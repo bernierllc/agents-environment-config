@@ -7,7 +7,8 @@ Unified configuration repository for managing AI agent definitions and MCP (Mode
 ```
 agents-environment-config/
 ├── .claude/
-│   └── agents/          # Git submodule → bernierllc/agency-agents
+│   ├── agents/          # Git submodule → bernierllc/agency-agents
+│   └── skills/          # Git submodule → bernierllc/skills
 ├── .cursor/
 │   ├── commands/        # Cursor command wrappers for agents
 │   └── mcp.json         # Cursor MCP server configuration
@@ -34,15 +35,17 @@ git clone https://github.com/bernierllc/agents-environment-config.git
 cd agents-environment-config
 ```
 
-### 2. Initialize Git Submodule
+### 2. Initialize Git Submodules
 
-The agents are managed as a git submodule pointing to `bernierllc/agency-agents`:
+Both agents and skills are managed as git submodules:
 
 ```bash
 git submodule update --init --recursive
 ```
 
-This will clone the `agency-agents` repository into `.claude/agents/`.
+This will clone:
+- The `agency-agents` repository into `.claude/agents/`
+- The `skills` repository into `.claude/skills/`
 
 ### 3. Configure Environment Variables
 
@@ -61,8 +64,10 @@ Create symlinks from your home directory configuration locations to this reposit
 # Set the repository path (adjust as needed)
 REPO_PATH="$HOME/path/to/agents-environment-config"
 
-# Claude agents
+# Claude agents and skills
+mkdir -p ~/.claude
 ln -s "$REPO_PATH/.claude/agents" ~/.claude/agents
+ln -s "$REPO_PATH/.claude/skills" ~/.claude/skills
 
 # Cursor configuration
 mkdir -p ~/.cursor
@@ -92,9 +97,43 @@ ln -s "$REPO_PATH/.claude-code-router/config.json" ~/.claude-code-router/config.
 
 ### Understanding Git Submodules
 
-A git submodule is a pointer to a specific commit in another repository. The parent repository (`agents-environment-config`) tracks which version of the submodule (`agency-agents`) you're using.
+A git submodule is a pointer to a specific commit in another repository. The parent repository (`agents-environment-config`) tracks which version of each submodule you're using.
 
-**Important:** Changes made in the submodule directory are tracked by the submodule's own git repository, not the parent repo.
+**Important:** Changes made in submodule directories are tracked by the submodule's own git repository, not the parent repo.
+
+This repository uses two submodules:
+- `.claude/agents` → `bernierllc/agency-agents`
+- `.claude/skills` → `bernierllc/skills`
+
+### Making Changes to Skills
+
+When you want to update skills:
+
+1. **Navigate to the submodule directory:**
+   ```bash
+   cd .claude/skills
+   ```
+
+2. **Make your changes and commit:**
+   ```bash
+   # Edit skill files
+   git add .
+   git commit -m "Update skill definitions"
+   ```
+
+3. **Push changes to the submodule's remote:**
+   ```bash
+   git push origin <branch-name>
+   ```
+   This pushes to `bernierllc/skills`.
+
+4. **Return to parent repo and update the submodule reference:**
+   ```bash
+   cd ../..
+   git add .claude/skills
+   git commit -m "Update skills submodule to latest version"
+   git push
+   ```
 
 ### Making Changes to Agents
 
@@ -126,12 +165,16 @@ When you want to update agent definitions:
    git push
    ```
 
-### Updating Agents from Remote
+### Updating Submodules from Remote
 
-To pull the latest agent changes:
+To pull the latest changes for a specific submodule:
 
 ```bash
+# Update agents
 git submodule update --remote .claude/agents
+
+# Update skills
+git submodule update --remote .claude/skills
 ```
 
 Or to update all submodules:
@@ -158,15 +201,18 @@ git submodule update --init --recursive
 
 ### Claude Desktop
 
-**Location:** `~/.claude/agents/`
+**Locations:**
+- Agents: `~/.claude/agents/`
+- Skills: `~/.claude/skills/`
 
-The agents are available via symlink. If you prefer not to use a symlink:
+Both are available via symlinks. If you prefer not to use symlinks:
 
 ```bash
 cp -r .claude/agents/* ~/.claude/agents/
+cp -r .claude/skills/* ~/.claude/skills/
 ```
 
-**Note:** Using a symlink keeps agents in sync automatically. Manual copying requires updates when agents change.
+**Note:** Using symlinks keeps agents and skills in sync automatically. Manual copying requires updates when content changes.
 
 ### Cursor
 
@@ -244,7 +290,7 @@ If you see broken symlinks, recreate them using the commands in the Quick Start 
 
 ### Submodule Not Initialized
 
-If `.claude/agents` is empty:
+If `.claude/agents` or `.claude/skills` is empty:
 
 ```bash
 git submodule update --init --recursive
@@ -270,6 +316,12 @@ git submodule update --init --recursive
 
 1. Make changes in `.claude/agents/` (the submodule)
 2. Commit and push to `bernierllc/agency-agents`
+3. Update submodule reference in parent repo
+
+### Adding New Skills
+
+1. Make changes in `.claude/skills/` (the submodule)
+2. Commit and push to `bernierllc/skills`
 3. Update submodule reference in parent repo
 
 ### Adding New MCP Servers
@@ -316,4 +368,5 @@ This repository maintains the same license as the `agency-agents` submodule (MIT
 ## Related Repositories
 
 - [agency-agents](https://github.com/bernierllc/agency-agents) - The agent definitions repository (submodule)
+- [skills](https://github.com/bernierllc/skills) - The skills repository (submodule)
 - [Original agency-agents fork](https://github.com/msitarzewski/agency-agents) - The original repository this was forked from
