@@ -1,0 +1,17 @@
+# Packages Rules
+
+Package-specific rules for @bernierllc packages and package management.
+
+## Package Management
+
+- `package-management.mdc` - Package management rules using ./manager CLI
+- `package-reuse.mdc` - Guidelines for reusing existing packages
+
+## Usage
+
+These rules apply when working with packages in the `packages/` directory or when managing npm packages.
+
+## References
+
+- **Architecture**: See `../general/architecture.mdc`
+- **Development Workflow**: See `../general/development-workflow.mdc`

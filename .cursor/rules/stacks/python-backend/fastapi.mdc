@@ -1,0 +1,128 @@
+---
+description: FastAPI patterns and conventions for Python backend development
+globs: ["**/routes/**/*.py", "**/schemas/**/*.py", "**/repositories/**/*.py", "**/api/**/*.py"]
+alwaysApply: false
+tags: [fastapi, python, backend, api]
+---
+
+# FastAPI Patterns
+
+## File Organization
+
+### Directory Structure
+- `routers/` - API route handlers
+- `schemas/` - Pydantic models for request/response validation
+- `repositories/` - Data access layer
+
+```
+project/
+├── routers/
+│   ├── users.py
+│   └── items.py
+├── schemas/
+│   ├── user.py
+│   └── item.py
+└── repositories/
+    ├── user_repository.py
+    └── item_repository.py
+```
+
+## Pydantic Models
+
+### Pydantic v2 Standards
+- **Use Pydantic v2 BaseModel** with `model_config`
+- Define schemas for all request/response models
+- Use proper field types and validators
+
+```python
+from pydantic import BaseModel, Field
+
+class UserCreate(BaseModel):
+    email: str = Field(..., description="User email address")
+    name: str = Field(..., min_length=1, max_length=100)
+    
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "email": "user@example.com",
+                "name": "John Doe"
+            }
+        }
+    }
+```
+
+## Route Handlers
+
+### Response Models
+- **All routes return `response_model`** - Define explicit response types
+- Use proper HTTP status codes
+- Handle errors consistently
+
+```python
+from fastapi import APIRouter, HTTPException, status
+from typing import List
+
+router = APIRouter(prefix="/api/users", tags=["users"])
+
+@router.post(
+    "/",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED
+)
+async def create_user(user_data: UserCreate) -> UserResponse:
+    # Implementation
+```
+
+## Background Tasks
+
+### Long-Running Operations
+- **Use background tasks** for long jobs
+- Use FastAPI's BackgroundTasks for non-critical operations
+- Use task queues (Celery, etc.) for critical background work
+
+```python
+from fastapi import BackgroundTasks
+
+@router.post("/process")
+async def process_data(
+    data: ProcessingRequest,
+    background_tasks: BackgroundTasks
+):
+    background_tasks.add_task(long_running_operation, data)
+    return {"status": "processing", "message": "Task queued"}
+```
+
+## Security
+
+### CSRF Protection
+- **Don't disable CSRF on JWT cookie endpoints** - Maintain security
+- Use proper authentication mechanisms
+- Validate all inputs
+
+## API Structure
+
+### Endpoint Organization
+- `/api/admin` - Admin UI endpoints (requires both keys)
+- `/api/crawler` - Crawler functionality (requires X-API-Key)
+- `/api/` - Public endpoints (requires X-API-Key)
+
+## Error Handling
+
+```python
+from fastapi import HTTPException
+
+@router.get("/{user_id}")
+async def get_user(user_id: str) -> UserResponse:
+    user = await user_repository.get_by_id(user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User {user_id} not found"
+        )
+    return user
+```
+
+## References
+- **Python Style**: See `languages/python/style.mdc`
+- **Architecture**: See `general/architecture.mdc`
+- **SQLAlchemy**: See `frameworks/database/sqlalchemy.mdc`

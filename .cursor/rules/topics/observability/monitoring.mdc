@@ -1,0 +1,103 @@
+---
+description: Observability, monitoring, and logging patterns
+globs: ["**/*.ts", "**/*.tsx", "**/*.py"]
+alwaysApply: false
+tags: [observability, monitoring, logging, tracing]
+---
+
+# Observability Standards
+
+## Logging Patterns
+
+### Structured Logging
+- Use structured JSON logs with consistent fields
+- Include trace_id, user_id, and request context
+- Forward logs to centralized systems (MS Sentinel, etc.)
+- Fallback to stdout when centralized logging unavailable
+
+### API Logging
+```typescript
+// Structured API logs
+logger.info('API request', {
+  trace_id: requestId,
+  user_id: userId,
+  site_id: siteId,
+  endpoint: '/api/users',
+  method: 'GET',
+  status: 200
+});
+```
+
+### React Logging
+- Use Sentry DSN from environment variables
+- Configure Sentry for React error tracking
+- Include user context and error details
+
+## Error Monitoring
+
+### Browser Errors
+- Monitor browser console errors
+- Check `logs/frontend.log` for frontend errors
+- Track JavaScript errors and unhandled promises
+- Monitor network request failures
+
+### Server Errors
+- Monitor API endpoint errors
+- Track database connection issues
+- Log unhandled exceptions with stack traces
+- Alert on critical errors
+
+## Monitoring Requirements
+
+### Application Monitoring
+- Error rates and types
+- Response times and latency
+- Throughput and request rates
+- Database performance metrics
+
+### Infrastructure Monitoring
+- Server resource usage (CPU, memory, disk)
+- Database connection pools
+- Network latency and availability
+- Service health checks
+
+## Tracing
+
+### Distributed Tracing
+- Use trace_id for request correlation
+- Track requests across services
+- Monitor end-to-end latency
+- Identify bottlenecks
+
+### Performance Tracing
+- Track slow queries
+- Monitor API endpoint performance
+- Profile critical code paths
+- Identify performance regressions
+
+## Alerting
+
+### Critical Alerts
+- Production errors exceeding threshold
+- Database connection failures
+- Service unavailability
+- Security incidents
+
+### Warning Alerts
+- Elevated error rates
+- Slow response times
+- Resource usage warnings
+- Deprecated API usage
+
+## Best Practices
+
+1. **Log Levels**: Use appropriate log levels (debug, info, warn, error)
+2. **Structured Data**: Use JSON for structured logging
+3. **Correlation IDs**: Include trace_id in all logs
+4. **Error Context**: Include full error context in logs
+5. **Privacy**: Never log sensitive data (passwords, tokens, PII)
+
+## References
+- **Logging**: See `topics/quality/logging.mdc`
+- **Error Handling**: See `topics/quality/error-handling.mdc`
+- **Security**: See `general/security.mdc`

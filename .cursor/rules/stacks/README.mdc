@@ -1,0 +1,24 @@
+# Stacks Rules
+
+Stack-specific rules that apply when using these technology stacks.
+
+## Next.js
+
+- `app-router.mdc` - Next.js App Router patterns, React component standards
+
+## React Native
+
+- `expo-development.mdc` - React Native and Expo development guidelines
+
+## Python Backend
+
+- `fastapi.mdc` - FastAPI patterns and conventions
+
+## Usage
+
+These rules apply automatically when files matching the glob patterns are present. See individual rule files for specific glob patterns.
+
+## References
+
+- **Languages**: See `../languages/` directory
+- **Frameworks**: See `../frameworks/` directory

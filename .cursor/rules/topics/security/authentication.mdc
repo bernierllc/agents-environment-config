@@ -1,0 +1,88 @@
+---
+description: Authentication boundaries, user identification, and security patterns
+globs: ["**/api/**/*.ts", "**/middleware/**/*.ts", "**/auth/**/*.ts"]
+alwaysApply: false
+tags: [authentication, security, auth, boundaries]
+---
+
+# Authentication Boundaries & User Identification
+
+## Core Principle
+
+**External authentication IDs (e.g., Clerk ID) must NEVER leave the authentication boundary.** All internal application logic uses internal UUID-based user IDs.
+
+## Authentication Flow Architecture
+
+```
+Frontend → Auth Middleware → Business Logic
+External ID → Internal UUID → Internal UUID ONLY
+```
+
+## Authentication Boundary Rules
+
+### ❌ NEVER DO
+- Send external IDs (Clerk ID) to APIs
+- Accept external IDs in API handlers (except auth boundary)
+- Use external IDs in business logic
+- Store external IDs in database queries (except lookup)
+
+### ✅ ALWAYS DO
+- Use `withAuth` middleware for all authenticated routes
+- Translate external IDs to internal UUIDs at auth boundary
+- Use internal UUIDs for all business logic
+- Use internal UUIDs for all database operations
+
+## User Identification Types
+
+### 1. External Authentication ID (e.g., Clerk ID)
+- **Usage**: Authentication boundary ONLY
+- **Where**: Auth middleware, user profile lookup
+- **Never**: API requests, business logic, database queries
+
+### 2. Internal User ID (UUID)
+- **Usage**: ALL internal application logic
+- **Where**: API handlers, database operations, business logic
+- **Always**: Use this after auth boundary
+
+### 3. API Keys
+- **Usage**: External integrations, programmatic access
+- **Translation**: Middleware translates to internal user ID
+
+## Required Patterns
+
+### API Route Pattern
+```typescript
+export const GET = withAuth(
+  async (request: NextRequest, context) => {
+    const userId = context.userId!; // Internal UUID
+    const result = await SomeService.getData(userId);
+    return NextResponse.json(result);
+  },
+  {
+    requireAuth: true,
+    allowApiKey: true,
+  }
+);
+```
+
+### Service Layer Pattern
+```typescript
+class FormService {
+  static async getUserForms(userId: string): Promise<Form[]> {
+    // Uses internal UUID
+    return DatabaseService.getFormsByUserId(userId);
+  }
+}
+```
+
+## Security Validation Checklist
+
+- [ ] No external IDs in API request/response bodies
+- [ ] No external IDs in URL parameters (except auth boundary)
+- [ ] All API routes use `withAuth` middleware
+- [ ] All business logic uses internal user IDs
+- [ ] No direct database queries with external IDs (except lookup)
+
+## References
+- **Security**: See `general/security.mdc`
+- **API Standards**: See `topics/api/design-standards.mdc`

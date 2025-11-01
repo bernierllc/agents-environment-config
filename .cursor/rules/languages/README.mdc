@@ -1,0 +1,20 @@
+# Languages Rules
+
+Language-specific rules that apply when working with these programming languages.
+
+## Python
+
+- `style.mdc` - PEP 8, Black formatting, type hints, code organization
+
+## TypeScript
+
+- `typing-standards.mdc` - TypeScript typing standards, strict mode, no any
+
+## Usage
+
+These rules apply automatically when files matching the glob patterns are present. See individual rule files for specific glob patterns.
+
+## References
+
+- **General Rules**: See `../general/` directory
+- **Stacks**: See `../stacks/` directory for framework-specific rules

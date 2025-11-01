@@ -1,0 +1,9 @@
+# Testing Framework Rules
+
+- standards.mdc — overall strategy, mocks policy, verification
+- organization.mdc — test directories, naming, coverage targets
+- tools.mdc — runners, libraries, commands
+
+See also:
+- topics/quality/gates.mdc for CI gates
+- topics/api/design-standards.mdc for API contract tests

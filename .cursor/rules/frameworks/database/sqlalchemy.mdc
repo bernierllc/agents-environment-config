@@ -1,0 +1,115 @@
+---
+description: SQLAlchemy database patterns and conventions
+globs: ["**/models/**/*.py", "**/repositories/**/*.py", "**/database.py", "**/db.py"]
+alwaysApply: false
+tags: [sqlalchemy, database, python, orm]
+---
+
+# SQLAlchemy Patterns
+
+## Naming Conventions
+
+### Tables and Models
+- **snake_case for tables** - Use snake_case for table names
+- **Singular model classes** - Model class names should be singular
+
+```python
+# ✅ Good
+class User(Base):
+    __tablename__ = "users"
+    
+# ✅ Good
+class Event(Base):
+    __tablename__ = "events"
+```
+
+## Primary Keys
+
+### UUID Primary Keys
+- **Use UUID(as_uuid=True) PKs** - Use UUID primary keys with proper type handling
+
+```python
+from sqlalchemy import Column, String
+from sqlalchemy.dialects.postgresql import UUID
+import uuid
+
+class User(Base):
+    __tablename__ = "users"
+    
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        nullable=False
+    )
+```
+
+## Soft Delete Pattern
+
+### Deleted At Timestamp
+- **Use soft-delete pattern via `deleted_at`** - Don't hard delete records
+
+```python
+from sqlalchemy import Column, DateTime
+from datetime import datetime
+
+class User(Base):
+    __tablename__ = "users"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    deleted_at = Column(DateTime, nullable=True)
+    
+    @property
+    def is_deleted(self) -> bool:
+        return self.deleted_at is not None
+    
+    def soft_delete(self):
+        self.deleted_at = datetime.utcnow()
+```
+
+## Alembic Migrations
+
+### Migration Management
+- **Alembic revision every PR** - Create migrations for each pull request
+- **Never auto-generate without review** - Always review generated migrations
+- Manual migration review ensures correctness
+
+```bash
+# Create migration
+alembic revision --autogenerate -m "description"
+
+# Review the generated migration file
+# Then apply
+alembic upgrade head
+```
+
+### Migration Best Practices
+- Review all auto-generated migrations
+- Test migrations on development database first
+- Keep migrations small and focused
+- Never edit existing migrations (create new ones)
+
+## Database Connection
+
+### Connection Management
+- Use connection pooling
+- Proper session management
+- Handle connection errors gracefully
+
+```python
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=10,
+    max_overflow=20
+)
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+```
+
+## References
+- **Python Style**: See `languages/python/style.mdc`
+- **FastAPI**: See `stacks/python-backend/fastapi.mdc`
+- **Architecture**: See `general/architecture.mdc`

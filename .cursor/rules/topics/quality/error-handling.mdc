@@ -1,0 +1,63 @@
+---
+description: Error handling patterns, quality gates, and zero-error policy
+alwaysApply: true
+tags: [error-handling, quality, errors, general]
+---
+
+# Error Handling
+
+## Core Requirements
+
+### Zero Error Policy
+- **Never commit with errors**: Always fix issues before committing
+- **No TypeScript errors**: `npm run type-check` must pass
+- **No linting errors**: `npm run lint` must pass
+- **No testing errors**: All tests must pass
+- **Build must succeed**: `npm run build` must complete successfully
+
+### Pre-commit Validation
+- Use pre-commit hooks to catch errors early
+- Run all checks locally before pushing
+- Don't rely on CI to catch issues
+- Fix errors immediately when they appear
+
+## Error Categories
+
+### TypeScript Errors
+- Compilation errors must be resolved
+- Type safety issues must be fixed
+- Interface mismatches must be corrected
+- Import/export errors must be resolved
+
+### Linting Errors
+- ESLint violations must be fixed
+- Code style issues must be resolved
+- Unused variables must be removed
+- Import/export consistency must be maintained
+
+### Testing Errors
+- All unit tests must pass
+- Integration tests must pass
+- No test failures allowed
+- Test coverage requirements must be met
+
+## Error Resolution Workflow
+
+1. **Identify the Error** - Read error message carefully, understand root cause
+2. **Fix the Error** - Apply minimal fix needed, test locally
+3. **Verify the Fix** - Run type-check, lint, test, build
+4. **Commit the Fix** - Use conventional commit messages
+
+## Quality Gates
+
+### Before Every Commit
+- [ ] TypeScript compilation passes
+- [ ] Linting passes
+- [ ] Tests pass
+- [ ] Build succeeds
+- [ ] No console errors
+
+## References
+- **Quality Gates**: See `topics/quality/gates.mdc`
+- **Development Workflow**: See `general/development-workflow.mdc`
+- **TypeScript**: See `languages/typescript/typing-standards.mdc`

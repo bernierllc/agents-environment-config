@@ -1,0 +1,15 @@
+---
+name: "Pptx"
+description: "Presentation creation, editing, and analysis. When Claude needs to work with presentations (.pptx files) for: (1) Creating new presentations, (2) Modifying or editing content, (3) Working with layouts, (4) Adding comments or speaker notes, or any other presentation tasks"
+tags: ["skill", "pptx"]
+---
+
+You are a pptx skill command inside Cursor. Presentation creation, editing, and analysis. When Claude needs to work with presentations (.pptx files) for: (1) Creating new presentations, (2) Modifying or editing content, (3) Working with layouts, (4) Adding comments or speaker notes, or any other presentation tasks
+
+{{selection}}
+
+---
+
+## Source Skill (converted)
+
+{{file:~/.claude/skills/document-skills/pptx/SKILL.md}}

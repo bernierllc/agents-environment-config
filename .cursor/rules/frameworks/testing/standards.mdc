@@ -1,0 +1,62 @@
+---
+description: Testing standards with tiered mocks and reality verification
+globs: ["**/*.test.*", "**/__tests__/**"]
+alwaysApply: false
+tags: [testing, mocks, unit, integration, e2e]
+---
+
+# Testing Standards (Tiered Mocks, Verified Against Reality)
+
+## Principles
+- Prefer small, fast tests near the code; grow realism as you move up the test pyramid.
+- Mocks are acceptable at lower levels when they are verified to match reality and do not hide defects.
+- Avoid global toggles that bypass tests; failures must be fixed or the test adjusted with rationale.
+
+## Test Pyramid and Mocking Strategy
+1. Unit tests (allow mocks) — fast feedback on small units
+   - Use test doubles for IO and slow deps (network, DB, filesystem).
+   - Keep mocks minimal; prefer fakes over complex behaviors.
+2. Integration tests (fewer mocks)
+   - Replace unit-level mocks with real adapters where feasible.
+   - Validate wiring across module boundaries and data contracts.
+3. End-to-end (no mocks if possible)
+   - Exercise the system through public interfaces.
+   - Only mock external third‑party services you do not control.
+
+## Mock Verification (Make Mocks Match Reality)
+Use one or more techniques so mocks do not drift from the real world:
+- Contract tests: Assert provider/consumer agree on request/response shapes.
+- Golden files/snapshots: Record real responses and reuse as fixtures; refresh on schema changes.
+- Schema/type guards: Validate fixtures against JSON Schema or TypeScript types at test load.
+- Parity runs: Periodically hit real services in CI nightly jobs to detect drift.
+
+## When To Mock
+- Allowed: low‑level unit tests for adapters, network clients, DB gateways.
+- Allowed: failure scenarios that are costly/risky to reproduce (timeouts, 5xx).
+- Avoid: mocking your own domain logic; prefer real collaboration between domain services.
+- Avoid: mocks in E2E unless isolating non-deterministic third parties.
+
+## Quality Bars
+- Unit: fast (<100ms), isolated, deterministic. High branch/path coverage.
+- Integration: validate cross‑module contracts and realistic data flows.
+- E2E: validate critical paths; focus on user‑visible correctness.
+
+## Fixture Hygiene
+- Keep fixtures small and representative; remove unused fields.
+- Co-locate fixtures with tests; document provenance (e.g., captured on 2025‑10‑29).
+- Validate fixtures against schemas/types on load.
+
+## Tooling Hints
+- TypeScript: use `zod`/`io-ts` or JSON Schema to validate mock payloads.
+- API: maintain OpenAPI and generate client/server types; use them in tests.
+- UI: prefer Testing Library; avoid implementation‑coupled selectors.
+
+## Documentation and Ownership
+- Each mocked interface must have a short README describing its real contract, how fixtures were captured, and how to refresh them.
+- Add a scheduled job or checklist to refresh golden files after API/schema changes.
+
+## References
+- Martin Fowler — “Mocks Aren’t Stubs”
+- Google Testing Blog — Testing on the Toilet (test doubles, hermetic tests)
+- Thoughtworks Tech Radar — Testing strategies and contract testing
+

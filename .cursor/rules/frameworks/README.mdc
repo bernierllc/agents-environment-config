@@ -1,0 +1,30 @@
+# Frameworks Rules
+
+Framework/tool-specific rules that apply when using these frameworks or tools.
+
+## Database
+
+- `prisma.mdc` - Prisma database patterns for Next.js/TypeScript
+- `supabase.mdc` - Supabase development guidelines and patterns
+- `sqlalchemy.mdc` - SQLAlchemy patterns for Python
+- `alembic.mdc` - Alembic migration patterns for Python
+
+## UI
+
+- `tailwind-css.mdc` - Tailwind CSS styling standards
+- `tamagui.mdc` - Tamagui property mappings and component development
+
+## Testing
+
+- `standards.mdc` - Testing standards with tiered mocks and reality verification
+- `organization.mdc` - Test organization, file layout, coverage targets
+- `tools.mdc` - Testing tools and commands
+
+## Usage
+
+These rules apply automatically when files matching the glob patterns are present. See individual rule files for specific glob patterns.
+
+## References
+
+- **Stacks**: See `../stacks/` directory
+- **Topics**: See `../topics/` directory

@@ -1,0 +1,83 @@
+---
+description: Logging standards and logger usage patterns
+globs: ["**/*.ts", "**/*.tsx", "**/*.py"]
+alwaysApply: false
+tags: [logging, observability, debugging]
+---
+
+# Logging Standards
+
+## Logger Usage
+
+### Use Logger Factory
+Use `@lib/logger-factory` for auditLogger, systemLogger, or browserLogger instead of `console.log`.
+
+### Logger Types
+
+#### auditLogger
+- **Usage**: API routing ONLY
+- **Output**: Writes to `audit_log` database table
+- **When**: For tracking API requests and user actions
+
+```typescript
+import { auditLogger } from '@/lib/logger-factory';
+
+export const POST = async (request: NextRequest) => {
+  auditLogger.info('API request received', { endpoint: '/api/users' });
+  // Implementation
+};
+```
+
+#### browserLogger
+- **Usage**: Browser context ONLY
+- **Output**: Writes to browser console
+- **When**: For client-side debugging and development
+
+```typescript
+import { browserLogger } from '@/lib/logger-factory';
+
+browserLogger.info('Component mounted', { component: 'UserCard' });
+```
+
+#### systemLogger
+- **Usage**: Everywhere else (server-side, background jobs, etc.)
+- **Output**: Writes to log file
+- **When**: For general application logging
+
+```typescript
+import { systemLogger } from '@/lib/logger-factory';
+
+systemLogger.error('Database connection failed', { error });
+```
+
+## Logging Best Practices
+
+### Log Levels
+- Use appropriate log levels (debug, info, warn, error)
+- Log errors with context
+- Log important business events
+- Avoid logging sensitive data
+
+### Log Context
+- Include relevant context in log messages
+- Use structured logging when possible
+- Include request IDs for tracing
+- Log performance metrics when appropriate
+
+## Prohibited Patterns
+
+❌ **NEVER DO:**
+- Use `console.log` in production code
+- Log sensitive data (passwords, tokens, PII)
+- Log full request/response bodies
+- Use console methods directly
+
+✅ **ALWAYS DO:**
+- Use appropriate logger from logger-factory
+- Log only metadata and non-sensitive information
+- Use structured logging with context
+- Follow logging standards for each environment
+
+## References
+- **Security**: See `general/security.mdc`
+- **Error Handling**: See `topics/quality/error-handling.mdc`

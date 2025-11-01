@@ -1,0 +1,70 @@
+---
+description: Rules for managing and maintaining cursor rules files themselves
+alwaysApply: true
+tags: [rules, meta, maintenance, general]
+---
+
+# Rules About Rules
+
+## Core Principle
+Rules are living documents and should be updated as we learn. Suggest improvements when something is unclear or not working. Keep rules concise and merge overlapping rules where possible.
+
+## Global vs Project-Specific Rules
+
+### Global Rules (This Repository)
+
+These rules in `agents-environment-config/.cursor/rules/` are **global rules** that apply across all projects. They contain:
+
+- General patterns and standards that work across projects
+- Language-specific conventions (TypeScript, Python)
+- Framework standards (Next.js, FastAPI, React Native)
+- Cross-cutting topics (API design, Git workflow, security, quality)
+
+**Location**: `agents-environment-config/.cursor/rules/`
+
+### Project-Specific Rules
+
+Project-specific rules stay in their respective projects (`{project}/.cursor/rules/`) and should:
+
+- Focus on project-specific patterns and business logic
+- Reference global rules where applicable (avoid duplication)
+- Handle custom workflows unique to that project
+
+**Location**: `{project}/.cursor/rules/`
+
+**How Cursor applies them**: Cursor discovers rules in parent directories, so global rules apply automatically. Project-specific rules take precedence for conflicts. Both rule sets complement each other.
+
+For detailed architecture, see `plans/cursor/architecture.md`.
+
+## Guidelines for Rule Files
+
+### Structure
+- Prefer small, focused rules with clear intent
+- Keep terminology consistent across all rules
+- When multiple files cover the same topic, consolidate into one and deprecate the rest
+
+### Content Standards
+- Prefer active voice and imperative style ("Do X", "Avoid Y")
+- Fix typos immediately; clear language beats clever phrasing
+- Use short rationale lines for non-obvious rules (1–2 sentences max)
+
+### Maintenance Process
+- When you change behavior or standards, submit an edit to the relevant rule file in the same PR
+- When adopting a new convention, add it to the appropriate rule file and reference related docs in `/docs/`
+- Link to decisions or plans in `./plans/` when context helps future readers
+- Run linting before committing rule changes to ensure formatting stays consistent
+
+### Conflict Resolution
+- If a rule conflicts with reality, propose an update rather than a workaround
+- Rules should reflect actual practices, not aspirational goals
+- Update rules when practices change
+
+### Documentation
+- When adopting a new convention, add it to the appropriate rule file and reference related docs in `/docs/`
+- Link to decisions or plans in `./plans/` when context helps future readers
+- Cross-reference related rules appropriately
+
+## References
+- **Architecture**: See `general/architecture.mdc`
+- **Development Workflow**: See `general/development-workflow.mdc`
+- **Documentation**: See `general/documentation.mdc`

@@ -1,0 +1,143 @@
+---
+description: Prisma database patterns and conventions for Next.js and TypeScript projects
+globs: ["prisma/**", "**/*prisma*.ts", "**/prisma/**"]
+alwaysApply: false
+tags: [prisma, database, orm, typescript]
+---
+
+# Prisma Patterns
+
+## Prisma Client Setup
+
+### Singleton Pattern
+Use a singleton pattern for Prisma client to prevent multiple instances in development:
+
+```typescript
+import { PrismaClient } from '@prisma/client';
+
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined;
+};
+
+export const prisma = globalForPrisma.prisma ?? new PrismaClient();
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForPrisma.prisma = prisma;
+}
+```
+
+## Database Operations
+
+### Type Safety
+- Use Prisma-generated types consistently
+- Leverage TypeScript types from `@prisma/client`
+- Use `Prisma.*` utility types for operations
+
+```typescript
+import { Prisma } from '@prisma/client';
+
+async function createUser(data: Prisma.UserCreateInput): Promise<User> {
+  return await prisma.user.create({ data });
+}
+```
+
+### Query Patterns
+```typescript
+// Find unique
+const user = await prisma.user.findUnique({
+  where: { id: userId }
+});
+
+// Find many with filters
+const users = await prisma.user.findMany({
+  where: { status: 'active' },
+  include: { profile: true }
+});
+
+// Update
+const updated = await prisma.user.update({
+  where: { id: userId },
+  data: { status: 'active' }
+});
+
+// Delete
+await prisma.user.delete({
+  where: { id: userId }
+});
+```
+
+## Migration Management
+
+### Schema Changes
+- All schema changes require migrations
+- Use `npx prisma migrate dev` for development
+- Use `npx prisma migrate deploy` for production
+- Never edit migration files after creation
+
+### Schema Validation
+```bash
+# Validate schema
+npx prisma validate
+
+# Generate client
+npx prisma generate
+
+# Create migration
+npx prisma migrate dev --name migration_name
+
+# Apply migrations
+npx prisma migrate deploy
+```
+
+## Best Practices
+
+### Transactions
+Use transactions for complex operations:
+
+```typescript
+await prisma.$transaction(async (tx) => {
+  await tx.user.create({ data: userData });
+  await tx.profile.create({ data: profileData });
+});
+```
+
+### Error Handling
+```typescript
+try {
+  const user = await prisma.user.findUnique({
+    where: { id: userId }
+  });
+  
+  if (!user) {
+    throw new Error('User not found');
+  }
+  
+  return user;
+} catch (error) {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    // Handle Prisma-specific errors
+  }
+  throw error;
+}
+```
+
+### Soft Delete Pattern
+```typescript
+// Add deleted_at field to schema
+model User {
+  id        String    @id @default(uuid())
+  deletedAt DateTime? @map("deleted_at")
+}
+
+// Query with soft delete
+const users = await prisma.user.findMany({
+  where: {
+    deletedAt: null
+  }
+});
+```
+
+## References
+- **Database**: See `frameworks/database/supabase.mdc` for Supabase patterns
+- **SQLAlchemy**: See `frameworks/database/sqlalchemy.mdc` for Python patterns
+- **TypeScript**: See `languages/typescript/typing-standards.mdc`

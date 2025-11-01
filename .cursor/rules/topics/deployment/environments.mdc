@@ -1,0 +1,132 @@
+---
+description: Deployment workflow, environment management, and release procedures
+alwaysApply: true
+tags: [deployment, environments, ci-cd, releases, general]
+---
+
+# Deployment Standards
+
+## Environment Overview
+
+### Development Environment
+- **Branch**: `development`
+- **Database**: Local or development database
+- **Server**: Local development server
+- **Purpose**: Feature development and testing
+
+### Staging Environment
+- **Branch**: `staging`
+- **Database**: Dedicated staging database
+- **Server**: Dedicated staging deployment
+- **Purpose**: Pre-production testing and validation
+
+### Production Environment
+- **Branch**: `main`
+- **Database**: Dedicated production database
+- **Server**: Dedicated production deployment
+- **Purpose**: Live application serving real users
+
+## Deployment Workflow
+
+### Feature Development Flow
+```
+Feature Branch → Development → Staging → Main
+```
+
+1. **Feature Branch**: Create from `development`
+2. **Development**: Merge feature after review and testing
+3. **Staging**: Promote from `development` after validation
+4. **Main**: Promote from `staging` after staging verification
+
+## Environment Protection
+
+### Branch Protection Rules
+
+#### Development Branch
+- Required: Pull request reviews
+- Required: Status checks pass
+- Required: No merge conflicts
+- Forbidden: Direct pushes
+
+#### Staging Branch
+- Required: Pull request reviews
+- Required: All tests pass
+- Required: Build successful
+- Required: Database migrations safe
+- Forbidden: Direct pushes
+- Forbidden: Merges from feature branches
+
+#### Main Branch (Production)
+- Required: Pull request reviews (2 approvals)
+- Required: All staging tests pass
+- Required: Staging deployment verified
+- Required: Database backup completed
+- Forbidden: Direct pushes
+- Forbidden: Merges from development or feature branches
+
+## Database Management
+
+### Migration Safety
+- **Development**: Test migrations locally
+- **Staging**: Verify migrations in staging environment
+- **Production**: Backup database before applying migrations
+
+### Environment Variables
+- Separate databases for each environment
+- Different API keys for each environment
+- Proper access control for production
+
+## Deployment Checklist
+
+### Staging Deployment
+- [ ] All tests pass locally
+- [ ] Build successful
+- [ ] Database migrations tested
+- [ ] Environment variables configured
+- [ ] Deploy to staging
+- [ ] Verify staging deployment
+- [ ] Test critical functionality
+- [ ] Check error monitoring
+
+### Main Deployment
+- [ ] Staging environment verified working
+- [ ] Production database backed up
+- [ ] Rollback plan documented
+- [ ] Security review completed
+- [ ] Deploy to main
+- [ ] Verify main deployment
+- [ ] Monitor for errors
+- [ ] Update documentation
+
+## Emergency Procedures
+
+### Hotfix Deployment
+1. Create hotfix branch from main
+2. Make minimal fix
+3. Test locally
+4. Merge to staging for verification
+5. Merge to main
+
+### Rollback Procedure
+1. Database Rollback: Restore from backup if needed
+2. Code Rollback: Revert to previous main commit
+3. Deploy Rollback: Push rollback to main
+4. Verify Rollback: Confirm system is stable
+
+## Security Considerations
+
+### Environment Isolation
+- Separate databases for each environment
+- Separate API keys for each environment
+- Access control: Limit production access
+
+### Data Protection
+- No production data in development
+- Encrypted connections for all databases
+- Audit logging for all production changes
+- Regular automated backups
+
+## References
+- **Git Workflow**: See `topics/git/workflow.mdc`
+- **Security**: See `general/security.mdc`
+- **Quality Gates**: See `topics/quality/gates.mdc`

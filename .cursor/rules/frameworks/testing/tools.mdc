@@ -1,0 +1,31 @@
+---
+description: Testing tools and commands
+alwaysApply: false
+tags: [testing, tools]
+---
+
+# Testing Tools & Commands
+
+## Runners & Libraries
+- Unit/Integration: Vitest / Jest + Testing Library
+- E2E: Playwright (preferred) or Cypress
+- Contract tests: Pact, OpenAPI validators, Zod/JSON Schema
+
+## Suggested Commands
+```bash
+# Run fast unit/integration tests
+pnpm test:run
+
+# Run with coverage
+pnpm test:coverage
+
+# E2E suite
+pnpm test:e2e
+
+# Contract tests (example)
+pnpm test:contracts
+```
+
+## Guardrails
+- Lint/typecheck pre-commit; full suite pre-push
+- Keep test output deterministic; avoid real clocks unless essential

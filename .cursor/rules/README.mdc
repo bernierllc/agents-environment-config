@@ -1,0 +1,102 @@
+---
+description: Cursor rules index and navigation guide
+alwaysApply: true
+tags: [index, navigation, general]
+---
+
+# Cursor Rules Index
+
+## Overview
+This directory follows a MECE (Mutually Exclusive, Collectively Exhaustive) structure to make rules discoverable and scoped by concern. High-level categories are: general, languages, stacks, frameworks, topics, and packages.
+
+## Global vs Project-Specific Rules
+
+**This repository contains global rules** that apply across all projects. These rules cover:
+
+- General patterns and standards
+- Language-specific conventions (TypeScript, Python)
+- Framework standards (Next.js, FastAPI, React Native)
+- Cross-cutting topics (API design, Git workflow, security, quality)
+- Testing and accessibility standards
+
+**Project-specific rules** should remain in their respective projects (e.g., `my-project/.cursor/rules/`) and should:
+
+- Reference global rules where applicable
+- Focus on project-specific patterns and business logic
+- Avoid duplicating global standards
+
+**How it works**: Cursor IDE automatically discovers rules in parent directories. When this repository is in your workspace path, Cursor will apply these global rules alongside project-specific rules (project rules take precedence for conflicts).
+
+For architecture details, see `plans/cursor/architecture.md`.
+
+## Structure
+
+### general/
+Always-apply rules that apply universally across all projects:
+- `architecture.mdc` - Core architectural principles and design philosophy
+- `development-workflow.mdc` - Version control, code quality, and development environment standards
+- `documentation.mdc` - Documentation standards, file organization, and content guidelines
+- `security.mdc` - Security standards, authentication, authorization, and data protection
+- `port-management.mdc` - Centralized port management system to prevent conflicts
+- `project-setup-cli.mdc` - Project Setup CLI tool usage for consistent environments
+- `plans-checklists.mdc` - Plans and checklist usage standards
+- `rules-about-rules.mdc` - Rules for managing and maintaining cursor rules files
+
+### languages/
+Language-specific rules (apply when working with these languages):
+- `python/style.mdc` - PEP 8, Black formatting, type hints, code organization
+- `typescript/typing-standards.mdc` - TypeScript typing standards, strict mode, no any
+
+### stacks/
+Stack-specific rules (apply when using these technology stacks):
+- `nextjs/app-router.mdc` - Next.js App Router patterns, React component standards
+- `react-native/expo-development.mdc` - React Native and Expo development guidelines
+- `python-backend/fastapi.mdc` - FastAPI patterns and conventions
+
+### frameworks/
+Framework/tool-specific rules:
+- `database/` - Database frameworks
+  - `prisma.mdc` - Prisma database patterns for Next.js/TypeScript
+  - `supabase.mdc` - Supabase development guidelines and patterns
+  - `sqlalchemy.mdc` - SQLAlchemy patterns and conventions
+  - `alembic.mdc` - Alembic migration patterns for Python
+- `ui/` - UI frameworks
+  - `tailwind-css.mdc` - Tailwind CSS styling standards
+  - `tamagui.mdc` - Tamagui property mappings and component development
+- `testing/` - Testing frameworks
+  - `standards.mdc` - Testing standards with tiered mocks and reality verification
+  - `organization.mdc` - Test organization, file layout, coverage targets
+  - `tools.mdc` - Testing tools and commands
+
+### topics/
+Cross-cutting topic rules:
+- `api/design-standards.mdc` - API design standards, HTTP status codes, error handling
+- `git/workflow.mdc` - Git branching strategy, commit conventions, pull request workflow
+- `security/` - Security topics
+  - `authentication.mdc` - Authentication boundaries and user identification
+  - `secrets.mdc` - Secrets management and environment variables
+- `quality/` - Quality and standards
+  - `gates.mdc` - Quality gates and standards for code quality and production readiness
+  - `error-handling.mdc` - Error handling patterns and zero-error policy
+  - `logging.mdc` - Logging standards and logger usage patterns
+- `accessibility/standards.mdc` - Accessibility standards and WCAG 2.1 AA compliance
+- `deployment/environments.mdc` - Deployment workflow and environment management
+- `observability/monitoring.mdc` - Observability, monitoring, and logging patterns
+- `troubleshooting/debugging.mdc` - Troubleshooting patterns and debugging guidelines
+
+### packages/
+Package-specific rules (for tools/):
+- `package-management.mdc` - Package management rules using ./manager CLI
+- `package-reuse.mdc` - Guidelines for reusing existing packages
+
+## Usage Guidelines
+- Read relevant rules in your scope before work
+- Follow standards; propose edits when reality changes
+- Prefer linking to detailed docs in `/docs/`
+- **For projects**: Reference global rules, don't duplicate them. Keep only project-specific patterns.
+
+## Notes
+- Testing standards have been updated to allow smart, tiered mocks at lower levels with verification that mocks match reality; see `frameworks/testing/standards.mdc`.
+- All general rules have `alwaysApply: true` and will be applied to all projects.
+- Framework, language, and stack-specific rules have appropriate globs and will apply when matching files are present.
+- **Architecture**: Global rules (this repo) + Project-specific rules (in each project) = Complete rule set

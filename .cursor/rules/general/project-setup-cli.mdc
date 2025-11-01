@@ -1,0 +1,205 @@
+---
+description: Project Setup CLI tool usage for port management and consistent development environments
+alwaysApply: true
+tags: [cli, tools, setup, ports, general]
+---
+
+# Project Setup CLI Rules
+
+## Objective
+Use the Project Setup CLI tool to manage port conflicts and set up consistent development environments across all projects.
+
+## CLI Tool Information
+
+### Tool Location
+- **Path**: `/Users/mattbernier/projects/ports/index.js`
+- **Type**: Node.js CLI tool with Commander.js
+- **Dependencies**: Installed in `/Users/mattbernier/projects/ports/`
+
+### Quick Access Commands
+```bash
+# Navigate to CLI directory
+cd /Users/mattbernier/projects/ports
+
+# Run CLI tool
+node index.js [command] [options]
+
+# Make globally accessible (if needed)
+export PATH="/Users/mattbernier/projects/ports:$PATH"
+```
+
+## Primary Use Cases
+
+### New Project Setup
+When creating a new project, ALWAYS use the CLI tool to:
+- Set up port management
+- Copy cursor rules
+- Configure tech stack
+
+```bash
+# Interactive setup (recommended)
+node index.js setup [project-directory]
+
+# Direct setup with tech stack
+node index.js setup [project-directory] -t [tech-stack]
+
+# Examples
+node index.js setup my-nextjs-app -t nextjs
+node index.js setup my-react-app -t react
+node index.js setup my-vue-app -t vue
+```
+
+### Port Validation
+Before committing changes or deploying, validate port configuration:
+
+```bash
+# Validate current project
+node index.js validate
+
+# Or run validation script directly
+bash validate-ports.sh
+```
+
+### Port Conflict Resolution
+When encountering port conflicts:
+
+```bash
+# Check what's using a port
+lsof -i:[port-number]
+
+# Stop conflicting service
+kill -9 [process-id]
+
+# Re-run setup
+node index.js setup [project-directory] -t [tech-stack]
+```
+
+## Available Commands
+
+### Setup Command
+```bash
+node index.js setup [project-dir] [options]
+```
+
+**Options:**
+- `-t, --tech-stack <stack>`: Specify technology stack
+- `--skip-cursor`: Skip copying .cursor directory
+- `--skip-ports`: Skip port setup
+
+**Supported Tech Stacks:**
+- `nextjs` - Next.js (ports: 3000, 3001)
+- `react` - React (port: 3000)
+- `vue` - Vue.js (port: 3000)
+- `node` - Node.js (ports: 3000, 5432)
+- `express` - Express.js (port: 3000)
+- `other` - Custom tech stack
+
+### Validate Command
+```bash
+node index.js validate
+```
+
+### Help Command
+```bash
+node index.js --help
+node index.js setup --help
+```
+
+## File Structure After Setup
+
+When you run the CLI tool, it creates:
+
+```
+project-directory/
+├── .cursor/
+│   └── rules/
+│       └── port-management.mdc
+├── .ports.json
+└── ... (your project files)
+```
+
+## Common Workflows
+
+### Starting a New Project
+1. **Create project directory**: `mkdir my-project && cd my-project`
+2. **Run CLI setup**: `node /Users/mattbernier/projects/ports/index.js setup . -t [tech-stack]`
+3. **Verify setup**: `node /Users/mattbernier/projects/ports/index.js validate`
+4. **Start development**: Follow tech stack specific instructions
+
+### Adding Services to Existing Project
+1. **Check current ports**: `cat .ports.json`
+2. **Edit port file**: Add new service configuration
+3. **Update central registry**: Run validation to sync
+4. **Test configuration**: `node /Users/mattbernier/projects/ports/index.js validate`
+
+### Resolving Port Conflicts
+1. **Identify conflict**: Check validation output
+2. **Find conflicting process**: `lsof -i:[port]`
+3. **Stop conflicting service**: `kill -9 [pid]`
+4. **Re-run setup**: `node /Users/mattbernier/projects/ports/index.js setup . -t [tech-stack]`
+
+## Integration with AI Agents
+
+### When to Use the CLI
+- **New project creation**: Always use CLI for initial setup
+- **Port conflicts**: Use CLI to resolve and prevent conflicts
+- **Environment setup**: Use CLI to ensure consistent development environment
+- **Port validation**: Use CLI before committing changes
+
+### AI Agent Instructions
+When working with projects that have port management:
+
+1. **Check for .ports.json**: Look for port configuration file
+2. **Validate ports**: Run validation before making changes
+3. **Use CLI for setup**: Don't manually create port configurations
+4. **Follow port ranges**: Respect the defined port ranges
+5. **Update central registry**: Ensure ports are registered centrally
+
+### Error Handling
+If CLI tool fails:
+1. **Check dependencies**: Ensure Node.js and npm packages are installed
+2. **Verify permissions**: Ensure write access to project and central registry
+3. **Check file paths**: Verify CLI tool path is correct
+4. **Review logs**: Check error messages for specific issues
+
+## Best Practices
+
+### Project Setup
+1. **Always use CLI**: Don't manually set up port management
+2. **Choose appropriate tech stack**: Use predefined configurations when possible
+3. **Validate after setup**: Ensure everything is working correctly
+4. **Document custom ports**: Add descriptions for any custom port usage
+
+### Port Management
+1. **Respect port ranges**: Use appropriate ranges for different service types
+2. **Avoid conflicts**: Check central registry before assigning ports
+3. **Update registry**: Always update central registry when changing ports
+4. **Validate regularly**: Run validation before committing changes
+
+### Development Workflow
+1. **Start with CLI**: Use CLI for initial project setup
+2. **Validate changes**: Run validation after port changes
+3. **Resolve conflicts**: Use CLI to resolve port conflicts
+4. **Maintain consistency**: Keep port configurations up to date
+
+## Additional Resources
+
+### Documentation
+- **Full docs**: `/Users/mattbernier/projects/ports/docs/README.md`
+- **Port management rules**: `.cursor/rules/port-management.mdc`
+- **Validation script**: `validate-ports.sh`
+
+### Configuration Files
+- **Central registry**: `~/projects/ports.json`
+- **Project ports**: `[project]/.ports.json`
+- **CLI config**: `/Users/mattbernier/projects/ports/package.json`
+
+### Troubleshooting
+- **Common issues**: See docs/README.md troubleshooting section
+- **Debug mode**: Add console.log statements to CLI tool
+- **Manual validation**: Run `bash validate-ports.sh` directly
+
+## References
+- **Port Management**: See `port-management.mdc`
+- **Architecture**: See `architecture.mdc`
+- **Documentation**: See `/docs/project-setup-cli.md`
