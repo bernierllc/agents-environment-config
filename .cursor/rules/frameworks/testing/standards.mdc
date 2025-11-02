@@ -41,6 +41,30 @@ Use one or more techniques so mocks do not drift from the real world:
 - Integration: validate cross‑module contracts and realistic data flows.
 - E2E: validate critical paths; focus on user‑visible correctness.
 
+## Test Isolation
+
+### Core Principle
+**Tests must be isolated by default** — data from one test suite should not affect another, and tests within a suite should not depend on each other unless explicitly necessary.
+
+### Isolation Requirements
+- **Between test suites**: Each test suite must clean up its own state and not rely on data created by other suites.
+- **Between tests**: Each test must set up and tear down its own data. Tests should be able to run in any order.
+- **Shared state**: Only share data between tests when explicitly necessary and documented with clear rationale.
+- **Database/state**: Use transactions, test databases, or fixtures that are reset between tests. Never rely on shared mutable state.
+
+### Implementation Guidelines
+- **Setup/teardown**: Use `beforeEach`/`afterEach` or `beforeAll`/`afterAll` hooks to establish and clean up test state.
+- **Transaction rollback**: Wrap database-dependent tests in transactions that roll back after each test.
+- **Isolated test databases**: Use separate test databases or schemas per test suite when possible.
+- **Fixtures**: Create fresh test data per test rather than reusing data across tests.
+- **Global state**: Avoid global variables, singletons, or shared caches that persist between tests.
+- **Concurrent execution**: Tests should be safe to run in parallel without interference.
+
+### Exceptions and Documentation
+- **Shared fixtures**: When sharing data is necessary (e.g., expensive setup, read-only reference data), document the rationale and ensure the shared state is immutable or reset between uses.
+- **Integration test dependencies**: Integration tests may share a database schema, but each test must still clean up its own modifications.
+- **E2E scenarios**: E2E tests may require shared state to simulate real user workflows; document these dependencies clearly.
+
 ## Fixture Hygiene
 - Keep fixtures small and representative; remove unused fields.
 - Co-locate fixtures with tests; document provenance (e.g., captured on 2025‑10‑29).
