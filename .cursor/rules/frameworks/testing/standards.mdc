@@ -9,6 +9,7 @@ tags: [testing, mocks, unit, integration, e2e]
 
 ## Principles
 - Prefer small, fast tests near the code; grow realism as you move up the test pyramid.
+- **CRITICAL: All mocks in testing MUST be tested to match the ACTUAL thing they are mocking, otherwise the mocks are fucking useless and only cause problems.**
 - Mocks are acceptable at lower levels when they are verified to match reality and do not hide defects.
 - Avoid global toggles that bypass tests; failures must be fixed or the test adjusted with rationale.
 
@@ -23,7 +24,27 @@ tags: [testing, mocks, unit, integration, e2e]
    - Exercise the system through public interfaces.
    - Only mock external third‑party services you do not control.
 
+## UI Testing Workflow
+
+**CRITICAL: For creating UI tests, use Playwright MCP with the actual UI to identify how the actual UI works in order to write or validate what is in the Playwright tests. Then run the Playwright tests and make sure they work against the actual UI as it actually works.**
+
+### UI Test Creation Process
+1. **Discovery Phase**: Use Playwright MCP to interact with the actual running UI
+   - Navigate to the UI and explore its behavior
+   - Identify selectors, interactions, and states through actual usage
+   - Document how the UI actually responds to user actions
+2. **Test Writing**: Write Playwright tests based on actual UI behavior discovered
+   - Use selectors and interactions verified against the real UI
+   - Ensure tests match the actual UI workflow, not assumptions
+3. **Validation**: Run tests against the actual UI and verify they work correctly
+   - Tests must pass against the real UI as it actually works
+   - Adjust tests if UI behavior differs from assumptions
+   - Never write tests without first verifying against the actual UI
+
 ## Mock Verification (Make Mocks Match Reality)
+
+**CRITICAL: All mocks in testing MUST be tested to match the ACTUAL thing they are mocking, otherwise the mocks are fucking useless and only cause problems.**
+
 Use one or more techniques so mocks do not drift from the real world:
 - Contract tests: Assert provider/consumer agree on request/response shapes.
 - Golden files/snapshots: Record real responses and reuse as fixtures; refresh on schema changes.
@@ -74,6 +95,7 @@ Use one or more techniques so mocks do not drift from the real world:
 - TypeScript: use `zod`/`io-ts` or JSON Schema to validate mock payloads.
 - API: maintain OpenAPI and generate client/server types; use them in tests.
 - UI: prefer Testing Library; avoid implementation‑coupled selectors.
+- **UI Testing**: Use Playwright MCP with the actual UI to discover behavior before writing tests. Always verify tests work against the actual UI.
 
 ## Documentation and Ownership
 - Each mocked interface must have a short README describing its real contract, how fixtures were captured, and how to refresh them.

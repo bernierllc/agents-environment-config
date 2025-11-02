@@ -1,8 +1,8 @@
-# Gemini CLI Agent Instructions
+# Codex Agent Instructions
 
 ## Overview
 
-This file contains development rules and standards for the Gemini CLI AI coding assistant.
+This file contains development rules and standards for the Codex AI coding assistant.
 These instructions are generated from `.cursor/rules/` and incorporate essential development
 principles, coding standards, and best practices. This file can be committed to git repositories
 so that anyone cloning the project will have consistent coding standards even without access
