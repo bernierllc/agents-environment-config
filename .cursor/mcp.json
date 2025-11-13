@@ -1,57 +1,5 @@
 {
   "mcpServers": {
-    "vibe-kanban": {
-      "command": "npx",
-      "args": ["-y", "@mkbernier/vibe-kanban@latest", "--mcp"]
-    },
-    "Supabase": {
-      "url": "https://mcp.supabase.com/mcp",
-      "headers": {}
-    },
-    "context7": {
-      "url": "https://mcp.context7.com/mcp",
-      "headers": {
-        "CONTEXT7_API_KEY": "your_context7_api_key_here"
-      }
-    },
-    "Semgrep": {
-      "url": "https://mcp.semgrep.ai/mcp",
-      "headers": {}
-    },
-    "Stripe": {
-      "command": "npx -y @stripe/mcp --tools=all",
-      "env": {
-        "STRIPE_SECRET_KEY": "your_stripe_secret_key_here"
-      },
-      "args": []
-    },
-    "Figma": {
-      "url": "https://mcp.figma.com/mcp",
-      "headers": {}
-    },
-    "Browserbase": {
-      "command": "npx @browserbasehq/mcp",
-      "env": {
-        "BROWSERBASE_API_KEY": "your_browserbase_api_key_here",
-        "BROWSERBASE_PROJECT_ID": "your_browserbase_project_id_here"
-      },
-      "args": []
-    },
-    "playwright": {
-      "command": "npx",
-      "args": [
-        "@playwright/mcp@latest"
-      ]
-    },
-    "brain-trust-ask-mcp": {
-      "url": "https://ask-mcp.com/mcp",
-      "transport": "http",
-      "headers": {
-        "X-OpenAI-API-Key": "your_openai_api_key_here",
-        "X-OpenAI-Model": "gpt-4",
-        "X-OpenAI-Max-Tokens": "2000"
-      }
-    },
     "packages-api": {
       "type": "http",
       "url": "http://localhost:3355/api/mcp",
@@ -60,15 +8,29 @@
         "Accept": "application/json, text/event-stream"
       }
     },
-    "PostHog": {
-      "command": "npx -y mcp-remote@latest https://mcp.posthog.com/sse --header Authorization:${POSTHOG_AUTH_HEADER}",
-      "env": {
-        "POSTHOG_AUTH_HEADER": "Bearer your_posthog_api_key_here"
-      },
-      "args": []
+    "context7": {
+      "url": "https://mcp.context7.com/mcp",
+      "headers": {
+        "CONTEXT7_API_KEY": "ctx7sk-d20f3c8b-a40a-4de5-a8ad-c383408a8031"
+      }
     },
-    "Vercel": {
-      "url": "https://mcp.vercel.com",
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest"
+      ]
+    },
+    "ask-mcp": {
+      "url": "https://ask-mcp.com/mcp",
+      "headers": {
+        "X-OpenAI-API-Key": "${OPENAI_API_KEY}",
+        "X-OpenAI-Model": "gpt-5",
+        "X-OpenAI-Max-Tokens": "2000"
+      }
+    },
+    "braingrid": {
+      "url": "https://mcp.braingrid.ai/mcp",
+      "transport": "httpStream",
       "headers": {}
     }
   }

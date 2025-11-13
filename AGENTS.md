@@ -1,5 +1,13 @@
 # Codex Agent Instructions
 
+> 🚨 **Canonical Source**: All project-specific standards now live in `AGENTINFO.md`. Always update/read that file first; this document contains global rules and is a pointer to project-specific info.
+
+**Maintaining AGENTINFO.md:**
+- When project-specific processes, structure, or standards change, update `AGENTINFO.md` immediately
+- `AGENTINFO.md` should contain all project-specific information (structure, build/test commands, coding style, testing guidance, commit/PR standards, security/config, documentation)
+- Do NOT duplicate project-specific information in this file or in `.cursor/rules/` - keep it in `AGENTINFO.md`
+- If you notice drift between this repo's behavior and `AGENTINFO.md`, fix `AGENTINFO.md` immediately
+
 ## Overview
 
 This file contains development rules and standards for the Codex AI coding assistant.
@@ -9,7 +17,7 @@ so that anyone cloning the project will have consistent coding standards even wi
 to the global agents-environment-config repository.
 
 > **Note**: For detailed information and the latest updates, see the source rule files in
-> `.cursor/rules/` if available in this repository.
+> `.cursor/rules/` if available in this repository. For project-specific information, see `AGENTINFO.md`.
 
 ---
 

@@ -21,8 +21,10 @@ agents-environment-config/
 ├── .claude-code-router/
 │   └── config.json      # Claude Code Router configuration
 ├── .env.template        # Environment variable template
-├── GEMINI.md            # Gemini setup documentation
-├── QWEN.md              # Qwen setup documentation
+├── AGENTS.md            # Generated agent instructions for Codex
+├── GEMINI.md            # Generated agent instructions for Gemini CLI
+├── QWEN.md              # Generated agent instructions for Qwen Code
+├── CLAUDE.md            # Generated agent instructions for Claude Code
 └── README.md            # This file
 ```
 
@@ -309,6 +311,50 @@ git submodule update --init --recursive
 2. Check that environment variables are exported if using them
 3. Ensure API keys haven't expired or been revoked
 4. Verify the correct format for each service (some require "Bearer " prefix)
+
+## Generated Agent Instruction Files
+
+This repository includes automatically generated agent instruction files (`AGENTS.md`, `GEMINI.md`, `QWEN.md`, `CLAUDE.md`) that incorporate rules from `.cursor/rules/`. These files can be committed to git repositories so that anyone cloning a project will have consistent coding standards even without access to the global agents-environment-config setup.
+
+### Using Agent Files in Projects
+
+To use these agent files in your projects:
+
+1. **Copy the relevant file(s) to your project root:**
+   ```bash
+   cp AGENTS.md /path/to/your-project/
+   cp CLAUDE.md /path/to/your-project/
+   ```
+
+2. **Replace the content in `AGENTINFO.md`** with your project-specific information:
+   - This file is a template - replace all content with your project-specific standards
+   - Include project structure, build/test commands, coding style, testing guidance, commit/PR standards, security/config, documentation
+   - The agent files contain instructions for maintaining `AGENTINFO.md` - follow those guidelines
+
+3. **The agent files automatically reference `AGENTINFO.md`:**
+   - Each agent file points to `AGENTINFO.md` as the canonical source for project-specific info
+   - Global rules remain in the agent files (from `.cursor/rules/`)
+   - Project-specific info goes ONLY in `AGENTINFO.md` - do NOT duplicate it in agent files or `.cursor/rules/`
+   - Each agent will automatically discover and use the appropriate file:
+     - Codex looks for `AGENTS.md`
+     - Gemini CLI looks for `GEMINI.md`
+     - Qwen Code looks for `QWEN.md`
+     - Claude Code looks for `CLAUDE.md`
+
+4. **Maintain the pattern:**
+   - When project-specific processes change, update `AGENTINFO.md` immediately
+   - Do NOT edit agent files or `.cursor/rules/` for project-specific info - keep it in `AGENTINFO.md`
+   - The agent files contain global rules and maintenance instructions - they will guide you to update `AGENTINFO.md`
+
+### Regenerating Agent Files
+
+When rules in `.cursor/rules/` are updated, regenerate the agent files:
+
+```bash
+python3 scripts/generate-agent-files.py
+```
+
+This will update all four agent instruction files with the latest rules.
 
 ## Maintaining This Repository
 

@@ -1,5 +1,14 @@
 # Claude Code Agent Instructions
 
+> 🚨 **Canonical Source**: All project-specific standards live in `AGENTINFO.md`. Read/update that file first; this profile only highlights Claude-specific reminders.
+
+**Maintaining AGENTINFO.md:**
+- When project-specific processes, structure, or standards change, update `AGENTINFO.md` immediately
+- Mirror every expectation from `AGENTINFO.md` (project structure, build/test commands, coding style, testing guidance, commit/PR standards, security/config, documentation)
+- Keep responses crisp but cite `AGENTINFO.md` when referencing project rules so humans know the authoritative file
+- Do NOT duplicate project-specific information in this file or in `.cursor/rules/` - keep it in `AGENTINFO.md`
+- If new constraints arise, edit `AGENTINFO.md` first—never duplicate details here
+
 ## Overview
 
 This file contains development rules and standards for the Claude Code AI coding assistant.
@@ -9,7 +18,7 @@ so that anyone cloning the project will have consistent coding standards even wi
 to the global agents-environment-config repository.
 
 > **Note**: For detailed information and the latest updates, see the source rule files in
-> `.cursor/rules/` if available in this repository.
+> `.cursor/rules/` if available in this repository. For project-specific information, see `AGENTINFO.md`.
 
 ---
 

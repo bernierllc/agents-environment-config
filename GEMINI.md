@@ -1,5 +1,14 @@
 # Gemini CLI Agent Instructions
 
+> 🚨 **Canonical Source**: All project-specific guidance now lives in `AGENTINFO.md`. Read/update that file first. This document only carries Gemini-specific reminders.
+
+**Maintaining AGENTINFO.md:**
+- When project-specific processes, structure, or standards change, update `AGENTINFO.md` immediately
+- Treat `AGENTINFO.md` as the single source of truth for project structure, build/test commands, coding style, testing guidance, commit/PR standards, security/config, and documentation
+- Mirror the requirements spelled out in `AGENTINFO.md` in all responses
+- Do NOT duplicate project-specific information in this file or in `.cursor/rules/` - keep it in `AGENTINFO.md`
+- Update `AGENTINFO.md` whenever new standards emerge; do **not** duplicate the details here
+
 ## Overview
 
 This file contains development rules and standards for the Gemini CLI AI coding assistant.
@@ -9,7 +18,7 @@ so that anyone cloning the project will have consistent coding standards even wi
 to the global agents-environment-config repository.
 
 > **Note**: For detailed information and the latest updates, see the source rule files in
-> `.cursor/rules/` if available in this repository.
+> `.cursor/rules/` if available in this repository. For project-specific information, see `AGENTINFO.md`.
 
 ---
 

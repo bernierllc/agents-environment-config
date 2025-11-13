@@ -1,46 +1,17 @@
+[mcp_servers.context7]
+url = "https://mcp.context7.com/mcp"
+
+[mcp_servers.context7.headers]
+CONTEXT7_API_KEY = "ctx7sk-d20f3c8b-a40a-4de5-a8ad-c383408a8031"
+
 [mcp_servers.packages-api]
 url = "http://localhost:3355/api/mcp"
 
 [mcp_servers.playwright]
-command = "npx"
 args = ["@playwright/mcp@latest"]
-
-[mcp_servers.vibe-kanban]
 command = "npx"
-args = ["-y", "@mkbernier/vibe-kanban@latest", "--mcp"]
 
-[mcp_servers.supabase]
-url = "https://mcp.supabase.com/mcp"
-
-[mcp_servers.context7]
-url = "https://mcp.context7.com/mcp"
-headers = { CONTEXT7_API_KEY = "your_context7_api_key_here" }
-
-[mcp_servers.semgrep]
-url = "https://mcp.semgrep.ai/mcp"
-
-[mcp_servers.stripe]
+[mcp_servers.braingrid]
 command = "npx"
-args = ["-y", "@stripe/mcp", "--tools=all"]
-env = { STRIPE_SECRET_KEY = "your_stripe_secret_key_here" }
+args = ["-y", "mcp-remote@latest", "https://mcp.braingrid.ai/mcp"]
 
-[mcp_servers.figma]
-url = "https://mcp.figma.com/mcp"
-
-[mcp_servers.browserbase]
-command = "npx"
-args = ["@browserbasehq/mcp"]
-env = { BROWSERBASE_API_KEY = "your_browserbase_api_key_here", BROWSERBASE_PROJECT_ID = "your_browserbase_project_id_here" }
-
-[mcp_servers.brain-trust-ask-mcp]
-url = "https://ask-mcp.com/mcp"
-transport = "http"
-headers = { X-OpenAI-API-Key = "your_openai_api_key_here", X-OpenAI-Model = "gpt-4", X-OpenAI-Max-Tokens = "2000" }
-
-[mcp_servers.posthog]
-command = "npx"
-args = ["-y", "mcp-remote@latest", "https://mcp.posthog.com/sse", "--header", "Authorization:${POSTHOG_AUTH_HEADER}"]
-env = { POSTHOG_AUTH_HEADER = "Bearer your_posthog_api_key_here" }
-
-[mcp_servers.vercel]
-url = "https://mcp.vercel.com"
