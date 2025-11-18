@@ -1,0 +1,120 @@
+{
+  "name": "bernier-environment-config",
+  "owner": {
+    "name": "Bernier LLC",
+    "email": "matt@bernier.dev"
+  },
+  "metadata": {
+    "description": "Comprehensive agent and skill marketplace for Bernier LLC development environment",
+    "version": "1.0.0",
+    "pluginRoot": "./"
+  },
+  "plugins": [
+    {
+      "name": "bernier-agents",
+      "description": "Complete agency agent collection including bernier-specific agents for development workflows, deployment, testing, and specialized tasks",
+      "source": {
+        "source": "github",
+        "repo": "bernierllc/agency-agents"
+      },
+      "category": "agents",
+      "keywords": ["agents", "development", "deployment", "vercel", "testing", "git"],
+      "agents": [
+        "bernier/bernier-development-workflow-manager",
+        "bernier/bernier-git-branch-manager",
+        "bernier/bernier-git-commit-manager",
+        "bernier/bernier-nextjs-backend-test-updater",
+        "bernier/bernier-typescript-strict-agent",
+        "bernier/bernier-vercel-cli-agent",
+        "bernier/bernier-vercel-production-deployment-agent",
+        "bernier/bernier-vercel-staging-deployment-agent",
+        "bernier/bernier-vpat-wcag-accessibility",
+        "engineering/engineering-frontend-developer",
+        "engineering/engineering-backend-architect",
+        "engineering/engineering-mobile-app-builder",
+        "engineering/engineering-ai-engineer",
+        "engineering/engineering-devops-automator",
+        "engineering/engineering-rapid-prototyper",
+        "engineering/engineering-senior-developer",
+        "design/design-ui-designer",
+        "design/design-ux-researcher",
+        "design/design-ux-architect",
+        "design/design-brand-guardian",
+        "design/design-visual-storyteller",
+        "design/design-whimsy-injector",
+        "marketing/marketing-growth-hacker",
+        "marketing/marketing-content-creator",
+        "marketing/marketing-twitter-engager",
+        "marketing/marketing-tiktok-strategist",
+        "marketing/marketing-instagram-curator",
+        "marketing/marketing-reddit-community-builder",
+        "marketing/marketing-app-store-optimizer",
+        "marketing/marketing-social-media-strategist",
+        "product/product-sprint-prioritizer",
+        "product/product-trend-researcher",
+        "product/product-feedback-synthesizer",
+        "testing/testing-frontend-ui-tester",
+        "testing/testing-evidence-qa",
+        "testing/testing-test-results-analyzer",
+        "testing/testing-performance-benchmarker",
+        "testing/testing-reality-checker",
+        "testing/testing-api-tester",
+        "support/support-responder",
+        "specialized/specialized-workflow-optimizer",
+        "specialized/specialized-experiment-tracker",
+        "specialized/specialized-tool-evaluator",
+        "project-management/project-manager-senior",
+        "project-management/project-shepherd",
+        "project-management/studio-producer",
+        "project-management/studio-operations",
+        "documentation/documentation-internal-bernier",
+        "documentation/documentation-customer-bernier",
+        "spatial-computing/spatial-xr-interface-architect",
+        "spatial-computing/spatial-macos-metal-engineer",
+        "spatial-computing/spatial-xr-immersive-developer",
+        "spatial-computing/spatial-xr-cockpit-specialist"
+      ]
+    },
+    {
+      "name": "bernier-gdocs-skill",
+      "description": "Intelligent Google Docs skill for document synthesis, meeting notes merging, and professional content integration",
+      "source": {
+        "source": "github",
+        "repo": "bernierllc/skills"
+      },
+      "category": "skills",
+      "keywords": ["google-docs", "documents", "synthesis", "meetings"],
+      "skills": [
+        "document-skills/gdocs"
+      ]
+    },
+    {
+      "name": "anthropic-skills",
+      "description": "Official Anthropic skills collection including document processing, design tools, and development utilities",
+      "source": {
+        "source": "github",
+        "repo": "anthropics/skills"
+      },
+      "category": "skills",
+      "keywords": ["skills", "documents", "design", "development"],
+      "skills": [
+        "document-skills/xlsx",
+        "document-skills/docx",
+        "document-skills/pptx",
+        "document-skills/pdf",
+        "skill-creator",
+        "mcp-builder",
+        "canvas-design",
+        "algorithmic-art",
+        "internal-comms",
+        "webapp-testing",
+        "artifacts-builder",
+        "slack-gif-creator",
+        "theme-factory",
+        "brand-guidelines",
+        "ui-audit",
+        "template-skill"
+      ]
+    }
+  ]
+}

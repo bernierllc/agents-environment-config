@@ -9,6 +9,8 @@ agents-environment-config/
 ├── .claude/
 │   ├── agents/          # Git submodule → bernierllc/agency-agents
 │   └── skills/          # Git submodule → bernierllc/skills
+├── .claude-plugin/
+│   └── marketplace.json # Claude Code plugin marketplace configuration
 ├── .cursor/
 │   ├── commands/        # Cursor command wrappers for agents
 │   └── mcp.json         # Cursor MCP server configuration
@@ -263,6 +265,99 @@ See [QWEN.md](./QWEN.md) for detailed setup instructions.
 2. Update the `PORT` value in the configuration
 3. Restart Claude Code Router
 
+## Claude Code Plugin Marketplace
+
+This repository includes a Claude Code plugin marketplace configuration at `.claude-plugin/marketplace.json` that enables Claude Code to discover and use agents and skills from multiple sources.
+
+### Marketplace Structure
+
+The marketplace configuration provides access to three plugin collections:
+
+1. **bernier-agents** - Complete agency agent collection from `bernierllc/agency-agents`
+   - All upstream agents from the original `msitarzewski/agency-agents` fork
+   - Bernier-specific agents for development workflows, deployment, testing, and specialized tasks
+   - Located in GitHub: `bernierllc/agency-agents`
+
+2. **bernier-gdocs-skill** - Custom Google Docs skill from `bernierllc/skills`
+   - Intelligent document synthesis and meeting notes merging
+   - Professional content integration for Google Docs
+   - Located in GitHub: `bernierllc/skills` at `document-skills/gdocs`
+
+3. **anthropic-skills** - Official Anthropic skills from `anthropics/skills`
+   - Document processing suite (Excel, Word, PowerPoint, PDF)
+   - Design and development tools (canvas-design, algorithmic-art, etc.)
+   - Testing utilities, MCP builders, and more
+   - Located in GitHub: `anthropics/skills`
+
+### Using the Marketplace
+
+Claude Code automatically discovers marketplace configurations in the `.claude-plugin/` directory. The marketplace points to:
+
+- **Git submodules**: Agents and skills are managed as git submodules at `.claude/agents/` and `.claude/skills/`
+- **GitHub repositories**: Each plugin source is referenced by its GitHub repository URL
+- **Mixed sources**: Combines bernierllc custom agents/skills with official Anthropic skills
+
+### Installing Plugins from the Marketplace
+
+To install plugins from this marketplace in Claude Code:
+
+```bash
+# Install all bernier agents
+/plugin install bernier-agents@bernier-environment-config
+
+# Install the gdocs skill
+/plugin install bernier-gdocs-skill@bernier-environment-config
+
+# Install official Anthropic skills
+/plugin install anthropic-skills@bernier-environment-config
+```
+
+### Marketplace Updates
+
+When agents or skills are updated in their respective repositories:
+
+1. **Update the submodule:**
+   ```bash
+   # For agents
+   git submodule update --remote .claude/agents
+
+   # For skills
+   git submodule update --remote .claude/skills
+   ```
+
+2. **Commit the submodule update:**
+   ```bash
+   git add .claude/agents .claude/skills
+   git commit -m "Update agents and skills submodules"
+   git push
+   ```
+
+3. **Claude Code will automatically detect the updates** when you pull the latest changes
+
+### Marketplace File Location
+
+The marketplace configuration is stored at:
+```
+.claude-plugin/marketplace.json
+```
+
+This file defines:
+- Plugin names and descriptions
+- Source repositories (GitHub URLs)
+- Specific agents and skills included in each plugin
+- Plugin categories and keywords
+
+### Customizing the Marketplace
+
+To add new plugins or modify existing ones:
+
+1. Edit `.claude-plugin/marketplace.json`
+2. Add or update plugin entries following the existing structure
+3. Commit changes to this repository
+4. Claude Code will discover the updated marketplace on next load
+
+For more information about plugin marketplaces, see the [Claude Code Plugin Marketplace documentation](https://code.claude.com/docs/en/plugin-marketplaces).
+
 ## Environment Variables
 
 All API keys and sensitive configuration should be stored in `.env` (not committed to git). The `.env.template` file lists all required variables:
@@ -416,3 +511,4 @@ This repository maintains the same license as the `agency-agents` submodule (MIT
 - [agency-agents](https://github.com/bernierllc/agency-agents) - The agent definitions repository (submodule)
 - [skills](https://github.com/bernierllc/skills) - The skills repository (submodule)
 - [Original agency-agents fork](https://github.com/msitarzewski/agency-agents) - The original repository this was forked from
+- [Anthropic skills](https://github.com/anthropics/skills) - Official Anthropic skills repository (referenced in marketplace)
