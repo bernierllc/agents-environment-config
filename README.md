@@ -13,7 +13,8 @@ agents-environment-config/
 │   └── marketplace.json # Claude Code plugin marketplace configuration
 ├── .cursor/
 │   ├── commands/        # Cursor command wrappers for agents
-│   └── mcp.json         # Cursor MCP server configuration
+│   ├── mcp.json         # Cursor MCP server configuration
+│   └── rules/           # Cursor rules (global development standards)
 ├── .gemini/
 │   └── settings.json    # Gemini MCP configuration
 ├── .qwen/
@@ -22,7 +23,21 @@ agents-environment-config/
 │   └── config.toml      # Codex MCP configuration (TOML format)
 ├── .claude-code-router/
 │   └── config.json      # Claude Code Router configuration
+├── docs/                # Documentation
+│   └── ui-audit/        # UI audit documentation
+├── plans/               # Planning documents
+│   ├── cursor/          # Cursor-related planning docs
+│   ├── gdocs-table-manipulation.plan.md
+│   └── ui-audit-skill-command.plan.md
+├── scripts/             # Utility scripts
+│   ├── audit-project-rules.py
+│   ├── generate-agent-files.py
+│   ├── generate-removal-script-safe.py
+│   ├── generate-removal-script.py
+│   ├── remove-duplicate-rules.sh
+│   └── verify-dry-run.py
 ├── .env.template        # Environment variable template
+├── AGENTINFO.md         # Project-specific agent information template
 ├── AGENTS.md            # Generated agent instructions for Codex
 ├── GEMINI.md            # Generated agent instructions for Gemini CLI
 ├── QWEN.md              # Generated agent instructions for Qwen Code
@@ -484,6 +499,33 @@ Cursor commands are in `.cursor/commands/`. These wrap the agent definitions for
 1. Create new `.md` file in `.cursor/commands/`
 2. Follow the existing pattern with frontmatter and agent reference
 3. Commit to this repository
+
+### Documentation Directory (`docs/`)
+
+The `docs/` directory contains project documentation:
+
+- `docs/ui-audit/` - Documentation for UI audit workflows and processes
+  - `README.md` - Overview of UI audit functionality
+  - `workflow.md` - UI audit workflow documentation
+
+### Planning Directory (`plans/`)
+
+The `plans/` directory contains planning documents and task tracking:
+
+- `plans/cursor/` - Cursor-related planning documents
+  - Architecture and consolidation planning
+  - Project rules audit documentation
+- `plans/*.plan.md` - Feature and improvement planning documents
+
+### Scripts Directory (`scripts/`)
+
+The `scripts/` directory contains utility scripts for repository maintenance:
+
+- `generate-agent-files.py` - Generates agent instruction files from `.cursor/rules/`
+- `audit-project-rules.py` - Audits project-specific rules
+- `generate-removal-script*.py` - Scripts for removing duplicate rules
+- `remove-duplicate-rules.sh` - Shell script for rule cleanup
+- `verify-dry-run.py` - Verification utilities
 
 ## Security Notes
 
