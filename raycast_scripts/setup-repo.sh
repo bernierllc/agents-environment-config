@@ -13,15 +13,43 @@
 # @raycast.author matt_bernier
 # @raycast.authorURL https://raycast.com/matt_bernier
 
+# Load environment variables from .env file if it exists
+# Create a .env file in the repository root with:
+# GITHUB_ORGS="mbernier,bernierllc,unicorn"
+# PROJECTS_DIR="$HOME/projects"
+# CUSTOM_DIRS="/unicorn"
+SCRIPT_BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="$SCRIPT_BASE_DIR/../.env"
+
+if [ -f "$ENV_FILE" ]; then
+    # Source the .env file, exporting variables
+    set -a
+    source "$ENV_FILE"
+    set +a
+fi
+
+# Set defaults if not provided in .env
+PROJECTS_DIR="${PROJECTS_DIR:-$HOME/projects}"
+
+# Parse GitHub orgs from environment variable (comma-separated)
+# Default to mbernier,bernierllc,unicorn if not set
+GITHUB_ORGS_STRING="${GITHUB_ORGS:-mbernier,bernierllc,unicorn}"
+IFS=',' read -ra GITHUB_ORGS_ARRAY <<< "$GITHUB_ORGS_STRING"
+
+# Parse custom directories from environment variable (comma-separated)
+# Default to /unicorn if not set
+CUSTOM_DIRS_STRING="${CUSTOM_DIRS:-/unicorn}"
+IFS=',' read -ra CUSTOM_DIRS_ARRAY <<< "$CUSTOM_DIRS_STRING"
+
+SCRIPT_DIR="$HOME/projects/raycast_scripts"
+AGENTS_DIR="$HOME/projects/agents-environment-config"
+
 # Prompt for setup type
 SETUP_TYPE=$(osascript -e 'choose from list {"Repository", "File path"} with prompt "Select setup type:" default items {"Repository"}')
 
 if [ -z "$SETUP_TYPE" ] || [ "$SETUP_TYPE" = "false" ]; then
     exit 0
 fi
-
-SCRIPT_DIR="$HOME/projects/raycast_scripts"
-AGENTS_DIR="$HOME/projects/agents-environment-config"
 
 if [ "$SETUP_TYPE" = "Repository" ]; then
     # Prompt for project directory name
@@ -34,59 +62,78 @@ if [ "$SETUP_TYPE" = "Repository" ]; then
     # Convert project name to a safe filename (replace spaces and special chars with hyphens)
     SAFE_NAME=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-\|-$//g')
     
-    PROJECT_DIR="$HOME/projects/$PROJECT_NAME"
-    UNICORN_DIR="/unicorn/$PROJECT_NAME"
+    PROJECT_DIR="$PROJECTS_DIR/$PROJECT_NAME"
     
-    # Check if directory exists, if not try to clone from GitHub
-    if [ ! -d "$PROJECT_DIR" ] && [ ! -d "$UNICORN_DIR" ]; then
-        echo "Directory $PROJECT_DIR and $UNICORN_DIR do not exist. Attempting to clone from GitHub..."
+    # Build array of all possible project directories (custom dirs + projects dir)
+    ALL_PROJECT_DIRS=("$PROJECT_DIR")
+    for custom_dir in "${CUSTOM_DIRS_ARRAY[@]}"; do
+        ALL_PROJECT_DIRS+=("$custom_dir/$PROJECT_NAME")
+    done
+    
+    # Check if any directory already exists
+    EXISTING_DIR=""
+    for dir in "${ALL_PROJECT_DIRS[@]}"; do
+        if [ -d "$dir" ]; then
+            EXISTING_DIR="$dir"
+            break
+        fi
+    done
+    
+    if [ -n "$EXISTING_DIR" ]; then
+        echo "Directory $EXISTING_DIR already exists. Using existing directory."
+        PROJECT_DIR="$EXISTING_DIR"
+    else
+        # No directory exists, try to clone from GitHub
+        echo "Directory $PROJECT_DIR does not exist. Attempting to clone from GitHub..."
         
-        # Try cloning from mbernier's GitHub
-        echo "Attempting to clone from mbernier's GitHub..."
-        if git clone "git@github.com:mbernier/$PROJECT_NAME.git" "$PROJECT_DIR" 2>/dev/null; then
-            echo "Successfully cloned from mbernier/$PROJECT_NAME"
-        else
-            # Try cloning from bernierllc's GitHub
-            echo "Attempting to clone from bernierllc's GitHub..."
-            if git clone "git@github.com:bernierllc/$PROJECT_NAME.git" "$PROJECT_DIR" 2>/dev/null; then
-                echo "Successfully cloned from bernierllc/$PROJECT_NAME"
-            else
-                # Check if unicorn directory exists first
-                if [ -d "$UNICORN_DIR" ]; then
-                    echo "Unicorn directory $UNICORN_DIR already exists. Using existing directory."
-                    PROJECT_DIR="$UNICORN_DIR"
-                else
-                    # Try cloning from unicorn's GitHub
-                    echo "Attempting to clone from unicorn's GitHub..."
-                    if git clone "git@github.com:unicorn/$PROJECT_NAME.git" "$UNICORN_DIR" 2>/dev/null; then
-                        echo "Successfully cloned from unicorn/$PROJECT_NAME"
-                        PROJECT_DIR="$UNICORN_DIR"
-                    else
-                        echo "Error: The git repo does not exist in mbernier, bernierllc, or unicorn's github repos and the directory does not exist. Stopping here." >&2
-                        osascript -e "display dialog \"Error: The git repo does not exist in mbernier, bernierllc, or unicorn's github repos and the directory does not exist. Stopping here.\" buttons {\"OK\"} default button \"OK\" with icon stop"
-                        exit 1
+        # Try cloning from each GitHub org in the array
+        CLONED=false
+        for org in "${GITHUB_ORGS_ARRAY[@]}"; do
+            echo "Attempting to clone from $org's GitHub..."
+            if git clone "git@github.com:$org/$PROJECT_NAME.git" "$PROJECT_DIR" 2>/dev/null; then
+                echo "Successfully cloned from $org/$PROJECT_NAME"
+                CLONED=true
+                break
+            fi
+        done
+        
+        if [ "$CLONED" = false ]; then
+            # Try cloning to custom directories
+            for custom_dir in "${CUSTOM_DIRS_ARRAY[@]}"; do
+                CUSTOM_PROJECT_DIR="$custom_dir/$PROJECT_NAME"
+                for org in "${GITHUB_ORGS_ARRAY[@]}"; do
+                    echo "Attempting to clone from $org's GitHub to $CUSTOM_PROJECT_DIR..."
+                    if git clone "git@github.com:$org/$PROJECT_NAME.git" "$CUSTOM_PROJECT_DIR" 2>/dev/null; then
+                        echo "Successfully cloned from $org/$PROJECT_NAME to $CUSTOM_PROJECT_DIR"
+                        PROJECT_DIR="$CUSTOM_PROJECT_DIR"
+                        CLONED=true
+                        break 2
                     fi
-                fi
+                done
+            done
+            
+            if [ "$CLONED" = false ]; then
+                # Build error message with all orgs tried
+                ORGS_LIST=$(IFS=', '; echo "${GITHUB_ORGS_ARRAY[*]}")
+                CUSTOM_DIRS_LIST=$(IFS=', '; echo "${CUSTOM_DIRS_ARRAY[*]}")
+                echo "Error: The git repo does not exist in any of the configured GitHub orgs ($ORGS_LIST) and the directory does not exist in any configured location ($PROJECTS_DIR, $CUSTOM_DIRS_LIST). Stopping here." >&2
+                osascript -e "display dialog \"Error: The git repo does not exist in any of the configured GitHub orgs ($ORGS_LIST) and the directory does not exist in any configured location ($PROJECTS_DIR, $CUSTOM_DIRS_LIST). Stopping here.\" buttons {\"OK\"} default button \"OK\" with icon stop"
+                exit 1
             fi
         fi
-    elif [ -d "$UNICORN_DIR" ]; then
-        echo "Unicorn directory $UNICORN_DIR already exists. Using existing directory."
-        PROJECT_DIR="$UNICORN_DIR"
-    else
-        echo "Directory $PROJECT_DIR already exists. Skipping git clone."
     fi
     
     # Use PROJECT_NAME for display purposes
     DISPLAY_NAME="$PROJECT_NAME"
 else
     # File path option
-    FILE_PATH=$(osascript -e 'text returned of (display dialog "Enter file path relative to ~/projects/ (e.g., EarnLearn/el_new_app):" default answer "" buttons {"Cancel", "OK"} default button "OK")')
+    FILE_PATH=$(osascript -e "text returned of (display dialog \"Enter file path relative to $PROJECTS_DIR/ (e.g., EarnLearn/el_new_app):\" default answer \"\" buttons {\"Cancel\", \"OK\"} default button \"OK\")")
     
     if [ -z "$FILE_PATH" ]; then
         exit 0
     fi
     
-    PROJECT_DIR="$HOME/projects/$FILE_PATH"
+    PROJECT_DIR="$PROJECTS_DIR/$FILE_PATH"
     
     # Verify the directory exists
     if [ ! -d "$PROJECT_DIR" ]; then
