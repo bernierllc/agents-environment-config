@@ -121,6 +121,62 @@ Use one or more techniques so mocks do not drift from the real world:
 - **Integration test dependencies**: Integration tests may share a database schema, but each test must still clean up its own modifications.
 - **E2E scenarios**: E2E tests may require shared state to simulate real user workflows; document these dependencies clearly.
 
+## Database and Service Testing
+
+### Core Principle
+**Tests must set up services at test run time and tear them down when tests are done.** Running services at test time is purposefully part of our testing strategy because:
+- Setting up services helps us test our environment variables
+- Tests our infrastructure setup, connection, and communication
+- Tests our database migrations on every test run
+- Ensures infrastructure works correctly as part of the test suite
+
+### Docker-Based Test Services
+
+**MANDATORY: Use Docker for all test services (databases, caches, message queues, etc.)**
+
+- **Container Lifecycle**: 
+  - Containers **MUST** spin up at the start of test execution
+  - Containers **MUST** spin down at the end of test execution
+  - Use test lifecycle hooks (`beforeAll`/`afterAll` or test framework equivalents) to manage container lifecycle
+  - Never leave containers running after tests complete
+
+- **Resource Management**:
+  - **CRITICAL**: The testing process **MUST** be killed at the end of testing to protect local systems from resource overload
+  - Test runners like Vitest can consume 2-3GB per service in memory
+  - Without proper cleanup, this quickly makes systems unusable
+  - On third-party CI services, this becomes very expensive
+  - Implement proper cleanup hooks that ensure all containers and test processes are terminated
+
+- **Implementation Requirements**:
+  - Use Docker Compose or container orchestration tools for multi-service test environments
+  - Ensure containers are isolated per test run (no shared state between runs)
+  - Use unique container names/IDs to avoid conflicts
+  - Implement timeout mechanisms to prevent hung containers
+  - Log container startup/shutdown for debugging
+
+### Test Suite Execution
+
+**When running the full test suite:**
+- **Stop after first 3 failures**: Configure test runner to stop after the first 3 failures
+- This speeds up the test-fix loop by allowing developers to:
+  - Stop and fix failures immediately
+  - Re-run tests without waiting for the entire suite
+  - Iterate quickly on fixing issues
+
+- **Implementation**:
+  - Vitest: Use `bail: 3` configuration option
+  - Jest: Use `bail: 3` configuration option
+  - Other runners: Configure equivalent "bail after N failures" option
+
+### Best Practices
+
+- **Service Health Checks**: Wait for services to be healthy before running tests
+- **Port Management**: Use dynamic port allocation or port ranges to avoid conflicts
+- **Data Cleanup**: Ensure test data is cleaned up between test runs
+- **Migration Testing**: Run database migrations as part of test setup to verify they work
+- **Environment Variables**: Test that environment variables are correctly loaded and used
+- **Connection Testing**: Verify that services can connect to each other correctly
+
 ## Fixture Hygiene
 - Keep fixtures small and representative; remove unused fields.
 - Co-locate fixtures with tests; document provenance (e.g., captured on 2025‑10‑29).
@@ -131,8 +187,10 @@ Use one or more techniques so mocks do not drift from the real world:
 - API: maintain OpenAPI and generate client/server types; use them in tests.
 - UI: prefer Testing Library; avoid implementation‑coupled selectors.
 - **UI Testing**: Use Playwright MCP with the actual UI to discover behavior before writing tests. Always verify tests work against the actual UI.
-- **Database**: Use Docker containers or test database instances for real database testing
+- **Database**: Use Docker containers for test databases - containers must spin up at test start and spin down at test end
 - **HTTP**: Use real HTTP clients to call internal APIs in tests
+- **Test Runners**: Configure bail after 3 failures for full test suite runs (e.g., Vitest: `bail: 3`, Jest: `bail: 3`)
+- **Resource Cleanup**: Ensure test processes and containers are killed after test completion to prevent resource exhaustion
 
 ## Documentation and Ownership
 - For external service mocks: Each mocked interface must have a short README describing its real contract, how fixtures were captured, and how to refresh them.
