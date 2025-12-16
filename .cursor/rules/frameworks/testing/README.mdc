@@ -1,6 +1,6 @@
 # Testing Framework Rules
 
-- standards.mdc — overall strategy, mocks policy, verification
+- standards.mdc — overall strategy, no mocking of internal systems policy
 - organization.mdc — test directories, naming, coverage targets
 - tools.mdc — runners, libraries, commands
 

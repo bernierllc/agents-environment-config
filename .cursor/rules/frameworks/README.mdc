@@ -16,7 +16,7 @@ Framework/tool-specific rules that apply when using these frameworks or tools.
 
 ## Testing
 
-- `standards.mdc` - Testing standards with tiered mocks and reality verification
+- `standards.mdc` - Testing standards - no mocking of internal systems
 - `organization.mdc` - Test organization, file layout, coverage targets
 - `tools.mdc` - Testing tools and commands
 

@@ -1,33 +1,12 @@
 {
-  "mcpServers": {
-    "playwright": {
-      "command": "npx",
-      "args": [
-        "@playwright/mcp@latest"
-      ]
-    },
-    "packages-api": {
-      "type": "http",
-      "url": "http://localhost:3355/api/mcp",
-      "headers": {
-        "Authorization": "Bearer your_packages_api_token_here",
-        "Accept": "application/json, text/event-stream"
-      }
-    },
-    "context7": {
-      "url": "https://mcp.context7.com/mcp",
-      "headers": {
-        "CONTEXT7_API_KEY": "ctx7sk-d20f3c8b-a40a-4de5-a8ad-c383408a8031"
-      }
-    },
-    "braingrid": {
-      "url": "https://mcp.braingrid.ai/mcp",
-      "transport": "httpStream"
-    }
-  },
+  "mcpServers": {},
   "security": {
     "auth": {
       "selectedType": "oauth-personal"
     }
-  }
+  },
+  "ui": {
+    "theme": "Google Code"
+  },
+  "hasSeenIdeIntegrationNudge": true
 }

@@ -64,7 +64,7 @@ Framework/tool-specific rules:
   - `tailwind-css.mdc` - Tailwind CSS styling standards
   - `tamagui.mdc` - Tamagui property mappings and component development
 - `testing/` - Testing frameworks
-  - `standards.mdc` - Testing standards with tiered mocks and reality verification
+  - `standards.mdc` - Testing standards - no mocking of internal systems
   - `organization.mdc` - Test organization, file layout, coverage targets
   - `tools.mdc` - Testing tools and commands
 
@@ -96,7 +96,7 @@ Package-specific rules (for tools/):
 - **For projects**: Reference global rules, don't duplicate them. Keep only project-specific patterns.
 
 ## Notes
-- Testing standards have been updated to allow smart, tiered mocks at lower levels with verification that mocks match reality; see `frameworks/testing/standards.mdc`.
+- Testing standards: If we own it or write it, we test it directly - no mocking. Only external third-party services can be mocked. See `frameworks/testing/standards.mdc`.
 - All general rules have `alwaysApply: true` and will be applied to all projects.
 - Framework, language, and stack-specific rules have appropriate globs and will apply when matching files are present.
 - **Architecture**: Global rules (this repo) + Project-specific rules (in each project) = Complete rule set

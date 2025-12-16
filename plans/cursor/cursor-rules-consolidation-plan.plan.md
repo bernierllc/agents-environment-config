@@ -63,12 +63,12 @@ For each .mdc file, analyze:
 - [ ] **Dependencies**: Note if rules reference other rules or project-specific code
 - [ ] **Frontmatter Gaps**: Identify missing description, globs, alwaysApply fields
 
-### 1.3 Mocking Best Practices Research
+### 1.3 Testing Strategy (No Mocking Internal Systems)
 
-- [ ] Research tiered mocking strategies (unit → integration → E2E)
-- [ ] Define verification strategy to ensure mocks match reality (contract tests, golden files, schema/type checks, integration parity tests)
-- [ ] Select canonical references (e.g., Martin Fowler Mocks vs Stubs, Google Testing Blog, Thoughtworks Tech Radar) and link them
-- [ ] Document guidance on where mocks are acceptable vs prohibited
+- [x] Policy: If we own it or write it, we test it directly - we do NOT mock it
+- [x] Policy: Do NOT mock the database or the internal API - use real database instances and real HTTP calls
+- [x] Policy: Mocks are only allowed for external third-party services
+- [x] Policy: Tables, code, configuration, and definitions that we own inside of 3rd party systems should be tested because we own it
 
 ## Phase 2: Category Classification
 
@@ -200,7 +200,7 @@ Organize by programming language:
 
 #### 2.4.3 Testing Frameworks (`frameworks/testing/`)
 
-- Testing standards (no mocks)
+- Testing standards (no mocking of internal systems - test directly what we own)
 - Test organization
 - Coverage requirements
 - Testing tools
@@ -470,7 +470,9 @@ For each source file:
 
 **Consolidated to:** `frameworks/testing/standards.mdc`
 
-- Merge "no mocks" principle from all
+- Policy: If we own it or write it, we test it directly - no mocking
+- Policy: Do NOT mock the database or internal API - use real instances
+- Policy: Mocks only allowed for external third-party services
 - Merge coverage requirements
 - Merge test organization patterns
 - Keep tool-specific examples but generalize

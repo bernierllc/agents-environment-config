@@ -996,78 +996,58 @@ These rules apply when using specific frameworks or tools:
 
 *Source: `.cursor/rules/frameworks/testing/organization.mdc`*
 
-#### Testing standards with tiered mocks and reality verification
+#### Testing standards - no mocking of internal systems
 
+### Core Testing Policy
+**If we own it or write it, we test it directly - we do NOT mock it in tests.**
+### Critical Rules
+- **DO NOT mock the database or the internal API**
+- **Use a real database instance and real HTTP calls**
+- **Mocks are only allowed for external third-party services**
+- **Tables, code, configuration, and definitions that we own and that affect the code we own inside of 3rd party systems should be tested because we own it**
 ### Principles
 - Prefer small, fast tests near the code; grow realism as you move up the test pyramid.
-- **CRITICAL: All mocks in testing MUST be tested to match the ACTUAL thing they are mocking, otherwise the mocks are fucking useless and only cause problems.**
-- Mocks are acceptable at lower levels when they are verified to match reality and do not hide defects.
-- Avoid global toggles that bypass tests; failures must be fixed or the test adjusted with rationale.
-### Test Pyramid and Mocking Strategy
-1. Unit tests (allow mocks) — fast feedback on small units
-   - Use test doubles for IO and slow deps (network, DB, filesystem).
-   - Keep mocks minimal; prefer fakes over complex behaviors.
-   - Replace unit-level mocks with real adapters where feasible.
-   - Validate wiring across module boundaries and data contracts.
-   - Exercise the system through public interfaces.
-   - Only mock external third‑party services you do not control.
+- Test against real systems we own - database, APIs, services, models, repositories
+- Mocks are ONLY allowed for external third-party services we do not control
+- Avoid global toggles that bypass tests; failures must be fixed or the test adjusted with rationale
+### No Mocking Internal Systems Policy
+### What NOT to Mock (We Own It)
+- **Database**: Never mock Prisma, database queries, or repositories - use real database instances
+- **Internal APIs**: Never mock our own API endpoints - make real HTTP calls
+- **Internal Services**: Never mock service classes we own and maintain
+- **Tables/Models**: Never mock database tables, models, or their relationships
+- **Configuration**: Never mock config that we own and control
+- **Definitions in 3rd-party systems**: If we define tables/schemas/config in external systems, test the real thing because we own it
+### What CAN Be Mocked (External Third-Party Only)
+- **External APIs**: Stripe, SendGrid, Twilio, Google APIs (when not testing our own code within them), etc.
+- **External services**: OAuth providers (when not testing auth flow)
+- **Network conditions**: Simulating timeouts, errors from external services
+- **Rate-limited services**: When testing without burning API quota
+### Rationale
+Mocking internal systems creates tests that pass when the mock is correct but fail in production when the real system behaves differently. Tests against mocks only verify that code works with the mock, not with the real system. If we own it, we must test it directly.
+### Test Pyramid and Testing Strategy
+1. Unit tests (NO internal mocks) — fast feedback on small units
+   - Use real database instances for database operations
+   - Call real service methods with real dependencies
+   - Make real HTTP calls to internal APIs
+   - Only mock external third-party services
+   - Use real database and make real HTTP calls to our APIs
+   - Validate wiring across module boundaries and data contracts
+   - Exercise the system through public interfaces
+   - Use real database and real internal APIs
+   - Only mock external third‑party services you do not control
 ### UI Testing Workflow
-
 **CRITICAL: For creating UI tests, use Playwright MCP with the actual UI to identify how the actual UI works in order to write or validate what is in the Playwright tests. Then run the Playwright tests and make sure they work against the actual UI as it actually works.**
-
 ### UI Test Creation Process
 1. **Discovery Phase**: Use Playwright MCP to interact with the actual running UI
    - Navigate to the UI and explore its behavior
    - Identify selectors, interactions, and states through actual usage
    - Document how the UI actually responds to user actions
-2. **Test Writing**: Write Playwright tests based on actual UI behavior discovered
    - Use selectors and interactions verified against the real UI
    - Ensure tests match the actual UI workflow, not assumptions
-3. **Validation**: Run tests against the actual UI and verify they work correctly
    - Tests must pass against the real UI as it actually works
    - Adjust tests if UI behavior differs from assumptions
    - Never write tests without first verifying against the actual UI
-### Mock Verification (Make Mocks Match Reality)
-
-**CRITICAL: All mocks in testing MUST be tested to match the ACTUAL thing they are mocking, otherwise the mocks are fucking useless and only cause problems.**
-
-- Contract tests: Assert provider/consumer agree on request/response shapes.
-- Golden files/snapshots: Record real responses and reuse as fixtures; refresh on schema changes.
-- Schema/type guards: Validate fixtures against JSON Schema or TypeScript types at test load.
-- Parity runs: Periodically hit real services in CI nightly jobs to detect drift.
-### When To Mock
-- Allowed: low‑level unit tests for adapters, network clients, DB gateways.
-- Allowed: failure scenarios that are costly/risky to reproduce (timeouts, 5xx).
-- Avoid: mocking your own domain logic; prefer real collaboration between domain services.
-- Avoid: mocks in E2E unless isolating non-deterministic third parties.
-### Quality Bars
-- Unit: fast (<100ms), isolated, deterministic. High branch/path coverage.
-- Integration: validate cross‑module contracts and realistic data flows.
-- E2E: validate critical paths; focus on user‑visible correctness.
-### Test Isolation
-### Core Principle
-**Tests must be isolated by default** — data from one test suite should not affect another, and tests within a suite should not depend on each other unless explicitly necessary.
-### Isolation Requirements
-- **Between test suites**: Each test suite must clean up its own state and not rely on data created by other suites.
-- **Between tests**: Each test must set up and tear down its own data. Tests should be able to run in any order.
-- **Shared state**: Only share data between tests when explicitly necessary and documented with clear rationale.
-- **Database/state**: Use transactions, test databases, or fixtures that are reset between tests. Never rely on shared mutable state.
-### Implementation Guidelines
-- **Setup/teardown**: Use `beforeEach`/`afterEach` or `beforeAll`/`afterAll` hooks to establish and clean up test state.
-- **Transaction rollback**: Wrap database-dependent tests in transactions that roll back after each test.
-- **Isolated test databases**: Use separate test databases or schemas per test suite when possible.
-- **Fixtures**: Create fresh test data per test rather than reusing data across tests.
-- **Global state**: Avoid global variables, singletons, or shared caches that persist between tests.
-- **Concurrent execution**: Tests should be safe to run in parallel without interference.
-### Exceptions and Documentation
-- **Shared fixtures**: When sharing data is necessary (e.g., expensive setup, read-only reference data), document the rationale and ensure the shared state is immutable or reset between uses.
-- **Integration test dependencies**: Integration tests may share a database schema, but each test must still clean up its own modifications.
-- **E2E scenarios**: E2E tests may require shared state to simulate real user workflows; document these dependencies clearly.
-### Fixture Hygiene
-- Keep fixtures small and representative; remove unused fields.
-- Co-locate fixtures with tests; document provenance (e.g., captured on 2025‑10‑29).
-- Validate fixtures against schemas/types on load.
-### Tooling Hints
 
 *[Content truncated - see source rule file for full details]*
 
@@ -1079,6 +1059,18 @@ These rules apply when using specific frameworks or tools:
 - Unit/Integration: Vitest / Jest + Testing Library
 - E2E: Playwright (preferred) or Cypress
 - Contract tests: Pact, OpenAPI validators, Zod/JSON Schema
+### UI Testing with Playwright MCP
+**CRITICAL: For creating UI tests, use Playwright MCP with the actual UI to identify how the actual UI works in order to write or validate what is in the Playwright tests. Then run the Playwright tests and make sure they work against the actual UI as it actually works.**
+### UI Test Workflow
+1. **Discovery**: Use Playwright MCP to interact with the actual running UI
+   - Navigate and explore the UI behavior
+   - Identify selectors, interactions, and states
+   - Document actual UI responses
+   - Use verified selectors and interactions
+   - Match actual UI workflows, not assumptions
+   - Tests must pass against the real UI
+   - Adjust if UI behavior differs from assumptions
+   - Never write tests without verifying against the actual UI first
 ### Suggested Commands
 ### Guardrails
 - Lint/typecheck pre-commit; full suite pre-push
@@ -1361,6 +1353,72 @@ These topics apply across different parts of the codebase:
 - **Observability, monitoring, and logging patterns**: See `.cursor/rules/topics/observability/monitoring.mdc` for details
 
 *Source: `.cursor/rules/topics/observability/monitoring.mdc`*
+
+### Other
+
+#### Cursor Code Agent Instructions - Development rules and standards for Cursor AI coding assistant
+
+**Maintaining AGENTINFO.md:**
+- When project-specific processes, structure, or standards change, update `AGENTINFO.md` immediately
+- Mirror every expectation from `AGENTINFO.md` (project structure, build/test commands, coding style, testing guidance, commit/PR standards, security/config, documentation)
+- Keep responses crisp but cite `AGENTINFO.md` when referencing project rules so humans know the authoritative file
+- Do NOT duplicate project-specific information in this file or in `.cursor/rules/` - keep it in `AGENTINFO.md`
+- If new constraints arise, edit `AGENTINFO.md` first—never duplicate details here
+### Overview
+### Cursor-Specific Guidelines
+### Rule Discovery
+- Cursor automatically discovers rules in `.cursor/rules/` directories
+- Rules are applied from parent directories (global rules) and project-specific directories
+- Project-specific rules take precedence over global rules for conflicts
+- Rules use `.mdc` format with frontmatter metadata
+### Rule File Format
+- Use `.mdc` extension for all rule files
+- Include frontmatter with `description`, `alwaysApply`, and `tags` fields
+- Follow MECE (Mutually Exclusive, Collectively Exhaustive) structure
+- Keep rules focused and scoped by concern
+### Project-Specific Rules
+- Store project-specific rules in `.cursor/rules/` within the project
+- Reference global rules where applicable (avoid duplication)
+- Focus on project-specific patterns and business logic
+- Update rules when project standards evolve
+### Core Development Principles
+- **Architecture**: See `general/architecture.mdc`
+- **Development Workflow**: See `general/development-workflow.mdc`
+- **Documentation**: See `general/documentation.mdc`
+- **Security**: See `general/security.mdc`
+- **Port Management**: See `general/port-management.mdc`
+- **Project Setup CLI**: See `general/project-setup-cli.mdc`
+- **Plans and Checklists**: See `general/plans-checklists.mdc`
+- **Rules About Rules**: See `general/rules-about-rules.mdc`
+### Language-Specific Rules
+- **Python**: See `languages/python/style.mdc`
+- **TypeScript**: See `languages/typescript/typing-standards.mdc`
+### Stack-Specific Rules
+- **Next.js**: See `stacks/nextjs/app-router.mdc`
+- **FastAPI**: See `stacks/python-backend/fastapi.mdc`
+- **React Native/Expo**: See `stacks/react-native/expo-development.mdc`
+### Framework-Specific Rules
+- **Database**: See `frameworks/database/` for Prisma, Supabase, SQLAlchemy, Alembic
+- **Testing**: See `frameworks/testing/` for testing standards, organization, and tools
+- **UI**: See `frameworks/ui/` for Tailwind CSS and Tamagui
+### Cross-Cutting Topics
+- **Accessibility**: See `topics/accessibility/standards.mdc`
+- **API Design**: See `topics/api/design-standards.mdc`
+- **Deployment**: See `topics/deployment/environments.mdc`
+- **Git Workflow**: See `topics/git/workflow.mdc`
+- **Observability**: See `topics/observability/monitoring.mdc`
+- **Quality**: See `topics/quality/` for error handling, gates, and logging
+- **Security**: See `topics/security/` for authentication and secrets
+- **Troubleshooting**: See `topics/troubleshooting/debugging.mdc`
+### Package Management
+- **Package Management**: See `packages/package-management.mdc`
+- **Package Reuse**: See `packages/package-reuse.mdc`
+### Customization
+1. Keep them at the top or in a dedicated "Project-Specific" section
+3. Avoid duplicating content from global rules
+### Regenerating This File
+
+*Source: `.cursor/rules/CURSOR.mdc`*
 
 ### Quality
 

@@ -18,7 +18,8 @@ Before starting any new package or feature:
 
 ```bash
 # List all packages to see what exists
-./manager list all
+# Make sure that localhost:3355 is running, if not then `cd ~/projects/mbernier.com/mbernier.com && npm run dev` first
+~/projects/tools/manager list all
 
 # Check specific package status
 ./manager status-enhanced [package-name]

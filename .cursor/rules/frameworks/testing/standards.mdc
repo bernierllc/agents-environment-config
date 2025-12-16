@@ -1,28 +1,60 @@
 ---
-description: Testing standards with tiered mocks and reality verification
+description: Testing standards - no mocking of internal systems
 globs: ["**/*.test.*", "**/__tests__/**"]
 alwaysApply: false
-tags: [testing, mocks, unit, integration, e2e]
+tags: [testing, unit, integration, e2e]
 ---
 
-# Testing Standards (Tiered Mocks, Verified Against Reality)
+# Testing Standards (No Mocking Internal Systems)
+
+## Core Testing Policy
+
+**If we own it or write it, we test it directly - we do NOT mock it in tests.**
+
+### Critical Rules
+- **DO NOT mock the database or the internal API**
+- **Use a real database instance and real HTTP calls**
+- **Mocks are only allowed for external third-party services**
+- **Tables, code, configuration, and definitions that we own and that affect the code we own inside of 3rd party systems should be tested because we own it**
 
 ## Principles
 - Prefer small, fast tests near the code; grow realism as you move up the test pyramid.
-- **CRITICAL: All mocks in testing MUST be tested to match the ACTUAL thing they are mocking, otherwise the mocks are fucking useless and only cause problems.**
-- Mocks are acceptable at lower levels when they are verified to match reality and do not hide defects.
-- Avoid global toggles that bypass tests; failures must be fixed or the test adjusted with rationale.
+- Test against real systems we own - database, APIs, services, models, repositories
+- Mocks are ONLY allowed for external third-party services we do not control
+- Avoid global toggles that bypass tests; failures must be fixed or the test adjusted with rationale
 
-## Test Pyramid and Mocking Strategy
-1. Unit tests (allow mocks) — fast feedback on small units
-   - Use test doubles for IO and slow deps (network, DB, filesystem).
-   - Keep mocks minimal; prefer fakes over complex behaviors.
-2. Integration tests (fewer mocks)
-   - Replace unit-level mocks with real adapters where feasible.
-   - Validate wiring across module boundaries and data contracts.
-3. End-to-end (no mocks if possible)
-   - Exercise the system through public interfaces.
-   - Only mock external third‑party services you do not control.
+## No Mocking Internal Systems Policy
+
+### What NOT to Mock (We Own It)
+- **Database**: Never mock Prisma, database queries, or repositories - use real database instances
+- **Internal APIs**: Never mock our own API endpoints - make real HTTP calls
+- **Internal Services**: Never mock service classes we own and maintain
+- **Tables/Models**: Never mock database tables, models, or their relationships
+- **Configuration**: Never mock config that we own and control
+- **Definitions in 3rd-party systems**: If we define tables/schemas/config in external systems, test the real thing because we own it
+
+### What CAN Be Mocked (External Third-Party Only)
+- **External APIs**: Stripe, SendGrid, Twilio, Google APIs (when not testing our own code within them), etc.
+- **External services**: OAuth providers (when not testing auth flow)
+- **Network conditions**: Simulating timeouts, errors from external services
+- **Rate-limited services**: When testing without burning API quota
+
+### Rationale
+Mocking internal systems creates tests that pass when the mock is correct but fail in production when the real system behaves differently. Tests against mocks only verify that code works with the mock, not with the real system. If we own it, we must test it directly.
+
+## Test Pyramid and Testing Strategy
+1. Unit tests (NO internal mocks) — fast feedback on small units
+   - Use real database instances for database operations
+   - Call real service methods with real dependencies
+   - Make real HTTP calls to internal APIs
+   - Only mock external third-party services
+2. Integration tests (NO internal mocks)
+   - Use real database and make real HTTP calls to our APIs
+   - Validate wiring across module boundaries and data contracts
+3. End-to-end (NO mocks for internal systems)
+   - Exercise the system through public interfaces
+   - Use real database and real internal APIs
+   - Only mock external third‑party services you do not control
 
 ## UI Testing Workflow
 
@@ -41,21 +73,24 @@ tags: [testing, mocks, unit, integration, e2e]
    - Adjust tests if UI behavior differs from assumptions
    - Never write tests without first verifying against the actual UI
 
-## Mock Verification (Make Mocks Match Reality)
+## When To Mock
+- **NEVER**: Database, Prisma, internal APIs, internal services, repositories, models
+- **NEVER**: Any code, tables, configuration, or definitions that we own
+- **NEVER**: Tables, code, configuration, or definitions that we own inside of 3rd party systems
+- **ALLOWED**: External third-party APIs (Stripe, SendGrid, Twilio, etc.) that we do not control
+- **ALLOWED**: External services we don't control (OAuth providers when not testing auth flow)
+- **ALLOWED**: Simulating external service failures (timeouts, 5xx from external services)
+- **ALLOWED**: Rate-limited external services to avoid burning API quota
 
-**CRITICAL: All mocks in testing MUST be tested to match the ACTUAL thing they are mocking, otherwise the mocks are fucking useless and only cause problems.**
+## Mock Verification (For External Services Only)
+
+**CRITICAL: All mocks for external third-party services MUST be tested to match the ACTUAL thing they are mocking, otherwise the mocks are useless and only cause problems.**
 
 Use one or more techniques so mocks do not drift from the real world:
 - Contract tests: Assert provider/consumer agree on request/response shapes.
 - Golden files/snapshots: Record real responses and reuse as fixtures; refresh on schema changes.
 - Schema/type guards: Validate fixtures against JSON Schema or TypeScript types at test load.
 - Parity runs: Periodically hit real services in CI nightly jobs to detect drift.
-
-## When To Mock
-- Allowed: low‑level unit tests for adapters, network clients, DB gateways.
-- Allowed: failure scenarios that are costly/risky to reproduce (timeouts, 5xx).
-- Avoid: mocking your own domain logic; prefer real collaboration between domain services.
-- Avoid: mocks in E2E unless isolating non-deterministic third parties.
 
 ## Quality Bars
 - Unit: fast (<100ms), isolated, deterministic. High branch/path coverage.
@@ -92,14 +127,16 @@ Use one or more techniques so mocks do not drift from the real world:
 - Validate fixtures against schemas/types on load.
 
 ## Tooling Hints
-- TypeScript: use `zod`/`io-ts` or JSON Schema to validate mock payloads.
+- TypeScript: use `zod`/`io-ts` or JSON Schema to validate test data and API responses.
 - API: maintain OpenAPI and generate client/server types; use them in tests.
 - UI: prefer Testing Library; avoid implementation‑coupled selectors.
 - **UI Testing**: Use Playwright MCP with the actual UI to discover behavior before writing tests. Always verify tests work against the actual UI.
+- **Database**: Use Docker containers or test database instances for real database testing
+- **HTTP**: Use real HTTP clients to call internal APIs in tests
 
 ## Documentation and Ownership
-- Each mocked interface must have a short README describing its real contract, how fixtures were captured, and how to refresh them.
-- Add a scheduled job or checklist to refresh golden files after API/schema changes.
+- For external service mocks: Each mocked interface must have a short README describing its real contract, how fixtures were captured, and how to refresh them.
+- Add a scheduled job or checklist to refresh golden files after external API/schema changes.
 
 ## References
 - Martin Fowler — “Mocks Aren’t Stubs”

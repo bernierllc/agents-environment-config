@@ -2,9 +2,9 @@
   "mcpServers": {
     "packages-api": {
       "type": "http",
-      "url": "http://localhost:3355/api/mcp",
+      "url": "https://mberniercom-staging.up.railway.app/api/mcp",
       "headers": {
-        "Authorization": "Bearer your_packages_api_token_here",
+        "Authorization": "Bearer app_8326b56b5e6eac0aae635ff1fbca9c9808a7f8b4113942505a99e3e624b15c23",
         "Accept": "application/json, text/event-stream"
       }
     },

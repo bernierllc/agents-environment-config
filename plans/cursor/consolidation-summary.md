@@ -86,7 +86,7 @@ All with `alwaysApply: true`:
 - **API Standards**: Consolidated from 4+ sources with HTTP status codes
 - **Git Workflow**: Consolidated from 3+ sources with branching, commits, PRs
 - **Quality Gates**: Consolidated from 2+ sources with comprehensive checklist
-- **Testing Standards**: Already had tiered mocking strategy (kept and enhanced)
+- **Testing Standards**: Updated to no mocking of internal systems - test directly what we own
 - **Database Patterns**: Consolidated Prisma, Supabase, SQLAlchemy, Alembic
 
 ### Sources Analyzed
