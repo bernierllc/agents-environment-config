@@ -1,0 +1,21 @@
+{
+  "submodules": {
+    "agents": {
+      "path": ".claude/agents",
+      "repo": "bernierllc/agency-agents",
+      "cursor_target": ".cursor/commands/agents"
+    },
+    "skills": {
+      "path": ".claude/skills",
+      "repo": "bernierllc/skills",
+      "cursor_target": ".cursor/commands/skills",
+      "skill_file_pattern": ["Skill.md", "SKILL.md"]
+    }
+  },
+  "pr_settings": {
+    "base_branch": "main",
+    "title_template": "Sync {type}: {filename}",
+    "body_template": "Automated sync from agents-environment-config"
+  }
+}
+

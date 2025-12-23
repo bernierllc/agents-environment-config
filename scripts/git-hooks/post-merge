@@ -1,0 +1,53 @@
+#!/bin/bash
+# Post-merge git hook for syncing agents and skills
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Get the repository root
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+SYNC_SCRIPT="$REPO_ROOT/scripts/sync-agents-skills.py"
+
+echo -e "${GREEN}=== Agent & Skill Sync (post-merge) ===${NC}"
+
+# Check skip flag
+if [ "${SKIP_SYNC}" = "1" ] || [ "${SKIP_SYNC}" = "true" ]; then
+    echo -e "${YELLOW}SKIP_SYNC is set, skipping sync${NC}"
+    exit 0
+fi
+
+# Check if sync script exists
+if [ ! -f "$SYNC_SCRIPT" ]; then
+    echo -e "${YELLOW}Warning: Sync script not found at $SYNC_SCRIPT${NC}"
+    exit 0
+fi
+
+# Check if Python 3 is available
+if ! command -v python3 &> /dev/null; then
+    echo -e "${YELLOW}Warning: Python 3 not found, skipping sync${NC}"
+    exit 0
+fi
+
+# Update submodules
+echo "Updating submodules..."
+cd "$REPO_ROOT"
+if git submodule update --init --recursive --remote; then
+    echo -e "${GREEN}✓ Submodules updated${NC}"
+else
+    echo -e "${YELLOW}Warning: Could not update submodules${NC}"
+fi
+
+# Run the sync script
+echo "Running sync operations..."
+if python3 "$SYNC_SCRIPT"; then
+    echo -e "${GREEN}✓ Sync completed successfully${NC}"
+else
+    echo -e "${YELLOW}Warning: Sync script encountered errors${NC}"
+fi
+
+echo -e "${GREEN}=== Post-merge sync complete ===${NC}"
+exit 0
+

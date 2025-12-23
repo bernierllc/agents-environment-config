@@ -112,6 +112,53 @@ ln -s "$REPO_PATH/.claude-code-router/config.json" ~/.claude-code-router/config.
 
 **Note:** Replace `$HOME/path/to/agents-environment-config` with the actual path to your cloned repository.
 
+## Automated Agent and Skill Sync System
+
+This repository includes an **automated sync system** that handles bidirectional synchronization between:
+- `.claude/agents/` ↔ `bernierllc/agency-agents` (git submodule)
+- `.claude/skills/` ↔ `bernierllc/skills` (git submodule)
+- `.claude/` → `.cursor/commands/` (local sync with content replacement)
+
+### Key Features
+
+- **Automatic Syncing**: Runs on `git push` and `git pull/merge`
+- **Content Replacement**: Replaces `{{file:...}}` references with actual file content in Cursor commands
+- **PR Creation**: Automatically creates pull requests for submodule changes
+- **Bidirectional**: Pushes local changes and pulls remote changes
+- **Deletion Handling**: Removes Cursor command files when source files are deleted
+- **Skip Mechanism**: `SKIP_SYNC=1 git push` to bypass sync when needed
+
+### Installation
+
+1. **Install the git hooks:**
+   ```bash
+   bash scripts/install-git-hooks.sh
+   ```
+
+2. **The installer will validate:**
+   - Python 3 is installed
+   - GitHub CLI (`gh`) is installed
+   - GitHub CLI is authenticated
+   - Git submodules are initialized
+
+### Usage
+
+The sync system works automatically:
+
+```bash
+# Normal git operations trigger sync
+git push        # Syncs to cursor, creates PRs for submodule changes
+git pull        # Pulls submodule updates, syncs to cursor
+
+# Skip sync if needed
+SKIP_SYNC=1 git push
+
+# Skip all hooks (not recommended)
+git push --no-verify
+```
+
+For detailed documentation, see [`docs/agent-skill-sync-system.md`](./docs/agent-skill-sync-system.md).
+
 ## Git Submodule Workflow
 
 ### Understanding Git Submodules
@@ -123,6 +170,8 @@ A git submodule is a pointer to a specific commit in another repository. The par
 This repository uses two submodules:
 - `.claude/agents` → `bernierllc/agency-agents`
 - `.claude/skills` → `bernierllc/skills`
+
+**Note:** With the automated sync system installed, many of these manual steps are handled automatically!
 
 ### Making Changes to Skills
 
@@ -470,12 +519,32 @@ This will update all four agent instruction files with the latest rules.
 
 ### Adding New Agents
 
+With the automated sync system:
+
+1. **Edit files** in `.claude/agents/`
+2. **Commit locally** (don't push to submodule manually)
+3. **Push to main repo**: The sync system will:
+   - Create a PR to `bernierllc/agency-agents`
+   - Sync to `.cursor/commands/agents/` with content replacement
+   - Update submodule reference
+
+**Manual method** (if sync is disabled):
 1. Make changes in `.claude/agents/` (the submodule)
 2. Commit and push to `bernierllc/agency-agents`
 3. Update submodule reference in parent repo
 
 ### Adding New Skills
 
+With the automated sync system:
+
+1. **Edit files** in `.claude/skills/`
+2. **Commit locally** (don't push to submodule manually)
+3. **Push to main repo**: The sync system will:
+   - Create a PR to `bernierllc/skills`
+   - Sync to `.cursor/commands/skills/` with content replacement
+   - Update submodule reference
+
+**Manual method** (if sync is disabled):
 1. Make changes in `.claude/skills/` (the submodule)
 2. Commit and push to `bernierllc/skills`
 3. Update submodule reference in parent repo
@@ -504,6 +573,12 @@ Cursor commands are in `.cursor/commands/`. These wrap the agent definitions for
 
 The `docs/` directory contains project documentation:
 
+- `docs/agent-skill-sync-system.md` - **Automated sync system documentation**
+  - Installation and setup guide
+  - Usage instructions and examples
+  - Configuration reference
+  - Troubleshooting guide
+  
 - `docs/ui-audit/` - Documentation for UI audit workflows and processes
   - `README.md` - Overview of UI audit functionality
   - `workflow.md` - UI audit workflow documentation
@@ -521,11 +596,21 @@ The `plans/` directory contains planning documents and task tracking:
 
 The `scripts/` directory contains utility scripts for repository maintenance:
 
-- `generate-agent-files.py` - Generates agent instruction files from `.cursor/rules/`
-- `audit-project-rules.py` - Audits project-specific rules
-- `generate-removal-script*.py` - Scripts for removing duplicate rules
-- `remove-duplicate-rules.sh` - Shell script for rule cleanup
-- `verify-dry-run.py` - Verification utilities
+- **Agent and Skill Sync:**
+  - `sync-agents-skills.py` - Core sync script for bidirectional agent/skill synchronization
+  - `sync-config.json` - Configuration for sync system (submodules, paths, PR settings)
+  - `install-git-hooks.sh` - Installs git hooks and validates environment
+  - `git-hooks/pre-push` - Pre-push hook for syncing and creating PRs
+  - `git-hooks/post-merge` - Post-merge hook for pulling submodule changes
+  
+- **Agent File Generation:**
+  - `generate-agent-files.py` - Generates agent instruction files from `.cursor/rules/`
+  
+- **Rule Management:**
+  - `audit-project-rules.py` - Audits project-specific rules
+  - `generate-removal-script*.py` - Scripts for removing duplicate rules
+  - `remove-duplicate-rules.sh` - Shell script for rule cleanup
+  - `verify-dry-run.py` - Verification utilities
 
 ## Security Notes
 
