@@ -2,13 +2,17 @@
 
 Unified configuration repository for managing AI agent definitions and MCP (Model Context Protocol) settings across multiple AI tools: Claude, Cursor, Gemini, Qwen, Codex, and Claude Code Router.
 
+**Note:** This repo is MacOSX specific, but nearly all of this translates to PC/Linux if you account for the nuances of your preferred Operating system.
+
 ## Repository Structure
 
 ```
 agents-environment-config/
 ├── .claude/
 │   ├── agents/          # Git submodule → bernierllc/agency-agents
-│   └── skills/          # Git submodule → bernierllc/skills
+│   ├── skills/          # Git submodule → bernierllc/skills
+│   ├── statusline.sh    # Claude Code statusline script
+│   └── statusline-command.sh  # Extended statusline with Claude-Flow integration
 ├── .claude-plugin/
 │   └── marketplace.json # Claude Code plugin marketplace configuration
 ├── .cursor/
@@ -83,10 +87,11 @@ Create symlinks from your home directory configuration locations to this reposit
 # Set the repository path (adjust as needed)
 REPO_PATH="$HOME/path/to/agents-environment-config"
 
-# Claude agents and skills
+# Claude agents, skills, and statusline
 mkdir -p ~/.claude
 ln -s "$REPO_PATH/.claude/agents" ~/.claude/agents
 ln -s "$REPO_PATH/.claude/skills" ~/.claude/skills
+ln -s "$REPO_PATH/.claude/statusline.sh" ~/.claude/statusline.sh
 
 # Cursor configuration
 mkdir -p ~/.cursor
@@ -281,6 +286,62 @@ cp -r .claude/skills/* ~/.claude/skills/
 ```
 
 **Note:** Using symlinks keeps agents and skills in sync automatically. Manual copying requires updates when content changes.
+
+### Claude Code
+
+#### Custom Statusline
+
+This repository includes custom statusline scripts that provide a rich, color-coded status bar for Claude Code displaying model name, token usage, git branch, and project name. Thank you to (@leovanzyl on Youtube)[https://youtu.be/fiZfVTsPy-w?si=uPhizLFOiWOiC2km] for this tip!
+
+**Example output:**
+
+```
+Opus 4.5 │ [█████████████░░░░░░░] │ 68% │ main │ my-project
+```
+
+The statusline shows:
+- **Model Name** (blue) - Current Claude model
+- **Progress Bar** (color-coded) - Visual token usage indicator
+- **Token %** (cyan/yellow/red) - Percentage of context used (turns red at 90%+)
+- **Git Branch** (green) - Current branch name
+- **Project Name** (magenta) - From BrainGrid or directory name
+
+**Setup Instructions:**
+
+1. **Copy the statusline script to your Claude config directory:**
+
+   ```bash
+   cp .claude/statusline.sh ~/.claude/statusline.sh
+   chmod +x ~/.claude/statusline.sh
+   ```
+
+2. **Update your `~/.claude/settings.json` to enable the statusline:**
+
+   Add the following to your `settings.json` file (create it if it doesn't exist):
+
+   ```json
+   {
+     "statusLine": {
+       "type": "command",
+       "command": "~/Users/YOUR_USERNAME~/.claude/statusline.sh",
+       "padding": 0
+     }
+   }
+   ```
+
+   **Important:** Replace `YOUR_USERNAME` with your actual username, or use the full path to the script.
+
+3. **Restart Claude Code** to see the new statusline.
+
+**Alternative: Claude-Flow Statusline**
+
+If you're using Claude-Flow for swarm orchestration, there's also `statusline-command.sh` which includes additional metrics:
+- Swarm topology and agent count
+- Memory and CPU usage
+- Session state and task metrics
+- Active task count and hooks status
+
+To use it instead, copy `statusline-command.sh` and update the path in `settings.json`.
 
 ### Cursor
 
