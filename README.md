@@ -323,13 +323,13 @@ The statusline shows:
    {
      "statusLine": {
        "type": "command",
-       "command": "~/Users/YOUR_USERNAME~/.claude/statusline.sh",
+       "command": "~/.claude/statusline.sh",
        "padding": 0
      }
    }
    ```
 
-   **Important:** Replace `YOUR_USERNAME` with your actual username, or use the full path to the script.
+   **Note:** The `~` expands to your home directory (e.g., `/Users/yourname/.claude/statusline.sh`).
 
 3. **Restart Claude Code** to see the new statusline.
 
