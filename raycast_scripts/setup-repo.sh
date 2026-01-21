@@ -41,8 +41,8 @@ IFS=',' read -ra GITHUB_ORGS_ARRAY <<< "$GITHUB_ORGS_STRING"
 CUSTOM_DIRS_STRING="${CUSTOM_DIRS:-/unicorn}"
 IFS=',' read -ra CUSTOM_DIRS_ARRAY <<< "$CUSTOM_DIRS_STRING"
 
-SCRIPT_DIR="$HOME/projects/raycast_scripts"
-AGENTS_DIR="$HOME/projects/agents-environment-config"
+SCRIPT_DIR="$SCRIPT_BASE_DIR"
+AGENTS_DIR="$(cd "$SCRIPT_BASE_DIR/.." && pwd)"
 
 # Prompt for setup type
 SETUP_TYPE=$(osascript -e 'choose from list {"Repository", "File path"} with prompt "Select setup type:" default items {"Repository"}')
@@ -148,6 +148,9 @@ else
     DISPLAY_NAME=$(basename "$FILE_PATH")
     SAFE_NAME=$(echo "$DISPLAY_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-\|-$//g')
 fi
+
+# Ensure SCRIPT_DIR exists before creating script files
+mkdir -p "$SCRIPT_DIR"
 
 # Create required directories
 mkdir -p "$PROJECT_DIR/.cursor/rules"
