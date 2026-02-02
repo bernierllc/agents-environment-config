@@ -1,5 +1,5 @@
 #!/bin/bash
-# Pre-push git hook for syncing agents and skills
+# Pre-push git hook: ensure submodules are pushed, then sync agents/skills to cursor commands
 
 # Colors for output
 RED='\033[0;31m'
@@ -9,15 +9,32 @@ NC='\033[0m' # No Color
 
 # Get the repository root
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+PUSH_SUBMODULES="$REPO_ROOT/scripts/push-submodules.sh"
 SYNC_SCRIPT="$REPO_ROOT/scripts/sync-agents-skills.py"
 
-echo -e "${GREEN}=== Agent & Skill Sync (pre-push) ===${NC}"
-
-# Check skip flag
+# --- 1. Ensure submodules are pushed (block push if they have uncommitted changes) ---
+echo -e "${GREEN}=== Submodule push check ===${NC}"
 if [ "${SKIP_SYNC}" = "1" ] || [ "${SKIP_SYNC}" = "true" ]; then
-    echo -e "${YELLOW}SKIP_SYNC is set, skipping sync${NC}"
+    echo -e "${YELLOW}SKIP_SYNC is set, skipping submodule push and sync${NC}"
     exit 0
 fi
+if [ -f "$PUSH_SUBMODULES" ]; then
+    if ! bash "$PUSH_SUBMODULES"; then
+        echo -e "${RED}Push aborted: fix submodule state above, then push again.${NC}"
+        exit 1
+    fi
+    # If push-submodules staged refs, commit so this push includes them
+    cd "$REPO_ROOT"
+    if ! git diff --cached --quiet -- .claude/agents .claude/skills 2>/dev/null; then
+        git commit -m "chore(submodules): update submodule refs" --no-verify
+        echo -e "${GREEN}✓ Committed submodule ref updates${NC}"
+    fi
+else
+    echo -e "${YELLOW}push-submodules.sh not found, continuing${NC}"
+fi
+
+# --- 2. Sync agents/skills to cursor commands ---
+echo -e "${GREEN}=== Agent & Skill Sync (pre-push) ===${NC}"
 
 # Check if sync script exists
 if [ ! -f "$SYNC_SCRIPT" ]; then
