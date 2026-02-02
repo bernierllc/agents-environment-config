@@ -14,8 +14,13 @@ SUBMODULES=(".claude/agents" ".claude/skills")
 FAILED=0
 
 for sub in "${SUBMODULES[@]}"; do
-  if [ ! -d "$sub/.git" ]; then
+  # Submodules have .git as file (gitlink) or directory (when not absorbed)
+  if [ ! -e "$sub/.git" ]; then
     echo -e "${YELLOW}Skip $sub (not a submodule or not initialized)${NC}"
+    continue
+  fi
+  if ! git -C "$sub" rev-parse --git-dir >/dev/null 2>&1; then
+    echo -e "${YELLOW}Skip $sub (not a git repo)${NC}"
     continue
   fi
   name=$(basename "$sub")
