@@ -8,6 +8,7 @@ This system automatically syncs agent and skill files from `.claude/agents` and 
 
 ## Features
 
+- **Submodule push enforcement**: Before every push, submodules (`.claude/agents`, `.claude/skills`) are checked. If any have unpushed commits, they are pushed first; if any have uncommitted changes, the push is blocked until you commit and push in the submodule. Updated submodule refs are auto-committed so the parent repo always points at the latest submodule commits.
 - **Bidirectional Sync**: Syncs from submodules to cursor commands
 - **Deterministic Path Mapping**: Simple 1:1 mapping for agents, parent-dir-to-filename for skills
 - **Content Replacement**: Replaces `{{file:...}}` references with actual content
@@ -35,8 +36,10 @@ This will:
 ### Automatic Sync
 
 Sync happens automatically:
-- **Pre-push**: Before pushing to this repo
+- **Pre-push**: (1) Submodule push check: unpushed submodule commits are pushed; uncommitted submodule changes block the push. (2) Submodule refs are staged and committed if they changed. (3) Agents/skills are synced to cursor commands.
 - **Post-merge**: After pulling/merging changes
+
+To run only the submodule push check (no sync): `./scripts/push-submodules.sh`
 
 ### Manual Sync
 
