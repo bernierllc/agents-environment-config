@@ -1,225 +1,137 @@
 # Agents Environment Configuration
 
-Unified configuration repository for managing AI agent definitions across multiple AI tools: Claude, Cursor, Gemini, Qwen, and Codex.
+> **This is a TEMPLATE repository.** It provides shared AI agent configurations that get copied to other projects. Do not add project-specific content here.
 
-## Quick Setup (2 Steps)
+## What This Repo Is
 
-### 1. Clone the Repository
+This repository contains:
+- **Shared cursor rules** (`.cursor/rules/`) - Development standards for all projects
+- **Agent instruction files** (`CLAUDE.md`, `AGENTS.md`, etc.) - Templates for AI assistants
+- **Setup scripts** - Tools to configure new projects with these standards
+- **Submodules** for agents and skills (`bernierllc/agency-agents`, `bernierllc/skills`)
+
+## Quick Start
+
+### Setting Up This Repo (One Time)
 
 ```bash
 git clone https://github.com/bernierllc/agents-environment-config.git
 cd agents-environment-config
-```
-
-### 2. Run the Setup Script
-
-```bash
 ./scripts/setup.sh
 ```
 
-That's it! The setup script will:
-- Automatically detect where you cloned the repo
-- Initialize and update git submodules to the latest version
-- Create all necessary symlinks to your home directory
-- Handle existing files gracefully (asks before overwriting)
+This creates symlinks from your home directory to this repo's configs.
 
-## Updating
-
-To get the latest changes:
+### Setting Up a New Project
 
 ```bash
-cd agents-environment-config
-git pull
-git submodule update --remote --recursive
+# Interactive mode
+./scripts/setup-repo.sh
+
+# Or direct mode
+./scripts/setup-repo.sh my-new-project
+./scripts/setup-repo.sh /path/to/existing/project
 ```
 
-Your symlinks will automatically point to the updated files. The submodule update pulls the latest agents and skills from their respective repositories.
+This copies agent files and creates directories in the target project.
 
-### About Submodules
-
-This repository uses git submodules for agents and skills:
-- **Agents**: `bernierllc/agency-agents` repository
-- **Skills**: `bernierllc/skills` repository
-
-The setup script automatically initializes and updates these submodules to the latest version. When you run `./scripts/setup.sh`, it will:
-1. Initialize the submodules if they haven't been cloned yet
-2. Fetch the latest changes from the remote repositories
-3. Update each submodule to the latest commit on their `main` branch
-
-This ensures you always have the most up-to-date agents and skills available.
-
-## Configuration
-
-You can create a `.env` file from the template:
-
-```bash
-cp .env.template .env
-# Edit .env with your API keys
-```
-
-## What Gets Symlinked
-
-The setup script creates symlinks from the repository to your home directory:
-
-- `~/.claude/agents/agents-environment-config` → repository `.claude/agents`
-- `~/.claude/skills/agents-environment-config` → repository `.claude/skills`
-- `~/.claude/statusline.sh` → repository `.claude/statusline.sh`
-- `~/.cursor/commands/agents-environment-config` → repository `.cursor/commands`
-- `~/.cursor/rules/agents-environment-config` → repository `.cursor/rules`
-
-**Note:** 
-- Agents, skills, Cursor commands, and Cursor rules are **symlinked** into subdirectories (`agents-environment-config`) so you can add your own custom content in the parent directories without conflicts.
-- Statusline files are optional and you'll be prompted during setup if you want to install them.
+**Raycast users:** The same script exists at `raycast_scripts/setup-repo.sh` with Raycast metadata.
 
 ## Repository Structure
 
 ```
-agents-environment-config/
+agents-environment-config/          # THIS IS A TEMPLATE - don't add project-specific content!
 ├── .claude/
-│   ├── agents/          # Agent definitions (git submodule)
-│   ├── skills/          # Skill definitions (git submodule)
-│   └── statusline.sh    # Claude Code statusline script
+│   ├── agents/                     # Agent definitions (git submodule)
+│   └── skills/                     # Skill definitions (git submodule)
 ├── .cursor/
-│   ├── commands/        # Cursor command wrappers
-│   └── rules/           # Cursor rules (global development standards)
+│   ├── commands/                   # Cursor command wrappers
+│   └── rules/                      # Cursor rules (global development standards)
 ├── scripts/
-│   └── setup.sh         # Setup script (run this!)
-└── README.md            # This file
+│   ├── setup.sh                    # Install this repo to your system
+│   ├── setup-repo.sh               # Set up a NEW project with agent files
+│   ├── generate-agent-files.py     # Regenerate CLAUDE.md etc from rules
+│   └── git-hooks/                  # Git hooks for this repo
+├── raycast_scripts/
+│   ├── setup-repo.sh               # Raycast version of setup-repo
+│   └── *.sh                        # Project launcher scripts
+├── AGENTINFO.md                    # TEMPLATE - gets filled in per-project
+├── CLAUDE.md                       # TEMPLATE - reference-only agent instructions
+├── AGENTS.md                       # TEMPLATE - for Codex
+├── GEMINI.md                       # TEMPLATE - for Gemini
+├── QWEN.md                         # TEMPLATE - for Qwen
+└── README.md                       # This file
 ```
 
-## Tool-Specific Setup
+## Scripts
 
-### Claude Desktop / Claude Code
+| Script | Purpose |
+|--------|---------|
+| `scripts/setup.sh` | Install this repo's configs to your home directory (symlinks) |
+| `scripts/setup-repo.sh` | Set up a new/existing project with agent files |
+| `scripts/generate-agent-files.py` | Regenerate CLAUDE.md etc from `.cursor/rules/` |
+| `scripts/install-git-hooks.sh` | Install git hooks for this repo |
+| `raycast_scripts/setup-repo.sh` | Raycast version of setup-repo |
 
-**Locations:**
-- Agents from this repo: `~/.claude/agents/agents-environment-config/` (symlinked)
-- Your custom agents: `~/.claude/agents/` (add your own `.md` files here)
-- Skills from this repo: `~/.claude/skills/agents-environment-config/` (symlinked)
-- Your custom skills: `~/.claude/skills/` (add your own skill folders here)
+### Script Parity
 
-Claude will discover agents and skills from both locations automatically.
+Scripts in `scripts/` and `raycast_scripts/` must stay in sync. A pre-commit hook validates:
+- `setup-repo.sh` exists in both directories
+- AGENTINFO.md remains a template (not project-specific)
 
-#### Custom Statusline
-
-This repository includes custom statusline scripts for Claude Code. During setup, you'll be prompted if you want to install them.
-
-If you choose to install:
-
-1. The setup script will symlink the statusline files to `~/.claude/`
-2. Update your `~/.claude/settings.json`:
-
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "~/.claude/statusline.sh",
-    "padding": 0
-  }
-}
-```
-
-3. Restart Claude Code
-
-**Note:** If you already have statusline files, the setup script will skip installing them to preserve your existing configuration.
-
-### Cursor
-
-**Locations:**
-- Commands from this repo: `~/.cursor/commands/agents-environment-config/` (symlinked)
-- Your custom commands: `~/.cursor/commands/` (add your own `.md` files here)
-- Rules from this repo: `~/.cursor/rules/agents-environment-config/` (symlinked)
-- Your custom rules: `~/.cursor/rules/` (add your own `.mdc` files here)
-
-Cursor will discover commands and rules from both locations automatically.
-
-After setup:
-1. Restart Cursor to load the new configuration
-
-
-## Troubleshooting
-
-### Symlinks Not Working
-
-Verify symlinks are correctly created:
+To install the git hooks:
 
 ```bash
-ls -la ~/.claude/agents/agents-environment-config
-ls -la ~/.claude/skills/agents-environment-config
-ls -la ~/.cursor/commands/agents-environment-config
-ls -la ~/.cursor/rules/agents-environment-config
+./scripts/install-git-hooks.sh
 ```
 
-If you see broken symlinks, re-run the setup script:
+## How Projects Use This
+
+When you run `setup-repo.sh` on a project, it:
+
+1. Creates directories: `.cursor/rules/`, `docs/`, `plans/`
+2. Copies template files: `AGENTINFO.md`, `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `QWEN.md`
+3. Copies `CURSOR.mdc` to `.cursor/rules/`
+4. Updates `.gitignore` to ignore agent files
+5. Optionally creates Raycast launcher scripts
+
+**After setup, edit `AGENTINFO.md`** in the target project with project-specific info.
+
+## Updating Rules
+
+When cursor rules in `.cursor/rules/` change:
 
 ```bash
-cd agents-environment-config
-./scripts/setup.sh
-```
-
-### Configuration Not Loading
-
-1. **Verify file paths:** Check symlinks point to correct locations
-2. **Check permissions:** Configuration files should be readable
-3. **Restart application:** Most tools require restart to load new config
-4. **Check logs:** Look for errors in application logs
-
-### API Keys Not Working
-
-1. Verify API keys are correctly entered (no extra spaces)
-2. Check that environment variables are exported if using them
-3. Ensure API keys haven't expired or been revoked
-4. Verify the correct format for each service (some require "Bearer " prefix)
-
-## Generated Agent Instruction Files
-
-This repository includes automatically generated agent instruction files (`AGENTS.md`, `GEMINI.md`, `QWEN.md`, `CLAUDE.md`) that incorporate rules from `.cursor/rules/`. These files can be copied to your projects for consistent coding standards.
-
-### Using Agent Files in Projects
-
-1. **Copy the relevant file(s) to your project root:**
-   ```bash
-   cp AGENTS.md /path/to/your-project/
-   cp CLAUDE.md /path/to/your-project/
-   ```
-
-2. **Create or update `AGENTINFO.md`** with your project-specific information
-
-3. **Each agent will automatically discover and use the appropriate file:**
-   - Codex looks for `AGENTS.md`
-   - Gemini CLI looks for `GEMINI.md`
-   - Qwen Code looks for `QWEN.md`
-   - Claude Code looks for `CLAUDE.md`
-
-### Regenerating Agent Files
-
-When rules in `.cursor/rules/` are updated, regenerate the agent files:
-
-```bash
+# Regenerate the agent instruction files
 python3 scripts/generate-agent-files.py
+
+# Commit the changes
+git add CLAUDE.md AGENTS.md GEMINI.md QWEN.md
+git commit -m "chore: regenerate agent files from rules"
 ```
+
+## Updating Submodules
+
+```bash
+git submodule update --remote --recursive
+```
+
+## File Purposes
+
+| File | Purpose | Edit In Project? |
+|------|---------|------------------|
+| `AGENTINFO.md` | Project-specific info | **YES** - Fill this in! |
+| `CLAUDE.md` | Rule references for Claude | No - regenerated |
+| `AGENTS.md` | Rule references for Codex | No - regenerated |
+| `.cursor/rules/*.mdc` | Development standards | No - shared across projects |
 
 ## Security Notes
 
-- **Never commit `.env` file** - It contains sensitive API keys
-- **Use placeholders in config files** - Replace with actual keys during setup
-- **Review API key permissions** - Use least-privilege access
-- **Rotate keys regularly** - Update keys periodically for security
-
-## Contributing
-
-When making changes:
-
-1. Edit files directly in the repository
-2. Test changes across all tools
-3. Update documentation if needed
-4. Commit with clear messages
-5. Push to `bernierllc/agents-environment-config`
-
-## License
-
-MIT License
+- Never commit `.env` files
+- API keys go in `.env` (copy from `.env.template`)
+- Review API key permissions - use least-privilege access
 
 ## Related Repositories
 
-- [agency-agents](https://github.com/bernierllc/agency-agents) - The agent definitions repository
-- [skills](https://github.com/bernierllc/skills) - The skills repository
+- [agency-agents](https://github.com/bernierllc/agency-agents) - Agent definitions
+- [skills](https://github.com/bernierllc/skills) - Skill definitions

@@ -35,31 +35,35 @@ def parse_frontmatter(content: str) -> Tuple[Optional[Dict], str]:
 
 
 def extract_key_content(body: str, max_lines: int = 50) -> str:
-    """Extract key content from rule body, limiting length."""
+    """Extract key content from rule body, limiting length.
+
+    NOTE: This function is kept for backwards compatibility but is no longer
+    used in the optimized reference-only generation mode.
+    """
     lines = body.split('\n')
-    
+
     # Skip code blocks and main title (first # header)
     in_code_block = False
     content_lines = []
     skip_code = False
     first_header_seen = False
-    
+
     for line in lines:
         if line.strip().startswith('```'):
             in_code_block = not in_code_block
             # Don't include code blocks in summaries - too verbose
             skip_code = True
             continue
-        
+
         if in_code_block:
             continue
-        
+
         # Skip the first main title (single #)
         stripped = line.strip()
         if stripped.startswith('# ') and not first_header_seen:
             first_header_seen = True
             continue
-        
+
         # Include subheaders (##, ###, etc.) and key points
         if stripped.startswith('##'):
             # Convert headers to one level deeper for better nesting
@@ -76,15 +80,81 @@ def extract_key_content(body: str, max_lines: int = 50) -> str:
                 content_lines.append(line)
             elif stripped.startswith('**') and stripped.endswith('**'):  # Bold statements
                 content_lines.append(line)
-    
+
     # Limit total lines
     result = '\n'.join(content_lines[:max_lines])
-    
+
     # If we cut it off, add a note
     if len(content_lines) > max_lines:
         result += '\n\n*[Content truncated - see source rule file for full details]*'
-    
+
     return result
+
+
+def generate_reference_only_content(
+    organized_rules: Dict[str, List[Tuple[str, Dict, str]]]
+) -> str:
+    """Generate a slim, reference-only rules section.
+
+    Instead of inlining rule content, this generates a categorized index
+    that points to the source .mdc files. Rules are read on demand.
+    """
+    lines = []
+
+    # Essential rules that should always be mentioned (read on demand)
+    essential_rules = {
+        'testing': '.cursor/rules/frameworks/testing/standards.mdc',
+        'typescript': '.cursor/rules/languages/typescript/typing-standards.mdc',
+        'architecture': '.cursor/rules/general/architecture.mdc',
+        'git': '.cursor/rules/topics/git/workflow.mdc',
+        'quality': '.cursor/rules/topics/quality/gates.mdc',
+    }
+
+    lines.extend([
+        "## Rules Reference",
+        "",
+        "Rules are organized in `.cursor/rules/` and should be read on demand when relevant.",
+        "Do NOT memorize all rules - read the specific rule file when working in that area.",
+        "",
+        "### Essential Rules (read when relevant)",
+        "",
+    ])
+
+    for name, path in essential_rules.items():
+        lines.append(f"- **{name.title()}**: `{path}`")
+
+    lines.extend([
+        "",
+        "### All Rules by Category",
+        "",
+    ])
+
+    category_descriptions = {
+        'general': 'Core principles (architecture, workflow, documentation)',
+        'languages': 'Language conventions (Python, TypeScript)',
+        'stacks': 'Stack patterns (Next.js, FastAPI, React Native)',
+        'frameworks': 'Framework guides (databases, testing, UI)',
+        'topics': 'Cross-cutting (API, git, security, quality)',
+        'packages': 'Package management',
+    }
+
+    for category, description in category_descriptions.items():
+        rules = organized_rules.get(category, [])
+        if rules:
+            lines.append(f"- **{category}/**: {description} ({len(rules)} rules)")
+
+    lines.extend([
+        "",
+        "### How to Use Rules",
+        "",
+        "1. When working on TypeScript, read `languages/typescript/typing-standards.mdc`",
+        "2. When writing tests, read `frameworks/testing/standards.mdc`",
+        "3. When setting up a project, read `general/architecture.mdc`",
+        "4. For project-specific info, see `AGENTINFO.md`",
+        "",
+    ])
+
+    return '\n'.join(lines)
 
 
 def organize_rules(rules_dir: Path) -> Dict[str, List[Tuple[str, Dict, str]]]:
@@ -131,105 +201,72 @@ def organize_rules(rules_dir: Path) -> Dict[str, List[Tuple[str, Dict, str]]]:
 def generate_agent_file(
     agent_name: str,
     organized_rules: Dict[str, List[Tuple[str, Dict, str]]],
-    rules_dir: Path
+    rules_dir: Path,
+    slim_mode: bool = True
 ) -> str:
-    """Generate agent instruction file content."""
-    
-    # Determine agent-specific pointer text
-    if agent_name == "Codex":
-        pointer_text = [
-            "> 🚨 **Canonical Source**: All project-specific standards now live in `AGENTINFO.md`. Always update/read that file first; this document contains global rules and is a pointer to project-specific info.",
-            "",
-            "**Maintaining AGENTINFO.md:**",
-            "- When project-specific processes, structure, or standards change, update `AGENTINFO.md` immediately",
-            "- `AGENTINFO.md` should contain all project-specific information (structure, build/test commands, coding style, testing guidance, commit/PR standards, security/config, documentation)",
-            "- Do NOT duplicate project-specific information in this file or in `.cursor/rules/` - keep it in `AGENTINFO.md`",
-            "- If you notice drift between this repo's behavior and `AGENTINFO.md`, fix `AGENTINFO.md` immediately",
-        ]
-    elif agent_name == "Claude Code":
-        pointer_text = [
-            "> 🚨 **Canonical Source**: All project-specific standards live in `AGENTINFO.md`. Read/update that file first; this profile only highlights Claude-specific reminders.",
-            "",
-            "**Maintaining AGENTINFO.md:**",
-            "- When project-specific processes, structure, or standards change, update `AGENTINFO.md` immediately",
-            "- Mirror every expectation from `AGENTINFO.md` (project structure, build/test commands, coding style, testing guidance, commit/PR standards, security/config, documentation)",
-            "- Keep responses crisp but cite `AGENTINFO.md` when referencing project rules so humans know the authoritative file",
-            "- Do NOT duplicate project-specific information in this file or in `.cursor/rules/` - keep it in `AGENTINFO.md`",
-            "- If new constraints arise, edit `AGENTINFO.md` first—never duplicate details here",
-        ]
-    elif agent_name == "Gemini CLI":
-        pointer_text = [
-            "> 🚨 **Canonical Source**: All project-specific guidance now lives in `AGENTINFO.md`. Read/update that file first. This document only carries Gemini-specific reminders.",
-            "",
-            "**Maintaining AGENTINFO.md:**",
-            "- When project-specific processes, structure, or standards change, update `AGENTINFO.md` immediately",
-            "- Treat `AGENTINFO.md` as the single source of truth for project structure, build/test commands, coding style, testing guidance, commit/PR standards, security/config, and documentation",
-            "- Mirror the requirements spelled out in `AGENTINFO.md` in all responses",
-            "- Do NOT duplicate project-specific information in this file or in `.cursor/rules/` - keep it in `AGENTINFO.md`",
-            "- Update `AGENTINFO.md` whenever new standards emerge; do **not** duplicate the details here",
-        ]
-    elif agent_name == "Qwen Code":
-        pointer_text = [
-            "> 🚨 **Canonical Source**: All project-specific context now lives in `AGENTINFO.md`. Read/update that file first; this profile only adds Qwen-specific reminders.",
-            "",
-            "**Maintaining AGENTINFO.md:**",
-            "- When project-specific processes, structure, or standards change, update `AGENTINFO.md` immediately",
-            "- Mirror every requirement from `AGENTINFO.md` (project structure, build/test commands, coding style, testing guidance, commit/PR standards, security/config, documentation)",
-            "- When responding, cite the relevant sections of `AGENTINFO.md` rather than restating them—this avoids stale guidance",
-            "- Do NOT duplicate project-specific information in this file or in `.cursor/rules/` - keep it in `AGENTINFO.md`",
-            "- If you discover new constraints, update `AGENTINFO.md` instead of duplicating details here",
-        ]
-    else:
-        # Generic fallback for other agents
-        pointer_text = [
-            "> 🚨 **Canonical Source**: All project-specific standards now live in `AGENTINFO.md`. Always update/read that file first; this document contains global rules and is a pointer to project-specific info.",
-            "",
-            "**Maintaining AGENTINFO.md:**",
-            "- When project-specific processes, structure, or standards change, update `AGENTINFO.md` immediately",
-            "- Do NOT duplicate project-specific information in this file or in `.cursor/rules/` - keep it in `AGENTINFO.md`",
-        ]
-    
+    """Generate agent instruction file content.
+
+    Args:
+        agent_name: Name of the AI agent
+        organized_rules: Rules organized by category
+        rules_dir: Path to rules directory
+        slim_mode: If True, generate reference-only content (recommended).
+                   If False, inline rule content (legacy, context-heavy).
+    """
     lines = [
         f"# {agent_name} Agent Instructions",
         "",
+        "> **Canonical Source**: Project-specific standards live in `AGENTINFO.md`.",
+        "> Read that file first. This file provides rule references.",
+        "",
+        "## Quick Start",
+        "",
+        "1. Read `AGENTINFO.md` for project-specific info",
+        "2. Read relevant `.cursor/rules/*.mdc` files on demand",
+        "3. Do NOT memorize all rules - reference them when needed",
+        "",
     ]
-    lines.extend(pointer_text)
+
+    if slim_mode:
+        # Generate reference-only content
+        lines.append(generate_reference_only_content(organized_rules))
+    else:
+        # Legacy mode - inline content (kept for backwards compatibility)
+        lines.extend(_generate_inline_content(agent_name, organized_rules))
+
     lines.extend([
+        "## Regenerating This File",
         "",
-        "## Overview",
-        "",
-        f"This file contains development rules and standards for the {agent_name} AI coding assistant.",
-        "These instructions are generated from `.cursor/rules/` and incorporate essential development",
-        "principles, coding standards, and best practices. This file can be committed to git repositories",
-        "so that anyone cloning the project will have consistent coding standards even without access",
-        "to the global agents-environment-config repository.",
-        "",
-        "> **Note**: For detailed information and the latest updates, see the source rule files in",
-        "> `.cursor/rules/` if available in this repository. For project-specific information, see `AGENTINFO.md`.",
-        "",
-        "---",
+        "```bash",
+        "python3 scripts/generate-agent-files.py",
+        "```",
         "",
     ])
-    
+
+    return '\n'.join(lines)
+
+
+def _generate_inline_content(
+    agent_name: str,
+    organized_rules: Dict[str, List[Tuple[str, Dict, str]]]
+) -> List[str]:
+    """Generate inline content (legacy mode). Returns list of lines."""
+    lines = []
+
     # Core Development Principles (from general/)
     general_rules = organized_rules.get('general', [])
     if general_rules:
         lines.extend([
             "## Core Development Principles",
             "",
-            "These principles apply universally across all projects:",
-            "",
         ])
-        
+
         for rule_path, frontmatter, body in general_rules:
             rule_name = frontmatter.get('description', Path(rule_path).stem.replace('-', ' ').title())
             always_apply = frontmatter.get('alwaysApply', False)
-            
-            # Include full content for always-apply general rules
+
             if always_apply:
-                # Extract key content (headers and main points)
-                key_content = extract_key_content(body, max_lines=80)
-                
+                key_content = extract_key_content(body, max_lines=40)
                 lines.append(f"### {rule_name}")
                 lines.append("")
                 lines.append(key_content)
@@ -237,197 +274,58 @@ def generate_agent_file(
                 lines.append(f"*Source: `.cursor/rules/{rule_path}`*")
                 lines.append("")
             else:
-                # Brief summary for non-always-apply general rules
-                lines.append(f"- **{rule_name}**: See `.cursor/rules/{rule_path}`")
-                lines.append("")
-    
+                lines.append(f"- **{rule_name}**: `.cursor/rules/{rule_path}`")
+
     # Language-Specific Rules
     lang_rules = organized_rules.get('languages', [])
     if lang_rules:
         lines.extend([
-            "## Language-Specific Rules",
             "",
-            "These rules apply when working with specific languages. They are conditionally relevant",
-            "based on the file types being edited:",
+            "## Language Rules",
             "",
         ])
-        
         for rule_path, frontmatter, body in lang_rules:
             rule_name = frontmatter.get('description', Path(rule_path).stem.replace('-', ' ').title())
-            globs = frontmatter.get('globs', [])
-            
-            lines.append(f"### {rule_name}")
-            if globs:
-                lines.append(f"*Applies to: {', '.join(globs[:3])}{'...' if len(globs) > 3 else ''}*")
-            lines.append("")
-            
-            key_content = extract_key_content(body, max_lines=60)
-            lines.append(key_content)
-            lines.append("")
-            lines.append(f"*Source: `.cursor/rules/{rule_path}`*")
-            lines.append("")
-    
+            lines.append(f"- **{rule_name}**: `.cursor/rules/{rule_path}`")
+
     # Stack-Specific Rules
     stack_rules = organized_rules.get('stacks', [])
     if stack_rules:
         lines.extend([
-            "## Stack-Specific Rules",
             "",
-            "These rules apply when using specific technology stacks:",
+            "## Stack Rules",
             "",
         ])
-        
         for rule_path, frontmatter, body in stack_rules:
             rule_name = frontmatter.get('description', Path(rule_path).stem.replace('-', ' ').title())
-            globs = frontmatter.get('globs', [])
-            
-            lines.append(f"### {rule_name}")
-            if globs:
-                lines.append(f"*Applies to: {', '.join(globs[:3])}{'...' if len(globs) > 3 else ''}*")
-            lines.append("")
-            
-            key_content = extract_key_content(body, max_lines=60)
-            lines.append(key_content)
-            lines.append("")
-            lines.append(f"*Source: `.cursor/rules/{rule_path}`*")
-            lines.append("")
-    
-    # Framework-Specific Rules
+            lines.append(f"- **{rule_name}**: `.cursor/rules/{rule_path}`")
+
+    # Framework Rules
     framework_rules = organized_rules.get('frameworks', [])
     if framework_rules:
         lines.extend([
-            "## Framework-Specific Rules",
             "",
-            "These rules apply when using specific frameworks or tools:",
+            "## Framework Rules",
             "",
         ])
-        
-        # Group by subcategory
-        frameworks_by_category = {}
         for rule_path, frontmatter, body in framework_rules:
-            path_parts = Path(rule_path).parts
-            if len(path_parts) > 1:
-                subcat = path_parts[1]  # e.g., 'database', 'testing', 'ui'
-                if subcat not in frameworks_by_category:
-                    frameworks_by_category[subcat] = []
-                frameworks_by_category[subcat].append((rule_path, frontmatter, body))
-            else:
-                if 'other' not in frameworks_by_category:
-                    frameworks_by_category['other'] = []
-                frameworks_by_category['other'].append((rule_path, frontmatter, body))
-        
-        for subcat, rules in sorted(frameworks_by_category.items()):
-            lines.append(f"### {subcat.title()}")
-            lines.append("")
-            
-            for rule_path, frontmatter, body in rules:
-                rule_name = frontmatter.get('description', Path(rule_path).stem.replace('-', ' ').title())
-                lines.append(f"#### {rule_name}")
-                lines.append("")
-                
-                key_content = extract_key_content(body, max_lines=50)
-                lines.append(key_content)
-                lines.append("")
-                lines.append(f"*Source: `.cursor/rules/{rule_path}`*")
-                lines.append("")
-    
-    # Cross-Cutting Topics
+            rule_name = frontmatter.get('description', Path(rule_path).stem.replace('-', ' ').title())
+            lines.append(f"- **{rule_name}**: `.cursor/rules/{rule_path}`")
+
+    # Topics
     topic_rules = organized_rules.get('topics', [])
     if topic_rules:
         lines.extend([
-            "## Cross-Cutting Topics",
             "",
-            "These topics apply across different parts of the codebase:",
+            "## Topic Rules",
             "",
         ])
-        
-        # Group by subcategory
-        topics_by_category = {}
         for rule_path, frontmatter, body in topic_rules:
-            path_parts = Path(rule_path).parts
-            if len(path_parts) > 1:
-                subcat = path_parts[1]  # e.g., 'quality', 'security', 'api'
-                if subcat not in topics_by_category:
-                    topics_by_category[subcat] = []
-                topics_by_category[subcat].append((rule_path, frontmatter, body))
-            else:
-                if 'other' not in topics_by_category:
-                    topics_by_category['other'] = []
-                topics_by_category['other'].append((rule_path, frontmatter, body))
-        
-        for subcat, rules in sorted(topics_by_category.items()):
-            lines.append(f"### {subcat.title()}")
-            lines.append("")
-            
-            for rule_path, frontmatter, body in rules:
-                rule_name = frontmatter.get('description', Path(rule_path).stem.replace('-', ' ').title())
-                always_apply = frontmatter.get('alwaysApply', False)
-                
-                if always_apply:
-                    lines.append(f"#### {rule_name}")
-                    lines.append("")
-                    key_content = extract_key_content(body, max_lines=60)
-                    lines.append(key_content)
-                    lines.append("")
-                else:
-                    # Brief summary for conditional topics
-                    lines.append(f"- **{rule_name}**: See `.cursor/rules/{rule_path}` for details")
-                    lines.append("")
-                
-                lines.append(f"*Source: `.cursor/rules/{rule_path}`*")
-                lines.append("")
-    
-    # Packages (brief mention)
-    package_rules = organized_rules.get('packages', [])
-    if package_rules:
-        lines.extend([
-            "## Package Management",
-            "",
-            "Package management and reuse guidelines:",
-            "",
-        ])
-        
-        for rule_path, frontmatter, body in package_rules:
             rule_name = frontmatter.get('description', Path(rule_path).stem.replace('-', ' ').title())
-            lines.append(f"- **{rule_name}**: See `.cursor/rules/{rule_path}`")
-            lines.append("")
-    
-    # References section
-    lines.extend([
-        "## References",
-        "",
-        "For the complete set of rules and detailed information, refer to the source rule files:",
-        "",
-        "- `.cursor/rules/general/` - Core development principles",
-        "- `.cursor/rules/languages/` - Language-specific conventions",
-        "- `.cursor/rules/stacks/` - Technology stack patterns",
-        "- `.cursor/rules/frameworks/` - Framework-specific guidelines",
-        "- `.cursor/rules/topics/` - Cross-cutting concerns",
-        "- `.cursor/rules/packages/` - Package management rules",
-        "",
-        "## Customization",
-        "",
-        "This file can be extended with project-specific rules. When adding project-specific",
-        "instructions:",
-        "",
-        "1. Keep them at the top or in a dedicated \"Project-Specific\" section",
-        "2. Reference relevant global rules where applicable",
-        "3. Avoid duplicating content from global rules",
-        "4. Update this file when project standards evolve",
-        "",
-        "## Regenerating This File",
-        "",
-        "This file is generated from `.cursor/rules/` using the script:",
-        "",
-        "```bash",
-        "python3 scripts/generate-agent-files.py",
-        "```",
-        "",
-        "To regenerate after rule updates, run the script from the repository root.",
-        "",
-    ])
-    
-    return '\n'.join(lines)
+            lines.append(f"- **{rule_name}**: `.cursor/rules/{rule_path}`")
+
+    lines.append("")
+    return lines
 
 
 def main():

@@ -108,21 +108,31 @@ if [ $ERRORS -eq 0 ]; then
     # Ensure hooks directory exists
     mkdir -p "$HOOKS_TARGET_DIR"
     
+    # Install pre-commit hook
+    if [ -f "$HOOKS_SOURCE_DIR/pre-commit" ]; then
+        cp "$HOOKS_SOURCE_DIR/pre-commit" "$HOOKS_TARGET_DIR/pre-commit"
+        chmod +x "$HOOKS_TARGET_DIR/pre-commit"
+        echo -e "  ${GREEN}✓${NC} Installed pre-commit hook (script parity, template checks)"
+    else
+        echo -e "  ${YELLOW}⚠${NC} pre-commit hook not found"
+        ((WARNINGS++))
+    fi
+
     # Install pre-push hook
     if [ -f "$HOOKS_SOURCE_DIR/pre-push" ]; then
         cp "$HOOKS_SOURCE_DIR/pre-push" "$HOOKS_TARGET_DIR/pre-push"
         chmod +x "$HOOKS_TARGET_DIR/pre-push"
-        echo -e "  ${GREEN}✓${NC} Installed pre-push hook"
+        echo -e "  ${GREEN}✓${NC} Installed pre-push hook (submodule sync)"
     else
         echo -e "  ${RED}✗${NC} pre-push hook not found"
         ((ERRORS++))
     fi
-    
+
     # Install post-merge hook
     if [ -f "$HOOKS_SOURCE_DIR/post-merge" ]; then
         cp "$HOOKS_SOURCE_DIR/post-merge" "$HOOKS_TARGET_DIR/post-merge"
         chmod +x "$HOOKS_TARGET_DIR/post-merge"
-        echo -e "  ${GREEN}✓${NC} Installed post-merge hook"
+        echo -e "  ${GREEN}✓${NC} Installed post-merge hook (agent/skill sync)"
     else
         echo -e "  ${RED}✗${NC} post-merge hook not found"
         ((ERRORS++))
