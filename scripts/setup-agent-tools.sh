@@ -121,14 +121,15 @@ fi
 # --- Step 4: Configure Cursor-specific symlinks ---
 if is_cursor_installed; then
     echo -e "\nCursor detected - configuring..."
-    mkdir -p "$CURSOR_DIR"/{rules,commands}
+    mkdir -p "$CURSOR_DIR/rules"
 
     # Cursor gets DIRECT link to .cursor/rules/ (keeps frontmatter)
     # This is different from other agents which use .agent-rules/
     create_symlink "$REPO_ROOT/.cursor/rules" "$CURSOR_DIR/rules/agents-environment-config" "Cursor rules (with frontmatter)"
 
-    # Commands go through ~/.agent-tools/
-    create_symlink "$AGENT_TOOLS_DIR/commands/agents-environment-config" "$CURSOR_DIR/commands/agents-environment-config" "Cursor commands"
+    # NOTE: ~/.cursor/commands/ is documented but NOT WORKING in Cursor
+    # See: https://forum.cursor.com/t/commands-are-not-detected-in-the-global-cursor-directory/150967
+    echo -e "  ${YELLOW}ℹ${NC} Cursor global commands not supported (known Cursor bug)"
 else
     echo -e "  ${YELLOW}⚠${NC} Cursor not detected - skipping Cursor symlinks"
     echo -e "     (Install later and re-run this script)"

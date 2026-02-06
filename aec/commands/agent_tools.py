@@ -138,7 +138,6 @@ def setup() -> None:
     if _is_cursor_installed():
         Console.print("Cursor detected - configuring...")
         ensure_directory(CURSOR_DIR / "rules")
-        ensure_directory(CURSOR_DIR / "commands")
 
         # Cursor rules point directly to repo (needs frontmatter)
         cursor_rules_src = repo_root / ".cursor" / "rules"
@@ -152,17 +151,10 @@ def setup() -> None:
             else:
                 Console.error("Failed to create Cursor rules symlink")
 
-        # Cursor commands through ~/.agent-tools/
-        cursor_cmd_src = AGENT_TOOLS_DIR / "commands" / "agents-environment-config"
-        cursor_cmd_dst = CURSOR_DIR / "commands" / "agents-environment-config"
-
-        if is_symlink(cursor_cmd_dst):
-            Console.success("Cursor commands (already linked)")
-        else:
-            if create_symlink(cursor_cmd_src, cursor_cmd_dst):
-                Console.success("Cursor commands")
-            else:
-                Console.error("Failed to create Cursor commands symlink")
+        # NOTE: ~/.cursor/commands/ is documented but NOT WORKING in Cursor
+        # See: https://forum.cursor.com/t/commands-are-not-detected-in-the-global-cursor-directory/150967
+        # Skipping global commands symlink until Cursor fixes this
+        Console.info("Cursor global commands not supported (known Cursor bug)")
     else:
         Console.info("Cursor not detected - skipping Cursor symlinks")
 
@@ -181,7 +173,7 @@ def setup() -> None:
     Console.print("  ├── skills/")
     Console.print("  │   └── agents-environment-config/ → repo/.claude/skills/")
     Console.print("  └── commands/")
-    Console.print("      └── agents-environment-config/ → repo/.cursor/commands/")
+    Console.print("      └── [for future use - Cursor global commands currently broken]")
 
 
 def migrate(dry_run: bool = False) -> None:

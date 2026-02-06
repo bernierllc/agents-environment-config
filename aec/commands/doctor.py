@@ -160,13 +160,14 @@ def run_doctor() -> Tuple[bool, List[str]]:
         Console.success("~/.cursor/ exists")
         checks_passed += 1
 
-        for subdir in ["rules", "commands"]:
-            link_path = CURSOR_DIR / subdir / "agents-environment-config"
-            if is_symlink(link_path):
-                target = get_symlink_target(link_path)
-                Console.success(f"  └─ {subdir}/agents-environment-config -> {target}")
-            else:
-                Console.info(f"  └─ {subdir}/agents-environment-config not linked")
+        # Only check rules - global commands are broken in Cursor
+        # See: https://forum.cursor.com/t/commands-are-not-detected-in-the-global-cursor-directory/150967
+        link_path = CURSOR_DIR / "rules" / "agents-environment-config"
+        if is_symlink(link_path):
+            target = get_symlink_target(link_path)
+            Console.success(f"  └─ rules/agents-environment-config -> {target}")
+        else:
+            Console.info(f"  └─ rules/agents-environment-config not linked")
     else:
         Console.info("~/.cursor/ not found (Cursor may not be installed)")
         checks_passed += 1  # OK if not installed
