@@ -18,6 +18,11 @@ This repository contains:
 ```bash
 git clone https://github.com/bernierllc/agents-environment-config.git
 cd agents-environment-config
+
+# Option 1: Python CLI (recommended, cross-platform)
+python -m aec install
+
+# Option 2: Shell script (macOS/Linux only)
 ./scripts/setup.sh
 ```
 
@@ -49,27 +54,74 @@ This creates:
 - `~/.claude/agents/agents-environment-config` → `~/.agent-tools/agents/agents-environment-config`
 - `~/.claude/skills/agents-environment-config` → `~/.agent-tools/skills/agents-environment-config`
 - `~/.cursor/rules/agents-environment-config` → `repo/.cursor/rules/` (with frontmatter)
-- `~/.cursor/commands/agents-environment-config` → `~/.agent-tools/commands/agents-environment-config`
+
+> **Note:** Cursor global commands (`~/.cursor/commands/`) are [not currently working](https://forum.cursor.com/t/commands-are-not-detected-in-the-global-cursor-directory/150967) due to a Cursor bug.
 
 ### Setting Up a New Project
 
 ```bash
-# Interactive mode
-./scripts/setup-repo.sh
+# Using Python CLI (recommended)
+python -m aec repo setup my-new-project
+python -m aec repo setup /path/to/existing/project
 
-# Or direct mode
+# Or using shell script
 ./scripts/setup-repo.sh my-new-project
-./scripts/setup-repo.sh /path/to/existing/project
 ```
 
 This copies agent files and creates directories in the target project.
 
 **Raycast users:** The same script exists at `raycast_scripts/setup-repo.sh` with Raycast metadata.
 
+## Python CLI
+
+The `python -m aec` CLI provides cross-platform support (macOS, Linux, Windows).
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `aec install` | Full setup (submodules, rules, agent-tools) |
+| `aec doctor` | Health check for installation |
+| `aec version` | Show version |
+| `aec repo setup <path>` | Setup a project with agent files |
+| `aec repo list` | List tracked repositories |
+| `aec repo update [--all]` | Update repositories |
+| `aec agent-tools setup` | Create ~/.agent-tools/ structure |
+| `aec agent-tools migrate` | Migrate from old symlink structure |
+| `aec agent-tools rollback <backup>` | Rollback migration |
+| `aec rules generate` | Generate .agent-rules/ from .cursor/rules/ |
+| `aec rules validate` | Validate rule parity |
+
+### Examples
+
+```bash
+# Check installation health
+python -m aec doctor
+
+# Setup a new project
+python -m aec repo setup my-app
+
+# List all tracked projects
+python -m aec repo list
+
+# Update all tracked projects
+python -m aec repo update --all
+
+# Validate rules are in sync
+python -m aec rules validate
+```
+
+### Windows Support
+
+On Windows, the CLI uses NTFS junctions (no admin required) instead of symlinks for directories.
+
 ## Repository Structure
 
 ```
 agents-environment-config/          # THIS IS A TEMPLATE - don't add project-specific content!
+├── aec/                            # Python CLI package (python -m aec)
+│   ├── commands/                   # CLI command implementations
+│   └── lib/                        # Shared utilities
 ├── .agent-rules/                   # Rules WITHOUT Cursor frontmatter (generated)
 │   ├── frameworks/testing/standards.md
 │   └── ...                         # Mirrors .cursor/rules/ structure
@@ -129,18 +181,20 @@ python3 scripts/validate-rule-parity.py
 
 ## Scripts
 
-| Script | Purpose |
-|--------|---------|
-| `scripts/setup.sh` | Full setup: submodules, .agent-rules/, ~/.agent-tools/ |
-| `scripts/setup-agent-tools.sh` | Create ~/.agent-tools/ structure and symlinks |
-| `scripts/init-aec-home.sh` | Initialize ~/.agents-environment-config/ (sourced by other scripts) |
-| `scripts/migrate-to-agent-tools.sh` | Migrate existing users (with backup) |
-| `scripts/rollback-agent-tools.sh` | Rollback migration from backup |
-| `scripts/setup-repo.sh` | Set up a new/existing project with agent files |
-| `scripts/generate-agent-files.py` | Regenerate CLAUDE.md etc from rules |
-| `scripts/generate-agent-rules.py` | Generate .agent-rules/ from .cursor/rules/ |
-| `scripts/validate-rule-parity.py` | Validate .agent-rules/ matches .cursor/rules/ |
-| `scripts/install-git-hooks.sh` | Install git hooks for this repo |
+Most operations are available via both the Python CLI and shell scripts:
+
+| Operation | Python CLI | Shell Script |
+|-----------|------------|--------------|
+| Full setup | `python -m aec install` | `scripts/setup.sh` |
+| Create ~/.agent-tools/ | `python -m aec agent-tools setup` | `scripts/setup-agent-tools.sh` |
+| Migrate existing setup | `python -m aec agent-tools migrate` | `scripts/migrate-to-agent-tools.sh` |
+| Rollback migration | `python -m aec agent-tools rollback <dir>` | `scripts/rollback-agent-tools.sh` |
+| Setup a project | `python -m aec repo setup <path>` | `scripts/setup-repo.sh` |
+| List tracked projects | `python -m aec repo list` | `scripts/setup-repo.sh --list` |
+| Generate .agent-rules/ | `python -m aec rules generate` | `scripts/generate-agent-rules.py` |
+| Validate rule parity | `python -m aec rules validate` | `scripts/validate-rule-parity.py` |
+| Health check | `python -m aec doctor` | — |
+| Install git hooks | — | `scripts/install-git-hooks.sh` |
 
 ### Script Parity
 
@@ -166,19 +220,19 @@ The scripts create a `~/.agents-environment-config/` directory to store local st
 ```
 
 This directory enables:
-- **Cascading updates**: Run `setup-repo.sh --update-all` to update all tracked projects
+- **Cascading updates**: Update all tracked projects at once
 - **Re-run detection**: Detects if a project was already set up
-- **Inventory**: Run `setup-repo.sh --list` to see all configured projects
+- **Inventory**: List all configured projects
 
 ```bash
 # List all tracked projects
-./scripts/setup-repo.sh --list
+python -m aec repo list
 
 # Update all tracked projects
-./scripts/setup-repo.sh --update-all
+python -m aec repo update --all
 
 # Preview updates without making changes
-./scripts/setup-repo.sh --update-all-dry-run
+python -m aec repo update --all --dry-run
 ```
 
 ## Migration for Existing Users
@@ -187,13 +241,13 @@ If you already have symlinks from a previous setup:
 
 ```bash
 # Preview changes (dry run)
-./scripts/migrate-to-agent-tools.sh --dry-run
+python -m aec agent-tools migrate --dry-run
 
 # Run migration (creates backup automatically)
-./scripts/migrate-to-agent-tools.sh
+python -m aec agent-tools migrate
 
 # Rollback if needed
-./scripts/rollback-agent-tools.sh ~/.agent-tools-backup-TIMESTAMP
+python -m aec agent-tools rollback ~/.agent-tools-backup-TIMESTAMP
 ```
 
 ## How Projects Use This
@@ -214,7 +268,7 @@ When cursor rules in `.cursor/rules/` change:
 
 ```bash
 # Regenerate the agent-agnostic rules
-python3 scripts/generate-agent-rules.py
+python -m aec rules generate
 
 # Regenerate the agent instruction files
 python3 scripts/generate-agent-files.py
