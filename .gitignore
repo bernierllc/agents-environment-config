@@ -19,6 +19,9 @@ Thumbs.db
 # Python
 __pycache__/
 *.pyc
+*.egg-info/
+dist/
+build/
 
 # Raycast scripts - exclude agent-specific scripts
 raycast_scripts/claude-*.sh

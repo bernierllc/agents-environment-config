@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aec"
+version = "2.0.0"
+description = "Agents Environment Configuration - Cross-platform AI agent setup CLI"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Build Tools",
+]
+keywords = ["ai", "agents", "cli", "configuration", "claude", "cursor"]
+
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["typer>=0.9.0"]
+
+[project.scripts]
+aec = "aec.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/bernierllc/agents-environment-config"
+Repository = "https://github.com/bernierllc/agents-environment-config"
+
+[tool.setuptools.packages.find]
+include = ["aec*"]
