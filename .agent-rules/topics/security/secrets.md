@@ -1,0 +1,57 @@
+# Secrets Management
+
+## Core Principles
+
+- **Never commit `.env*` files** to version control
+- **Use secure secret management systems** (Azure Key Vault, AWS Secrets Manager, etc.)
+- **All secrets via secure storage** (e.g., `kv://sites/<name>`)
+- **Rotate keys regularly** (every 90 days recommended)
+- **CI jobs check expiry** automatically
+
+## Environment Variables
+
+### Secure Storage
+- Store secrets in secure vaults, not in code
+- Use environment variables for configuration
+- Reference secrets by path (e.g., `kv://sites/<name>`)
+- Never hardcode secrets in application code
+
+### Key Rotation
+- Rotate keys every 90 days
+- Use CI jobs to check key expiry
+- Automate key rotation when possible
+- Document key rotation procedures
+
+## Secret Management Best Practices
+
+### Storage
+- Use Azure Key Vault or equivalent
+- Reference secrets by path, not by value
+- Use different secrets for different environments
+- Never store secrets in database or logs
+
+### Access
+- Limit access to secrets (principle of least privilege)
+- Use service principals for automated access
+- Audit secret access
+- Rotate secrets when compromised
+
+### Development
+- Use `.env.example` files (without real values)
+- Document required environment variables
+- Use local secrets for development only
+- Never commit actual secrets
+
+## Security Checklist
+
+- [ ] No secrets in version control
+- [ ] Secrets stored in secure vault
+- [ ] Environment variables documented
+- [ ] Key rotation schedule established
+- [ ] CI checks for secret expiry
+- [ ] Access controls configured
+- [ ] Audit logging enabled
+
+## References
+- **Security**: See `general/security.mdc`
+- **Authentication**: See `topics/security/authentication.mdc`

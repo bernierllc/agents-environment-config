@@ -1,0 +1,151 @@
+# Accessibility Standards
+
+## Core Requirements
+
+All components must meet **WCAG 2.1 AA standards** and provide proper support for screen readers, keyboard navigation, and assistive technologies.
+
+## Form Accessibility
+
+### Labels and Associations
+- **Every form input** must have a corresponding `<label>` with `htmlFor`
+- Labels must be descriptive and indicate required fields
+- Use `aria-describedby` for error messages and helper text
+
+```tsx
+// ✅ GOOD - Proper label association
+<label htmlFor="email-input">Email Address</label>
+<input id="email-input" type="email" />
+
+// ❌ BAD - Missing label association
+<input type="email" placeholder="Enter email" />
+```
+
+## ARIA Labels and Roles
+
+### Interactive Elements
+- Buttons with only icons must have `aria-label`
+- Navigation elements must have `aria-label`
+- Custom interactive elements must have appropriate ARIA roles
+
+```tsx
+// ✅ GOOD - Descriptive ARIA labels
+<button aria-label="Close dialog" onClick={onClose}>
+  <X className="h-4 w-4" />
+</button>
+
+<nav aria-label="Main navigation">
+  <ul role="menubar">
+    <li role="menuitem">Home</li>
+  </ul>
+</nav>
+```
+
+## Keyboard Navigation
+
+### Requirements
+- All interactive elements must respond to keyboard events
+- Implement proper focus management for dynamic content
+- Use logical tab order
+
+```tsx
+// ✅ GOOD - Keyboard accessible
+const handleKeyDown = (e: React.KeyboardEvent) => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    setIsOpen(!isOpen);
+  } else if (e.key === 'Escape') {
+    setIsOpen(false);
+  }
+};
+
+// ❌ BAD - Mouse-only interaction
+<div onClick={() => setIsOpen(!isOpen)}>Menu</div>
+```
+
+## Focus Indicators
+
+### Requirements
+- Never remove focus indicators with `focus:outline-none` without replacement
+- Use consistent focus styling across the application
+- Ensure focus indicators meet contrast requirements
+
+```tsx
+// ✅ GOOD - Visible focus indicators
+<button className="focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2">
+  Submit
+</button>
+```
+
+## Error Handling
+
+### Accessible Form Errors
+- Use `aria-invalid` for form validation
+- Use `aria-describedby` to associate errors with inputs
+- Use `role="alert"` for error messages
+
+```tsx
+<input
+  id="email"
+  aria-describedby="email-error"
+  aria-invalid={hasError}
+/>
+{hasError && (
+  <div id="email-error" className="text-red-600" role="alert">
+    Please enter a valid email address
+  </div>
+)}
+```
+
+## Color and Contrast
+
+### WCAG AA Requirements
+- Normal text: minimum 4.5:1 contrast ratio
+- Large text: minimum 3:1 contrast ratio
+- UI components: minimum 3:1 contrast ratio
+
+```tsx
+// ✅ GOOD - Sufficient contrast
+<div className="text-text-dark bg-white">
+  High contrast text
+</div>
+```
+
+## Testing Requirements
+
+### Automated Testing
+- ESLint accessibility rules must pass
+- axe-core tests must pass
+- Color contrast validation must pass
+
+### Manual Testing Checklist
+- [ ] Keyboard navigation works
+- [ ] Screen reader announces content correctly
+- [ ] Focus indicators are visible
+- [ ] Error messages are announced
+- [ ] Dynamic content changes are communicated
+
+## Common Violations
+
+### Missing Labels
+```tsx
+// ❌ VIOLATION
+<input type="email" placeholder="Enter email" />
+
+// ✅ FIX
+<label htmlFor="email-input">Email Address</label>
+<input id="email-input" type="email" />
+```
+
+### Icon-Only Buttons
+```tsx
+// ❌ VIOLATION
+<button onClick={onClose}><X /></button>
+
+// ✅ FIX
+<button aria-label="Close dialog" onClick={onClose}><X /></button>
+```
+
+## References
+- **UI Frameworks**: See `frameworks/ui/tailwind-css.mdc`
+- **Testing**: See `frameworks/testing/standards.mdc`
+- **WCAG 2.1 Guidelines**: https://www.w3.org/WAI/WCAG21/quickref/

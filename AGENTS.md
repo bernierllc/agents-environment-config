@@ -6,37 +6,38 @@
 ## Quick Start
 
 1. Read `AGENTINFO.md` for project-specific info
-2. Read relevant `.cursor/rules/*.mdc` files on demand
+2. Read relevant `.agent-rules/*.md` files on demand
 3. Do NOT memorize all rules - reference them when needed
 
 ## Rules Reference
 
-Rules are organized in `.cursor/rules/` and should be read on demand when relevant.
+Rules are organized in `.agent-rules/` (no Cursor frontmatter) and should be read on demand.
 Do NOT memorize all rules - read the specific rule file when working in that area.
 
 ### Essential Rules (read when relevant)
 
-- **Testing**: `.cursor/rules/frameworks/testing/standards.mdc`
-- **Typescript**: `.cursor/rules/languages/typescript/typing-standards.mdc`
-- **Architecture**: `.cursor/rules/general/architecture.mdc`
-- **Git**: `.cursor/rules/topics/git/workflow.mdc`
-- **Quality**: `.cursor/rules/topics/quality/gates.mdc`
+- **Testing**: `.agent-rules/frameworks/testing/standards.md`
+- **Typescript**: `.agent-rules/languages/typescript/typing-standards.md`
+- **Architecture**: `.agent-rules/general/architecture.md`
+- **Git**: `.agent-rules/topics/git/workflow.md`
+- **Quality**: `.agent-rules/topics/quality/gates.md`
 
 ### All Rules by Category
 
 - **general/**: Core principles (architecture, workflow, documentation) (8 rules)
 - **languages/**: Language conventions (Python, TypeScript) (2 rules)
 - **stacks/**: Stack patterns (Next.js, FastAPI, React Native) (3 rules)
-- **frameworks/**: Framework guides (databases, testing, UI) (9 rules)
+- **frameworks/**: Framework guides (databases, testing, UI) (10 rules)
 - **topics/**: Cross-cutting (API, git, security, quality) (12 rules)
 - **packages/**: Package management (2 rules)
 
 ### How to Use Rules
 
-1. When working on TypeScript, read `languages/typescript/typing-standards.mdc`
-2. When writing tests, read `frameworks/testing/standards.mdc`
-3. When setting up a project, read `general/architecture.mdc`
-4. For project-specific info, see `AGENTINFO.md`
+1. When working on TypeScript, read `.agent-rules/languages/typescript/typing-standards.md`
+2. When writing tests, read `.agent-rules/frameworks/testing/standards.md`
+3. When working with databases, read `.agent-rules/frameworks/database/connection-management.md`
+4. When setting up a project, read `.agent-rules/general/architecture.md`
+5. For project-specific info, see `AGENTINFO.md`
 
 ## Regenerating This File
 

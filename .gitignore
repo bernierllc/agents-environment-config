@@ -16,9 +16,18 @@ Thumbs.db
 # Logs
 *.log
 
+# Python
+__pycache__/
+*.pyc
+
 # Raycast scripts - exclude agent-specific scripts
 raycast_scripts/claude-*.sh
 raycast_scripts/cursor-*.sh
 raycast_scripts/qwen-*.sh
 raycast_scripts/codex-*.sh
 raycast_scripts/gemini-*.sh
+/plans/
+
+# Local symlinks (created by setup, point to absolute paths)
+.cursor/commands/agents-environment-config
+.cursor/rules/agents-environment-config

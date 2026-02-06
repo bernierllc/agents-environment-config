@@ -1,0 +1,65 @@
+# Package Reuse Rules
+
+## Core Principle
+
+**Reuse first, create second!** Before starting any new package development, always check existing @bernierllc packages to avoid reinventing functionality.
+
+## Pre-Development Checklist
+
+### 1. Check Existing Packages
+Before starting any new package or feature:
+
+```bash
+# List all packages to see what exists
+# Make sure that localhost:3355 is running, if not then `cd ~/projects/mbernier.com/mbernier.com && npm run dev` first
+~/projects/tools/manager list all
+
+# Check specific package status
+./manager status-enhanced [package-name]
+```
+
+### 2. Search for Relevant Functionality
+Ask yourself:
+- Does this need retry logic? → Use `@bernierllc/retry-policy`
+- Does this need state management? → Use `@bernierllc/retry-state`
+- Does this need metrics/analytics? → Use `@bernierllc/retry-metrics`
+- Does this process CSV data? → Use `@bernierllc/csv-parser` and/or `@bernierllc/csv-validator`
+- Does this handle markdown? → Use `@bernierllc/markdown-detector` and/or `@bernierllc/markdown-renderer`
+- Does this send emails? → Use `@bernierllc/email-sender`
+- Does this need secure tokens? → Use `@bernierllc/magic-link`
+- Does this need message queuing? → Use `@bernierllc/message-queue`
+
+### 3. Check Package Capabilities
+For each potentially relevant package:
+- Review the README and API documentation
+- Check if it supports your specific use case
+- Consider if it can be extended rather than replaced
+- Look for integration patterns in examples
+
+## Implementation Steps
+
+1. **Before starting**: Run `./manager list all` to see what's available
+2. **Research**: Check package READMEs and examples
+3. **Plan integration**: Design how to use existing packages
+4. **Implement**: Use existing packages as dependencies
+5. **Test**: Ensure integration works correctly
+6. **Document**: Update documentation to show package usage
+
+## Benefits
+
+- **Faster development** - Leverage existing, tested code
+- **Better consistency** - Use proven patterns across packages
+- **Reduced maintenance** - Single source of truth for common functionality
+- **Improved reliability** - Use battle-tested implementations
+
+## When to Create New Packages
+
+Only create new packages when:
+- No existing package provides the needed functionality
+- The functionality is truly atomic and reusable
+- It follows MECE architecture principles
+- It provides clear value as a standalone package
+
+## References
+- **Package Management**: See `packages/package-management.mdc`
+- **Architecture**: See `general/architecture.mdc`

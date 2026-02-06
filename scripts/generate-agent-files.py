@@ -92,28 +92,44 @@ def extract_key_content(body: str, max_lines: int = 50) -> str:
 
 
 def generate_reference_only_content(
-    organized_rules: Dict[str, List[Tuple[str, Dict, str]]]
+    organized_rules: Dict[str, List[Tuple[str, Dict, str]]],
+    use_agent_rules: bool = False
 ) -> str:
     """Generate a slim, reference-only rules section.
 
     Instead of inlining rule content, this generates a categorized index
-    that points to the source .mdc files. Rules are read on demand.
+    that points to the source files. Rules are read on demand.
+
+    Args:
+        organized_rules: Rules organized by category
+        use_agent_rules: If True, reference .agent-rules/*.md files (no frontmatter)
+                         If False, reference .cursor/rules/*.mdc files (Cursor format)
     """
     lines = []
 
+    # Determine path prefix and extension based on target
+    if use_agent_rules:
+        rules_dir = '.agent-rules'
+        ext = '.md'
+        dir_note = "Rules are organized in `.agent-rules/` (no Cursor frontmatter) and should be read on demand."
+    else:
+        rules_dir = '.cursor/rules'
+        ext = '.mdc'
+        dir_note = "Rules are organized in `.cursor/rules/` and should be read on demand when relevant."
+
     # Essential rules that should always be mentioned (read on demand)
     essential_rules = {
-        'testing': '.cursor/rules/frameworks/testing/standards.mdc',
-        'typescript': '.cursor/rules/languages/typescript/typing-standards.mdc',
-        'architecture': '.cursor/rules/general/architecture.mdc',
-        'git': '.cursor/rules/topics/git/workflow.mdc',
-        'quality': '.cursor/rules/topics/quality/gates.mdc',
+        'testing': f'{rules_dir}/frameworks/testing/standards{ext}',
+        'typescript': f'{rules_dir}/languages/typescript/typing-standards{ext}',
+        'architecture': f'{rules_dir}/general/architecture{ext}',
+        'git': f'{rules_dir}/topics/git/workflow{ext}',
+        'quality': f'{rules_dir}/topics/quality/gates{ext}',
     }
 
     lines.extend([
         "## Rules Reference",
         "",
-        "Rules are organized in `.cursor/rules/` and should be read on demand when relevant.",
+        dir_note,
         "Do NOT memorize all rules - read the specific rule file when working in that area.",
         "",
         "### Essential Rules (read when relevant)",
@@ -147,10 +163,11 @@ def generate_reference_only_content(
         "",
         "### How to Use Rules",
         "",
-        "1. When working on TypeScript, read `languages/typescript/typing-standards.mdc`",
-        "2. When writing tests, read `frameworks/testing/standards.mdc`",
-        "3. When setting up a project, read `general/architecture.mdc`",
-        "4. For project-specific info, see `AGENTINFO.md`",
+        f"1. When working on TypeScript, read `{rules_dir}/languages/typescript/typing-standards{ext}`",
+        f"2. When writing tests, read `{rules_dir}/frameworks/testing/standards{ext}`",
+        f"3. When working with databases, read `{rules_dir}/frameworks/database/connection-management{ext}`",
+        f"4. When setting up a project, read `{rules_dir}/general/architecture{ext}`",
+        "5. For project-specific info, see `AGENTINFO.md`",
         "",
     ])
 
@@ -202,7 +219,8 @@ def generate_agent_file(
     agent_name: str,
     organized_rules: Dict[str, List[Tuple[str, Dict, str]]],
     rules_dir: Path,
-    slim_mode: bool = True
+    slim_mode: bool = True,
+    use_agent_rules: bool = False
 ) -> str:
     """Generate agent instruction file content.
 
@@ -212,7 +230,15 @@ def generate_agent_file(
         rules_dir: Path to rules directory
         slim_mode: If True, generate reference-only content (recommended).
                    If False, inline rule content (legacy, context-heavy).
+        use_agent_rules: If True, reference .agent-rules/*.md (no frontmatter).
+                         If False, reference .cursor/rules/*.mdc (Cursor format).
     """
+    # Determine which rules directory to reference
+    if use_agent_rules:
+        rules_path = '.agent-rules/*.md'
+    else:
+        rules_path = '.cursor/rules/*.mdc'
+
     lines = [
         f"# {agent_name} Agent Instructions",
         "",
@@ -222,14 +248,14 @@ def generate_agent_file(
         "## Quick Start",
         "",
         "1. Read `AGENTINFO.md` for project-specific info",
-        "2. Read relevant `.cursor/rules/*.mdc` files on demand",
+        f"2. Read relevant `{rules_path}` files on demand",
         "3. Do NOT memorize all rules - reference them when needed",
         "",
     ]
 
     if slim_mode:
         # Generate reference-only content
-        lines.append(generate_reference_only_content(organized_rules))
+        lines.append(generate_reference_only_content(organized_rules, use_agent_rules=use_agent_rules))
     else:
         # Legacy mode - inline content (kept for backwards compatibility)
         lines.extend(_generate_inline_content(agent_name, organized_rules))
@@ -334,38 +360,48 @@ def main():
     script_dir = Path(__file__).parent
     repo_root = script_dir.parent
     rules_dir = repo_root / '.cursor' / 'rules'
-    
+
     if not rules_dir.exists():
         print(f"Error: Rules directory not found at {rules_dir}")
         return 1
-    
+
     print(f"Reading rules from {rules_dir}...")
     organized_rules = organize_rules(rules_dir)
-    
+
     # Count rules
     total_rules = sum(len(rules) for rules in organized_rules.values())
     print(f"Found {total_rules} rule files")
-    
+
     # Generate files for each agent
+    # Non-Cursor agents use .agent-rules/ (no frontmatter)
+    # CLAUDE.md uses .agent-rules/ because Claude Code doesn't use Cursor frontmatter
     agents = {
-        'AGENTS.md': 'Codex',
-        'GEMINI.md': 'Gemini CLI',
-        'QWEN.md': 'Qwen Code',
-        'CLAUDE.md': 'Claude Code'
+        'AGENTS.md': ('Codex', True),           # use_agent_rules=True
+        'GEMINI.md': ('Gemini CLI', True),      # use_agent_rules=True
+        'QWEN.md': ('Qwen Code', True),         # use_agent_rules=True
+        'CLAUDE.md': ('Claude Code', True),     # use_agent_rules=True (Claude doesn't use frontmatter)
     }
-    
-    for filename, agent_name in agents.items():
+
+    for filename, (agent_name, use_agent_rules) in agents.items():
         print(f"Generating {filename} for {agent_name}...")
-        content = generate_agent_file(agent_name, organized_rules, rules_dir)
-        
+        content = generate_agent_file(
+            agent_name,
+            organized_rules,
+            rules_dir,
+            use_agent_rules=use_agent_rules
+        )
+
         output_path = repo_root / filename
         output_path.write_text(content, encoding='utf-8')
         print(f"  Written to {output_path}")
-    
+
     print("\nDone! Generated agent instruction files:")
     for filename in agents.keys():
         print(f"  - {filename}")
-    
+
+    print("\nNote: All agents now reference .agent-rules/*.md (no Cursor frontmatter)")
+    print("Cursor IDE uses .cursor/rules/*.mdc directly via symlinks.")
+
     return 0
 
 

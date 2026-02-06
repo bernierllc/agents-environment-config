@@ -4,6 +4,7 @@ Framework/tool-specific rules that apply when using these frameworks or tools.
 
 ## Database
 
+- `connection-management.mdc` - Database connection principles (ORM-agnostic)
 - `prisma.mdc` - Prisma database patterns for Next.js/TypeScript
 - `supabase.mdc` - Supabase development guidelines and patterns
 - `sqlalchemy.mdc` - SQLAlchemy patterns for Python

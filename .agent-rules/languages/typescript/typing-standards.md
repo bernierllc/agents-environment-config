@@ -1,0 +1,227 @@
+# TypeScript Typing Standards
+
+## Core Typing Principles
+
+### Zero Tolerance for `any`
+- **NEVER use `any` type** - it defeats the purpose of TypeScript's type safety
+- **PREFER `unknown` over `any`** when the type is truly unknown
+- **ALWAYS define explicit types** for function parameters and return values
+- **USE proper interface/type definitions** for complex objects and data structures
+- **LEVERAGE TypeScript's type inference** but be explicit when unclear
+
+### Strict Mode Requirements
+- All code must be written in TypeScript with strict mode enabled
+- Follow TypeScript strict mode rules
+- No use of `any`, `@ts-ignore`, or type coercion without explanation
+- Validate code with `tsc --noEmit` in CI and before publishing or merging
+
+### Type Safety Checklist
+- [ ] All function parameters have explicit types
+- [ ] All function return types are defined
+- [ ] All component props are properly typed
+- [ ] All API responses have defined interfaces
+- [ ] All state variables have proper types
+- [ ] No `any` types are used
+- [ ] Type guards are used for runtime validation
+- [ ] Generic types are used for reusable code
+- [ ] Error types are specific and well-defined
+
+## React Import Standards
+
+### Direct Imports Preferred
+- **PREFER direct imports** from React instead of namespace imports
+- **USE destructured imports** for React hooks and components
+- **AVOID namespace imports** when individual imports are available
+
+```typescript
+// ✅ Good - direct imports
+import { useEffect, useState, useCallback } from 'react';
+import { Button, Text, View } from 'react-native';
+
+// ❌ Bad - namespace imports
+import React from 'react';
+React.useEffect(() => {});
+React.useState();
+
+// ✅ Good - mixed approach when needed
+import React, { useEffect, useState } from 'react';
+// Use React.Component when extending, but prefer hooks directly
+```
+
+## Function and Method Typing
+
+```typescript
+// ✅ Good - explicit parameter and return types
+function calculateTotal(items: Item[]): number {
+  return items.reduce((sum, item) => sum + item.price, 0);
+}
+
+// ✅ Good - using generics for reusability
+function processData<T>(data: T[]): T[] {
+  return data.filter(Boolean);
+}
+
+// ❌ Bad - using any
+function badFunction(data: any): any {
+  return data.something;
+}
+
+// ✅ Better - using unknown with type guards
+function betterFunction(data: unknown): string {
+  if (typeof data === 'string') {
+    return data;
+  }
+  throw new Error('Expected string');
+}
+```
+
+## Component Props Typing
+
+```typescript
+// ✅ Good - explicit interface definition
+interface ButtonProps {
+  label: string;
+  variant: 'primary' | 'secondary' | 'danger';
+  disabled?: boolean;
+  onClick: () => void;
+}
+
+export const Button = ({ label, variant, disabled, onClick }: ButtonProps) => {
+  // Implementation
+};
+
+// ❌ Bad - using any for props
+export const BadButton = (props: any) => {
+  // Implementation
+};
+```
+
+## API and Data Typing
+
+### End-to-End Type Safety
+All data flows must be fully type-safe from database to UI. This includes:
+- API endpoints
+- Service layers
+- UI components
+- Database queries
+
+### Action Required
+1. **No `any` Types**: Replace all `any` types with proper interfaces
+2. **Service Layer Types**: Ensure all service methods have strict input/output types
+3. **API Response Types**: Define explicit response interfaces for all endpoints
+4. **UI Component Props**: All component props must be strictly typed
+5. **Database Types**: Use Prisma-generated types consistently (or equivalent ORM types)
+
+```typescript
+// ✅ Good - strict API response typing
+interface ApiResponse<T> {
+  data: T;
+  status: 'success' | 'error';
+  message?: string;
+}
+
+interface User {
+  id: string;
+  email: string;
+  name: string;
+  createdAt: Date;
+}
+
+// ✅ Good - type guards for runtime validation
+function isUser(obj: unknown): obj is User {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    typeof (obj as User).id === 'string' &&
+    typeof (obj as User).email === 'string'
+  );
+}
+```
+
+## Generic Types and Reusability
+
+```typescript
+// ✅ Good - constrained generic
+interface Repository<T extends { id: string }> {
+  findById(id: string): Promise<T | null>;
+  save(entity: T): Promise<T>;
+}
+
+// ✅ Good - utility type
+type Partial<T> = {
+  [P in keyof T]?: T[P];
+};
+```
+
+## Error Handling Typing
+
+```typescript
+// ✅ Good - specific error types
+type ApiError = 
+  | { type: 'network'; message: string }
+  | { type: 'validation'; field: string; message: string }
+  | { type: 'unauthorized'; message: string };
+
+// ✅ Good - typed error handling
+async function fetchUser(id: string): Promise<User | ApiError> {
+  try {
+    const response = await api.get(`/users/${id}`);
+    return response.data;
+  } catch (error) {
+    return { type: 'network', message: 'Failed to fetch user' };
+  }
+}
+```
+
+## State Management Typing
+
+```typescript
+// ✅ Good - typed state management
+interface AppState {
+  user: User | null;
+  loading: boolean;
+  error: ApiError | null;
+}
+
+type AppAction = 
+  | { type: 'SET_USER'; payload: User }
+  | { type: 'SET_LOADING'; payload: boolean }
+  | { type: 'SET_ERROR'; payload: ApiError | null };
+```
+
+## Linting and Validation
+
+### Pre-commit Checks
+- Ensure all code passes linting before committing
+- Use the project's `.eslintrc`, `.prettierrc`, and `.editorconfig` for formatting and standards
+- Do not commit code that triggers TypeScript or ESLint errors
+
+### Quality Gates
+- TypeScript compilation must pass with no errors
+- ESLint must pass with no warnings
+- All modified files must pass type checking before commit
+
+## Common Anti-Patterns to Avoid
+
+- **DON'T use `any`** - defeats TypeScript's purpose
+- **DON'T use `@ts-ignore`** without good reason
+- **DON'T use `as` assertions** without proper validation
+- **DON'T skip return type annotations** for public functions
+- **DON'T use `object`** when you mean a specific object shape
+- **DON'T commit code** that triggers TypeScript or ESLint errors
+
+## Code Generation Guidelines
+
+If you're generating code:
+- Prefer typed function signatures and clear parameter names
+- Use proper interfaces instead of inline types
+- Ensure all generated code passes type checking
+
+## The End Goal
+
+Data flowing from database queries through services, APIs, and UI components should be fully type-safe with no reliance on `any` or type assertions.
+
+## References
+- **Architecture**: See `general/architecture.mdc`
+- **Development Workflow**: See `general/development-workflow.mdc`
+- **Testing**: See `frameworks/testing/standards.mdc`

@@ -23,8 +23,9 @@ npm run lint
 
 ## Coding Style
 
-- Document your coding style expectations here
-- Reference relevant `.cursor/rules/*.mdc` files
+- Document your project-specific coding style expectations here
+- Example: "We use 2-space indentation"
+- Example: "All functions must have JSDoc comments"
 
 ## Testing Guidance
 

@@ -130,6 +130,62 @@ Use one or more techniques so mocks do not drift from the real world:
 - Tests our database migrations on every test run
 - Ensures infrastructure works correctly as part of the test suite
 
+### Database Connection Management in Tests
+
+> **General Principles**: See `frameworks/database/connection-management.mdc` for ORM-agnostic guidance.
+> **Prisma-Specific**: See `frameworks/database/prisma.mdc` for Prisma patterns.
+
+**Core Rule: Never create standalone database clients in tests. Always use shared/pooled connections.**
+
+#### Rules
+- **NEVER** use `new PrismaClient()` (or equivalent) directly in test files
+- **ALWAYS** use shared test clients from test utilities (e.g., `getSharedPrismaClient()`)
+- **NEVER** call disconnect methods on shared clients (test infrastructure manages lifecycle)
+- **Exception**: E2E tests in separate processes may need isolated clients with explicit cleanup
+
+#### Correct Pattern
+```typescript
+// BAD - creates new connection per file/test
+import { PrismaClient } from '@prisma/client';
+const prisma = new PrismaClient();
+
+// GOOD - uses shared pooled connection
+import { getSharedPrismaClient } from '@/tests/utils/shared-database';
+const prisma = getSharedPrismaClient();
+```
+
+#### Test Cleanup
+```typescript
+// BAD - disconnecting shared client breaks other tests
+afterAll(async () => {
+  await prisma.$disconnect();
+});
+
+// GOOD - clean up data only, let infrastructure manage connection
+afterAll(async () => {
+  await prisma.someTable.deleteMany({
+    where: { id: { startsWith: testFactory.prefix } }
+  });
+});
+```
+
+#### Symptoms of Connection Pool Exhaustion
+- Error: "Too many clients already" or "Too many database connections"
+- Tests passing individually but failing when run together
+- Intermittent connection timeouts
+
+#### When Writing New Tests
+1. Import from shared test utilities, not ORM client directly
+2. Use the shared client for all database operations
+3. Clean up test data in `afterAll`/`afterEach`, but don't disconnect
+4. If a test needs isolation, use transactions not separate clients
+
+#### When Fixing Connection Issues
+1. Search for direct client instantiation in test files (e.g., `new PrismaClient()`)
+2. Replace with shared test client utilities
+3. Remove any disconnect calls on shared clients
+4. Verify tests still pass with `--runInBand`
+
 ### Docker-Based Test Services
 
 **MANDATORY: Use Docker for all test services (databases, caches, message queues, etc.)**

@@ -1,0 +1,104 @@
+---
+description: Database connection management principles for all ORMs and database clients
+globs: ["**/db/**", "**/database/**", "**/prisma/**", "**/*database*.ts", "**/*db*.ts"]
+alwaysApply: false
+tags: [database, connections, pooling, performance]
+---
+
+# Database Connection Management
+
+## Core Principle
+
+Database connections are expensive resources. Never create clients ad-hoc. Always use centralized, pooled connections with proper lifecycle management.
+
+## Why This Matters
+
+- Each connection consumes memory on both client and server
+- Connection establishment has latency overhead
+- Database servers have connection limits
+- Connection churn causes performance degradation
+- Leaked connections can crash applications
+
+## General Rules
+
+### Production Code
+- **NEVER** instantiate database clients per request or per function call
+- **ALWAYS** use the singleton pattern with connection pooling
+- **ALWAYS** configure connection limits appropriate to your environment
+- **ALWAYS** handle connection errors gracefully with retry logic
+- **ALWAYS** implement graceful shutdown hooks for long-running processes
+
+### Test Code
+- **NEVER** create new database clients in individual test files
+- **ALWAYS** use shared/pooled test clients provided by test infrastructure
+- **NEVER** disconnect shared clients in test cleanup (infrastructure manages lifecycle)
+- **Exception**: E2E tests in separate processes may need isolated clients with explicit cleanup
+
+## Connection Pool Configuration
+
+### Environment-Specific Limits
+
+| Environment | Connection Limit | Pool Timeout | Rationale |
+|-------------|------------------|--------------|-----------|
+| Development | 5 | 10s | Single developer, quick feedback |
+| Test | 10 | 30s | Parallel test execution |
+| Staging | 20 | 30s | Mirror production behavior |
+| Production | 50-100 | 30s | Handle concurrent load |
+
+### Serverless Considerations
+
+Serverless environments (Vercel, AWS Lambda, etc.) require special handling:
+- Use connection poolers (PgBouncer, Prisma Accelerate, Supabase Pooler)
+- Connection string should point to pooler, not direct database
+- Keep separate direct connection for migrations only
+- Set lower connection limits per function instance
+
+## Symptoms of Connection Problems
+
+| Symptom | Likely Cause | Fix |
+|---------|--------------|-----|
+| "Too many clients already" | Multiple client instances | Use singleton/shared client |
+| "Connection timeout" | Pool exhausted or slow queries | Increase pool size, optimize queries |
+| Tests pass alone, fail together | Each test creates own client | Use shared test client |
+| Intermittent 500 errors in prod | Connection churn | Implement singleton pattern |
+| Memory leaks in long-running processes | Unclosed connections | Ensure proper shutdown hooks |
+
+## Debugging Connection Issues
+
+### Check Active Connections (PostgreSQL)
+```sql
+-- Count active connections
+SELECT count(*) FROM pg_stat_activity WHERE datname = 'your_database';
+
+-- See connection details
+SELECT pid, usename, application_name, client_addr, state, query_start
+FROM pg_stat_activity
+WHERE datname = 'your_database';
+```
+
+### Check Active Connections (MySQL)
+```sql
+SHOW PROCESSLIST;
+SELECT COUNT(*) FROM information_schema.processlist;
+```
+
+## Code Review Checklist
+
+### Production Code
+- [ ] Single database client instance via singleton
+- [ ] Services import singleton, never instantiate their own
+- [ ] Connection pool configured for environment
+- [ ] Graceful shutdown handler for long-running processes
+- [ ] No direct client instantiation outside singleton file
+
+### Test Code
+- [ ] No new client instantiation in test files (except E2E with explicit cleanup)
+- [ ] Uses shared test client from test utilities
+- [ ] No disconnect calls on shared client
+- [ ] Test data cleanup uses deletion, not disconnection
+
+## References
+
+- **Prisma**: See `frameworks/database/prisma.mdc` for Prisma-specific patterns
+- **SQLAlchemy**: See `frameworks/database/sqlalchemy.mdc` for Python patterns
+- **Testing**: See `frameworks/testing/standards.mdc` for test database patterns

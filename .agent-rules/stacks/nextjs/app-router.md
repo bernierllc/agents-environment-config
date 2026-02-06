@@ -1,0 +1,188 @@
+# Next.js App Router & React Standards
+
+## Next.js App Router Patterns
+
+### Server Components (Default)
+Server components are the default in Next.js App Router. Only use client components when interactivity is needed.
+
+```typescript
+// ✅ DEFAULT: Server Component (no 'use client')
+export default function Page() {
+  // Server-side rendering by default
+  return <div>Server Component</div>;
+}
+```
+
+### Client Components (Explicit)
+Only mark components as client components when they need interactivity.
+
+```typescript
+// ✅ EXPLICIT: Only when needed
+'use client';
+
+import { useState } from 'react';
+
+export function InteractiveButton() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount(c => c + 1)}>{count}</button>;
+}
+```
+
+### File Structure (App Router)
+```
+src/app/
+├── layout.tsx           # Root layout
+├── page.tsx            # Home page
+├── loading.tsx         # Loading UI
+├── error.tsx           # Error boundary
+├── not-found.tsx       # 404 page
+├── dashboard/
+│   ├── layout.tsx      # Nested layout
+│   ├── page.tsx        # Dashboard page
+│   └── users/
+│       └── page.tsx    # Users page
+└── api/
+    └── users/
+        └── route.ts    # API endpoint
+```
+
+## Component Standards
+
+### Functional Components with TypeScript
+All React components must have proper TypeScript interfaces and explicit return types.
+
+```typescript
+// ✅ REQUIRED: Props interface + explicit return type
+interface UserCardProps {
+  user: User;
+  onSelect?: (user: User) => void;
+  className?: string;
+}
+
+export function UserCard({ 
+  user, 
+  onSelect, 
+  className 
+}: UserCardProps): JSX.Element {
+  return (
+    <div 
+      className={`border-gray-200 shadow-sm ${className}`}
+      onClick={() => onSelect?.(user)}
+    >
+      <h3 className="text-gray-900">{user.name}</h3>
+      <p className="text-gray-700">{user.email}</p>
+    </div>
+  );
+}
+```
+
+### Error Boundaries
+Use error boundaries for client components to handle errors gracefully.
+
+```typescript
+// ✅ REQUIRED: Error boundaries for client components
+'use client';
+
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+  fallback?: React.ComponentType<{ error: Error }>;
+}
+
+export function ErrorBoundary({ children, fallback: Fallback }: ErrorBoundaryProps) {
+  // Error boundary implementation
+}
+```
+
+## Performance Patterns
+
+### React.memo for Expensive Components
+Use `React.memo` for components with expensive renders.
+
+```typescript
+// ✅ USE: For components with expensive renders
+export const ExpensiveComponent = React.memo(function ExpensiveComponent({
+  data
+}: ExpensiveComponentProps) {
+  // Expensive computation
+});
+```
+
+### Dynamic Imports for Code Splitting
+Use dynamic imports for heavy components.
+
+```typescript
+// ✅ REQUIRED: For heavy components
+import dynamic from 'next/dynamic';
+
+const HeavyChart = dynamic(() => import('./HeavyChart'), {
+  loading: () => <div>Loading chart...</div>,
+  ssr: false
+});
+```
+
+## API Integration Patterns
+
+### Server Actions (Preferred)
+Prefer server actions for form handling and server-side operations.
+
+```typescript
+// ✅ PREFERRED: Server actions for form handling
+'use server';
+
+async function createUser(formData: FormData) {
+  const name = formData.get('name') as string;
+  // Server-side validation and database operation
+}
+```
+
+### API Routes for External APIs
+Use API routes for external API integration.
+
+```typescript
+// ✅ USE: For external API integration
+export async function GET(request: NextRequest) {
+  const response = await fetch('https://api.external.com/data');
+  return NextResponse.json(await response.json());
+}
+```
+
+## Project Structure
+
+### Directory Organization
+```
+src/
+├── app/           # Next.js app router pages
+├── components/    # React components
+├── lib/           # Utility functions and shared logic
+├── types/         # TypeScript type definitions
+├── hooks/         # Custom React hooks
+└── __tests__/     # Test files
+```
+
+### Code Organization
+- Feature-based organization within `/src/`
+- Shared utilities in `/lib/`
+- Type definitions centralized in `/types/`
+- Tests co-located with implementation
+
+## Component Creation Checklist
+
+1. ✅ **TypeScript Interface** - Props properly typed
+2. ✅ **Server Component** - Default unless interactivity needed
+3. ✅ **Light Theme Styling** - Consistent color palette
+4. ✅ **Error Boundaries** - For client components
+5. ✅ **Loading States** - Suspense boundaries where needed
+6. ✅ **Tests** - Component behavior tests
+
+## Quality Gates
+
+- **TypeScript Strict** - No `any` types, explicit interfaces
+- **Build Validation** - `npm run build` must succeed
+- **Component Tests** - React Testing Library tests
+- **Accessibility** - WCAG 2.1 AA compliance
+
+## References
+- **TypeScript**: See `languages/typescript/typing-standards.mdc`
+- **API Standards**: See `topics/api/design-standards.mdc`
+- **Testing**: See `frameworks/testing/standards.mdc`
+- **Architecture**: See `general/architecture.mdc`

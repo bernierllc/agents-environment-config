@@ -79,6 +79,20 @@ for shfile in "$REPO_ROOT"/scripts/*.sh; do
     fi
 done
 
+# --- 5. Validate .agent-rules/ parity with .cursor/rules/ ---
+echo -e "\n${GREEN}Checking .agent-rules/ parity...${NC}"
+if [ -d "$REPO_ROOT/.agent-rules" ]; then
+    if python3 "$REPO_ROOT/scripts/validate-rule-parity.py" > /dev/null 2>&1; then
+        echo -e "${GREEN}✓${NC} .agent-rules/ matches .cursor/rules/"
+    else
+        echo -e "${RED}✗ .agent-rules/ is out of sync with .cursor/rules/${NC}"
+        echo -e "  Run: python3 scripts/generate-agent-rules.py"
+        ERRORS=$((ERRORS + 1))
+    fi
+else
+    echo -e "${YELLOW}⚠${NC} .agent-rules/ directory not found - run: python3 scripts/generate-agent-rules.py"
+fi
+
 # --- Summary ---
 echo ""
 if [ $ERRORS -gt 0 ]; then
