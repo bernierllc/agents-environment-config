@@ -2,6 +2,7 @@
 
 import os
 import platform
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -27,6 +28,137 @@ AGENT_TOOLS_DIR = HOME / ".agent-tools"
 # Agent-specific directories
 CLAUDE_DIR = HOME / ".claude"
 CURSOR_DIR = HOME / ".cursor"
+
+# Supported agents with detection and launch configuration
+SUPPORTED_AGENTS = {
+    "claude": {
+        "commands": ["claude"],
+        "alt_paths": [HOME / ".claude"],
+        "terminal_launch": True,
+        "launch_args": "--dangerously-skip-permissions",
+        "has_resume": True,
+        "resume_args": "--dangerously-skip-permissions --resume",
+    },
+    "cursor": {
+        "commands": ["cursor"],
+        "alt_paths": [Path("/Applications/Cursor.app")],
+        "terminal_launch": False,
+        "launch_template": "cursor {path}/",
+        "has_resume": False,
+    },
+    "gemini": {
+        "commands": ["gemini"],
+        "alt_paths": [],
+        "terminal_launch": True,
+        "launch_args": "",
+        "has_resume": False,
+    },
+    "qwen": {
+        "commands": ["qwen"],
+        "alt_paths": [],
+        "terminal_launch": True,
+        "launch_args": "",
+        "has_resume": False,
+    },
+    "codex": {
+        "commands": ["codex"],
+        "alt_paths": [],
+        "terminal_launch": True,
+        "launch_args": "",
+        "has_resume": False,
+    },
+}
+
+
+def detect_agents() -> dict[str, dict]:
+    """
+    Detect which supported agents are installed on the system.
+
+    Checks both command availability (via shutil.which) and alternative
+    filesystem paths for each agent.
+
+    Returns:
+        Dictionary of agent_name -> agent_config for all detected agents.
+    """
+    detected = {}
+    for name, config in SUPPORTED_AGENTS.items():
+        found = False
+
+        # Check if the command is available on PATH
+        for cmd in config["commands"]:
+            if shutil.which(cmd) is not None:
+                found = True
+                break
+
+        # Check alternative filesystem paths if command not found
+        if not found:
+            for alt_path in config.get("alt_paths", []):
+                if alt_path.exists():
+                    found = True
+                    break
+
+        if found:
+            detected[name] = config
+
+    return detected
+
+
+def generate_raycast_script(
+    agent_name: str,
+    agent_config: dict,
+    project_name: str,
+    project_path: str,
+    is_resume: bool = False,
+) -> str:
+    """
+    Generate the contents of a Raycast launcher script for an agent/project.
+
+    Args:
+        agent_name: Name of the agent (e.g., "claude", "cursor").
+        agent_config: Configuration dict from SUPPORTED_AGENTS.
+        project_name: Human-readable project name.
+        project_path: Absolute path to the project directory.
+        is_resume: Whether to generate the resume variant (claude only).
+
+    Returns:
+        The full script content as a string.
+    """
+    title_suffix = f" {project_name} resume" if is_resume else f" {project_name}"
+    desc_suffix = " resume" if is_resume else ""
+
+    header = (
+        f"#!/bin/bash\n"
+        f"\n"
+        f"# Required parameters:\n"
+        f"# @raycast.schemaVersion 1\n"
+        f"# @raycast.title {agent_name}{title_suffix}\n"
+        f"# @raycast.mode compact\n"
+        f"\n"
+        f"# Optional parameters:\n"
+        f"# @raycast.icon 🤖\n"
+        f"\n"
+        f"# Documentation:\n"
+        f"# @raycast.description open {agent_name} {project_name} project{desc_suffix}\n"
+        f"# @raycast.author matt_bernier\n"
+        f"# @raycast.authorURL https://raycast.com/matt_bernier\n"
+    )
+
+    if agent_config.get("terminal_launch", True):
+        args = agent_config.get("launch_args", "")
+        if is_resume:
+            args = agent_config.get("resume_args", args)
+        args_str = f" {args}" if args else ""
+        command = (
+            f"\nosascript -e "
+            f"'tell application \"Terminal\" to do script "
+            f"\"cd {project_path}/; {agent_name}{args_str}\"'\n"
+        )
+    else:
+        template = agent_config.get("launch_template", f"{agent_name} {{path}}/")
+        command = f"\n{template.format(path=project_path)}\n"
+
+    return header + command
+
 
 # Cached repo root
 _repo_root: Optional[Path] = None

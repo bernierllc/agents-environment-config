@@ -24,7 +24,7 @@ if HAS_TYPER:
     )
 
     # Import and register command groups
-    from .commands import repo, agent_tools, rules, install
+    from .commands import repo, agent_tools, rules, install, discover
 
     app.add_typer(repo.app, name="repo", help="Manage project repositories")
     app.add_typer(agent_tools.app, name="agent-tools", help="Manage ~/.agent-tools/ directory")
@@ -32,6 +32,7 @@ if HAS_TYPER:
 
     # Register top-level commands
     app.command("install")(install.install)
+    app.command("discover")(discover.discover_cmd)
 
     @app.command("version")
     def version():
@@ -97,6 +98,19 @@ else:
         subparsers.add_parser("doctor", help="Check installation health")
         subparsers.add_parser("version", help="Show version")
 
+        # discover command
+        discover_parser = subparsers.add_parser(
+            "discover", help="Discover repos from Raycast scripts"
+        )
+        discover_parser.add_argument(
+            "--dry-run", action="store_true",
+            help="Show what would be added without adding it",
+        )
+        discover_parser.add_argument(
+            "--auto", action="store_true",
+            help="Add missing paths without prompting",
+        )
+
         args = parser.parse_args()
 
         if args.command is None:
@@ -109,6 +123,7 @@ else:
         from .commands import rules as rules_cmd
         from .commands import install as install_cmd
         from .commands import doctor as doctor_cmd
+        from .commands import discover as discover_cmd
 
         if args.command == "version":
             Console.print(f"aec version {__version__}")
@@ -146,6 +161,12 @@ else:
                 rules_cmd.validate()
             else:
                 rules_parser.print_help()
+
+        elif args.command == "discover":
+            discover_cmd.discover(
+                dry_run=args.dry_run,
+                auto=args.auto,
+            )
 
 
 def main():

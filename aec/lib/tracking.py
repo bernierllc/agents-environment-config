@@ -1,5 +1,6 @@
 """Track which repositories have been set up."""
 
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, NamedTuple, Optional
@@ -135,6 +136,69 @@ def list_repos() -> List[TrackedRepo]:
             ))
 
     return repos
+
+
+def discover_from_scripts(raycast_dir: Path) -> List[Path]:
+    """
+    Discover project paths from existing Raycast launcher scripts.
+
+    Scans .sh files in the given directory for path patterns used in
+    agent launcher scripts (cd commands for terminal agents, direct
+    path arguments for cursor/code).
+
+    Args:
+        raycast_dir: Path to the raycast_scripts/ directory
+
+    Returns:
+        Deduplicated list of discovered project paths (resolved to absolute)
+    """
+    if not raycast_dir.is_dir():
+        return []
+
+    # Pattern 1: Terminal launch - osascript cd path; agent
+    # Only match paths starting with / or ~ to avoid matching shell
+    # script internals like cd "$(dirname ...)" or cd $VARIABLE;
+    # Matches: cd ~/projects/tools/; claude
+    # Matches: cd /Users/matt/projects/tools/; claude
+    terminal_pattern = re.compile(r'cd\s+([/~][^;]+?)/?\s*;')
+
+    # Pattern 2: Direct launch - cursor /path or code /path
+    # Matches: cursor ~/projects/tools/
+    # Matches: cursor /Users/matt/projects/tools/
+    # Matches: code /Users/matt/projects/tools/
+    direct_pattern = re.compile(r'^(?:cursor|code)\s+(.+?)/?\s*$', re.MULTILINE)
+
+    discovered: set[str] = set()
+
+    for script_file in sorted(raycast_dir.glob("*.sh")):
+        try:
+            content = script_file.read_text()
+        except (OSError, UnicodeDecodeError):
+            continue
+
+        # Try terminal pattern
+        for match in terminal_pattern.finditer(content):
+            raw_path = match.group(1).strip()
+            if raw_path:
+                discovered.add(raw_path)
+
+        # Try direct launch pattern
+        for match in direct_pattern.finditer(content):
+            raw_path = match.group(1).strip()
+            if raw_path:
+                discovered.add(raw_path)
+
+    # Resolve all paths (expand ~ and resolve relative paths)
+    resolved: set[Path] = set()
+    for raw in discovered:
+        try:
+            path = Path(raw).expanduser().resolve()
+            resolved.add(path)
+        except (ValueError, RuntimeError):
+            # Skip malformed paths
+            continue
+
+    return sorted(resolved)
 
 
 def _get_readme_content() -> str:

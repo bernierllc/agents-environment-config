@@ -7,6 +7,8 @@
 #   ./scripts/setup-repo.sh <path/to/project>  # Path mode
 #   ./scripts/setup-repo.sh --update-all       # Update all previously set up repos
 #   ./scripts/setup-repo.sh --list             # List all tracked repos
+#   ./scripts/setup-repo.sh --discover         # Discover repos from Raycast scripts
+#   ./scripts/setup-repo.sh --discover --auto  # Discover and add without prompting
 #
 # This script copies agent configuration files to a target project directory.
 # It creates necessary directories and optionally generates Raycast launcher scripts.
@@ -116,6 +118,120 @@ migrate_to_agent_rules() {
     done
 
     return $changes_made
+}
+
+discover_from_scripts() {
+    # Discover project paths from existing Raycast launcher scripts.
+    # Args: $1=auto (true/false, default false)
+    local auto_mode="${1:-false}"
+
+    local raycast_dir="$REPO_ROOT/raycast_scripts"
+
+    echo -e "${BLUE}=== Repo Discovery ===${NC}\n"
+
+    if [ ! -d "$raycast_dir" ]; then
+        echo -e "${RED}Raycast scripts directory not found: $raycast_dir${NC}"
+        return 1
+    fi
+
+    echo -e "Scanning ${GREEN}$raycast_dir${NC} for project paths...\n"
+
+    # Extract paths from scripts
+    local -A discovered_paths  # associative array for dedup
+    local script_count=0
+
+    for script_file in "$raycast_dir"/*.sh; do
+        [ -f "$script_file" ] || continue
+        script_count=$((script_count + 1))
+
+        # Pattern 1: Terminal launch - cd path; agent
+        while IFS= read -r match; do
+            if [ -n "$match" ]; then
+                # Clean up: strip trailing / and whitespace
+                local clean_path
+                clean_path=$(echo "$match" | sed 's|/\?[[:space:]]*$||')
+                # Expand ~ to HOME
+                clean_path="${clean_path/#\~/$HOME}"
+                # Resolve to absolute path if possible
+                if [ -d "$clean_path" ]; then
+                    clean_path="$(cd "$clean_path" && pwd)"
+                fi
+                discovered_paths["$clean_path"]=1
+            fi
+        done < <(grep -oP 'cd\s+\K[^;]+' "$script_file" 2>/dev/null)
+
+        # Pattern 2: Direct launch - cursor path or code path
+        while IFS= read -r match; do
+            if [ -n "$match" ]; then
+                local clean_path
+                clean_path=$(echo "$match" | sed 's|/\?[[:space:]]*$||')
+                clean_path="${clean_path/#\~/$HOME}"
+                if [ -d "$clean_path" ]; then
+                    clean_path="$(cd "$clean_path" && pwd)"
+                fi
+                discovered_paths["$clean_path"]=1
+            fi
+        done < <(grep -oP '^(?:cursor|code)\s+\K.+' "$script_file" 2>/dev/null)
+    done
+
+    local total_discovered=${#discovered_paths[@]}
+
+    if [ "$total_discovered" -eq 0 ]; then
+        echo -e "${YELLOW}No project paths found in Raycast scripts.${NC}"
+        return 0
+    fi
+
+    echo -e "Found ${CYAN}$total_discovered${NC} unique paths from ${CYAN}$script_count${NC} Raycast scripts:\n"
+
+    # Categorize paths
+    local -a new_paths=()
+    local -a tracked_paths=()
+    local -a missing_paths=()
+
+    for path in $(echo "${!discovered_paths[@]}" | tr ' ' '\n' | sort); do
+        if aec_is_logged "$path"; then
+            tracked_paths+=("$path")
+            echo -e "  $path ${DIM:-}(already tracked)${NC}"
+        elif [ ! -d "$path" ]; then
+            missing_paths+=("$path")
+            echo -e "  $path ${RED}(path not found)${NC}"
+        else
+            new_paths+=("$path")
+            echo -e "  $path ${YELLOW}(not tracked)${NC}"
+        fi
+    done
+
+    echo ""
+    echo -e "Already tracked: ${GREEN}${#tracked_paths[@]}${NC}"
+    echo -e "New paths to add: ${YELLOW}${#new_paths[@]}${NC}"
+    if [ ${#missing_paths[@]} -gt 0 ]; then
+        echo -e "Missing on disk: ${RED}${#missing_paths[@]}${NC}"
+    fi
+
+    if [ ${#new_paths[@]} -eq 0 ]; then
+        echo -e "\n${GREEN}All discovered paths are already tracked. Nothing to do.${NC}"
+        return 0
+    fi
+
+    echo ""
+
+    if [ "$auto_mode" = true ]; then
+        for path in "${new_paths[@]}"; do
+            aec_log_setup "$path"
+        done
+        echo -e "${GREEN}✓ Added ${#new_paths[@]} path(s) to tracking log${NC}"
+    else
+        read -p "Add ${#new_paths[@]} new path(s) to tracking? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            for path in "${new_paths[@]}"; do
+                aec_log_setup "$path"
+            done
+            echo -e "${GREEN}✓ Added ${#new_paths[@]} path(s) to tracking log${NC}"
+        else
+            echo -e "${YELLOW}Cancelled${NC}"
+        fi
+    fi
 }
 
 clean_agentinfo_redundancy() {
@@ -243,6 +359,15 @@ case "${1:-}" in
         update_all_repos true
         exit 0
         ;;
+    --discover)
+        # Check for --auto flag
+        if [ "${2:-}" = "--auto" ]; then
+            discover_from_scripts true
+        else
+            discover_from_scripts false
+        fi
+        exit 0
+        ;;
     --help|-h)
         echo "Usage: $0 [options] [project-name-or-path]"
         echo ""
@@ -250,6 +375,8 @@ case "${1:-}" in
         echo "  --list, -l           List all tracked repositories"
         echo "  --update-all         Update all tracked repositories"
         echo "  --update-all-dry-run Preview updates without making changes"
+        echo "  --discover           Discover repos from Raycast scripts (interactive)"
+        echo "  --discover --auto    Discover and add repos without prompting"
         echo "  --help, -h           Show this help message"
         echo ""
         echo "Examples:"
@@ -257,6 +384,7 @@ case "${1:-}" in
         echo "  $0 my-project          # Setup project in \$PROJECTS_DIR"
         echo "  $0 /path/to/project    # Setup at specific path"
         echo "  $0 --update-all        # Update all previously setup repos"
+        echo "  $0 --discover          # Find repos from Raycast scripts"
         echo ""
         echo "Setup log: $AEC_SETUP_LOG"
         exit 0
@@ -396,79 +524,144 @@ ABS_PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 aec_log_setup "$ABS_PROJECT_DIR"
 echo -e "\n${GREEN}✓${NC} Logged setup to $AEC_SETUP_LOG"
 
+# --- Agent Detection ---
+
+detect_installed_agents() {
+    # Detect which supported agents are installed on this machine.
+    # Sets DETECTED_AGENTS as a space-separated list of agent names.
+    DETECTED_AGENTS=""
+
+    # claude: check command or ~/.claude directory
+    if command -v claude &>/dev/null || [ -d "$HOME/.claude" ]; then
+        DETECTED_AGENTS="$DETECTED_AGENTS claude"
+    fi
+
+    # cursor: check command or /Applications/Cursor.app
+    if command -v cursor &>/dev/null || [ -d "/Applications/Cursor.app" ]; then
+        DETECTED_AGENTS="$DETECTED_AGENTS cursor"
+    fi
+
+    # gemini: check command
+    if command -v gemini &>/dev/null; then
+        DETECTED_AGENTS="$DETECTED_AGENTS gemini"
+    fi
+
+    # qwen: check command
+    if command -v qwen &>/dev/null; then
+        DETECTED_AGENTS="$DETECTED_AGENTS qwen"
+    fi
+
+    # codex: check command
+    if command -v codex &>/dev/null; then
+        DETECTED_AGENTS="$DETECTED_AGENTS codex"
+    fi
+
+    # Trim leading whitespace
+    DETECTED_AGENTS="$(echo "$DETECTED_AGENTS" | xargs)"
+}
+
+generate_raycast_script() {
+    # Generate a single Raycast launcher script.
+    # Args: $1=agent_name $2=project_name $3=abs_project_path $4=safe_name $5=output_dir $6=is_resume(true/false)
+    local agent="$1"
+    local proj_name="$2"
+    local proj_path="$3"
+    local safe="$4"
+    local out_dir="$5"
+    local is_resume="${6:-false}"
+
+    local title_suffix=""
+    local desc_suffix=""
+    local filename_suffix=""
+    if [ "$is_resume" = true ]; then
+        title_suffix=" resume"
+        desc_suffix=" resume"
+        filename_suffix="-resume"
+    fi
+
+    local script_path="$out_dir/${agent}-${safe}${filename_suffix}.sh"
+
+    cat > "$script_path" << RAYEOF
+#!/bin/bash
+
+# Required parameters:
+# @raycast.schemaVersion 1
+# @raycast.title ${agent} ${proj_name}${title_suffix}
+# @raycast.mode compact
+
+# Optional parameters:
+# @raycast.icon 🤖
+
+# Documentation:
+# @raycast.description open ${agent} ${proj_name} project${desc_suffix}
+# @raycast.author matt_bernier
+# @raycast.authorURL https://raycast.com/matt_bernier
+
+RAYEOF
+
+    # Append the launch command based on agent type
+    case "$agent" in
+        cursor)
+            echo "cursor ${proj_path}/" >> "$script_path"
+            ;;
+        claude)
+            if [ "$is_resume" = true ]; then
+                echo "osascript -e 'tell application \"Terminal\" to do script \"cd ${proj_path}/; claude --dangerously-skip-permissions --resume\"'" >> "$script_path"
+            else
+                echo "osascript -e 'tell application \"Terminal\" to do script \"cd ${proj_path}/; claude --dangerously-skip-permissions\"'" >> "$script_path"
+            fi
+            ;;
+        gemini|qwen|codex)
+            echo "osascript -e 'tell application \"Terminal\" to do script \"cd ${proj_path}/; ${agent}\"'" >> "$script_path"
+            ;;
+    esac
+
+    echo "" >> "$script_path"
+    chmod +x "$script_path"
+}
+
 # Ask about Raycast scripts
 echo ""
 read -p "Create Raycast launcher scripts? (y/N): " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    RAYCAST_DIR="$REPO_ROOT/raycast_scripts"
-    mkdir -p "$RAYCAST_DIR"
+    detect_installed_agents
 
-    # Create cursor script
-    cat > "$RAYCAST_DIR/cursor-$SAFE_NAME.sh" << EOF
-#!/bin/bash
+    if [ -z "$DETECTED_AGENTS" ]; then
+        echo -e "${YELLOW}No supported agents detected on this machine.${NC}"
+        echo -e "Supported agents: claude, cursor, gemini, qwen, codex"
+        echo -e "Install an agent and re-run setup to generate Raycast scripts."
+    else
+        echo -e "\n${BLUE}Detected agents:${NC}"
+        for agent in $DETECTED_AGENTS; do
+            echo -e "  ${GREEN}✓${NC} $agent"
+        done
 
-# Required parameters:
-# @raycast.schemaVersion 1
-# @raycast.title cursor $PROJECT_NAME
-# @raycast.mode compact
+        echo ""
+        read -p "Generate Raycast scripts for these agents? (Y/n): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            RAYCAST_DIR="$REPO_ROOT/raycast_scripts"
+            mkdir -p "$RAYCAST_DIR"
 
-# Optional parameters:
-# @raycast.icon 🤖
+            SCRIPT_COUNT=0
+            for agent in $DETECTED_AGENTS; do
+                # Generate the main script
+                generate_raycast_script "$agent" "$PROJECT_NAME" "$ABS_PROJECT_DIR" "$SAFE_NAME" "$RAYCAST_DIR" false
+                SCRIPT_COUNT=$((SCRIPT_COUNT + 1))
 
-# Documentation:
-# @raycast.description open cursor $PROJECT_NAME project
-# @raycast.author matt_bernier
-# @raycast.authorURL https://raycast.com/matt_bernier
+                # Generate resume variant for claude
+                if [ "$agent" = "claude" ]; then
+                    generate_raycast_script "$agent" "$PROJECT_NAME" "$ABS_PROJECT_DIR" "$SAFE_NAME" "$RAYCAST_DIR" true
+                    SCRIPT_COUNT=$((SCRIPT_COUNT + 1))
+                fi
+            done
 
-cursor $ABS_PROJECT_DIR/
-
-EOF
-
-    # Create claude script
-    cat > "$RAYCAST_DIR/claude-$SAFE_NAME.sh" << EOF
-#!/bin/bash
-
-# Required parameters:
-# @raycast.schemaVersion 1
-# @raycast.title claude $PROJECT_NAME
-# @raycast.mode compact
-
-# Optional parameters:
-# @raycast.icon 🤖
-
-# Documentation:
-# @raycast.description open claude $PROJECT_NAME project
-# @raycast.author matt_bernier
-# @raycast.authorURL https://raycast.com/matt_bernier
-
-osascript -e 'tell application "Terminal" to do script "cd $ABS_PROJECT_DIR/; claude --dangerously-skip-permissions"'
-
-EOF
-
-    # Create claude resume script
-    cat > "$RAYCAST_DIR/claude-$SAFE_NAME-resume.sh" << EOF
-#!/bin/bash
-
-# Required parameters:
-# @raycast.schemaVersion 1
-# @raycast.title claude $PROJECT_NAME resume
-# @raycast.mode compact
-
-# Optional parameters:
-# @raycast.icon 🤖
-
-# Documentation:
-# @raycast.description open claude $PROJECT_NAME project resume
-# @raycast.author matt_bernier
-# @raycast.authorURL https://raycast.com/matt_bernier
-
-osascript -e 'tell application "Terminal" to do script "cd $ABS_PROJECT_DIR/; claude --dangerously-skip-permissions --resume"'
-
-EOF
-
-    chmod +x "$RAYCAST_DIR/cursor-$SAFE_NAME.sh" "$RAYCAST_DIR/claude-$SAFE_NAME.sh" "$RAYCAST_DIR/claude-$SAFE_NAME-resume.sh"
-    echo -e "${GREEN}✓ Created Raycast scripts in $RAYCAST_DIR${NC}"
+            echo -e "${GREEN}✓ Created $SCRIPT_COUNT Raycast script(s) in $RAYCAST_DIR${NC}"
+        else
+            echo -e "${YELLOW}Skipped Raycast script generation.${NC}"
+        fi
+    fi
 fi
 
 # Summary

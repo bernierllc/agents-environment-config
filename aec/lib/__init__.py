@@ -11,6 +11,9 @@ from .config import (
     AGENT_TOOLS_DIR,
     CLAUDE_DIR,
     CURSOR_DIR,
+    SUPPORTED_AGENTS,
+    detect_agents,
+    generate_raycast_script,
     get_repo_root,
     get_projects_dir,
     get_github_orgs,
@@ -31,6 +34,7 @@ from .tracking import (
     is_logged,
     get_version,
     list_repos,
+    discover_from_scripts,
     TrackedRepo,
 )
 
@@ -46,6 +50,9 @@ __all__ = [
     "AGENT_TOOLS_DIR",
     "CLAUDE_DIR",
     "CURSOR_DIR",
+    "SUPPORTED_AGENTS",
+    "detect_agents",
+    "generate_raycast_script",
     "get_repo_root",
     "get_projects_dir",
     "get_github_orgs",
@@ -65,5 +72,6 @@ __all__ = [
     "is_logged",
     "get_version",
     "list_repos",
+    "discover_from_scripts",
     "TrackedRepo",
 ]

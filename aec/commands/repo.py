@@ -1,6 +1,9 @@
 """Repository setup commands: aec repo {setup|list|update}"""
 
+import os
+import re
 import shutil
+import stat
 from pathlib import Path
 from typing import Optional, List
 
@@ -12,6 +15,7 @@ except ImportError:
 
 from ..lib import (
     Console,
+    IS_MACOS,
     get_repo_root,
     get_projects_dir,
     get_github_orgs,
@@ -22,6 +26,8 @@ from ..lib import (
     is_logged,
     get_version,
     list_repos as tracking_list_repos,
+    detect_agents,
+    generate_raycast_script,
     VERSION,
 )
 from ..lib.git import clone_repo
@@ -104,6 +110,88 @@ def _copy_agent_files(project_dir: Path, repo_root: Path) -> None:
                 Console.success("Copied CURSOR.mdc to .cursor/rules/")
             else:
                 Console.error("Failed to copy CURSOR.mdc")
+
+
+def _make_safe_name(project_name: str) -> str:
+    """Convert a project name to a safe filename component (lowercase, alphanumeric, hyphens)."""
+    safe = project_name.lower()
+    safe = re.sub(r"[^a-z0-9-]", "-", safe)
+    safe = re.sub(r"-+", "-", safe)
+    safe = safe.strip("-")
+    return safe
+
+
+def _generate_raycast_scripts(
+    project_dir: Path,
+    project_name: str,
+    repo_root: Path,
+) -> None:
+    """Detect installed agents and generate Raycast launcher scripts.
+
+    Only runs on macOS since Raycast is a macOS application.
+    """
+    if not IS_MACOS:
+        Console.info("Raycast is macOS only - skipping script generation on this platform.")
+        return
+
+    detected = detect_agents()
+
+    if not detected:
+        Console.warning("No supported agents detected on this machine.")
+        Console.print("  Supported agents: claude, cursor, gemini, qwen, codex")
+        Console.print("  Install an agent and re-run setup to generate Raycast scripts.")
+        return
+
+    Console.subheader("Detected agents:")
+    for agent_name in detected:
+        Console.success(agent_name)
+
+    Console.print()
+    try:
+        response = input("Generate Raycast scripts for these agents? (Y/n): ").strip().lower()
+    except EOFError:
+        response = "y"
+
+    if response == "n":
+        Console.warning("Skipped Raycast script generation.")
+        return
+
+    raycast_dir = repo_root / "raycast_scripts"
+    raycast_dir.mkdir(exist_ok=True)
+
+    safe_name = _make_safe_name(project_name)
+    abs_project_path = str(project_dir.resolve())
+    script_count = 0
+
+    for agent_name, agent_config in detected.items():
+        # Generate main script
+        content = generate_raycast_script(
+            agent_name=agent_name,
+            agent_config=agent_config,
+            project_name=project_name,
+            project_path=abs_project_path,
+            is_resume=False,
+        )
+        script_path = raycast_dir / f"{agent_name}-{safe_name}.sh"
+        script_path.write_text(content)
+        script_path.chmod(script_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        script_count += 1
+
+        # Generate resume variant if supported
+        if agent_config.get("has_resume", False):
+            resume_content = generate_raycast_script(
+                agent_name=agent_name,
+                agent_config=agent_config,
+                project_name=project_name,
+                project_path=abs_project_path,
+                is_resume=True,
+            )
+            resume_path = raycast_dir / f"{agent_name}-{safe_name}-resume.sh"
+            resume_path.write_text(resume_content)
+            resume_path.chmod(resume_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+            script_count += 1
+
+    Console.success(f"Created {script_count} Raycast script(s) in {raycast_dir}")
 
 
 def _update_gitignore(project_dir: Path) -> None:
@@ -272,6 +360,21 @@ def setup(
     # Log setup
     log_setup(project_dir)
     Console.success(f"Logged setup to tracking file")
+
+    # Raycast scripts (macOS only)
+    if not skip_raycast:
+        Console.print()
+        try:
+            raycast_response = input("Create Raycast launcher scripts? (y/N): ").strip().lower()
+        except EOFError:
+            raycast_response = "n"
+
+        if raycast_response == "y":
+            repo_root_path = get_repo_root()
+            if repo_root_path:
+                _generate_raycast_scripts(project_dir, project_name, repo_root_path)
+            else:
+                Console.error("Could not find repo root for Raycast script output directory.")
 
     # Summary
     Console.header("Setup Complete")

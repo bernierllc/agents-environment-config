@@ -11,6 +11,20 @@ This repository contains:
 - **Setup scripts** - Tools to configure new projects with these standards
 - **Submodules** for agents and skills (`bernierllc/agency-agents`, `bernierllc/skills`)
 
+## Supported Agents
+
+| Agent | Instruction File | Detection | Description |
+|-------|------------------|-----------|-------------|
+| Claude Code | `CLAUDE.md` | `claude` command or `~/.claude` | Anthropic's CLI coding agent |
+| Cursor | `.cursor/rules/*.mdc` | `cursor` command or `/Applications/Cursor.app` | AI-first IDE with Cursor rules |
+| Codex | `AGENTS.md` | `codex` command | OpenAI's coding agent |
+| Gemini CLI | `GEMINI.md` | `gemini` command | Google's CLI coding agent |
+| Qwen Code | `QWEN.md` | `qwen` command | Alibaba's coding agent |
+
+All non-Cursor agents use `.agent-rules/*.md` (standard markdown, no frontmatter). Cursor uses `.cursor/rules/*.mdc` (with YAML frontmatter). See [Rules Architecture](#rules-architecture) for details.
+
+Want to add support for another agent? See the [Adding Agent Support](docs/adding-agent-support.md) guide.
+
 ## Quick Start
 
 ### Setting Up This Repo (One Time)
@@ -104,6 +118,7 @@ pip install -e .
 | `aec agent-tools setup` | Create ~/.agent-tools/ structure |
 | `aec agent-tools migrate` | Migrate from old symlink structure |
 | `aec agent-tools rollback <backup>` | Rollback migration |
+| `aec discover` | Discover repos from existing Raycast scripts |
 | `aec rules generate` | Generate .agent-rules/ from .cursor/rules/ |
 | `aec rules validate` | Validate rule parity |
 
@@ -222,6 +237,31 @@ To install the git hooks:
 
 ```bash
 ./scripts/install-git-hooks.sh
+```
+
+## Raycast Integration
+
+During project setup (`aec repo setup` or `scripts/setup-repo.sh`), users are prompted to generate [Raycast](https://raycast.com/) launcher scripts. These scripts provide one-keystroke access to open a project in any detected agent.
+
+Scripts are generated per-agent based on what is installed on the machine. The setup detects all [supported agents](#supported-agents) (Claude, Cursor, Gemini, Qwen, Codex) and generates scripts for each one found.
+
+| Script Pattern | Example | Purpose |
+|----------------|---------|---------|
+| `{agent}-{project}.sh` | `cursor-my-app.sh` | Open project in the agent |
+| `claude-{project}-resume.sh` | `claude-my-app-resume.sh` | Resume last Claude session |
+
+The generated scripts include Raycast metadata (`@raycast.schemaVersion`, `@raycast.title`, etc.) so they appear in the Raycast command palette automatically.
+
+To skip Raycast script generation during setup, pass `--skip-raycast` (Python CLI) or answer "N" at the prompt (shell script).
+
+### Discovering Existing Repos from Scripts
+
+If you have existing Raycast scripts from before tracking was added, use `aec discover` to retroactively populate the tracking log:
+
+```bash
+aec discover              # Interactive - shows what was found, asks to add
+aec discover --dry-run    # Preview without making changes
+aec discover --auto       # Auto-add all discovered paths
 ```
 
 ## Local Configuration Directory
