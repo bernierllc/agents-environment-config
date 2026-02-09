@@ -29,6 +29,9 @@ from ..lib import (
     detect_agents,
     generate_raycast_script,
     VERSION,
+    get_agent_files,
+    get_gitignore_patterns,
+    get_migration_files,
 )
 from ..lib.git import clone_repo
 
@@ -37,19 +40,9 @@ if HAS_TYPER:
 else:
     app = None
 
-# Agent files to copy
-AGENT_FILES = ["AGENTINFO.md", "AGENTS.md", "CLAUDE.md", "GEMINI.md", "QWEN.md"]
-
-# Patterns to add to .gitignore
-GITIGNORE_PATTERNS = [
-    "AGENTINFO.md",
-    "AGENTS.md",
-    "CLAUDE.md",
-    "GEMINI.md",
-    "QWEN.md",
-    ".cursor/rules",
-    "/plans/",
-]
+# Agent files and gitignore patterns derived from agents.json registry
+AGENT_FILES = get_agent_files()
+GITIGNORE_PATTERNS = get_gitignore_patterns()
 
 
 def _resolve_project_path(path_input: str) -> Path:
@@ -224,7 +217,7 @@ def _update_gitignore(project_dir: Path) -> None:
 
 def _needs_migration(project_dir: Path) -> bool:
     """Check if project needs migration to .agent-rules/ references."""
-    for filename in ["CLAUDE.md", "AGENTS.md", "GEMINI.md", "QWEN.md"]:
+    for filename in get_migration_files():
         filepath = project_dir / filename
         if filepath.exists():
             content = filepath.read_text()
@@ -240,7 +233,7 @@ def _migrate_agent_files(project_dir: Path, dry_run: bool = False) -> int:
     Console.subheader(f"Checking for .agent-rules migration...")
     changes = 0
 
-    for filename in ["CLAUDE.md", "AGENTS.md", "GEMINI.md", "QWEN.md"]:
+    for filename in get_migration_files():
         filepath = project_dir / filename
 
         if not filepath.exists():

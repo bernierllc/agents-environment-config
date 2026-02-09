@@ -372,15 +372,28 @@ def main():
     total_rules = sum(len(rules) for rules in organized_rules.values())
     print(f"Found {total_rules} rule files")
 
-    # Generate files for each agent
-    # Non-Cursor agents use .agent-rules/ (no frontmatter)
-    # CLAUDE.md uses .agent-rules/ because Claude Code doesn't use Cursor frontmatter
-    agents = {
-        'AGENTS.md': ('Codex', True),           # use_agent_rules=True
-        'GEMINI.md': ('Gemini CLI', True),      # use_agent_rules=True
-        'QWEN.md': ('Qwen Code', True),         # use_agent_rules=True
-        'CLAUDE.md': ('Claude Code', True),     # use_agent_rules=True (Claude doesn't use frontmatter)
-    }
+    # Load agent generation config from agents.json registry
+    agents_json_path = repo_root / 'agents.json'
+    if agents_json_path.exists():
+        import json
+        with open(agents_json_path) as f:
+            registry = json.load(f)
+        agents = {}
+        for agent_data in registry.get('agents', {}).values():
+            instruction_file = agent_data.get('instruction_file')
+            if instruction_file:
+                agents[instruction_file] = (
+                    agent_data['display_name'],
+                    agent_data.get('use_agent_rules', True),
+                )
+    else:
+        # Fallback: hardcoded for standalone use without agents.json
+        agents = {
+            'AGENTS.md': ('Codex', True),
+            'GEMINI.md': ('Gemini CLI', True),
+            'QWEN.md': ('Qwen Code', True),
+            'CLAUDE.md': ('Claude Code', True),
+        }
 
     for filename, (agent_name, use_agent_rules) in agents.items():
         print(f"Generating {filename} for {agent_name}...")

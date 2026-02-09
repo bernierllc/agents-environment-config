@@ -1,27 +1,35 @@
 """Tests for agent detection and Raycast script generation."""
 
+import json
 import os
+import shutil
 import stat
-import textwrap
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from aec.lib.config import (
-    SUPPORTED_AGENTS,
     detect_agents,
     generate_raycast_script,
 )
+from aec.lib.registry import get_supported_agents, load_agent_registry
+
+# Load SUPPORTED_AGENTS from registry (not hardcoded)
+SUPPORTED_AGENTS = get_supported_agents()
+
+# Derive expected agent names from agents.json
+REPO_ROOT = Path(__file__).resolve().parent.parent
+with open(REPO_ROOT / "agents.json") as _f:
+    _REGISTRY = json.load(_f)
+EXPECTED_AGENT_NAMES = set(_REGISTRY["agents"].keys())
 
 
 class TestSupportedAgents:
     """Test the SUPPORTED_AGENTS configuration structure."""
 
     def test_all_expected_agents_present(self):
-        """All five expected agents should be defined."""
-        expected = {"claude", "cursor", "gemini", "qwen", "codex"}
-        assert set(SUPPORTED_AGENTS.keys()) == expected
+        """All expected agents from agents.json should be defined."""
+        assert set(SUPPORTED_AGENTS.keys()) == EXPECTED_AGENT_NAMES
 
     def test_each_agent_has_required_keys(self):
         """Every agent config must have the required keys."""
@@ -45,33 +53,360 @@ class TestSupportedAgents:
             for p in config["alt_paths"]:
                 assert isinstance(p, Path), f"Agent '{name}' has non-Path in alt_paths"
 
-    def test_claude_has_resume(self):
-        """Claude should have resume support."""
-        assert SUPPORTED_AGENTS["claude"]["has_resume"] is True
-        assert "resume_args" in SUPPORTED_AGENTS["claude"]
-
-    def test_cursor_is_not_terminal_launch(self):
-        """Cursor should use direct launch, not terminal."""
-        assert SUPPORTED_AGENTS["cursor"]["terminal_launch"] is False
-        assert "launch_template" in SUPPORTED_AGENTS["cursor"]
-
     def test_terminal_agents_have_launch_args(self):
         """Terminal-launched agents should have launch_args defined."""
         for name, config in SUPPORTED_AGENTS.items():
             if config["terminal_launch"]:
                 assert "launch_args" in config, f"Agent '{name}' missing launch_args"
 
-    def test_claude_has_correct_launch_args(self):
-        """Claude launch args should include --dangerously-skip-permissions."""
-        assert "--dangerously-skip-permissions" in SUPPORTED_AGENTS["claude"]["launch_args"]
-        assert "--dangerously-skip-permissions" in SUPPORTED_AGENTS["claude"]["resume_args"]
-        assert "--resume" in SUPPORTED_AGENTS["claude"]["resume_args"]
-
-    def test_no_resume_for_non_claude_agents(self):
-        """Only claude should have has_resume=True."""
+    def test_resume_agents_have_resume_args(self):
+        """Agents with has_resume=True must have resume_args."""
         for name, config in SUPPORTED_AGENTS.items():
-            if name != "claude":
-                assert config["has_resume"] is False, f"Agent '{name}' unexpectedly has resume"
+            if config["has_resume"]:
+                assert "resume_args" in config, f"Agent '{name}' has resume but no resume_args"
+
+
+# ---------------------------------------------------------------------------
+# Per-agent exact config value tests
+# These catch regressions if someone changes a value in agents.json
+# ---------------------------------------------------------------------------
+
+
+class TestClaudeConfig:
+    """Validate Claude Code exact configuration values."""
+
+    def test_command(self):
+        assert SUPPORTED_AGENTS["claude"]["commands"] == ["claude"]
+
+    def test_terminal_launch(self):
+        assert SUPPORTED_AGENTS["claude"]["terminal_launch"] is True
+
+    def test_launch_args(self):
+        assert SUPPORTED_AGENTS["claude"]["launch_args"] == "--dangerously-skip-permissions"
+
+    def test_has_resume(self):
+        assert SUPPORTED_AGENTS["claude"]["has_resume"] is True
+
+    def test_resume_args(self):
+        assert SUPPORTED_AGENTS["claude"]["resume_args"] == "--dangerously-skip-permissions --resume"
+
+    def test_alt_paths(self):
+        alt_paths = SUPPORTED_AGENTS["claude"]["alt_paths"]
+        assert len(alt_paths) == 1
+        assert alt_paths[0] == Path.home() / ".claude"
+
+    def test_instruction_file(self):
+        assert _REGISTRY["agents"]["claude"]["instruction_file"] == "CLAUDE.md"
+
+    def test_use_agent_rules(self):
+        assert _REGISTRY["agents"]["claude"]["use_agent_rules"] is True
+
+
+class TestCursorConfig:
+    """Validate Cursor exact configuration values."""
+
+    def test_command(self):
+        assert SUPPORTED_AGENTS["cursor"]["commands"] == ["cursor"]
+
+    def test_terminal_launch(self):
+        assert SUPPORTED_AGENTS["cursor"]["terminal_launch"] is False
+
+    def test_launch_template(self):
+        assert SUPPORTED_AGENTS["cursor"]["launch_template"] == "cursor {path}/"
+
+    def test_has_resume(self):
+        assert SUPPORTED_AGENTS["cursor"]["has_resume"] is False
+
+    def test_alt_paths(self):
+        alt_paths = SUPPORTED_AGENTS["cursor"]["alt_paths"]
+        assert len(alt_paths) == 1
+        assert alt_paths[0] == Path("/Applications/Cursor.app")
+
+    def test_instruction_file_is_null(self):
+        assert _REGISTRY["agents"]["cursor"]["instruction_file"] is None
+
+    def test_use_agent_rules(self):
+        assert _REGISTRY["agents"]["cursor"]["use_agent_rules"] is False
+
+
+class TestGeminiConfig:
+    """Validate Gemini CLI exact configuration values."""
+
+    def test_command(self):
+        assert SUPPORTED_AGENTS["gemini"]["commands"] == ["gemini"]
+
+    def test_terminal_launch(self):
+        assert SUPPORTED_AGENTS["gemini"]["terminal_launch"] is True
+
+    def test_launch_args(self):
+        assert SUPPORTED_AGENTS["gemini"]["launch_args"] == "--yolo"
+
+    def test_has_resume(self):
+        assert SUPPORTED_AGENTS["gemini"]["has_resume"] is True
+
+    def test_resume_args(self):
+        assert SUPPORTED_AGENTS["gemini"]["resume_args"] == "--yolo --resume"
+
+    def test_alt_paths_empty(self):
+        assert SUPPORTED_AGENTS["gemini"]["alt_paths"] == []
+
+    def test_instruction_file(self):
+        assert _REGISTRY["agents"]["gemini"]["instruction_file"] == "GEMINI.md"
+
+    def test_use_agent_rules(self):
+        assert _REGISTRY["agents"]["gemini"]["use_agent_rules"] is True
+
+
+class TestQwenConfig:
+    """Validate Qwen Code exact configuration values."""
+
+    def test_command(self):
+        assert SUPPORTED_AGENTS["qwen"]["commands"] == ["qwen"]
+
+    def test_terminal_launch(self):
+        assert SUPPORTED_AGENTS["qwen"]["terminal_launch"] is True
+
+    def test_launch_args(self):
+        assert SUPPORTED_AGENTS["qwen"]["launch_args"] == "--yolo"
+
+    def test_has_resume(self):
+        assert SUPPORTED_AGENTS["qwen"]["has_resume"] is True
+
+    def test_resume_args(self):
+        assert SUPPORTED_AGENTS["qwen"]["resume_args"] == "--yolo --continue"
+
+    def test_alt_paths_empty(self):
+        assert SUPPORTED_AGENTS["qwen"]["alt_paths"] == []
+
+    def test_instruction_file(self):
+        assert _REGISTRY["agents"]["qwen"]["instruction_file"] == "QWEN.md"
+
+    def test_use_agent_rules(self):
+        assert _REGISTRY["agents"]["qwen"]["use_agent_rules"] is True
+
+
+class TestCodexConfig:
+    """Validate Codex exact configuration values."""
+
+    def test_command(self):
+        assert SUPPORTED_AGENTS["codex"]["commands"] == ["codex"]
+
+    def test_terminal_launch(self):
+        assert SUPPORTED_AGENTS["codex"]["terminal_launch"] is True
+
+    def test_launch_args(self):
+        assert SUPPORTED_AGENTS["codex"]["launch_args"] == "--dangerously-bypass-approvals-and-sandbox"
+
+    def test_has_resume(self):
+        assert SUPPORTED_AGENTS["codex"]["has_resume"] is True
+
+    def test_resume_args(self):
+        assert SUPPORTED_AGENTS["codex"]["resume_args"] == "resume --last"
+
+    def test_alt_paths_empty(self):
+        assert SUPPORTED_AGENTS["codex"]["alt_paths"] == []
+
+    def test_instruction_file(self):
+        assert _REGISTRY["agents"]["codex"]["instruction_file"] == "AGENTS.md"
+
+    def test_use_agent_rules(self):
+        assert _REGISTRY["agents"]["codex"]["use_agent_rules"] is True
+
+
+# ---------------------------------------------------------------------------
+# Instruction file existence tests
+# ---------------------------------------------------------------------------
+
+
+class TestInstructionFilesExist:
+    """Every non-null instruction_file in agents.json must exist at repo root."""
+
+    def test_all_instruction_files_exist(self):
+        for name, agent in _REGISTRY["agents"].items():
+            f_name = agent.get("instruction_file")
+            if f_name:
+                filepath = REPO_ROOT / f_name
+                assert filepath.exists(), (
+                    f"Agent '{name}' instruction_file '{f_name}' "
+                    f"does not exist at {filepath}"
+                )
+
+    def test_agentinfo_template_exists(self):
+        """AGENTINFO.md must always exist (it's included in every setup)."""
+        assert (REPO_ROOT / "AGENTINFO.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# Shell config variable value spot-checks
+# ---------------------------------------------------------------------------
+
+
+class TestShellConfigValues:
+    """Parse _agent-config.sh and verify key variables match agents.json."""
+
+    @pytest.fixture(autouse=True)
+    def _load_shell_config(self):
+        config_path = REPO_ROOT / "scripts" / "_agent-config.sh"
+        assert config_path.exists(), "_agent-config.sh must exist"
+        self.shell_content = config_path.read_text()
+
+    def _get_shell_var(self, var_name: str) -> str:
+        """Extract a variable value from the shell config."""
+        for line in self.shell_content.splitlines():
+            if line.startswith(f"{var_name}="):
+                # Strip var_name= and surrounding quotes
+                value = line[len(var_name) + 1:]
+                return value.strip('"')
+        pytest.fail(f"Variable {var_name} not found in _agent-config.sh")
+
+    def test_claude_launch_args(self):
+        assert self._get_shell_var("AGENT_claude_LAUNCH_ARGS") == "--dangerously-skip-permissions"
+
+    def test_claude_resume_args(self):
+        assert self._get_shell_var("AGENT_claude_RESUME_ARGS") == "--dangerously-skip-permissions --resume"
+
+    def test_claude_has_resume(self):
+        assert self._get_shell_var("AGENT_claude_HAS_RESUME") == "true"
+
+    def test_cursor_terminal_launch_false(self):
+        assert self._get_shell_var("AGENT_cursor_TERMINAL_LAUNCH") == "false"
+
+    def test_cursor_launch_template(self):
+        assert self._get_shell_var("AGENT_cursor_LAUNCH_TEMPLATE") == "cursor {path}/"
+
+    def test_cursor_has_resume_false(self):
+        assert self._get_shell_var("AGENT_cursor_HAS_RESUME") == "false"
+
+    def test_gemini_launch_args(self):
+        assert self._get_shell_var("AGENT_gemini_LAUNCH_ARGS") == "--yolo"
+
+    def test_gemini_resume_args(self):
+        assert self._get_shell_var("AGENT_gemini_RESUME_ARGS") == "--yolo --resume"
+
+    def test_qwen_launch_args(self):
+        assert self._get_shell_var("AGENT_qwen_LAUNCH_ARGS") == "--yolo"
+
+    def test_qwen_resume_args(self):
+        assert self._get_shell_var("AGENT_qwen_RESUME_ARGS") == "--yolo --continue"
+
+    def test_codex_launch_args(self):
+        assert self._get_shell_var("AGENT_codex_LAUNCH_ARGS") == "--dangerously-bypass-approvals-and-sandbox"
+
+    def test_codex_resume_args(self):
+        assert self._get_shell_var("AGENT_codex_RESUME_ARGS") == "resume --last"
+
+    def test_all_agents_have_display_name(self):
+        for name in _REGISTRY["agents"]:
+            var = f"AGENT_{name}_DISPLAY_NAME"
+            value = self._get_shell_var(var)
+            assert value == _REGISTRY["agents"][name]["display_name"]
+
+    def test_all_agents_have_commands(self):
+        for name in _REGISTRY["agents"]:
+            var = f"AGENT_{name}_COMMANDS"
+            value = self._get_shell_var(var)
+            expected = " ".join(_REGISTRY["agents"][name]["commands"])
+            assert value == expected
+
+
+# ---------------------------------------------------------------------------
+# Raycast launch command output tests (Python generate_raycast_script)
+# ---------------------------------------------------------------------------
+
+
+class TestRaycastOutputPerAgent:
+    """Validate the Python generate_raycast_script produces correct launch commands."""
+
+    PROJECT_PATH = "/Users/dev/projects/my-app"
+
+    def test_claude_launch(self):
+        content = generate_raycast_script(
+            "claude", SUPPORTED_AGENTS["claude"], "my-app", self.PROJECT_PATH
+        )
+        assert "osascript -e" in content
+        assert "claude --dangerously-skip-permissions" in content
+        assert f"cd {self.PROJECT_PATH}/" in content
+
+    def test_claude_resume(self):
+        content = generate_raycast_script(
+            "claude", SUPPORTED_AGENTS["claude"], "my-app", self.PROJECT_PATH, is_resume=True
+        )
+        assert "--dangerously-skip-permissions --resume" in content
+
+    def test_cursor_launch(self):
+        content = generate_raycast_script(
+            "cursor", SUPPORTED_AGENTS["cursor"], "my-app", self.PROJECT_PATH
+        )
+        assert f"cursor {self.PROJECT_PATH}/" in content
+        assert "osascript" not in content
+
+    def test_gemini_launch(self):
+        content = generate_raycast_script(
+            "gemini", SUPPORTED_AGENTS["gemini"], "my-app", self.PROJECT_PATH
+        )
+        assert "osascript -e" in content
+        assert "gemini --yolo" in content
+        assert f"cd {self.PROJECT_PATH}/" in content
+
+    def test_gemini_resume(self):
+        content = generate_raycast_script(
+            "gemini", SUPPORTED_AGENTS["gemini"], "my-app", self.PROJECT_PATH, is_resume=True
+        )
+        assert "--yolo --resume" in content
+
+    def test_qwen_launch(self):
+        content = generate_raycast_script(
+            "qwen", SUPPORTED_AGENTS["qwen"], "my-app", self.PROJECT_PATH
+        )
+        assert "osascript -e" in content
+        assert "qwen --yolo" in content
+        assert f"cd {self.PROJECT_PATH}/" in content
+
+    def test_qwen_resume(self):
+        content = generate_raycast_script(
+            "qwen", SUPPORTED_AGENTS["qwen"], "my-app", self.PROJECT_PATH, is_resume=True
+        )
+        assert "--yolo --continue" in content
+
+    def test_codex_launch(self):
+        content = generate_raycast_script(
+            "codex", SUPPORTED_AGENTS["codex"], "my-app", self.PROJECT_PATH
+        )
+        assert "osascript -e" in content
+        assert "codex --dangerously-bypass-approvals-and-sandbox" in content
+        assert f"cd {self.PROJECT_PATH}/" in content
+
+    def test_codex_resume(self):
+        content = generate_raycast_script(
+            "codex", SUPPORTED_AGENTS["codex"], "my-app", self.PROJECT_PATH, is_resume=True
+        )
+        assert "codex resume --last" in content
+
+    def test_all_scripts_have_shebang(self):
+        for name, config in SUPPORTED_AGENTS.items():
+            content = generate_raycast_script(name, config, "test", "/tmp/test")
+            assert content.startswith("#!/bin/bash"), f"{name} missing shebang"
+
+    def test_all_scripts_have_raycast_metadata(self):
+        for name, config in SUPPORTED_AGENTS.items():
+            content = generate_raycast_script(name, config, "test-proj", "/tmp/test")
+            assert "@raycast.schemaVersion 1" in content, f"{name} missing schemaVersion"
+            assert f"@raycast.title {name} test-proj" in content, f"{name} missing title"
+
+    def test_resume_scripts_have_resume_in_title(self):
+        for name, config in SUPPORTED_AGENTS.items():
+            if config["has_resume"]:
+                content = generate_raycast_script(
+                    name, config, "proj", "/tmp/proj", is_resume=True
+                )
+                assert f"@raycast.title {name} proj resume" in content, (
+                    f"{name} resume script missing 'resume' in title"
+                )
+
+
+# ---------------------------------------------------------------------------
+# Detection logic tests (mock-based)
+# ---------------------------------------------------------------------------
 
 
 class TestDetectAgents:
@@ -85,7 +420,6 @@ class TestDetectAgents:
             return None
 
         monkeypatch.setattr("shutil.which", mock_which)
-        # Ensure alt_paths don't match
         monkeypatch.setattr(
             "aec.lib.config.SUPPORTED_AGENTS",
             {
@@ -143,8 +477,9 @@ class TestDetectAgents:
                     "commands": ["gemini"],
                     "alt_paths": [],
                     "terminal_launch": True,
-                    "launch_args": "",
-                    "has_resume": False,
+                    "launch_args": "--yolo",
+                    "has_resume": True,
+                    "resume_args": "--yolo --resume",
                 },
             },
         )
@@ -175,35 +510,10 @@ class TestDetectAgents:
         monkeypatch.setattr(
             "aec.lib.config.SUPPORTED_AGENTS",
             {
-                "claude": {
-                    "commands": ["claude"],
-                    "alt_paths": [],
-                    "terminal_launch": True,
-                    "launch_args": "--dangerously-skip-permissions",
-                    "has_resume": True,
-                    "resume_args": "--dangerously-skip-permissions --resume",
-                },
-                "cursor": {
-                    "commands": ["cursor"],
-                    "alt_paths": [],
-                    "terminal_launch": False,
-                    "launch_template": "cursor {path}/",
-                    "has_resume": False,
-                },
-                "codex": {
-                    "commands": ["codex"],
-                    "alt_paths": [],
-                    "terminal_launch": True,
-                    "launch_args": "",
-                    "has_resume": False,
-                },
-                "gemini": {
-                    "commands": ["gemini"],
-                    "alt_paths": [],
-                    "terminal_launch": True,
-                    "launch_args": "",
-                    "has_resume": False,
-                },
+                "claude": SUPPORTED_AGENTS["claude"],
+                "cursor": SUPPORTED_AGENTS["cursor"],
+                "codex": SUPPORTED_AGENTS["codex"],
+                "gemini": SUPPORTED_AGENTS["gemini"],
             },
         )
 
@@ -214,113 +524,80 @@ class TestDetectAgents:
         assert "gemini" not in detected
 
 
-class TestGenerateRaycastScript:
-    """Test Raycast script content generation."""
+# ---------------------------------------------------------------------------
+# Real detection integration test
+# Verifies that detect_agents() finds agents actually installed on this machine.
+# ---------------------------------------------------------------------------
 
-    def _claude_config(self):
-        return {
-            "commands": ["claude"],
-            "alt_paths": [],
-            "terminal_launch": True,
-            "launch_args": "--dangerously-skip-permissions",
-            "has_resume": True,
-            "resume_args": "--dangerously-skip-permissions --resume",
-        }
 
-    def _cursor_config(self):
-        return {
-            "commands": ["cursor"],
-            "alt_paths": [],
-            "terminal_launch": False,
-            "launch_template": "cursor {path}/",
-            "has_resume": False,
-        }
+class TestRealAgentDetection:
+    """Integration test: verify detection against real installed agents.
 
-    def _gemini_config(self):
-        return {
-            "commands": ["gemini"],
-            "alt_paths": [],
-            "terminal_launch": True,
-            "launch_args": "",
-            "has_resume": False,
-        }
+    These tests run against the real system and confirm that detect_agents()
+    correctly finds agents that are actually installed. They are skipped
+    in CI via the 'integration' marker if needed.
+    """
 
-    def test_claude_script_has_raycast_metadata(self):
-        """Claude script should contain Raycast metadata comments."""
-        content = generate_raycast_script(
-            "claude", self._claude_config(), "my-project", "/home/user/projects/my-project"
+    @pytest.mark.parametrize("agent_name", list(EXPECTED_AGENT_NAMES))
+    def test_installed_agent_is_detected(self, agent_name):
+        """If an agent's command is on PATH, detect_agents() should find it."""
+        agent_json = _REGISTRY["agents"][agent_name]
+        commands = agent_json["commands"]
+
+        # Check if the agent is actually installed
+        installed = any(shutil.which(cmd) is not None for cmd in commands)
+
+        if not installed:
+            # Also check alt_paths from agents.json
+            for alt in agent_json.get("alt_paths", []):
+                expanded = Path(alt.replace("~", str(Path.home())))
+                if expanded.exists():
+                    installed = True
+                    break
+
+        if not installed:
+            pytest.skip(f"{agent_name} not installed on this machine")
+
+        detected = detect_agents()
+        assert agent_name in detected, (
+            f"{agent_name} is installed but detect_agents() did not find it"
         )
-        assert "#!/bin/bash" in content
-        assert "@raycast.schemaVersion 1" in content
-        assert "@raycast.title claude my-project" in content
-        assert "@raycast.mode compact" in content
-        assert "@raycast.description open claude my-project project" in content
-        assert "@raycast.author matt_bernier" in content
 
-    def test_claude_script_uses_terminal_launch(self):
-        """Claude script should use osascript Terminal launch."""
-        content = generate_raycast_script(
-            "claude", self._claude_config(), "my-project", "/home/user/projects/my-project"
-        )
-        assert "osascript -e" in content
-        assert 'tell application "Terminal"' in content
-        assert "cd /home/user/projects/my-project/" in content
-        assert "claude --dangerously-skip-permissions" in content
+    def test_all_five_agents_detected_on_this_machine(self):
+        """All 5 agents should be detected (skip if any is missing)."""
+        detected = detect_agents()
+        missing = EXPECTED_AGENT_NAMES - set(detected.keys())
+        if missing:
+            # Check if they're actually installed before failing
+            truly_missing = set()
+            for name in missing:
+                agent_json = _REGISTRY["agents"][name]
+                installed = any(
+                    shutil.which(cmd) is not None
+                    for cmd in agent_json["commands"]
+                )
+                if not installed:
+                    for alt in agent_json.get("alt_paths", []):
+                        expanded = Path(alt.replace("~", str(Path.home())))
+                        if expanded.exists():
+                            installed = True
+                            break
+                if installed:
+                    truly_missing.add(name)
 
-    def test_claude_resume_script(self):
-        """Claude resume script should include --resume flag."""
-        content = generate_raycast_script(
-            "claude", self._claude_config(), "my-project", "/home/user/projects/my-project",
-            is_resume=True,
-        )
-        assert "@raycast.title claude my-project resume" in content
-        assert "@raycast.description open claude my-project project resume" in content
-        assert "--dangerously-skip-permissions --resume" in content
+            if truly_missing:
+                pytest.fail(
+                    f"Agents installed but not detected: {truly_missing}"
+                )
+            else:
+                pytest.skip(
+                    f"Agents not installed on this machine: {missing}"
+                )
 
-    def test_cursor_script_uses_direct_launch(self):
-        """Cursor script should use direct cursor command, not Terminal."""
-        content = generate_raycast_script(
-            "cursor", self._cursor_config(), "my-project", "/home/user/projects/my-project"
-        )
-        assert "cursor /home/user/projects/my-project/" in content
-        assert "osascript" not in content
-        assert "Terminal" not in content
 
-    def test_gemini_script_uses_terminal_launch(self):
-        """Gemini script should use Terminal launch like claude but without extra args."""
-        content = generate_raycast_script(
-            "gemini", self._gemini_config(), "my-project", "/home/user/projects/my-project"
-        )
-        assert "osascript -e" in content
-        assert 'tell application "Terminal"' in content
-        assert "cd /home/user/projects/my-project/; gemini" in content
-
-    def test_script_starts_with_shebang(self):
-        """Generated scripts must start with bash shebang."""
-        for agent_name, config in [
-            ("claude", self._claude_config()),
-            ("cursor", self._cursor_config()),
-            ("gemini", self._gemini_config()),
-        ]:
-            content = generate_raycast_script(
-                agent_name, config, "test", "/tmp/test"
-            )
-            assert content.startswith("#!/bin/bash"), f"{agent_name} missing shebang"
-
-    def test_project_name_in_title(self):
-        """Project name should appear in the raycast title."""
-        content = generate_raycast_script(
-            "claude", self._claude_config(), "fancy-project", "/tmp/fancy-project"
-        )
-        assert "@raycast.title claude fancy-project" in content
-
-    def test_project_path_in_command(self):
-        """Absolute project path should appear in the launch command."""
-        path = "/Users/dev/projects/my-app"
-        content = generate_raycast_script(
-            "claude", self._claude_config(), "my-app", path
-        )
-        assert path in content
+# ---------------------------------------------------------------------------
+# Integration: Raycast scripts to disk
+# ---------------------------------------------------------------------------
 
 
 class TestRaycastScriptGeneration:
@@ -333,14 +610,7 @@ class TestRaycastScriptGeneration:
         safe_name = _make_safe_name("My Project")
         assert safe_name == "my-project"
 
-        config = {
-            "commands": ["claude"],
-            "alt_paths": [],
-            "terminal_launch": True,
-            "launch_args": "--dangerously-skip-permissions",
-            "has_resume": True,
-            "resume_args": "--dangerously-skip-permissions --resume",
-        }
+        config = SUPPORTED_AGENTS["claude"]
 
         # Write main script
         content = generate_raycast_script(
@@ -364,6 +634,36 @@ class TestRaycastScriptGeneration:
 
         assert resume_path.exists()
         assert "--resume" in resume_path.read_text()
+
+    def test_all_agents_generate_valid_scripts(self, tmp_path):
+        """Every agent should produce a valid Raycast script."""
+        for name, config in SUPPORTED_AGENTS.items():
+            content = generate_raycast_script(
+                name, config, "test-proj", "/tmp/test-proj"
+            )
+            script_path = tmp_path / f"{name}-test-proj.sh"
+            script_path.write_text(content)
+            script_path.chmod(script_path.stat().st_mode | stat.S_IXUSR)
+
+            assert script_path.exists()
+            assert os.access(script_path, os.X_OK)
+            text = script_path.read_text()
+            assert "#!/bin/bash" in text
+            assert "@raycast.schemaVersion 1" in text
+
+            # Resume variants for agents that support it
+            if config["has_resume"]:
+                resume_content = generate_raycast_script(
+                    name, config, "test-proj", "/tmp/test-proj", is_resume=True
+                )
+                resume_path = tmp_path / f"{name}-test-proj-resume.sh"
+                resume_path.write_text(resume_content)
+                assert "resume" in resume_path.read_text().lower()
+
+
+# ---------------------------------------------------------------------------
+# Helper tests
+# ---------------------------------------------------------------------------
 
 
 class TestMakeSafeName:

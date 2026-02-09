@@ -11,12 +11,20 @@ from .config import (
     AGENT_TOOLS_DIR,
     CLAUDE_DIR,
     CURSOR_DIR,
-    SUPPORTED_AGENTS,
     detect_agents,
     generate_raycast_script,
     get_repo_root,
     get_projects_dir,
     get_github_orgs,
+)
+from .registry import (
+    load_agent_registry,
+    get_supported_agents,
+    get_agent_files,
+    get_gitignore_patterns,
+    get_migration_files,
+    get_generation_agents,
+    invalidate_cache,
 )
 from .console import Console
 from .filesystem import (
@@ -38,6 +46,10 @@ from .tracking import (
     TrackedRepo,
 )
 
+# SUPPORTED_AGENTS is lazy-loaded via config.__getattr__
+# Import it explicitly for backwards compatibility
+SUPPORTED_AGENTS = get_supported_agents()
+
 __all__ = [
     # Config
     "VERSION",
@@ -56,6 +68,14 @@ __all__ = [
     "get_repo_root",
     "get_projects_dir",
     "get_github_orgs",
+    # Registry
+    "load_agent_registry",
+    "get_supported_agents",
+    "get_agent_files",
+    "get_gitignore_patterns",
+    "get_migration_files",
+    "get_generation_agents",
+    "invalidate_cache",
     # Console
     "Console",
     # Filesystem

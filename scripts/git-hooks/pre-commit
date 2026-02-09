@@ -79,7 +79,31 @@ for shfile in "$REPO_ROOT"/scripts/*.sh; do
     fi
 done
 
-# --- 5. Validate .agent-rules/ parity with .cursor/rules/ ---
+# --- 5. Check _agent-config.sh freshness ---
+echo -e "\n${GREEN}Checking _agent-config.sh freshness...${NC}"
+AGENT_CONFIG_SH="$REPO_ROOT/scripts/_agent-config.sh"
+if [ -f "$AGENT_CONFIG_SH" ] && [ -f "$REPO_ROOT/agents.json" ]; then
+    # Save current content, regenerate, compare
+    SAVED_CONTENT=$(cat "$AGENT_CONFIG_SH")
+    if python3 "$REPO_ROOT/scripts/generate-agent-config.py" > /dev/null 2>&1; then
+        NEW_CONTENT=$(cat "$AGENT_CONFIG_SH")
+        if [ "$SAVED_CONTENT" = "$NEW_CONTENT" ]; then
+            echo -e "${GREEN}✓${NC} _agent-config.sh matches agents.json"
+        else
+            echo -e "${RED}✗ _agent-config.sh is stale${NC}"
+            echo -e "  Run: python3 scripts/generate-agent-config.py"
+            ERRORS=$((ERRORS + 1))
+        fi
+    else
+        echo -e "${YELLOW}⚠${NC} Could not run generate-agent-config.py"
+    fi
+elif [ -f "$REPO_ROOT/agents.json" ] && [ ! -f "$AGENT_CONFIG_SH" ]; then
+    echo -e "${RED}✗ _agent-config.sh not found but agents.json exists${NC}"
+    echo -e "  Run: python3 scripts/generate-agent-config.py"
+    ERRORS=$((ERRORS + 1))
+fi
+
+# --- 6. Validate .agent-rules/ parity with .cursor/rules/ ---
 echo -e "\n${GREEN}Checking .agent-rules/ parity...${NC}"
 if [ -d "$REPO_ROOT/.agent-rules" ]; then
     if python3 "$REPO_ROOT/scripts/validate-rule-parity.py" > /dev/null 2>&1; then

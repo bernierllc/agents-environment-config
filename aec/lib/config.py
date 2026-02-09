@@ -29,45 +29,13 @@ AGENT_TOOLS_DIR = HOME / ".agent-tools"
 CLAUDE_DIR = HOME / ".claude"
 CURSOR_DIR = HOME / ".cursor"
 
-# Supported agents with detection and launch configuration
-SUPPORTED_AGENTS = {
-    "claude": {
-        "commands": ["claude"],
-        "alt_paths": [HOME / ".claude"],
-        "terminal_launch": True,
-        "launch_args": "--dangerously-skip-permissions",
-        "has_resume": True,
-        "resume_args": "--dangerously-skip-permissions --resume",
-    },
-    "cursor": {
-        "commands": ["cursor"],
-        "alt_paths": [Path("/Applications/Cursor.app")],
-        "terminal_launch": False,
-        "launch_template": "cursor {path}/",
-        "has_resume": False,
-    },
-    "gemini": {
-        "commands": ["gemini"],
-        "alt_paths": [],
-        "terminal_launch": True,
-        "launch_args": "",
-        "has_resume": False,
-    },
-    "qwen": {
-        "commands": ["qwen"],
-        "alt_paths": [],
-        "terminal_launch": True,
-        "launch_args": "",
-        "has_resume": False,
-    },
-    "codex": {
-        "commands": ["codex"],
-        "alt_paths": [],
-        "terminal_launch": True,
-        "launch_args": "",
-        "has_resume": False,
-    },
-}
+
+# Lazy-load SUPPORTED_AGENTS from registry
+def __getattr__(name: str):
+    if name == "SUPPORTED_AGENTS":
+        from .registry import get_supported_agents
+        return get_supported_agents()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def detect_agents() -> dict[str, dict]:

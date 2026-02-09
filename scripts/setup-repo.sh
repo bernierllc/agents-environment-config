@@ -31,6 +31,9 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Source the AEC home initialization script
 source "$SCRIPT_DIR/init-aec-home.sh"
 
+# Source generated agent config (from agents.json)
+source "$SCRIPT_DIR/_agent-config.sh"
+
 # Load environment variables
 ENV_FILE="$REPO_ROOT/.env"
 if [ -f "$ENV_FILE" ]; then
@@ -78,7 +81,8 @@ needs_agent_rules_migration() {
     local project_dir="$1"
 
     # Check if any agent file still references .cursor/rules/ instead of .agent-rules/
-    for file in CLAUDE.md AGENTS.md GEMINI.md QWEN.md; do
+    # Uses MIGRATION_FILES from sourced _agent-config.sh
+    for file in "${MIGRATION_FILES[@]}"; do
         if [ -f "$project_dir/$file" ]; then
             if grep -q '\.cursor/rules.*\.mdc' "$project_dir/$file" 2>/dev/null; then
                 return 0  # Needs migration
@@ -95,7 +99,8 @@ migrate_to_agent_rules() {
 
     echo -e "\n${BLUE}Checking $project_dir for .agent-rules migration...${NC}"
 
-    for file in CLAUDE.md AGENTS.md GEMINI.md QWEN.md; do
+    # Uses MIGRATION_FILES from sourced _agent-config.sh
+    for file in "${MIGRATION_FILES[@]}"; do
         local filepath="$project_dir/$file"
         if [ -f "$filepath" ]; then
             if grep -q '\.cursor/rules.*\.mdc' "$filepath" 2>/dev/null; then
@@ -329,9 +334,9 @@ copy_fresh_agent_files() {
     local project_dir="$1"
 
     echo -e "\n${BLUE}Copying agent files...${NC}"
-    AGENT_FILES=("AGENTINFO.md" "AGENTS.md" "CLAUDE.md" "GEMINI.md" "QWEN.md")
+    # Uses AGENT_INSTRUCTION_FILES from sourced _agent-config.sh
 
-    for file in "${AGENT_FILES[@]}"; do
+    for file in "${AGENT_INSTRUCTION_FILES[@]}"; do
         if [ -f "$REPO_ROOT/$file" ]; then
             if [ -f "$project_dir/$file" ]; then
                 echo -e "  ${YELLOW}⚠${NC} $file already exists (skipping)"
@@ -511,8 +516,8 @@ echo -e "\n${BLUE}Updating .gitignore...${NC}"
 GITIGNORE="$PROJECT_DIR/.gitignore"
 [ ! -f "$GITIGNORE" ] && touch "$GITIGNORE"
 
-PATTERNS=("AGENTINFO.md" "AGENTS.md" "CLAUDE.md" "GEMINI.md" "QWEN.md" ".cursor/rules" "/plans/")
-for pattern in "${PATTERNS[@]}"; do
+# Uses GITIGNORE_AGENT_PATTERNS from sourced _agent-config.sh
+for pattern in "${GITIGNORE_AGENT_PATTERNS[@]}"; do
     if ! grep -Fxq "$pattern" "$GITIGNORE" 2>/dev/null; then
         echo "$pattern" >> "$GITIGNORE"
         echo -e "  ${GREEN}✓${NC} Added $pattern"
@@ -524,41 +529,9 @@ ABS_PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 aec_log_setup "$ABS_PROJECT_DIR"
 echo -e "\n${GREEN}✓${NC} Logged setup to $AEC_SETUP_LOG"
 
-# --- Agent Detection ---
-
-detect_installed_agents() {
-    # Detect which supported agents are installed on this machine.
-    # Sets DETECTED_AGENTS as a space-separated list of agent names.
-    DETECTED_AGENTS=""
-
-    # claude: check command or ~/.claude directory
-    if command -v claude &>/dev/null || [ -d "$HOME/.claude" ]; then
-        DETECTED_AGENTS="$DETECTED_AGENTS claude"
-    fi
-
-    # cursor: check command or /Applications/Cursor.app
-    if command -v cursor &>/dev/null || [ -d "/Applications/Cursor.app" ]; then
-        DETECTED_AGENTS="$DETECTED_AGENTS cursor"
-    fi
-
-    # gemini: check command
-    if command -v gemini &>/dev/null; then
-        DETECTED_AGENTS="$DETECTED_AGENTS gemini"
-    fi
-
-    # qwen: check command
-    if command -v qwen &>/dev/null; then
-        DETECTED_AGENTS="$DETECTED_AGENTS qwen"
-    fi
-
-    # codex: check command
-    if command -v codex &>/dev/null; then
-        DETECTED_AGENTS="$DETECTED_AGENTS codex"
-    fi
-
-    # Trim leading whitespace
-    DETECTED_AGENTS="$(echo "$DETECTED_AGENTS" | xargs)"
-}
+# --- Agent Detection & Raycast ---
+# detect_installed_agents() and generate_raycast_launch_command() are
+# sourced from _agent-config.sh (generated from agents.json).
 
 generate_raycast_script() {
     # Generate a single Raycast launcher script.
@@ -599,22 +572,10 @@ generate_raycast_script() {
 
 RAYEOF
 
-    # Append the launch command based on agent type
-    case "$agent" in
-        cursor)
-            echo "cursor ${proj_path}/" >> "$script_path"
-            ;;
-        claude)
-            if [ "$is_resume" = true ]; then
-                echo "osascript -e 'tell application \"Terminal\" to do script \"cd ${proj_path}/; claude --dangerously-skip-permissions --resume\"'" >> "$script_path"
-            else
-                echo "osascript -e 'tell application \"Terminal\" to do script \"cd ${proj_path}/; claude --dangerously-skip-permissions\"'" >> "$script_path"
-            fi
-            ;;
-        gemini|qwen|codex)
-            echo "osascript -e 'tell application \"Terminal\" to do script \"cd ${proj_path}/; ${agent}\"'" >> "$script_path"
-            ;;
-    esac
+    # Append the launch command using generated function from _agent-config.sh
+    local launch_cmd
+    launch_cmd=$(generate_raycast_launch_command "$agent" "$proj_path" "$is_resume")
+    echo "$launch_cmd" >> "$script_path"
 
     echo "" >> "$script_path"
     chmod +x "$script_path"
@@ -650,8 +611,9 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
                 generate_raycast_script "$agent" "$PROJECT_NAME" "$ABS_PROJECT_DIR" "$SAFE_NAME" "$RAYCAST_DIR" false
                 SCRIPT_COUNT=$((SCRIPT_COUNT + 1))
 
-                # Generate resume variant for claude
-                if [ "$agent" = "claude" ]; then
+                # Generate resume variant if agent supports it (from _agent-config.sh)
+                local has_resume_var="AGENT_${agent}_HAS_RESUME"
+                if [ "${!has_resume_var}" = "true" ]; then
                     generate_raycast_script "$agent" "$PROJECT_NAME" "$ABS_PROJECT_DIR" "$SAFE_NAME" "$RAYCAST_DIR" true
                     SCRIPT_COUNT=$((SCRIPT_COUNT + 1))
                 fi

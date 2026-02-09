@@ -99,7 +99,7 @@ When adding new features, add corresponding tests in `tests/`.
 
 ## Adding Agent Support
 
-If you want to add support for a new AI coding agent, see [docs/adding-agent-support.md](docs/adding-agent-support.md) or open an issue using the **New Agent Support** template.
+All agents are defined in [`agents.json`](agents.json) at the repo root. Adding a new agent is just one JSON entry + two generation commands. See [docs/adding-agent-support.md](docs/adding-agent-support.md) for the full guide, or open an issue using the **New Agent Support** template.
 
 ## Commit Convention
 

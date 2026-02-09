@@ -23,7 +23,9 @@ This repository contains:
 
 All non-Cursor agents use `.agent-rules/*.md` (standard markdown, no frontmatter). Cursor uses `.cursor/rules/*.mdc` (with YAML frontmatter). See [Rules Architecture](#rules-architecture) for details.
 
-Want to add support for another agent? See the [Adding Agent Support](docs/adding-agent-support.md) guide.
+All agent definitions live in [`agents.json`](agents.json) at the repo root. This is the single source of truth -- Python config, shell config, file lists, and detection logic are all derived from it.
+
+Want to add support for another agent? See the [Adding Agent Support](docs/adding-agent-support.md) guide -- it's just one JSON entry + two commands.
 
 ## Quick Start
 
@@ -174,6 +176,7 @@ agents-environment-config/          # THIS IS A TEMPLATE - don't add project-spe
 ├── raycast_scripts/
 │   ├── setup-repo.sh               # Raycast version of setup-repo
 │   └── *.sh                        # Project launcher scripts
+├── agents.json                     # Single source of truth for agent definitions
 ├── AGENTINFO.md                    # TEMPLATE - gets filled in per-project
 ├── CLAUDE.md                       # TEMPLATE - references .agent-rules/
 ├── AGENTS.md                       # TEMPLATE - for Codex (references .agent-rules/)

@@ -1,0 +1,65 @@
+{
+  "_schema_version": "1.0",
+  "_description": "Single source of truth for supported agents. Run 'python3 scripts/generate-agent-config.py' after editing.",
+  "agents": {
+    "claude": {
+      "display_name": "Claude Code",
+      "description": "Anthropic's CLI coding agent",
+      "instruction_file": "CLAUDE.md",
+      "commands": ["claude"],
+      "alt_paths": ["~/.claude"],
+      "terminal_launch": true,
+      "launch_args": "--dangerously-skip-permissions",
+      "has_resume": true,
+      "resume_args": "--dangerously-skip-permissions --resume",
+      "use_agent_rules": true
+    },
+    "cursor": {
+      "display_name": "Cursor",
+      "description": "AI-first IDE with Cursor rules",
+      "instruction_file": null,
+      "commands": ["cursor"],
+      "alt_paths": ["/Applications/Cursor.app"],
+      "terminal_launch": false,
+      "launch_template": "cursor {path}/",
+      "has_resume": false,
+      "use_agent_rules": false
+    },
+    "gemini": {
+      "display_name": "Gemini CLI",
+      "description": "Google's CLI coding agent",
+      "instruction_file": "GEMINI.md",
+      "commands": ["gemini"],
+      "alt_paths": [],
+      "terminal_launch": true,
+      "launch_args": "--yolo",
+      "has_resume": true,
+      "resume_args": "--yolo --resume",
+      "use_agent_rules": true
+    },
+    "qwen": {
+      "display_name": "Qwen Code",
+      "description": "Alibaba's coding agent",
+      "instruction_file": "QWEN.md",
+      "commands": ["qwen"],
+      "alt_paths": [],
+      "terminal_launch": true,
+      "launch_args": "--yolo",
+      "has_resume": true,
+      "resume_args": "--yolo --continue",
+      "use_agent_rules": true
+    },
+    "codex": {
+      "display_name": "Codex",
+      "description": "OpenAI's coding agent",
+      "instruction_file": "AGENTS.md",
+      "commands": ["codex"],
+      "alt_paths": [],
+      "terminal_launch": true,
+      "launch_args": "--dangerously-bypass-approvals-and-sandbox",
+      "has_resume": true,
+      "resume_args": "resume --last",
+      "use_agent_rules": true
+    }
+  }
+}
