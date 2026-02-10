@@ -57,7 +57,7 @@ if python3 "$SYNC_SCRIPT"; then
     
     # Check if there are changes to commit in cursor commands
     cd "$REPO_ROOT"
-    if git diff --quiet .cursor/commands/; then
+    if git diff --quiet .cursor/commands/ && [ -z "$(git ls-files --others --exclude-standard .cursor/commands/)" ]; then
         echo "No cursor command changes to commit"
     else
         echo "Staging cursor command changes..."
