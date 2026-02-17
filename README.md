@@ -169,12 +169,15 @@ agents-environment-config/          # THIS IS A TEMPLATE - don't add project-spe
 │   ├── migrate-to-agent-tools.sh   # Migrate existing users to new structure
 │   ├── rollback-agent-tools.sh     # Rollback migration if needed
 │   ├── setup-repo.sh               # Set up a NEW project with agent files
+│   ├── cleanup-hung-processes.sh   # Kill hung processes + Docker cleanup (macOS/Linux)
+│   ├── cleanup-hung-processes.ps1  # Same, for Windows (PowerShell)
 │   ├── generate-agent-files.py     # Regenerate CLAUDE.md etc from rules
 │   ├── generate-agent-rules.py     # Generate .agent-rules/ from .cursor/rules/
 │   ├── validate-rule-parity.py     # Pre-commit validation for rule parity
 │   └── git-hooks/                  # Git hooks for this repo
 ├── raycast_scripts/
 │   ├── setup-repo.sh               # Raycast version of setup-repo
+│   ├── cleanup-hung-processes.sh   # Raycast version (calls scripts/)
 │   └── *.sh                        # Project launcher scripts
 ├── agents.json                     # Single source of truth for agent definitions
 ├── AGENTINFO.md                    # TEMPLATE - gets filled in per-project
@@ -228,11 +231,23 @@ Most operations are available via both the Python CLI and shell scripts:
 | Validate rule parity | `aec rules validate` | `scripts/validate-rule-parity.py` |
 | Health check | `aec doctor` | — |
 | Install git hooks | — | `scripts/install-git-hooks.sh` |
+| Cleanup hung processes | — | `scripts/cleanup-hung-processes.sh` (macOS/Linux) or `scripts/cleanup-hung-processes.ps1` (Windows) |
+
+### Cleanup Hung Processes
+
+Kills hung/unresponsive development processes (vitest, jest, stale build tools) and runs Docker cleanup. Only terminates processes that are actually hung (e.g., running >10 min for test runners, >30 min for build tools), not active ones.
+
+| Platform | Script | Notes |
+|----------|--------|-------|
+| macOS / Linux | `scripts/cleanup-hung-processes.sh` | Also available via Raycast: `raycast_scripts/cleanup-hung-processes.sh` |
+| Windows | `scripts/cleanup-hung-processes.ps1` | Run in PowerShell: `pwsh -File scripts/cleanup-hung-processes.ps1` |
+
+Both scripts include timeouts on Docker commands to prevent hangs when the Docker daemon is slow or unresponsive.
 
 ### Script Parity
 
 Scripts in `scripts/` and `raycast_scripts/` must stay in sync. A pre-commit hook validates:
-- `setup-repo.sh` exists in both directories
+- `setup-repo.sh` and `cleanup-hung-processes.sh` exist in both directories
 - AGENTINFO.md remains a template (not project-specific)
 - `.agent-rules/` parity with `.cursor/rules/`
 
