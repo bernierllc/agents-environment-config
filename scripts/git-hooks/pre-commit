@@ -18,7 +18,7 @@ echo -e "${GREEN}=== Pre-commit checks ===${NC}"
 echo -e "\n${GREEN}Checking script parity...${NC}"
 
 # Scripts that MUST exist in both directories
-REQUIRED_SCRIPTS=("setup-repo.sh")
+REQUIRED_SCRIPTS=("setup-repo.sh" "cleanup-hung-processes.sh")
 
 for script in "${REQUIRED_SCRIPTS[@]}"; do
     SCRIPTS_PATH="$REPO_ROOT/scripts/$script"
