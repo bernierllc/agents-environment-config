@@ -32,11 +32,13 @@ if HAS_TYPER:
         check_pending_preferences()
 
     # Import and register command groups
-    from .commands import repo, agent_tools, rules, install, discover
+    from .commands import repo, agent_tools, rules, install, discover, preferences
 
     app.add_typer(repo.app, name="repo", help="Manage project repositories")
     app.add_typer(agent_tools.app, name="agent-tools", help="Manage ~/.agent-tools/ directory")
     app.add_typer(rules.app, name="rules", help="Manage agent rules")
+
+    app.add_typer(preferences.app, name="preferences", help="Manage optional feature preferences")
 
     # Register top-level commands
     app.command("install")(install.install)
@@ -119,6 +121,16 @@ else:
             help="Add missing paths without prompting",
         )
 
+        # preferences commands
+        prefs_parser = subparsers.add_parser("preferences", help="Manage optional feature preferences")
+        prefs_sub = prefs_parser.add_subparsers(dest="prefs_command")
+        prefs_sub.add_parser("list", help="List optional features")
+        prefs_set = prefs_sub.add_parser("set", help="Set a feature on/off")
+        prefs_set.add_argument("feature", help="Feature name")
+        prefs_set.add_argument("value", help="'on' or 'off'")
+        prefs_reset = prefs_sub.add_parser("reset", help="Reset a feature preference")
+        prefs_reset.add_argument("feature", help="Feature name")
+
         args = parser.parse_args()
 
         if args.command is None:
@@ -180,6 +192,17 @@ else:
                 dry_run=args.dry_run,
                 auto=args.auto,
             )
+
+        elif args.command == "preferences":
+            from .commands import preferences as prefs_cmd
+            if args.prefs_command == "list":
+                prefs_cmd.list_preferences()
+            elif args.prefs_command == "set":
+                prefs_cmd.set_pref(args.feature, args.value)
+            elif args.prefs_command == "reset":
+                prefs_cmd.reset_pref(args.feature)
+            else:
+                prefs_parser.print_help()
 
 
 def main():
