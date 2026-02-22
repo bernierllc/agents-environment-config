@@ -99,6 +99,49 @@ def reset_preference(key: str) -> None:
     save_preferences(prefs)
 
 
+def check_pending_preferences() -> None:
+    """
+    Check for unanswered optional features and prompt the user.
+
+    Called as a pre-command hook in the CLI. If all features have been
+    answered (enabled or disabled), this is a fast no-op (single file read).
+    """
+    pending = get_pending_prompts()
+    if not pending:
+        return
+
+    from .console import Console
+
+    Console.print()
+    Console.subheader("Optional Features")
+    Console.print("AEC has optional rules you can enable for your AI agents.\n")
+
+    for feature in pending:
+        try:
+            response = input(feature["prompt"]).strip().lower()
+        except EOFError:
+            response = ""
+
+        if response == "":
+            enabled = feature["default"]
+        elif response in ("y", "yes"):
+            enabled = True
+        elif response in ("n", "no"):
+            enabled = False
+        else:
+            # Treat any unrecognized input as the default
+            enabled = feature["default"]
+
+        set_preference(feature["key"], enabled)
+
+        if enabled:
+            Console.success(f"Enabled: {feature['description']}")
+        else:
+            Console.info(f"Disabled: {feature['description']}")
+
+    Console.print()
+
+
 def get_pending_prompts() -> List[Dict[str, Any]]:
     """
     Get optional features that haven't been asked about yet.

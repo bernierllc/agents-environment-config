@@ -267,3 +267,72 @@ class TestResetPreference:
 
         # Should not raise
         reset_preference("nonexistent-feature")
+
+
+class TestCheckPendingPreferences:
+    """Test the check_pending_preferences function used by CLI callback."""
+
+    def test_prompts_when_pending(self, temp_dir, monkeypatch):
+        """Should prompt user when there are pending preferences."""
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
+        monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+
+        # Simulate user pressing Enter (accepting default)
+        monkeypatch.setattr("builtins.input", lambda _: "")
+
+        from aec.lib.preferences import check_pending_preferences
+
+        check_pending_preferences()
+
+        # After check, preference should be set (default is True for leave-it-better)
+        from aec.lib.preferences import get_preference
+        assert get_preference("leave-it-better") is True
+
+    def test_no_prompt_when_all_answered(self, temp_dir, monkeypatch):
+        """Should not prompt when all preferences are answered."""
+        prefs_file = temp_dir / "preferences.json"
+        prefs_file.write_text(json.dumps({
+            "schema_version": "1.0",
+            "optional_rules": {
+                "leave-it-better": {"enabled": False, "asked_at": "2026-01-01T00:00:00Z"}
+            }
+        }))
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
+
+        # input should NOT be called — if it is, this will raise
+        def should_not_be_called(_):
+            raise AssertionError("Should not prompt")
+        monkeypatch.setattr("builtins.input", should_not_be_called)
+
+        from aec.lib.preferences import check_pending_preferences
+
+        check_pending_preferences()  # Should not raise
+
+    def test_user_declines(self, temp_dir, monkeypatch):
+        """Should store False when user types 'n'."""
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
+        monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+        monkeypatch.setattr("builtins.input", lambda _: "n")
+
+        from aec.lib.preferences import check_pending_preferences, get_preference
+
+        check_pending_preferences()
+
+        assert get_preference("leave-it-better") is False
+
+    def test_handles_eof(self, temp_dir, monkeypatch):
+        """Should use default when input raises EOFError (non-interactive)."""
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
+        monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+
+        def raise_eof(_):
+            raise EOFError
+
+        monkeypatch.setattr("builtins.input", raise_eof)
+
+        from aec.lib.preferences import check_pending_preferences, get_preference
+
+        check_pending_preferences()
+
+        # Default for leave-it-better is True
+        assert get_preference("leave-it-better") is True

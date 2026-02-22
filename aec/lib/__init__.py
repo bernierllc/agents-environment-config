@@ -53,6 +53,7 @@ from .preferences import (
     set_preference,
     reset_preference,
     get_pending_prompts,
+    check_pending_preferences,
 )
 
 # SUPPORTED_AGENTS is lazy-loaded via config.__getattr__
@@ -111,4 +112,5 @@ __all__ = [
     "set_preference",
     "reset_preference",
     "get_pending_prompts",
+    "check_pending_preferences",
 ]
