@@ -45,6 +45,15 @@ from .tracking import (
     discover_from_scripts,
     TrackedRepo,
 )
+from .preferences import (
+    OPTIONAL_FEATURES,
+    load_preferences,
+    save_preferences,
+    get_preference,
+    set_preference,
+    reset_preference,
+    get_pending_prompts,
+)
 
 # SUPPORTED_AGENTS is lazy-loaded via config.__getattr__
 # Import it explicitly for backwards compatibility
@@ -94,4 +103,12 @@ __all__ = [
     "list_repos",
     "discover_from_scripts",
     "TrackedRepo",
+    # Preferences
+    "OPTIONAL_FEATURES",
+    "load_preferences",
+    "save_preferences",
+    "get_preference",
+    "set_preference",
+    "reset_preference",
+    "get_pending_prompts",
 ]
