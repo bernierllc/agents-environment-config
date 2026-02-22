@@ -105,6 +105,44 @@ def _copy_agent_files(project_dir: Path, repo_root: Path) -> None:
                 Console.error("Failed to copy CURSOR.mdc")
 
 
+# Mapping of optional feature keys to their rule source files (relative to repo root)
+OPTIONAL_RULE_FILES = {
+    "leave-it-better": ".cursor/rules/general/leave-it-better.mdc",
+}
+
+
+def _copy_optional_rules(project_dir: Path, repo_root: Path) -> None:
+    """Copy enabled optional rule files to the project."""
+    from ..lib.preferences import get_preference
+
+    for feature_key, rule_path in OPTIONAL_RULE_FILES.items():
+        preference = get_preference(feature_key)
+
+        # Only copy if explicitly enabled (True), skip if False or None
+        if preference is not True:
+            continue
+
+        source = repo_root / rule_path
+        if not source.exists():
+            Console.warning(f"Optional rule source not found: {rule_path}")
+            continue
+
+        # Preserve the relative path structure under .cursor/rules/
+        relative = Path(rule_path).relative_to(".cursor/rules")
+        target = project_dir / ".cursor" / "rules" / relative
+
+        # Ensure parent directory exists
+        ensure_directory(target.parent)
+
+        if target.exists():
+            Console.skip(f"{relative} already exists (skipping)")
+        else:
+            if copy_file(source, target):
+                Console.success(f"Copied optional rule: {relative}")
+            else:
+                Console.error(f"Failed to copy optional rule: {relative}")
+
+
 def _make_safe_name(project_name: str) -> str:
     """Convert a project name to a safe filename component (lowercase, alphanumeric, hyphens)."""
     safe = project_name.lower()
@@ -346,6 +384,9 @@ def setup(
 
     # Copy agent files
     _copy_agent_files(project_dir, repo_root)
+
+    # Copy optional rules based on user preferences
+    _copy_optional_rules(project_dir, repo_root)
 
     # Update .gitignore
     _update_gitignore(project_dir)
