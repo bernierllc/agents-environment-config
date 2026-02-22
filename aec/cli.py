@@ -138,9 +138,8 @@ else:
             return
 
         # Check for unanswered optional features
-        if args.command is not None:
-            from .lib.preferences import check_pending_preferences
-            check_pending_preferences()
+        from .lib.preferences import check_pending_preferences
+        check_pending_preferences()
 
         # Dispatch to command handlers
         from .commands import repo as repo_cmd
