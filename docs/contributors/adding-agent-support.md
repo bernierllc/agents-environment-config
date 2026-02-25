@@ -4,7 +4,7 @@ Guide for contributors who want to add support for a new AI coding agent in agen
 
 ## Prerequisites
 
-- Familiarity with the [README](../README.md) and the overall repo structure
+- Familiarity with the [README](../../README.md) and the overall repo structure
 - The agent you are adding must have a documented instruction file format (e.g., a markdown file the agent reads at startup)
 - A working installation of the agent on your machine for testing
 
@@ -56,7 +56,7 @@ Open `agents.json` at the repo root and add a new entry to the `"agents"` object
 | `launch_template` | string | Launch command template with `{path}` placeholder (non-terminal agents only) |
 | `has_resume` | bool | Whether the agent supports a `--resume` flag |
 | `resume_args` | string | Arguments for resume mode (only if `has_resume: true`) |
-| `use_agent_rules` | bool | `true` = references `.agent-rules/*.md`, `false` = uses Cursor `.mdc` files |
+| `use_agent_rules` | bool | `true` = references `~/.agent-tools/rules/agents-environment-config/*.md`, `false` = uses Cursor `.mdc` files |
 
 ### Examples
 
@@ -123,7 +123,7 @@ aec doctor
 
 ## 4. Update README
 
-Add the new agent to the [Supported Agents](../README.md#supported-agents) table in README.md.
+Add the new agent to the [Supported Agents](../../README.md#supported-agents) table in README.md.
 
 ## 5. Commit
 
@@ -154,12 +154,12 @@ The `agents.json` registry is the single source of truth. All other agent-relate
 - [ ] Ran `python3 scripts/generate-agent-files.py`
 - [ ] Tests pass: `python -m pytest tests/ -v`
 - [ ] Rule parity validated: `aec rules validate`
-- [ ] [Supported Agents](../README.md#supported-agents) table updated in README
+- [ ] [Supported Agents](../../README.md#supported-agents) table updated in README
 
 ## References
 
-- [README](../README.md) -- project overview and structure
-- [`agents.json`](../agents.json) -- agent registry (single source of truth)
-- [`aec/lib/registry.py`](../aec/lib/registry.py) -- Python registry loader
-- [`scripts/generate-agent-config.py`](../scripts/generate-agent-config.py) -- shell config generator
-- [`scripts/generate-agent-files.py`](../scripts/generate-agent-files.py) -- agent file generation script
+- [README](../../README.md) -- project overview and structure
+- [`agents.json`](../../agents.json) -- agent registry (single source of truth)
+- [`aec/lib/registry.py`](../../aec/lib/registry.py) -- Python registry loader
+- [`scripts/generate-agent-config.py`](../../scripts/generate-agent-config.py) -- shell config generator
+- [`scripts/generate-agent-files.py`](../../scripts/generate-agent-files.py) -- agent file generation script

@@ -57,7 +57,7 @@ Rules are authored in `.cursor/rules/` with Cursor YAML frontmatter. The `.agent
 3. Run `python3 scripts/generate-agent-files.py` to update agent instruction files
 4. Run `aec rules validate` to verify parity
 
-Never edit `.agent-rules/` directly -- it will be overwritten.
+Never edit `.agent-rules/` directly -- it will be overwritten. See [docs/contributors/generation-pipeline.md](docs/contributors/generation-pipeline.md) for the full generation workflow.
 
 ### Agent Instruction Files (`CLAUDE.md`, `AGENTS.md`, etc.)
 
@@ -95,11 +95,11 @@ aec rules validate
 aec doctor
 ```
 
-When adding new features, add corresponding tests in `tests/`.
+When adding new features, add corresponding tests in `tests/`. See [docs/contributors/testing.md](docs/contributors/testing.md) for fixtures, patterns, and the mocking strategy.
 
 ## Adding Agent Support
 
-All agents are defined in [`agents.json`](agents.json) at the repo root. Adding a new agent is just one JSON entry + two generation commands. See [docs/adding-agent-support.md](docs/adding-agent-support.md) for the full guide, or open an issue using the **New Agent Support** template.
+All agents are defined in [`agents.json`](agents.json) at the repo root. Adding a new agent is just one JSON entry + two generation commands. See [docs/contributors/adding-agent-support.md](docs/contributors/adding-agent-support.md) for the full guide, or open an issue using the **New Agent Support** template. For how the pieces fit together, see [docs/contributors/architecture.md](docs/contributors/architecture.md).
 
 ## Commit Convention
 
