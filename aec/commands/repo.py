@@ -32,6 +32,7 @@ from ..lib import (
     get_agent_files,
     get_gitignore_patterns,
     get_migration_files,
+    AGENT_TOOLS_DIR,
 )
 from ..lib.git import clone_repo
 
@@ -254,21 +255,27 @@ def _update_gitignore(project_dir: Path) -> None:
 
 
 def _needs_migration(project_dir: Path) -> bool:
-    """Check if project needs migration to .agent-rules/ references."""
+    """Check if project needs migration to ~/.agent-tools/ references."""
     for filename in get_migration_files():
         filepath = project_dir / filename
         if filepath.exists():
             content = filepath.read_text()
+            # Old format: .cursor/rules/*.mdc
             if ".cursor/rules" in content and ".mdc" in content:
+                return True
+            # Intermediate format: .agent-rules/ (local, not home dir)
+            if ".agent-rules/" in content and "~/.agent-tools/" not in content:
                 return True
     return False
 
 
 def _migrate_agent_files(project_dir: Path, dry_run: bool = False) -> int:
-    """Migrate agent files from .cursor/rules/ to .agent-rules/ references."""
+    """Migrate agent files to ~/.agent-tools/ references."""
     import re
 
-    Console.subheader(f"Checking for .agent-rules migration...")
+    home_rules = "~/.agent-tools/rules/agents-environment-config"
+
+    Console.subheader("Checking for path migrations...")
     changes = 0
 
     for filename in get_migration_files():
@@ -278,33 +285,58 @@ def _migrate_agent_files(project_dir: Path, dry_run: bool = False) -> int:
             continue
 
         content = filepath.read_text()
+        needs_update = False
 
+        # Check for old .cursor/rules/*.mdc format
         if ".cursor/rules" in content and ".mdc" in content:
+            needs_update = True
+
+        # Check for intermediate .agent-rules/ format (local, not home dir)
+        if ".agent-rules/" in content and "~/.agent-tools/" not in content:
+            needs_update = True
+
+        if needs_update:
             if dry_run:
                 Console.warning(f"Would update: {filename}")
                 changes += 1
             else:
-                # Replace .cursor/rules/*.mdc with .agent-rules/*.md
+                new_content = content
+
+                # Phase 1: .cursor/rules/*.mdc -> home dir paths
                 new_content = re.sub(
                     r'\.cursor/rules/([^`]*?)\.mdc',
-                    r'.agent-rules/\1.md',
-                    content
+                    home_rules + r'/\1.md',
+                    new_content
                 )
-                # Also update text references
                 new_content = new_content.replace(
                     "Read relevant `.cursor/rules",
-                    "Read relevant `.agent-rules"
+                    f"Read relevant `{home_rules}"
                 )
                 new_content = new_content.replace(
                     "Rules are organized in `.cursor/rules",
-                    "Rules are organized in `.agent-rules"
+                    f"Rules are organized in `{home_rules}"
+                )
+
+                # Phase 2: .agent-rules/ -> home dir paths
+                new_content = re.sub(
+                    r'(?<!\~/)\.agent-rules/([^`]*?)\.md',
+                    home_rules + r'/\1.md',
+                    new_content
+                )
+                new_content = new_content.replace(
+                    "Read relevant `.agent-rules",
+                    f"Read relevant `{home_rules}"
+                )
+                new_content = new_content.replace(
+                    "Rules are organized in `.agent-rules",
+                    f"Rules are organized in `{home_rules}"
                 )
 
                 filepath.write_text(new_content)
                 Console.success(f"Updated {filename}")
                 changes += 1
         else:
-            Console.success(f"{filename} already uses .agent-rules/")
+            Console.success(f"{filename} already up to date")
 
     return changes
 
@@ -322,6 +354,17 @@ def setup(
         raise SystemExit(1)
 
     Console.print(f"Template source: {Console.path(repo_root)}")
+
+    # Check that aec install has been run (rules must exist in home dir)
+    rules_install_dir = AGENT_TOOLS_DIR / "rules" / "agents-environment-config"
+    if not rules_install_dir.exists():
+        Console.error(
+            "Agent rules not installed. "
+            "Agent files reference rules in ~/.agent-tools/rules/agents-environment-config/ "
+            "which does not exist."
+        )
+        Console.print(f"\nRun this first: {Console.cmd('python -m aec install')}")
+        raise SystemExit(1)
 
     # Resolve path
     project_dir = _resolve_project_path(path)

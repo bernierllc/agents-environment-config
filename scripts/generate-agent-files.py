@@ -109,9 +109,9 @@ def generate_reference_only_content(
 
     # Determine path prefix and extension based on target
     if use_agent_rules:
-        rules_dir = '.agent-rules'
+        rules_dir = '~/.agent-tools/rules/agents-environment-config'
         ext = '.md'
-        dir_note = "Rules are organized in `.agent-rules/` (no Cursor frontmatter) and should be read on demand."
+        dir_note = "Rules live in `~/.agent-tools/rules/agents-environment-config/` (installed by `aec install`) and should be read on demand."
     else:
         rules_dir = '.cursor/rules'
         ext = '.mdc'
@@ -235,7 +235,7 @@ def generate_agent_file(
     """
     # Determine which rules directory to reference
     if use_agent_rules:
-        rules_path = '.agent-rules/*.md'
+        rules_path = '~/.agent-tools/rules/agents-environment-config/*.md'
     else:
         rules_path = '.cursor/rules/*.mdc'
 
@@ -412,7 +412,7 @@ def main():
     for filename in agents.keys():
         print(f"  - {filename}")
 
-    print("\nNote: All agents now reference .agent-rules/*.md (no Cursor frontmatter)")
+    print("\nNote: All agents now reference ~/.agent-tools/rules/agents-environment-config/*.md")
     print("Cursor IDE uses .cursor/rules/*.mdc directly via symlinks.")
 
     return 0
