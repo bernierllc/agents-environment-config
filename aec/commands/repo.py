@@ -407,6 +407,7 @@ def _migrate_agent_files(project_dir: Path, dry_run: bool = False) -> int:
 def setup(
     path: str,
     skip_raycast: bool = False,
+    batch: bool = False,
 ) -> None:
     """Setup a project with agent files."""
     Console.header("Repository Setup")
@@ -439,6 +440,13 @@ def setup(
     # Check if already set up
     if is_logged(project_dir):
         old_version = get_version(project_dir) or "unknown"
+
+        if batch:
+            # In batch mode, silently run update instead of showing interactive menu
+            Console.info(f"  {project_dir.name}: updating (was {old_version})")
+            update(str(project_dir), dry_run=False, update_all=False)
+            return
+
         Console.info(f"Previously set up (version {old_version})")
         Console.print("\nOptions:")
         Console.print("  1) Check for updates (recommended)")
@@ -623,6 +631,19 @@ def _update_all_repos(dry_run: bool = False) -> None:
         Console.print("\nRun without --dry-run to apply changes.")
 
 
+def setup_all() -> None:
+    """Setup all projects in the configured projects directory."""
+    from ..lib.preferences import get_setting
+    from .install import _batch_project_setup
+
+    projects_dir = get_setting("projects_dir")
+    if not projects_dir:
+        Console.error("No projects directory configured. Run 'aec install' first.")
+        raise SystemExit(1)
+
+    _batch_project_setup()
+
+
 # Typer command decorators (if available)
 if HAS_TYPER:
     @app.command("setup")
@@ -637,6 +658,11 @@ if HAS_TYPER:
     def list_cmd():
         """List all tracked repositories."""
         list_repos()
+
+    @app.command("setup-all")
+    def setup_all_cmd():
+        """Setup all projects in the configured projects directory."""
+        setup_all()
 
     @app.command("update")
     def update_cmd(
