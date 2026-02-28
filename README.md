@@ -31,6 +31,8 @@ Want to add support for another agent? See the [Adding Agent Support](docs/addin
 
 ### Setting Up This Repo (One Time)
 
+> **New to Python/pip?** The `pip` command below requires Python 3.10+. If you don't have it installed, see the [official pip installation guide](https://pip.pypa.io/en/stable/installation/) for macOS, Windows, and Linux instructions.
+
 ```bash
 git clone https://github.com/bernierllc/agents-environment-config.git
 cd agents-environment-config
@@ -41,6 +43,11 @@ pip install -e .
 # Run setup
 aec install
 ```
+
+> **Not totally sure yet?** Run with `--dry-run` to see what would be changed, before you run it for real!
+> ```bash
+> aec install --dry-run
+> ```
 
 Or using shell scripts (macOS/Linux only):
 ```bash
