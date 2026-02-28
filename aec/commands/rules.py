@@ -171,7 +171,9 @@ def validate() -> Tuple[bool, List[str]]:
 
         # Compare content (stripped frontmatter vs .md)
         mdc_content = mdc_file.read_text()
-        mdc_stripped = _strip_frontmatter(mdc_content).strip()
+        mdc_stripped = _strip_frontmatter(mdc_content)
+        mdc_stripped = _apply_settings(mdc_stripped)
+        mdc_stripped = mdc_stripped.strip()
         md_content = md_file.read_text().strip()
 
         if mdc_stripped != md_content:

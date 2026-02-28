@@ -41,9 +41,8 @@ if HAS_TYPER:
 else:
     app = None
 
-# Agent files and gitignore patterns derived from agents.json registry
+# Agent files derived from agents.json registry
 AGENT_FILES = get_agent_files()
-GITIGNORE_PATTERNS = get_gitignore_patterns()
 
 
 def _resolve_project_path(path_input: str) -> Path:
@@ -184,21 +183,20 @@ def _migrate_plans_dir(project_dir: Path) -> None:
         migrated = 0
         skipped = 0
         for item in files:
-            if item.is_file():
-                dest = target / item.name
-                if dest.exists():
-                    Console.skip(f"  {item.name} already exists in {plans_dir}/ (skipping)")
-                    skipped += 1
-                else:
-                    shutil.move(str(item), str(dest))
-                    migrated += 1
+            dest = target / item.name
+            if dest.exists():
+                Console.skip(f"  {item.name} already exists in {plans_dir}/ (skipping)")
+                skipped += 1
+            else:
+                shutil.move(str(item), str(dest))
+                migrated += 1
 
         if migrated:
             Console.success(
-                f"Migrated {migrated} file(s) from {legacy.relative_to(project_dir)}/ to {plans_dir}/"
+                f"Migrated {migrated} item(s) from {legacy.relative_to(project_dir)}/ to {plans_dir}/"
             )
         if skipped:
-            Console.info(f"Skipped {skipped} file(s) already in {plans_dir}/")
+            Console.info(f"Skipped {skipped} item(s) already in {plans_dir}/")
 
         # Remove empty legacy directory
         remaining = list(legacy.iterdir())
@@ -300,9 +298,10 @@ def _update_gitignore(project_dir: Path) -> None:
     if gitignore_path.exists():
         existing_patterns = set(gitignore_path.read_text().strip().split("\n"))
 
-    # Add missing patterns
+    # Add missing patterns (call at runtime, not module-level, so settings are fresh)
+    gitignore_patterns = get_gitignore_patterns()
     added = []
-    for pattern in GITIGNORE_PATTERNS:
+    for pattern in gitignore_patterns:
         if pattern not in existing_patterns:
             existing_patterns.add(pattern)
             added.append(pattern)

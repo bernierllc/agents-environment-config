@@ -223,3 +223,36 @@ class TestRulesCompletionBehavior:
         output = (mock_repo_root / ".agent-rules" / "general" / "plans-checklists.md").read_text()
         assert "completed/" in output
         assert "(if applicable)" in output
+
+
+class TestValidateWithSettings:
+    """Test that validate() accounts for settings-rewritten content."""
+
+    def test_validate_passes_with_custom_plans_dir(self, mock_repo_root, monkeypatch, temp_dir):
+        """Validate should pass when .agent-rules has settings-applied content."""
+        prefs_file = temp_dir / "preferences.json"
+        prefs_file.write_text(json.dumps({
+            "schema_version": "1.1",
+            "optional_rules": {},
+            "settings": {"plans_dir": ".plans"}
+        }))
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
+
+        # Create a .mdc source that references ./plans/
+        cursor_rules = mock_repo_root / ".cursor" / "rules" / "general"
+        cursor_rules.mkdir(parents=True, exist_ok=True)
+        (cursor_rules / "test-plans.mdc").write_text(
+            "---\ndescription: test\n---\n"
+            "Store plans in `./plans/` directory\n"
+        )
+
+        monkeypatch.setattr("aec.commands.rules.get_repo_root", lambda: mock_repo_root)
+
+        # First generate (applies settings: ./plans/ -> ./.plans/)
+        from aec.commands.rules import generate, validate
+        generate()
+
+        # Then validate should pass (not fail due to settings-rewritten content)
+        success, errors = validate()
+        assert success is True
+        assert errors == []

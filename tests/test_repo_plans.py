@@ -133,3 +133,28 @@ class TestMigratePlansDir:
         _migrate_plans_dir(project)
         # Should keep the target version
         assert (project / ".plans" / "feature.md").read_text() == "new version"
+
+    def test_migrates_subdirectories(self, temp_dir, monkeypatch):
+        """Should also migrate subdirectories, not just files."""
+        prefs_file = temp_dir / "prefs.json"
+        prefs_file.write_text(json.dumps({
+            "schema_version": "1.1",
+            "optional_rules": {},
+            "settings": {"plans_dir": ".plans"}
+        }))
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
+
+        from aec.commands.repo import _migrate_plans_dir
+
+        project = temp_dir / "myproject"
+        project.mkdir()
+        old_plans = project / "plans"
+        old_plans.mkdir()
+        subdir = old_plans / "features"
+        subdir.mkdir()
+        (subdir / "auth.md").write_text("# Auth Plan")
+
+        _migrate_plans_dir(project)
+
+        assert (project / ".plans" / "features" / "auth.md").exists()
+        assert not (project / "plans").exists()
