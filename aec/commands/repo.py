@@ -55,7 +55,7 @@ def _resolve_project_path(path_input: str) -> Path:
     return get_projects_dir() / path_input
 
 
-def _create_directories(project_dir: Path) -> None:
+def _create_directories(project_dir: Path, dry_run: bool = False) -> None:
     """Create required directories in the project."""
     from ..lib.preferences import get_setting
 
@@ -70,12 +70,19 @@ def _create_directories(project_dir: Path) -> None:
     ]
 
     for d in dirs:
-        ensure_directory(d)
+        if dry_run:
+            if not d.exists():
+                Console.info(f"Would create: {d}")
+            else:
+                Console.success(f"{d} (already exists)")
+        else:
+            ensure_directory(d)
 
-    Console.success(f"Created .cursor/rules/, docs/, {plans_dir}/")
+    if not dry_run:
+        Console.success(f"Created .cursor/rules/, docs/, {plans_dir}/")
 
 
-def _copy_agent_files(project_dir: Path, repo_root: Path) -> None:
+def _copy_agent_files(project_dir: Path, repo_root: Path, dry_run: bool = False) -> None:
     """Copy agent files from repo to project."""
     Console.subheader("Copying agent files...")
 
@@ -89,6 +96,8 @@ def _copy_agent_files(project_dir: Path, repo_root: Path) -> None:
 
         if target.exists():
             Console.skip(f"{filename} already exists (skipping)")
+        elif dry_run:
+            Console.info(f"Would copy: {filename}")
         else:
             if copy_file(source, target):
                 Console.success(f"Copied {filename}")
@@ -102,6 +111,8 @@ def _copy_agent_files(project_dir: Path, repo_root: Path) -> None:
     if cursor_src.exists():
         if cursor_dst.exists():
             Console.skip("CURSOR.mdc already exists (skipping)")
+        elif dry_run:
+            Console.info("Would copy: CURSOR.mdc to .cursor/rules/")
         else:
             if copy_file(cursor_src, cursor_dst):
                 Console.success("Copied CURSOR.mdc to .cursor/rules/")
@@ -115,7 +126,7 @@ OPTIONAL_RULE_FILES = {
 }
 
 
-def _copy_optional_rules(project_dir: Path, repo_root: Path) -> None:
+def _copy_optional_rules(project_dir: Path, repo_root: Path, dry_run: bool = False) -> None:
     """Copy enabled optional rule files to the project."""
     from ..lib.preferences import get_preference
 
@@ -135,19 +146,21 @@ def _copy_optional_rules(project_dir: Path, repo_root: Path) -> None:
         relative = Path(rule_path).relative_to(".cursor/rules")
         target = project_dir / ".cursor" / "rules" / relative
 
-        # Ensure parent directory exists
-        ensure_directory(target.parent)
-
         if target.exists():
             Console.skip(f"{relative} already exists (skipping)")
+        elif dry_run:
+            Console.info(f"Would copy optional rule: {relative}")
         else:
+            # Ensure parent directory exists
+            ensure_directory(target.parent)
+
             if copy_file(source, target):
                 Console.success(f"Copied optional rule: {relative}")
             else:
                 Console.error(f"Failed to copy optional rule: {relative}")
 
 
-def _migrate_plans_dir(project_dir: Path) -> None:
+def _migrate_plans_dir(project_dir: Path, dry_run: bool = False) -> None:
     """Migrate legacy plans directories to the configured plans_dir.
 
     Checks for legacy locations (plans/, docs/plans/) and moves files
@@ -177,8 +190,9 @@ def _migrate_plans_dir(project_dir: Path) -> None:
         if not files:
             continue
 
-        # Ensure target directory exists
-        ensure_directory(target)
+        if not dry_run:
+            # Ensure target directory exists
+            ensure_directory(target)
 
         migrated = 0
         skipped = 0
@@ -187,22 +201,31 @@ def _migrate_plans_dir(project_dir: Path) -> None:
             if dest.exists():
                 Console.skip(f"  {item.name} already exists in {plans_dir}/ (skipping)")
                 skipped += 1
+            elif dry_run:
+                Console.info(f"  Would migrate: {item.name} -> {plans_dir}/")
+                migrated += 1
             else:
                 shutil.move(str(item), str(dest))
                 migrated += 1
 
         if migrated:
-            Console.success(
-                f"Migrated {migrated} item(s) from {legacy.relative_to(project_dir)}/ to {plans_dir}/"
-            )
+            if dry_run:
+                Console.info(
+                    f"Would migrate {migrated} item(s) from {legacy.relative_to(project_dir)}/ to {plans_dir}/"
+                )
+            else:
+                Console.success(
+                    f"Migrated {migrated} item(s) from {legacy.relative_to(project_dir)}/ to {plans_dir}/"
+                )
         if skipped:
             Console.info(f"Skipped {skipped} item(s) already in {plans_dir}/")
 
         # Remove empty legacy directory
-        remaining = list(legacy.iterdir())
-        if not remaining:
-            legacy.rmdir()
-            Console.info(f"Removed empty {legacy.relative_to(project_dir)}/")
+        if not dry_run:
+            remaining = list(legacy.iterdir())
+            if not remaining:
+                legacy.rmdir()
+                Console.info(f"Removed empty {legacy.relative_to(project_dir)}/")
 
 
 def _make_safe_name(project_name: str) -> str:
@@ -218,6 +241,7 @@ def _generate_raycast_scripts(
     project_dir: Path,
     project_name: str,
     repo_root: Path,
+    dry_run: bool = False,
 ) -> None:
     """Detect installed agents and generate Raycast launcher scripts.
 
@@ -238,6 +262,25 @@ def _generate_raycast_scripts(
     Console.subheader("Detected agents:")
     for agent_name in detected:
         Console.success(agent_name)
+
+    if dry_run:
+        # Skip prompt, report what would happen
+        raycast_dir = repo_root / "raycast_scripts"
+        safe_name = _make_safe_name(project_name)
+        script_count = 0
+
+        for agent_name, agent_config in detected.items():
+            script_path = raycast_dir / f"{agent_name}-{safe_name}.sh"
+            Console.info(f"Would create script: {script_path}")
+            script_count += 1
+
+            if agent_config.get("has_resume", False):
+                resume_path = raycast_dir / f"{agent_name}-{safe_name}-resume.sh"
+                Console.info(f"Would create script: {resume_path}")
+                script_count += 1
+
+        Console.info(f"Would create {script_count} Raycast script(s)")
+        return
 
     Console.print()
     try:
@@ -287,7 +330,7 @@ def _generate_raycast_scripts(
     Console.success(f"Created {script_count} Raycast script(s) in {raycast_dir}")
 
 
-def _update_gitignore(project_dir: Path) -> None:
+def _update_gitignore(project_dir: Path, dry_run: bool = False) -> None:
     """Update .gitignore with agent file patterns."""
     Console.subheader("Updating .gitignore...")
 
@@ -306,14 +349,18 @@ def _update_gitignore(project_dir: Path) -> None:
             existing_patterns.add(pattern)
             added.append(pattern)
 
-    # Write back
-    if added:
+    if not added:
+        Console.info("All patterns already present")
+        return
+
+    if dry_run:
+        for pattern in added:
+            Console.info(f"Would add to .gitignore: {pattern}")
+    else:
         with open(gitignore_path, "a") as f:
             for pattern in added:
                 f.write(f"{pattern}\n")
                 Console.success(f"Added {pattern}")
-    else:
-        Console.info("All patterns already present")
 
 
 def _needs_migration(project_dir: Path) -> bool:
@@ -407,9 +454,20 @@ def setup(
     path: str,
     skip_raycast: bool = False,
     batch: bool = False,
+    dry_run: bool = False,
 ) -> None:
-    """Setup a project with agent files."""
+    """Setup a project with agent files.
+
+    Args:
+        path: Project name or path.
+        skip_raycast: Skip Raycast script creation.
+        batch: Batch mode (skip interactive prompts for already-setup projects).
+        dry_run: If True, report what would happen without making changes.
+    """
     Console.header("Repository Setup")
+
+    if dry_run:
+        Console.warning("DRY RUN MODE - No changes will be made\n")
 
     repo_root = get_repo_root()
     if not repo_root:
@@ -440,6 +498,12 @@ def setup(
     if is_logged(project_dir):
         old_version = get_version(project_dir) or "unknown"
 
+        if dry_run:
+            Console.info(f"Previously set up (version {old_version})")
+            Console.info("Would check for updates")
+            update(str(project_dir), dry_run=True, update_all=False)
+            return
+
         if batch:
             # In batch mode, silently run update instead of showing interactive menu
             Console.info(f"  {project_dir.name}: updating (was {old_version})")
@@ -467,6 +531,11 @@ def setup(
 
     # Check if directory exists
     if not project_dir.exists():
+        if dry_run:
+            Console.info(f"Directory does not exist: {project_dir}")
+            Console.info("Would attempt to clone or create directory")
+            return
+
         Console.warning("Directory does not exist.")
 
         # Try to clone from GitHub
@@ -493,48 +562,55 @@ def setup(
                 return
 
     # Create directories
-    _create_directories(project_dir)
+    _create_directories(project_dir, dry_run)
 
     # Migrate legacy plans directories
-    _migrate_plans_dir(project_dir)
+    _migrate_plans_dir(project_dir, dry_run)
 
     # Copy agent files
-    _copy_agent_files(project_dir, repo_root)
+    _copy_agent_files(project_dir, repo_root, dry_run)
 
     # Copy optional rules based on user preferences
-    _copy_optional_rules(project_dir, repo_root)
+    _copy_optional_rules(project_dir, repo_root, dry_run)
 
     # Update .gitignore
-    _update_gitignore(project_dir)
+    _update_gitignore(project_dir, dry_run)
 
     # Log setup
-    log_setup(project_dir)
-    Console.success(f"Logged setup to tracking file")
+    log_setup(project_dir, dry_run)
+    if not dry_run:
+        Console.success(f"Logged setup to tracking file")
 
     # Raycast scripts (macOS only)
     if not skip_raycast:
-        Console.print()
-        try:
-            raycast_response = input("Create Raycast launcher scripts? (y/N): ").strip().lower()
-        except EOFError:
-            raycast_response = "n"
-
-        if raycast_response == "y":
+        if dry_run:
             repo_root_path = get_repo_root()
             if repo_root_path:
-                _generate_raycast_scripts(project_dir, project_name, repo_root_path)
-            else:
-                Console.error("Could not find repo root for Raycast script output directory.")
+                _generate_raycast_scripts(project_dir, project_name, repo_root_path, dry_run=True)
+        else:
+            Console.print()
+            try:
+                raycast_response = input("Create Raycast launcher scripts? (y/N): ").strip().lower()
+            except EOFError:
+                raycast_response = "n"
+
+            if raycast_response == "y":
+                repo_root_path = get_repo_root()
+                if repo_root_path:
+                    _generate_raycast_scripts(project_dir, project_name, repo_root_path)
+                else:
+                    Console.error("Could not find repo root for Raycast script output directory.")
 
     # Summary
-    Console.header("Setup Complete")
-    Console.print(f"Project ready at: {Console.path(project_dir)}")
-    Console.print("\nNext steps:")
-    Console.print(f"  1. {Console.bold('Edit AGENTINFO.md')} with your project-specific info")
-    Console.print("  2. Review .cursor/rules/CURSOR.mdc for Cursor settings")
-    Console.print("  3. Start coding with your AI assistant!")
-    Console.print()
-    Console.print(f"Future updates: {Console.cmd('python -m aec repo update --all')}")
+    if not dry_run:
+        Console.header("Setup Complete")
+        Console.print(f"Project ready at: {Console.path(project_dir)}")
+        Console.print("\nNext steps:")
+        Console.print(f"  1. {Console.bold('Edit AGENTINFO.md')} with your project-specific info")
+        Console.print("  2. Review .cursor/rules/CURSOR.mdc for Cursor settings")
+        Console.print("  3. Start coding with your AI assistant!")
+        Console.print()
+        Console.print(f"Future updates: {Console.cmd('python -m aec repo update --all')}")
 
 
 def list_repos() -> None:
@@ -630,7 +706,7 @@ def _update_all_repos(dry_run: bool = False) -> None:
         Console.print("\nRun without --dry-run to apply changes.")
 
 
-def setup_all() -> None:
+def setup_all(dry_run: bool = False) -> None:
     """Setup all projects in the configured projects directory."""
     from ..lib.preferences import get_setting
     from .install import _batch_project_setup
@@ -640,7 +716,7 @@ def setup_all() -> None:
         Console.error("No projects directory configured. Run 'aec install' first.")
         raise SystemExit(1)
 
-    _batch_project_setup()
+    _batch_project_setup(dry_run)
 
 
 # Typer command decorators (if available)

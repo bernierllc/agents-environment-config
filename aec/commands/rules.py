@@ -86,9 +86,16 @@ def _mdc_to_md_path(mdc_path: Path, repo_root: Path) -> Path:
     return repo_root / ".agent-rules" / md_name
 
 
-def generate() -> None:
-    """Generate .agent-rules/ from .cursor/rules/ (strips frontmatter)."""
+def generate(dry_run: bool = False) -> None:
+    """Generate .agent-rules/ from .cursor/rules/ (strips frontmatter).
+
+    Args:
+        dry_run: If True, report what would happen without making changes.
+    """
     Console.header("Generate Agent Rules")
+
+    if dry_run:
+        Console.warning("DRY RUN MODE - No changes will be made\n")
 
     repo_root = get_repo_root()
     if not repo_root:
@@ -112,19 +119,24 @@ def generate() -> None:
         md_file = _mdc_to_md_path(mdc_file, repo_root)
 
         try:
-            # Read and strip frontmatter
+            # Read and strip frontmatter (read-only)
             content = mdc_file.read_text()
             stripped = _strip_frontmatter(content)
             stripped = _apply_settings(stripped)
 
-            # Ensure directory exists
-            ensure_directory(md_file.parent)
-
-            # Write stripped content
-            md_file.write_text(stripped)
-
             relative_md = md_file.relative_to(repo_root)
-            Console.success(f"{relative_md}")
+
+            if dry_run:
+                Console.info(f"Would generate: {relative_md}")
+            else:
+                # Ensure directory exists
+                ensure_directory(md_file.parent)
+
+                # Write stripped content
+                md_file.write_text(stripped)
+
+                Console.success(f"{relative_md}")
+
             generated += 1
 
         except Exception as e:
@@ -132,7 +144,9 @@ def generate() -> None:
             errors += 1
 
     Console.print()
-    if errors == 0:
+    if dry_run:
+        Console.info(f"Would generate {generated} rule files in .agent-rules/")
+    elif errors == 0:
         Console.success(f"Generated {generated} rule files in .agent-rules/")
     else:
         Console.warning(f"Generated {generated} files, {errors} errors")

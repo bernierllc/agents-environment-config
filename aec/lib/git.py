@@ -55,16 +55,20 @@ def clone_repo(
         return False, str(e)
 
 
-def init_submodules(repo_dir: Path) -> Tuple[bool, str]:
+def init_submodules(repo_dir: Path, dry_run: bool = False) -> Tuple[bool, str]:
     """
     Initialize git submodules.
 
     Args:
         repo_dir: Repository root directory
+        dry_run: If True, report what would happen without making changes.
 
     Returns:
         Tuple of (success, message)
     """
+    if dry_run:
+        return True, "Would initialize submodules"
+
     try:
         result = subprocess.run(
             ["git", "submodule", "update", "--init", "--recursive"],
@@ -82,13 +86,16 @@ def init_submodules(repo_dir: Path) -> Tuple[bool, str]:
         return False, str(e)
 
 
-def update_submodule(repo_dir: Path, submodule_path: str) -> Tuple[bool, Optional[str]]:
+def update_submodule(
+    repo_dir: Path, submodule_path: str, dry_run: bool = False
+) -> Tuple[bool, Optional[str]]:
     """
     Update a specific submodule to latest from remote.
 
     Args:
         repo_dir: Repository root directory
         submodule_path: Relative path to submodule
+        dry_run: If True, report what would happen without making changes.
 
     Returns:
         Tuple of (success, new_commit_hash or error message)
@@ -97,6 +104,20 @@ def update_submodule(repo_dir: Path, submodule_path: str) -> Tuple[bool, Optiona
 
     if not submodule_dir.exists():
         return False, "Submodule directory not found"
+
+    if dry_run:
+        # Read-only: show current commit without changing anything
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=submodule_dir,
+                capture_output=True,
+                text=True,
+            )
+            current = result.stdout.strip() if result.returncode == 0 else "unknown"
+            return True, f"{current} (no change, dry run)"
+        except Exception:
+            return True, "unknown (no change, dry run)"
 
     try:
         # Fetch and checkout latest

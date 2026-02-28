@@ -41,7 +41,12 @@ if HAS_TYPER:
     app.add_typer(preferences.app, name="preferences", help="Manage optional feature preferences")
 
     # Register top-level commands
-    app.command("install")(install.install)
+    @app.command("install")
+    def install_cmd(
+        dry_run: bool = typer.Option(False, "--dry-run", help="Preview without making changes"),
+    ):
+        """Full setup of agents-environment-config."""
+        install.install(dry_run=dry_run)
     app.command("discover")(discover.discover_cmd)
 
     @app.command("version")
@@ -106,7 +111,8 @@ else:
         rules_sub.add_parser("validate", help="Validate rule parity")
 
         # Top-level commands
-        subparsers.add_parser("install", help="Full setup")
+        install_parser = subparsers.add_parser("install", help="Full setup")
+        install_parser.add_argument("--dry-run", action="store_true", help="Preview without making changes")
         subparsers.add_parser("doctor", help="Check installation health")
         subparsers.add_parser("version", help="Show version")
 
@@ -155,7 +161,7 @@ else:
             Console.print(f"aec version {__version__}")
 
         elif args.command == "install":
-            install_cmd.install()
+            install_cmd.install(dry_run=args.dry_run)
 
         elif args.command == "doctor":
             doctor_cmd.run_doctor()

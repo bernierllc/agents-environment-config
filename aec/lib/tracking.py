@@ -16,12 +16,24 @@ class TrackedRepo(NamedTuple):
     exists: bool
 
 
-def init_aec_home() -> None:
+def init_aec_home(dry_run: bool = False) -> None:
     """
     Initialize ~/.agents-environment-config/ directory.
 
     Creates the directory, README, and setup log file if they don't exist.
+
+    Args:
+        dry_run: If True, report what would happen without making changes.
     """
+    if dry_run:
+        if not AEC_HOME.exists():
+            print(f"  Would create: {AEC_HOME}")
+        if not AEC_README.exists():
+            print(f"  Would create: {AEC_README}")
+        if not AEC_SETUP_LOG.exists():
+            print(f"  Would create: {AEC_SETUP_LOG}")
+        return
+
     # Create directory
     AEC_HOME.mkdir(parents=True, exist_ok=True)
 
@@ -34,17 +46,22 @@ def init_aec_home() -> None:
         AEC_SETUP_LOG.touch()
 
 
-def log_setup(project_dir: Path) -> None:
+def log_setup(project_dir: Path, dry_run: bool = False) -> None:
     """
     Log a project setup to the tracking file.
 
     Args:
         project_dir: The project directory that was set up
+        dry_run: If True, report what would happen without making changes.
     """
+    abs_path = Path(project_dir).resolve()
+
+    if dry_run:
+        print(f"  Would log setup: {abs_path}")
+        return
+
     init_aec_home()
 
-    # Get absolute path
-    abs_path = Path(project_dir).resolve()
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Read existing entries, filter out this path

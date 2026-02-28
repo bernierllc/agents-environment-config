@@ -55,9 +55,16 @@ def _is_cursor_installed() -> bool:
     return False
 
 
-def setup() -> None:
-    """Create ~/.agent-tools/ structure and symlinks."""
+def setup(dry_run: bool = False) -> None:
+    """Create ~/.agent-tools/ structure and symlinks.
+
+    Args:
+        dry_run: If True, report what would happen without making changes.
+    """
     Console.header("Agent Tools Setup")
+
+    if dry_run:
+        Console.warning("DRY RUN MODE - No changes will be made\n")
 
     repo_root = get_repo_root()
     if not repo_root:
@@ -71,19 +78,30 @@ def setup() -> None:
     Console.subheader("Creating ~/.agent-tools/ structure...")
 
     for subdir in ["rules", "agents", "skills", "commands"]:
-        ensure_directory(AGENT_TOOLS_DIR / subdir)
+        target = AGENT_TOOLS_DIR / subdir
+        if dry_run:
+            if not target.exists():
+                Console.info(f"Would create: {target}")
+            else:
+                Console.success(f"{target} (already exists)")
+        else:
+            ensure_directory(target)
 
-    Console.success("Created ~/.agent-tools/ directory structure")
+    if not dry_run:
+        Console.success("Created ~/.agent-tools/ directory structure")
 
     # Create marker file
     marker = AGENT_TOOLS_DIR / ".aec-managed"
-    marker.write_text(
-        f"# This directory is managed by agents-environment-config\n"
-        f"# Created: {datetime.utcnow().isoformat()}Z\n"
-        f"# Source: {repo_root}\n"
-        f"# Version: {VERSION}\n"
-    )
-    Console.success("Created .aec-managed marker file")
+    if dry_run:
+        Console.info(f"Would create: {marker}")
+    else:
+        marker.write_text(
+            f"# This directory is managed by agents-environment-config\n"
+            f"# Created: {datetime.utcnow().isoformat()}Z\n"
+            f"# Source: {repo_root}\n"
+            f"# Version: {VERSION}\n"
+        )
+        Console.success("Created .aec-managed marker file")
 
     # Create repo symlinks
     Console.subheader("Creating repo symlinks in ~/.agent-tools/...")
@@ -102,6 +120,8 @@ def setup() -> None:
 
         if is_symlink(target):
             Console.success(f"{name} (agents-environment-config) (already linked)")
+        elif dry_run:
+            Console.info(f"Would create symlink: {target} -> {source}")
         else:
             if create_symlink(source, target):
                 Console.success(f"{name} (agents-environment-config)")
@@ -113,8 +133,14 @@ def setup() -> None:
 
     if _is_claude_installed():
         Console.print("Claude Code detected - configuring...")
-        ensure_directory(CLAUDE_DIR / "agents")
-        ensure_directory(CLAUDE_DIR / "skills")
+        if not dry_run:
+            ensure_directory(CLAUDE_DIR / "agents")
+            ensure_directory(CLAUDE_DIR / "skills")
+        else:
+            if not (CLAUDE_DIR / "agents").exists():
+                Console.info(f"Would create: {CLAUDE_DIR / 'agents'}")
+            if not (CLAUDE_DIR / "skills").exists():
+                Console.info(f"Would create: {CLAUDE_DIR / 'skills'}")
 
         # Claude symlinks point through ~/.agent-tools/
         claude_links = [
@@ -127,6 +153,8 @@ def setup() -> None:
         for source, target, name in claude_links:
             if is_symlink(target):
                 Console.success(f"{name} (already linked)")
+            elif dry_run:
+                Console.info(f"Would create symlink: {target} -> {source}")
             else:
                 if create_symlink(source, target):
                     Console.success(name)
@@ -137,7 +165,10 @@ def setup() -> None:
 
     if _is_cursor_installed():
         Console.print("Cursor detected - configuring...")
-        ensure_directory(CURSOR_DIR / "rules")
+        if not dry_run:
+            ensure_directory(CURSOR_DIR / "rules")
+        elif not (CURSOR_DIR / "rules").exists():
+            Console.info(f"Would create: {CURSOR_DIR / 'rules'}")
 
         # Cursor rules point directly to repo (needs frontmatter)
         cursor_rules_src = repo_root / ".cursor" / "rules"
@@ -145,6 +176,8 @@ def setup() -> None:
 
         if is_symlink(cursor_rules_dst):
             Console.success("Cursor rules (with frontmatter) (already linked)")
+        elif dry_run:
+            Console.info(f"Would create symlink: {cursor_rules_dst} -> {cursor_rules_src}")
         else:
             if create_symlink(cursor_rules_src, cursor_rules_dst):
                 Console.success("Cursor rules (with frontmatter)")
@@ -152,28 +185,27 @@ def setup() -> None:
                 Console.error("Failed to create Cursor rules symlink")
 
         # NOTE: ~/.cursor/commands/ is documented but NOT WORKING in Cursor
-        # See: https://forum.cursor.com/t/commands-are-not-detected-in-the-global-cursor-directory/150967
-        # Skipping global commands symlink until Cursor fixes this
         Console.info("Cursor global commands not supported (known Cursor bug)")
     else:
         Console.info("Cursor not detected - skipping Cursor symlinks")
 
     # Summary
-    Console.header("Setup Complete")
-    Console.success("~/.agent-tools/ directory structure created")
-    Console.print()
-    Console.print("Directory Structure:")
-    Console.print("  ~/.agent-tools/")
-    Console.print("  ├── .aec-managed              # Marker file")
-    Console.print("  ├── rules/")
-    Console.print("  │   ├── agents-environment-config/ → repo/.agent-rules/")
-    Console.print("  │   └── [your rules here]")
-    Console.print("  ├── agents/")
-    Console.print("  │   └── agents-environment-config/ → repo/.claude/agents/")
-    Console.print("  ├── skills/")
-    Console.print("  │   └── agents-environment-config/ → repo/.claude/skills/")
-    Console.print("  └── commands/")
-    Console.print("      └── [for future use - Cursor global commands currently broken]")
+    if not dry_run:
+        Console.header("Setup Complete")
+        Console.success("~/.agent-tools/ directory structure created")
+        Console.print()
+        Console.print("Directory Structure:")
+        Console.print("  ~/.agent-tools/")
+        Console.print("  ├── .aec-managed              # Marker file")
+        Console.print("  ├── rules/")
+        Console.print("  │   ├── agents-environment-config/ → repo/.agent-rules/")
+        Console.print("  │   └── [your rules here]")
+        Console.print("  ├── agents/")
+        Console.print("  │   └── agents-environment-config/ → repo/.claude/agents/")
+        Console.print("  ├── skills/")
+        Console.print("  │   └── agents-environment-config/ → repo/.claude/skills/")
+        Console.print("  └── commands/")
+        Console.print("      └── [for future use - Cursor global commands currently broken]")
 
 
 def migrate(dry_run: bool = False) -> None:

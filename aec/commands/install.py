@@ -31,8 +31,12 @@ def _find_projects(projects_dir: Path, git_only: bool = True) -> list[Path]:
     return results
 
 
-def _batch_project_setup() -> None:
-    """Walk projects directory and offer to setup each one."""
+def _batch_project_setup(dry_run: bool = False) -> None:
+    """Walk projects directory and offer to setup each one.
+
+    Args:
+        dry_run: If True, list projects that would be set up without prompting.
+    """
     from ..lib.preferences import get_setting
 
     projects_dir = get_setting("projects_dir")
@@ -42,6 +46,20 @@ def _batch_project_setup() -> None:
     projects_path = Path(projects_dir)
     if not projects_path.is_dir():
         Console.warning(f"Projects directory not found: {projects_dir}")
+        return
+
+    if dry_run:
+        # In dry-run mode, scan git repos and list what would be set up
+        projects = _find_projects(projects_path, git_only=True)
+
+        if not projects:
+            Console.info("No projects found.")
+            return
+
+        Console.subheader(f"Projects in {projects_dir} ({len(projects)} found):")
+        from . import repo
+        for project in projects:
+            Console.info(f"  Would setup: {project.name}")
         return
 
     try:
@@ -86,13 +104,28 @@ def _batch_project_setup() -> None:
         repo.setup(str(project), skip_raycast=True, batch=True)
 
 
-def _prompt_settings() -> None:
-    """Prompt for settings if not already configured."""
+def _prompt_settings(dry_run: bool = False) -> None:
+    """Prompt for settings if not already configured.
+
+    Args:
+        dry_run: If True, show current values and what would be prompted.
+    """
     from ..lib.preferences import get_setting, set_setting
     from ..lib import get_projects_dir
 
     # Check if all settings are already set
     required_settings = ["projects_dir", "plans_dir", "plans_gitignored", "plans_completion"]
+
+    if dry_run:
+        Console.subheader("Configuration (current settings)")
+        for key in required_settings:
+            value = get_setting(key)
+            if value is not None:
+                Console.success(f"{key} = {value}")
+            else:
+                Console.info(f"{key}: not yet configured (would be prompted)")
+        return
+
     if all(get_setting(k) is not None for k in required_settings):
         return
 
@@ -156,7 +189,7 @@ def _prompt_settings() -> None:
         set_setting("plans_completion", "archive" if response == "1" else "delete")
 
 
-def install() -> None:
+def install(dry_run: bool = False) -> None:
     """
     Full setup of agents-environment-config.
 
@@ -165,8 +198,14 @@ def install() -> None:
     2. Updates git submodules (agents, skills)
     3. Generates .agent-rules/ from .cursor/rules/
     4. Sets up ~/.agent-tools/ structure
+
+    Args:
+        dry_run: If True, report what would happen without making changes.
     """
     Console.header("Agents Environment Config Setup")
+
+    if dry_run:
+        Console.warning("DRY RUN MODE - No changes will be made\n")
 
     repo_root = get_repo_root()
     if not repo_root:
@@ -178,15 +217,16 @@ def install() -> None:
 
     # Initialize AEC home directory
     Console.subheader("Initializing configuration directory...")
-    init_aec_home()
-    Console.success("~/.agents-environment-config/ initialized")
+    init_aec_home(dry_run)
+    if not dry_run:
+        Console.success("~/.agents-environment-config/ initialized")
 
     # Update submodules
     if is_git_repo(repo_root) and has_gitmodules(repo_root):
         Console.subheader("Updating submodules...")
 
         # Initialize submodules
-        success, message = init_submodules(repo_root)
+        success, message = init_submodules(repo_root, dry_run)
         if success:
             Console.success(message)
         else:
@@ -196,7 +236,7 @@ def install() -> None:
         agents_path = ".claude/agents"
         if (repo_root / agents_path).exists():
             Console.print("  Updating agents...")
-            success, result = update_submodule(repo_root, agents_path)
+            success, result = update_submodule(repo_root, agents_path, dry_run)
             if success:
                 Console.success(f"Agents updated to {result}")
             else:
@@ -206,7 +246,7 @@ def install() -> None:
         skills_path = ".claude/skills"
         if (repo_root / skills_path).exists():
             Console.print("  Updating skills...")
-            success, result = update_submodule(repo_root, skills_path)
+            success, result = update_submodule(repo_root, skills_path, dry_run)
             if success:
                 Console.success(f"Skills updated to {result}")
             else:
@@ -218,13 +258,13 @@ def install() -> None:
     Console.subheader("Generating .agent-rules/ directory...")
     cursor_rules = repo_root / ".cursor" / "rules"
     if cursor_rules.exists():
-        rules.generate()
+        rules.generate(dry_run)
     else:
         Console.warning(".cursor/rules/ not found - skipping rule generation")
 
     # Setup agent-tools
     Console.subheader("Setting up ~/.agent-tools/ structure...")
-    agent_tools.setup()
+    agent_tools.setup(dry_run)
 
     # Detect and display agents
     Console.subheader("Detecting installed agents...")
@@ -233,32 +273,42 @@ def install() -> None:
     if detected:
         agent_names = ", ".join(detected.keys())
         Console.success(f"Found: {agent_names}")
-        Console.print("  During project setup, we'll create instruction files for these agents.")
+        if not dry_run:
+            Console.print("  During project setup, we'll create instruction files for these agents.")
     else:
         Console.warning("No supported agents detected.")
 
     # Prompt for settings
-    _prompt_settings()
+    _prompt_settings(dry_run)
 
     # Regenerate rules with new settings applied
-    Console.subheader("Applying settings to rules...")
-    cursor_rules_dir = repo_root / ".cursor" / "rules"
-    if cursor_rules_dir.exists():
-        rules.generate()
+    if not dry_run:
+        Console.subheader("Applying settings to rules...")
+        cursor_rules_dir = repo_root / ".cursor" / "rules"
+        if cursor_rules_dir.exists():
+            rules.generate()
+    else:
+        Console.subheader("Applying settings to rules...")
+        Console.info("Would regenerate rules with applied settings")
 
     # Batch project setup
-    _batch_project_setup()
+    _batch_project_setup(dry_run)
 
     # Final summary
-    Console.header("Setup Complete")
-    Console.success("All components installed successfully!")
-    Console.print()
-    Console.print("What was set up:")
-    Console.print(f"  - ~/.agents-environment-config/  (local config)")
-    Console.print(f"  - ~/.agent-tools/                (shared agent content)")
-    Console.print(f"  - .agent-rules/                  (frontmatter-stripped rules)")
-    Console.print()
-    Console.print("Next steps:")
-    Console.print(f"  1. Setup a project: {Console.cmd('python -m aec repo setup <project>')}")
-    Console.print(f"  2. Check health:    {Console.cmd('python -m aec doctor')}")
-    Console.print()
+    if dry_run:
+        Console.header("DRY RUN COMPLETE")
+        Console.warning("No changes were made.")
+        Console.print("\nRun without --dry-run to apply changes.")
+    else:
+        Console.header("Setup Complete")
+        Console.success("All components installed successfully!")
+        Console.print()
+        Console.print("What was set up:")
+        Console.print(f"  - ~/.agents-environment-config/  (local config)")
+        Console.print(f"  - ~/.agent-tools/                (shared agent content)")
+        Console.print(f"  - .agent-rules/                  (frontmatter-stripped rules)")
+        Console.print()
+        Console.print("Next steps:")
+        Console.print(f"  1. Setup a project: {Console.cmd('python -m aec repo setup <project>')}")
+        Console.print(f"  2. Check health:    {Console.cmd('python -m aec doctor')}")
+        Console.print()
