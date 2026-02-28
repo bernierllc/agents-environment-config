@@ -83,6 +83,8 @@ else:
 
         repo_sub.add_parser("list", help="List tracked repositories")
 
+        repo_sub.add_parser("setup-all", help="Setup all projects in configured projects directory")
+
         repo_update = repo_sub.add_parser("update", help="Update repositories")
         repo_update.add_argument("path", nargs="?", help="Specific project to update")
         repo_update.add_argument("--all", action="store_true", help="Update all repos")
@@ -161,6 +163,8 @@ else:
         elif args.command == "repo":
             if args.repo_command == "setup":
                 repo_cmd.setup(args.path, args.skip_raycast)
+            elif args.repo_command == "setup-all":
+                repo_cmd.setup_all()
             elif args.repo_command == "list":
                 repo_cmd.list_repos()
             elif args.repo_command == "update":

@@ -49,8 +49,15 @@ def detect_agents() -> dict[str, dict]:
     Returns:
         Dictionary of agent_name -> agent_config for all detected agents.
     """
+    import sys
+    _this = sys.modules[__name__]
+    supported = getattr(_this, "SUPPORTED_AGENTS", None)
+    if supported is None:
+        from .registry import get_supported_agents
+        supported = get_supported_agents()
+
     detected = {}
-    for name, config in SUPPORTED_AGENTS.items():
+    for name, config in supported.items():
         found = False
 
         # Check if the command is available on PATH

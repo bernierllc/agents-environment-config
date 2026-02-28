@@ -50,7 +50,8 @@ Or using shell scripts (macOS/Linux only):
 This creates:
 1. `~/.agent-tools/` - Centralized directory for rules, agents, skills, and commands
 2. Agent-specific symlinks for Claude and Cursor
-3. Optional Claude Code statusline
+3. User settings (projects directory, plans directory, completion behavior)
+4. Optionally walks your projects directory to set up each project
 
 ### Directory Structure After Setup
 
@@ -111,12 +112,16 @@ pip install -e .
 
 | Command | Description |
 |---------|-------------|
-| `aec install` | Full setup (submodules, rules, agent-tools) |
+| `aec install` | Full setup (submodules, rules, agent-tools, settings, project walk) |
 | `aec doctor` | Health check for installation |
 | `aec version` | Show version |
 | `aec repo setup <path>` | Setup a project with agent files |
+| `aec repo setup-all` | Setup all projects in configured projects directory |
 | `aec repo list` | List tracked repositories |
 | `aec repo update [--all]` | Update repositories |
+| `aec preferences list` | Show current preferences and settings |
+| `aec preferences set <key> <value>` | Set a preference |
+| `aec preferences reset <key>` | Reset a preference (re-prompts on next run) |
 | `aec agent-tools setup` | Create ~/.agent-tools/ structure |
 | `aec agent-tools migrate` | Migrate from old symlink structure |
 | `aec agent-tools rollback <backup>` | Rollback migration |
@@ -226,7 +231,9 @@ Most operations are available via both the Python CLI and shell scripts:
 | Migrate existing setup | `aec agent-tools migrate` | `scripts/migrate-to-agent-tools.sh` |
 | Rollback migration | `aec agent-tools rollback <dir>` | `scripts/rollback-agent-tools.sh` |
 | Setup a project | `aec repo setup <path>` | `scripts/setup-repo.sh` |
+| Setup all projects | `aec repo setup-all` | — |
 | List tracked projects | `aec repo list` | `scripts/setup-repo.sh --list` |
+| Manage preferences | `aec preferences list\|set\|reset` | — |
 | Generate .agent-rules/ | `aec rules generate` | `scripts/generate-agent-rules.py` |
 | Validate rule parity | `aec rules validate` | `scripts/validate-rule-parity.py` |
 | Health check | `aec doctor` | — |
@@ -289,13 +296,19 @@ The scripts create a `~/.agents-environment-config/` directory to store local st
 ```
 ~/.agents-environment-config/
 ├── README.md                    # Explains why this directory exists
+├── preferences.json             # User settings and optional feature toggles
 └── setup-repo-locations.txt     # Tracks projects set up with agent files
 ```
+
+`preferences.json` stores:
+- **Settings**: Projects root directory, plans directory name, git tracking preference, plan completion behavior (archive/delete)
+- **Optional rules**: Feature toggles like "Leave It Better"
 
 This directory enables:
 - **Cascading updates**: Update all tracked projects at once
 - **Re-run detection**: Detects if a project was already set up
 - **Inventory**: List all configured projects
+- **Consistent settings**: Plans directory and completion behavior applied across all projects
 
 ```bash
 # List all tracked projects
@@ -325,15 +338,28 @@ aec agent-tools rollback ~/.agent-tools-backup-TIMESTAMP
 
 ## How Projects Use This
 
-When you run `setup-repo.sh` on a project, it:
+When you run `aec repo setup` (or `setup-repo.sh`) on a project, it:
 
-1. Creates directories: `.cursor/rules/`, `docs/`, `plans/`
+1. Creates directories: `.cursor/rules/`, `docs/`, and your configured plans directory (default: `.plans/`)
 2. Copies template files: `AGENTINFO.md`, `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `QWEN.md`
 3. Copies `CURSOR.mdc` to `.cursor/rules/`
-4. Updates `.gitignore` to ignore agent files
-5. Optionally creates Raycast launcher scripts
+4. Migrates legacy plan files from `plans/` or `docs/plans/` to your configured plans directory
+5. Updates `.gitignore` to ignore agent files (and plans directory if configured)
+6. Optionally creates Raycast launcher scripts
 
 **After setup, edit `AGENTINFO.md`** in the target project with project-specific info.
+
+### Batch Project Setup
+
+During `aec install`, or anytime with `aec repo setup-all`, you can walk through all projects in your configured projects directory and set up each one:
+
+```bash
+# During install, you'll be prompted automatically
+aec install
+
+# Or run standalone
+aec repo setup-all
+```
 
 ## Updating Rules
 
