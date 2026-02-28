@@ -205,8 +205,8 @@ class TestRepoDryRun:
 class TestInstallDryRun:
     """Test dry-run mode for install.py functions."""
 
-    def test_prompt_settings_dry_run_shows_values(self, temp_dir, monkeypatch, capsys):
-        """_prompt_settings(dry_run=True) should show current values, not prompt."""
+    def test_prompt_settings_dry_run_shows_existing_prompts_missing(self, temp_dir, monkeypatch, capsys):
+        """_prompt_settings(dry_run=True) should show existing values and prompt for missing ones."""
         prefs_file = temp_dir / "prefs.json"
         prefs_file.write_text(json.dumps({
             "schema_version": "1.1",
@@ -219,17 +219,20 @@ class TestInstallDryRun:
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
         monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
 
-        # Should not call input()
-        def should_not_prompt(_):
-            raise AssertionError("Should not prompt in dry-run mode")
-        monkeypatch.setattr("builtins.input", should_not_prompt)
+        # Provide answers for the 2 missing settings (plans_gitignored, plans_completion)
+        inputs = iter(["n", "1"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
 
         from aec.commands.install import _prompt_settings
         _prompt_settings(dry_run=True)
 
         captured = capsys.readouterr()
-        assert "projects_dir" in captured.out
-        assert "not yet configured" in captured.out  # plans_gitignored is missing
+        # Existing settings shown
+        assert "projects_dir = /Users/test/projects" in captured.out
+        assert "plans_dir = .plans" in captured.out
+        # Answers reported as "Would save"
+        assert "Would save: plans_gitignored" in captured.out
+        assert "Would save: plans_completion" in captured.out
 
     def test_prompt_settings_dry_run_no_writes(self, temp_dir, monkeypatch):
         """_prompt_settings(dry_run=True) should not write to preferences."""
@@ -237,11 +240,38 @@ class TestInstallDryRun:
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
         monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
 
+        # Provide answers for all 4 settings
+        inputs = iter(["/tmp/projects", "1", "n", "1"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+
         from aec.commands.install import _prompt_settings
         _prompt_settings(dry_run=True)
 
         # Prefs file should not have been created
         assert not prefs_file.exists()
+
+    def test_prompt_settings_dry_run_skips_when_all_set(self, temp_dir, monkeypatch):
+        """_prompt_settings(dry_run=True) should show all values without prompting when fully configured."""
+        prefs_file = temp_dir / "prefs.json"
+        prefs_file.write_text(json.dumps({
+            "schema_version": "1.1",
+            "optional_rules": {},
+            "settings": {
+                "projects_dir": "/Users/test/projects",
+                "plans_dir": ".plans",
+                "plans_gitignored": True,
+                "plans_completion": "archive",
+            },
+        }))
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
+        monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+
+        def should_not_prompt(_):
+            raise AssertionError("Should not prompt when all settings exist")
+        monkeypatch.setattr("builtins.input", should_not_prompt)
+
+        from aec.commands.install import _prompt_settings
+        _prompt_settings(dry_run=True)  # Should not raise
 
     def test_batch_project_setup_dry_run_no_prompts(self, temp_dir, monkeypatch):
         """_batch_project_setup(dry_run=True) should list projects without prompting."""

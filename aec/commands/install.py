@@ -107,8 +107,12 @@ def _batch_project_setup(dry_run: bool = False) -> None:
 def _prompt_settings(dry_run: bool = False) -> None:
     """Prompt for settings if not already configured.
 
+    In dry-run mode, the user walks through the same prompts interactively
+    but answers are reported as "Would save" instead of persisted to disk.
+    Already-configured settings are shown as-is and not re-prompted.
+
     Args:
-        dry_run: If True, show current values and what would be prompted.
+        dry_run: If True, run prompts but don't persist answers.
     """
     from ..lib.preferences import get_setting, set_setting
     from ..lib import get_projects_dir
@@ -116,33 +120,49 @@ def _prompt_settings(dry_run: bool = False) -> None:
     # Check if all settings are already set
     required_settings = ["projects_dir", "plans_dir", "plans_gitignored", "plans_completion"]
 
-    if dry_run:
-        Console.subheader("Configuration (current settings)")
-        for key in required_settings:
-            value = get_setting(key)
-            if value is not None:
-                Console.success(f"{key} = {value}")
-            else:
-                Console.info(f"{key}: not yet configured (would be prompted)")
-        return
-
-    if all(get_setting(k) is not None for k in required_settings):
+    if not dry_run and all(get_setting(k) is not None for k in required_settings):
         return
 
     Console.subheader("Configuration")
 
+    # Helper: persist or report based on dry_run
+    # In dry-run mode, keep an in-memory dict so later prompts can reference
+    # earlier answers (e.g. plans_dir prompt references projects_dir answer)
+    dry_run_settings: dict[str, object] = {}
+
+    def _save(key: str, value: object) -> None:
+        if dry_run:
+            dry_run_settings[key] = value
+            Console.info(f"Would save: {key} = {value}")
+        else:
+            set_setting(key, value)
+
+    def _get(key: str) -> object:
+        """Get a setting, checking dry-run in-memory values first."""
+        if dry_run and key in dry_run_settings:
+            return dry_run_settings[key]
+        return get_setting(key)
+
     # 1. Projects directory
-    if get_setting("projects_dir") is None:
+    current = get_setting("projects_dir")
+    if current is not None:
+        if dry_run:
+            Console.success(f"projects_dir = {current}")
+    else:
         default_dir = str(get_projects_dir())
         try:
             response = input(f"Where is your projects root directory? [{default_dir}]: ").strip()
         except EOFError:
             response = ""
         projects_dir = response or default_dir
-        set_setting("projects_dir", str(Path(projects_dir).expanduser().resolve()))
+        _save("projects_dir", str(Path(projects_dir).expanduser().resolve()))
 
     # 2. Plans directory
-    if get_setting("plans_dir") is None:
+    current = get_setting("plans_dir")
+    if current is not None:
+        if dry_run:
+            Console.success(f"plans_dir = {current}")
+    else:
         Console.print("\nWhere should plan files go in your projects?")
         Console.print("  1) .plans/ (recommended)")
         Console.print("  2) plans/")
@@ -153,9 +173,9 @@ def _prompt_settings(dry_run: bool = False) -> None:
             response = "1"
 
         if response == "1":
-            set_setting("plans_dir", ".plans")
+            _save("plans_dir", ".plans")
         elif response == "2":
-            set_setting("plans_dir", "plans")
+            _save("plans_dir", "plans")
         else:
             if response == "3":
                 try:
@@ -164,21 +184,29 @@ def _prompt_settings(dry_run: bool = False) -> None:
                     custom = ".plans"
             else:
                 custom = response  # user typed the name directly
-            set_setting("plans_dir", custom)
+            _save("plans_dir", custom)
 
     # 3. Plans gitignored
-    if get_setting("plans_gitignored") is None:
-        plans_dir = get_setting("plans_dir")
+    current = get_setting("plans_gitignored")
+    if current is not None:
+        if dry_run:
+            Console.success(f"plans_gitignored = {current}")
+    else:
+        plans_dir = _get("plans_dir")
         try:
             response = input(f"Should {plans_dir}/ be tracked in git? (y/N): ").strip().lower()
         except EOFError:
             response = "n"
         tracked = response in ("y", "yes")
-        set_setting("plans_gitignored", not tracked)
+        _save("plans_gitignored", not tracked)
 
     # 4. Plans completion behavior
-    if get_setting("plans_completion") is None:
-        plans_dir = get_setting("plans_dir")
+    current = get_setting("plans_completion")
+    if current is not None:
+        if dry_run:
+            Console.success(f"plans_completion = {current}")
+    else:
+        plans_dir = _get("plans_dir")
         Console.print(f"\nWhen a plan is completed, should the agent:")
         Console.print(f"  1) Archive to {plans_dir}/archive/ (recommended)")
         Console.print(f"  2) Delete the plan file")
@@ -186,7 +214,7 @@ def _prompt_settings(dry_run: bool = False) -> None:
             response = input("Choice [1]: ").strip() or "1"
         except EOFError:
             response = "1"
-        set_setting("plans_completion", "archive" if response == "1" else "delete")
+        _save("plans_completion", "archive" if response == "1" else "delete")
 
 
 def install(dry_run: bool = False) -> None:
