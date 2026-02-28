@@ -31,6 +31,9 @@ raycast_scripts/codex-*.sh
 raycast_scripts/gemini-*.sh
 /plans/
 
+# Worktrees
+.worktrees/
+
 # Local symlinks (created by setup, point to absolute paths)
 .cursor/commands/agents-environment-config
 .cursor/rules/agents-environment-config
