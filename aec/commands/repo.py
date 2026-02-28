@@ -58,18 +58,22 @@ def _resolve_project_path(path_input: str) -> Path:
 
 def _create_directories(project_dir: Path) -> None:
     """Create required directories in the project."""
+    from ..lib.preferences import get_setting
+
     Console.subheader("Creating directories...")
+
+    plans_dir = get_setting("plans_dir") or "plans"
 
     dirs = [
         project_dir / ".cursor" / "rules",
         project_dir / "docs",
-        project_dir / "plans",
+        project_dir / plans_dir,
     ]
 
     for d in dirs:
         ensure_directory(d)
 
-    Console.success("Created .cursor/rules/, docs/, plans/")
+    Console.success(f"Created .cursor/rules/, docs/, {plans_dir}/")
 
 
 def _copy_agent_files(project_dir: Path, repo_root: Path) -> None:
