@@ -148,6 +148,65 @@ def _copy_optional_rules(project_dir: Path, repo_root: Path) -> None:
                 Console.error(f"Failed to copy optional rule: {relative}")
 
 
+def _migrate_plans_dir(project_dir: Path) -> None:
+    """Migrate legacy plans directories to the configured plans_dir.
+
+    Checks for legacy locations (plans/, docs/plans/) and moves files
+    to the target plans directory if they differ. Skips files that
+    already exist in the target. Removes empty legacy dirs after migration.
+    """
+    from ..lib.preferences import get_setting
+
+    plans_dir = get_setting("plans_dir") or "plans"
+    target = project_dir / plans_dir
+
+    legacy_dirs = [
+        project_dir / "plans",
+        project_dir / "docs" / "plans",
+    ]
+
+    for legacy in legacy_dirs:
+        # Skip if legacy dir doesn't exist or has no files
+        if not legacy.is_dir():
+            continue
+
+        # Skip if legacy IS the target (resolved to same path)
+        if legacy.resolve() == target.resolve():
+            continue
+
+        files = list(legacy.iterdir())
+        if not files:
+            continue
+
+        # Ensure target directory exists
+        ensure_directory(target)
+
+        migrated = 0
+        skipped = 0
+        for item in files:
+            if item.is_file():
+                dest = target / item.name
+                if dest.exists():
+                    Console.skip(f"  {item.name} already exists in {plans_dir}/ (skipping)")
+                    skipped += 1
+                else:
+                    shutil.move(str(item), str(dest))
+                    migrated += 1
+
+        if migrated:
+            Console.success(
+                f"Migrated {migrated} file(s) from {legacy.relative_to(project_dir)}/ to {plans_dir}/"
+            )
+        if skipped:
+            Console.info(f"Skipped {skipped} file(s) already in {plans_dir}/")
+
+        # Remove empty legacy directory
+        remaining = list(legacy.iterdir())
+        if not remaining:
+            legacy.rmdir()
+            Console.info(f"Removed empty {legacy.relative_to(project_dir)}/")
+
+
 def _make_safe_name(project_name: str) -> str:
     """Convert a project name to a safe filename component (lowercase, alphanumeric, hyphens)."""
     safe = project_name.lower()
@@ -429,6 +488,9 @@ def setup(
     # Create directories
     _create_directories(project_dir)
 
+    # Migrate legacy plans directories
+    _migrate_plans_dir(project_dir)
+
     # Copy agent files
     _copy_agent_files(project_dir, repo_root)
 
@@ -515,6 +577,10 @@ def _update_single_repo(project_dir: Path, dry_run: bool = False) -> None:
     # Check for migrations
     if _needs_migration(project_dir):
         _migrate_agent_files(project_dir, dry_run)
+
+    # Migrate legacy plans directories
+    if not dry_run:
+        _migrate_plans_dir(project_dir)
 
     # Update log
     if not dry_run:
