@@ -265,6 +265,49 @@ class TestGetGitignorePatterns:
         assert "/plans/" in patterns
 
 
+class TestGetGitignorePatternsWithPlansDir:
+    """Test that get_gitignore_patterns respects plans_dir setting."""
+
+    def test_default_plans_dir(self, temp_dir, monkeypatch):
+        """Without setting, should use /plans/ as before."""
+        monkeypatch.setattr(
+            "aec.lib.preferences.AEC_PREFERENCES",
+            temp_dir / "preferences.json",
+        )
+        patterns = get_gitignore_patterns()
+        assert "/plans/" in patterns
+
+    def test_custom_plans_dir(self, temp_dir, monkeypatch):
+        """With plans_dir setting, should use that instead."""
+        prefs_file = temp_dir / "preferences.json"
+        prefs_file.write_text(json.dumps({
+            "schema_version": "1.1",
+            "optional_rules": {},
+            "settings": {"plans_dir": ".plans", "plans_gitignored": True},
+        }))
+        monkeypatch.setattr(
+            "aec.lib.preferences.AEC_PREFERENCES", prefs_file
+        )
+        patterns = get_gitignore_patterns()
+        assert "/.plans/" in patterns
+        assert "/plans/" not in patterns
+
+    def test_plans_not_gitignored(self, temp_dir, monkeypatch):
+        """When plans_gitignored is false, should not include plans dir."""
+        prefs_file = temp_dir / "preferences.json"
+        prefs_file.write_text(json.dumps({
+            "schema_version": "1.1",
+            "optional_rules": {},
+            "settings": {"plans_dir": ".plans", "plans_gitignored": False},
+        }))
+        monkeypatch.setattr(
+            "aec.lib.preferences.AEC_PREFERENCES", prefs_file
+        )
+        patterns = get_gitignore_patterns()
+        assert "/.plans/" not in patterns
+        assert "/plans/" not in patterns
+
+
 class TestGetMigrationFiles:
     """Test migration file list."""
 

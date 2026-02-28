@@ -100,8 +100,19 @@ def get_agent_files() -> list[str]:
 
 def get_gitignore_patterns() -> list[str]:
     """Return patterns to add to .gitignore in target projects."""
+    from .preferences import get_setting
+
     files = get_agent_files()
-    return files + [".cursor/rules", "/plans/"]
+    patterns = files + [".cursor/rules"]
+
+    plans_dir = get_setting("plans_dir") or "plans"
+    plans_gitignored = get_setting("plans_gitignored")
+
+    # Default to gitignored if not explicitly set to False
+    if plans_gitignored is not False:
+        patterns.append(f"/{plans_dir}/")
+
+    return patterns
 
 
 def get_migration_files() -> list[str]:
