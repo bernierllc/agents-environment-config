@@ -29,7 +29,7 @@ class TestLoadPreferences:
         from aec.lib.preferences import load_preferences
 
         result = load_preferences()
-        assert result == {"schema_version": "1.0", "optional_rules": {}}
+        assert result == {"schema_version": "1.1", "optional_rules": {}, "settings": {}}
 
     def test_reads_existing_file(self, temp_dir, monkeypatch):
         """Should read and return existing preferences."""
@@ -56,7 +56,7 @@ class TestLoadPreferences:
         from aec.lib.preferences import load_preferences
 
         result = load_preferences()
-        assert result == {"schema_version": "1.0", "optional_rules": {}}
+        assert result == {"schema_version": "1.1", "optional_rules": {}, "settings": {}}
 
 
 class TestSavePreferences:
@@ -336,3 +336,73 @@ class TestCheckPendingPreferences:
 
         # Default for leave-it-better is True
         assert get_preference("leave-it-better") is True
+
+
+class TestSettingsSupport:
+    """Test settings section in preferences schema 1.1."""
+
+    def test_default_preferences_has_settings(self, temp_dir, monkeypatch):
+        """Default preferences should include empty settings dict."""
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
+
+        from aec.lib.preferences import load_preferences
+
+        result = load_preferences()
+        assert "settings" in result
+        assert result["settings"] == {}
+
+    def test_get_setting_returns_none_when_not_set(self, temp_dir, monkeypatch):
+        """Should return None for unset setting."""
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
+
+        from aec.lib.preferences import get_setting
+
+        assert get_setting("projects_dir") is None
+
+    def test_set_setting_stores_value(self, temp_dir, monkeypatch):
+        """Should store a string setting."""
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
+        monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+
+        from aec.lib.preferences import set_setting, get_setting
+
+        set_setting("projects_dir", "/Users/test/projects")
+        assert get_setting("projects_dir") == "/Users/test/projects"
+
+    def test_set_setting_preserves_existing(self, temp_dir, monkeypatch):
+        """Should not clobber existing settings or optional_rules."""
+        prefs_file = temp_dir / "preferences.json"
+        prefs_file.write_text(json.dumps({
+            "schema_version": "1.1",
+            "optional_rules": {
+                "leave-it-better": {"enabled": True, "asked_at": "2026-01-01T00:00:00Z"}
+            },
+            "settings": {"plans_dir": ".plans"}
+        }))
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
+        monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+
+        from aec.lib.preferences import set_setting, get_setting, get_preference
+
+        set_setting("projects_dir", "/Users/test/projects")
+        assert get_setting("plans_dir") == ".plans"
+        assert get_setting("projects_dir") == "/Users/test/projects"
+        assert get_preference("leave-it-better") is True
+
+    def test_load_migrates_schema_1_0_to_1_1(self, temp_dir, monkeypatch):
+        """Loading a 1.0 file should add settings key gracefully."""
+        prefs_file = temp_dir / "preferences.json"
+        prefs_file.write_text(json.dumps({
+            "schema_version": "1.0",
+            "optional_rules": {
+                "leave-it-better": {"enabled": True, "asked_at": "2026-01-01T00:00:00Z"}
+            }
+        }))
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
+
+        from aec.lib.preferences import load_preferences
+
+        result = load_preferences()
+        assert "settings" in result
+        assert result["settings"] == {}
+        assert result["optional_rules"]["leave-it-better"]["enabled"] is True

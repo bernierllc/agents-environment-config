@@ -27,7 +27,7 @@ OPTIONAL_FEATURES: Dict[str, Dict[str, Any]] = {
 
 def _default_preferences() -> Dict[str, Any]:
     """Return the default (empty) preferences structure."""
-    return {"schema_version": "1.0", "optional_rules": {}}
+    return {"schema_version": "1.1", "optional_rules": {}, "settings": {}}
 
 
 def load_preferences() -> Dict[str, Any]:
@@ -47,6 +47,7 @@ def load_preferences() -> Dict[str, Any]:
         # Ensure required keys exist
         data.setdefault("schema_version", "1.0")
         data.setdefault("optional_rules", {})
+        data.setdefault("settings", {})
         return data
     except (json.JSONDecodeError, OSError):
         return _default_preferences()
@@ -87,6 +88,29 @@ def set_preference(key: str, enabled: bool) -> None:
         "enabled": enabled,
         "asked_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    save_preferences(prefs)
+
+
+def get_setting(key: str) -> Optional[Any]:
+    """
+    Get a setting value from the settings section of preferences.
+
+    Returns:
+        The setting value, or None if not set.
+    """
+    prefs = load_preferences()
+    return prefs.get("settings", {}).get(key)
+
+
+def set_setting(key: str, value: Any) -> None:
+    """
+    Set a setting value in the settings section of preferences.
+
+    The value can be any JSON-serializable type (str, bool, int, etc.).
+    Creates/updates the setting and saves to disk.
+    """
+    prefs = load_preferences()
+    prefs["settings"][key] = value
     save_preferences(prefs)
 
 

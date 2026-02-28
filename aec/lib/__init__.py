@@ -52,6 +52,8 @@ from .preferences import (
     get_preference,
     set_preference,
     reset_preference,
+    get_setting,
+    set_setting,
     get_pending_prompts,
     check_pending_preferences,
 )
@@ -111,6 +113,8 @@ __all__ = [
     "get_preference",
     "set_preference",
     "reset_preference",
+    "get_setting",
+    "set_setting",
     "get_pending_prompts",
     "check_pending_preferences",
 ]
