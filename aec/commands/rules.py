@@ -39,6 +39,32 @@ def _strip_frontmatter(content: str) -> str:
     return content
 
 
+def _apply_settings(content: str) -> str:
+    """Apply user settings to rule content (plans dir and completion behavior)."""
+    from ..lib.preferences import get_setting
+
+    plans_dir = get_setting("plans_dir")
+    plans_completion = get_setting("plans_completion")
+
+    # Step 1: Substitute plans directory references
+    if plans_dir and plans_dir != "plans":
+        content = content.replace("./plans/", f"./{plans_dir}/")
+
+    # Step 2: Apply completion behavior (after dir substitution)
+    if plans_completion == "delete":
+        content = re.sub(
+            r"\*\*Move file\*\* to `\./[^`]+/completed/` directory \(if applicable\)",
+            "**Delete the completed plan file**",
+            content,
+        )
+    elif plans_completion == "archive":
+        content = content.replace(
+            "/completed/` directory (if applicable)", "/archive/` directory"
+        )
+
+    return content
+
+
 def _get_cursor_rules(repo_root: Path) -> List[Path]:
     """Get all .mdc files in .cursor/rules/, excluding README.mdc."""
     cursor_rules = repo_root / ".cursor" / "rules"
@@ -89,6 +115,7 @@ def generate() -> None:
             # Read and strip frontmatter
             content = mdc_file.read_text()
             stripped = _strip_frontmatter(content)
+            stripped = _apply_settings(stripped)
 
             # Ensure directory exists
             ensure_directory(md_file.parent)

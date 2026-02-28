@@ -1,5 +1,6 @@
 """Tests for aec.commands.rules module."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -83,3 +84,142 @@ Line 4 (after blank)
         assert "Line 2" in result
         assert "Line 4" in result
         assert "key: value" not in result
+
+
+class TestRulesPlansSubstitution:
+    """Test that rules.generate() substitutes plans dir references."""
+
+    def test_substitutes_plans_dir(self, mock_repo_root, monkeypatch, temp_dir):
+        """Should replace ./plans/ with user's chosen dir in generated rules."""
+        prefs_file = temp_dir / "preferences.json"
+        prefs_file.write_text(json.dumps({
+            "schema_version": "1.1",
+            "optional_rules": {},
+            "settings": {"plans_dir": ".plans"}
+        }))
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
+
+        cursor_rules = mock_repo_root / ".cursor" / "rules" / "general"
+        cursor_rules.mkdir(parents=True, exist_ok=True)
+        (cursor_rules / "test-plans.mdc").write_text(
+            "---\ndescription: test\n---\n"
+            "Store plans in `./plans/` directory\n"
+            "Use `./plans/**/*.md` for organization\n"
+        )
+
+        monkeypatch.setattr("aec.commands.rules.get_repo_root", lambda: mock_repo_root)
+        from aec.commands.rules import generate
+        generate()
+
+        output = (mock_repo_root / ".agent-rules" / "general" / "test-plans.md").read_text()
+        assert "./.plans/" in output
+        assert "./.plans/**/*.md" in output
+        assert "./plans/" not in output
+
+    def test_no_substitution_when_plans_dir_is_plans(self, mock_repo_root, monkeypatch, temp_dir):
+        """Should not change anything when user chose plans/ (the default)."""
+        prefs_file = temp_dir / "preferences.json"
+        prefs_file.write_text(json.dumps({
+            "schema_version": "1.1",
+            "optional_rules": {},
+            "settings": {"plans_dir": "plans"}
+        }))
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
+
+        cursor_rules = mock_repo_root / ".cursor" / "rules" / "general"
+        cursor_rules.mkdir(parents=True, exist_ok=True)
+        (cursor_rules / "test-plans.mdc").write_text(
+            "---\ndescription: test\n---\n"
+            "Store plans in `./plans/` directory\n"
+        )
+
+        monkeypatch.setattr("aec.commands.rules.get_repo_root", lambda: mock_repo_root)
+        from aec.commands.rules import generate
+        generate()
+
+        output = (mock_repo_root / ".agent-rules" / "general" / "test-plans.md").read_text()
+        assert "./plans/" in output
+
+
+class TestRulesCompletionBehavior:
+    """Test that rules.generate() applies plans completion behavior."""
+
+    def test_archive_behavior(self, mock_repo_root, monkeypatch, temp_dir):
+        """Should change completed to archive when user chose archive."""
+        prefs_file = temp_dir / "preferences.json"
+        prefs_file.write_text(json.dumps({
+            "schema_version": "1.1",
+            "optional_rules": {},
+            "settings": {"plans_dir": ".plans", "plans_completion": "archive"}
+        }))
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
+
+        cursor_rules = mock_repo_root / ".cursor" / "rules" / "general"
+        cursor_rules.mkdir(parents=True, exist_ok=True)
+        (cursor_rules / "plans-checklists.mdc").write_text(
+            "---\ndescription: test\n---\n"
+            "### File Completion Process\n"
+            "1. When ALL tasks in a plan file are completed `- [x]`:\n"
+            "   - **Move file** to `./plans/completed/` directory (if applicable)\n"
+        )
+
+        monkeypatch.setattr("aec.commands.rules.get_repo_root", lambda: mock_repo_root)
+        from aec.commands.rules import generate
+        generate()
+
+        output = (mock_repo_root / ".agent-rules" / "general" / "plans-checklists.md").read_text()
+        assert "./.plans/archive/" in output
+        assert "Move file" in output
+        assert "(if applicable)" not in output
+
+    def test_delete_behavior(self, mock_repo_root, monkeypatch, temp_dir):
+        """Should replace with delete instruction when user chose delete."""
+        prefs_file = temp_dir / "preferences.json"
+        prefs_file.write_text(json.dumps({
+            "schema_version": "1.1",
+            "optional_rules": {},
+            "settings": {"plans_dir": ".plans", "plans_completion": "delete"}
+        }))
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
+
+        cursor_rules = mock_repo_root / ".cursor" / "rules" / "general"
+        cursor_rules.mkdir(parents=True, exist_ok=True)
+        (cursor_rules / "plans-checklists.mdc").write_text(
+            "---\ndescription: test\n---\n"
+            "### File Completion Process\n"
+            "1. When ALL tasks in a plan file are completed `- [x]`:\n"
+            "   - **Move file** to `./plans/completed/` directory (if applicable)\n"
+        )
+
+        monkeypatch.setattr("aec.commands.rules.get_repo_root", lambda: mock_repo_root)
+        from aec.commands.rules import generate
+        generate()
+
+        output = (mock_repo_root / ".agent-rules" / "general" / "plans-checklists.md").read_text()
+        assert "**Delete the completed plan file**" in output
+        assert "Move file" not in output
+
+    def test_no_completion_setting_leaves_original(self, mock_repo_root, monkeypatch, temp_dir):
+        """When no plans_completion setting, should leave original text."""
+        prefs_file = temp_dir / "preferences.json"
+        prefs_file.write_text(json.dumps({
+            "schema_version": "1.1",
+            "optional_rules": {},
+            "settings": {"plans_dir": "plans"}
+        }))
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
+
+        cursor_rules = mock_repo_root / ".cursor" / "rules" / "general"
+        cursor_rules.mkdir(parents=True, exist_ok=True)
+        (cursor_rules / "plans-checklists.mdc").write_text(
+            "---\ndescription: test\n---\n"
+            "   - **Move file** to `./plans/completed/` directory (if applicable)\n"
+        )
+
+        monkeypatch.setattr("aec.commands.rules.get_repo_root", lambda: mock_repo_root)
+        from aec.commands.rules import generate
+        generate()
+
+        output = (mock_repo_root / ".agent-rules" / "general" / "plans-checklists.md").read_text()
+        assert "completed/" in output
+        assert "(if applicable)" in output
