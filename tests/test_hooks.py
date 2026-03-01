@@ -344,3 +344,59 @@ class TestHookModePreference:
         from aec.lib.preferences import set_setting, get_setting
         set_setting("hook_mode", "never")
         assert get_setting("hook_mode") == "never"
+
+
+class TestAgentsJsonHookSupport:
+    """Test that agents.json has supports_hooks field."""
+
+    def test_all_agents_have_supports_hooks_field(self):
+        """Every agent in agents.json should have a supports_hooks boolean."""
+        from aec.lib.registry import invalidate_cache, load_agent_registry
+
+        invalidate_cache()
+        registry = load_agent_registry()
+        for key, agent in registry["agents"].items():
+            assert "supports_hooks" in agent, f"Agent '{key}' missing supports_hooks"
+            assert isinstance(agent["supports_hooks"], bool), (
+                f"Agent '{key}' supports_hooks must be bool"
+            )
+
+    def test_claude_supports_hooks(self):
+        """Claude should support hooks."""
+        from aec.lib.registry import invalidate_cache, load_agent_registry
+
+        invalidate_cache()
+        registry = load_agent_registry()
+        assert registry["agents"]["claude"]["supports_hooks"] is True
+
+    def test_gemini_supports_hooks(self):
+        """Gemini should support hooks."""
+        from aec.lib.registry import invalidate_cache, load_agent_registry
+
+        invalidate_cache()
+        registry = load_agent_registry()
+        assert registry["agents"]["gemini"]["supports_hooks"] is True
+
+    def test_cursor_supports_hooks(self):
+        """Cursor should support hooks."""
+        from aec.lib.registry import invalidate_cache, load_agent_registry
+
+        invalidate_cache()
+        registry = load_agent_registry()
+        assert registry["agents"]["cursor"]["supports_hooks"] is True
+
+    def test_codex_does_not_support_hooks(self):
+        """Codex should not support hooks."""
+        from aec.lib.registry import invalidate_cache, load_agent_registry
+
+        invalidate_cache()
+        registry = load_agent_registry()
+        assert registry["agents"]["codex"]["supports_hooks"] is False
+
+    def test_qwen_does_not_support_hooks(self):
+        """Qwen should not support hooks."""
+        from aec.lib.registry import invalidate_cache, load_agent_registry
+
+        invalidate_cache()
+        registry = load_agent_registry()
+        assert registry["agents"]["qwen"]["supports_hooks"] is False

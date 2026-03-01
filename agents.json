@@ -12,7 +12,8 @@
       "launch_args": "--dangerously-skip-permissions",
       "has_resume": true,
       "resume_args": "--dangerously-skip-permissions --resume",
-      "use_agent_rules": true
+      "use_agent_rules": true,
+      "supports_hooks": true
     },
     "cursor": {
       "display_name": "Cursor",
@@ -23,7 +24,8 @@
       "terminal_launch": false,
       "launch_template": "cursor {path}/",
       "has_resume": false,
-      "use_agent_rules": false
+      "use_agent_rules": false,
+      "supports_hooks": true
     },
     "gemini": {
       "display_name": "Gemini CLI",
@@ -35,7 +37,8 @@
       "launch_args": "--yolo",
       "has_resume": true,
       "resume_args": "--yolo --resume",
-      "use_agent_rules": true
+      "use_agent_rules": true,
+      "supports_hooks": true
     },
     "qwen": {
       "display_name": "Qwen Code",
@@ -47,7 +50,8 @@
       "launch_args": "--yolo",
       "has_resume": true,
       "resume_args": "--yolo --continue",
-      "use_agent_rules": true
+      "use_agent_rules": true,
+      "supports_hooks": false
     },
     "codex": {
       "display_name": "Codex",
@@ -59,7 +63,8 @@
       "launch_args": "--dangerously-bypass-approvals-and-sandbox",
       "has_resume": true,
       "resume_args": "resume --last",
-      "use_agent_rules": true
+      "use_agent_rules": true,
+      "supports_hooks": false
     }
   }
 }
