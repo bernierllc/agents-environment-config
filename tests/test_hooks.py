@@ -310,3 +310,37 @@ class TestMergeHookConfig:
         from aec.lib.hooks import write_hook_config
         result = write_hook_config(temp_dir, "claude", ["npx tsc --noEmit --pretty 2>&1 | head -20"])
         assert result == "exists"
+
+
+class TestHookModePreference:
+    """Test hook_mode setting in preferences."""
+
+    def test_hook_mode_default_is_none(self, temp_dir, monkeypatch):
+        """hook_mode should be None when not yet set."""
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
+        from aec.lib.preferences import get_setting
+        assert get_setting("hook_mode") is None
+
+    def test_set_hook_mode_per_repo(self, temp_dir, monkeypatch):
+        """Should store 'per-repo' hook_mode."""
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
+        monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+        from aec.lib.preferences import set_setting, get_setting
+        set_setting("hook_mode", "per-repo")
+        assert get_setting("hook_mode") == "per-repo"
+
+    def test_set_hook_mode_auto(self, temp_dir, monkeypatch):
+        """Should store 'auto' hook_mode."""
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
+        monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+        from aec.lib.preferences import set_setting, get_setting
+        set_setting("hook_mode", "auto")
+        assert get_setting("hook_mode") == "auto"
+
+    def test_set_hook_mode_never(self, temp_dir, monkeypatch):
+        """Should store 'never' hook_mode."""
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
+        monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+        from aec.lib.preferences import set_setting, get_setting
+        set_setting("hook_mode", "never")
+        assert get_setting("hook_mode") == "never"
