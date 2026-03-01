@@ -183,3 +183,130 @@ class TestGenerateHookConfig:
         from aec.lib.hooks import generate_hook_config
         with pytest.raises(KeyError):
             generate_hook_config("codex", ["echo hello"])
+
+
+class TestWriteHookConfig:
+    """Test write_hook_config function."""
+
+    def test_creates_new_config_file(self, temp_dir):
+        """Should create config file when it doesn't exist."""
+        from aec.lib.hooks import write_hook_config
+        result = write_hook_config(
+            project_dir=temp_dir,
+            agent_key="claude",
+            commands=["npx tsc --noEmit --pretty 2>&1 | head -20"],
+        )
+        assert result == "created"
+        config_path = temp_dir / ".claude" / "settings.json"
+        assert config_path.exists()
+        data = json.loads(config_path.read_text())
+        assert "hooks" in data
+        assert data["hooks"]["PostToolUse"][0]["matcher"] == "Edit|Write"
+
+    def test_creates_parent_directories(self, temp_dir):
+        """Should create parent dirs (.claude/, .gemini/, etc.) if missing."""
+        from aec.lib.hooks import write_hook_config
+        write_hook_config(temp_dir, "gemini", ["cargo check 2>&1 | head -20"])
+        config_path = temp_dir / ".gemini" / "settings.json"
+        assert config_path.exists()
+
+    def test_creates_cursor_hooks_json(self, temp_dir):
+        """Should create .cursor/hooks.json for cursor."""
+        from aec.lib.hooks import write_hook_config
+        write_hook_config(temp_dir, "cursor", ["npx tsc --noEmit --pretty 2>&1 | head -20"])
+        config_path = temp_dir / ".cursor" / "hooks.json"
+        assert config_path.exists()
+        data = json.loads(config_path.read_text())
+        assert data["version"] == 1
+
+
+class TestMergeHookConfig:
+    """Test merge behavior when config file already exists."""
+
+    def test_merge_adds_hooks_to_existing(self, temp_dir):
+        """Should add hooks section to existing config without removing other keys."""
+        config_dir = temp_dir / ".claude"
+        config_dir.mkdir()
+        config_path = config_dir / "settings.json"
+        config_path.write_text(json.dumps({"permissions": {"allow": ["Read"]}}))
+        from aec.lib.hooks import write_hook_config
+        result = write_hook_config(
+            project_dir=temp_dir,
+            agent_key="claude",
+            commands=["npx tsc --noEmit --pretty 2>&1 | head -20"],
+            mode="merge",
+        )
+        assert result == "merged"
+        data = json.loads(config_path.read_text())
+        assert data["permissions"]["allow"] == ["Read"]
+        assert "hooks" in data
+
+    def test_merge_replaces_existing_hooks(self, temp_dir):
+        """Should replace existing hooks section when merging."""
+        config_dir = temp_dir / ".claude"
+        config_dir.mkdir()
+        config_path = config_dir / "settings.json"
+        config_path.write_text(json.dumps({
+            "permissions": {"allow": ["Read"]},
+            "hooks": {"PostToolUse": [{"matcher": "Bash", "hooks": []}]},
+        }))
+        from aec.lib.hooks import write_hook_config
+        result = write_hook_config(
+            project_dir=temp_dir,
+            agent_key="claude",
+            commands=["cargo check 2>&1 | head -20"],
+            mode="merge",
+        )
+        assert result == "merged"
+        data = json.loads(config_path.read_text())
+        assert data["permissions"]["allow"] == ["Read"]
+        assert data["hooks"]["PostToolUse"][0]["matcher"] == "Edit|Write"
+
+    def test_skip_returns_skipped(self, temp_dir):
+        """Should return 'skipped' and not modify file when mode is skip."""
+        config_dir = temp_dir / ".claude"
+        config_dir.mkdir()
+        config_path = config_dir / "settings.json"
+        original = json.dumps({"existing": True})
+        config_path.write_text(original)
+        from aec.lib.hooks import write_hook_config
+        result = write_hook_config(
+            project_dir=temp_dir,
+            agent_key="claude",
+            commands=["npx tsc --noEmit --pretty 2>&1 | head -20"],
+            mode="skip",
+        )
+        assert result == "skipped"
+        assert config_path.read_text() == original
+
+    def test_show_returns_config_without_writing(self, temp_dir):
+        """Should return 'show' and not modify file when mode is show."""
+        config_dir = temp_dir / ".claude"
+        config_dir.mkdir()
+        config_path = config_dir / "settings.json"
+        original = json.dumps({"existing": True})
+        config_path.write_text(original)
+        from aec.lib.hooks import write_hook_config
+        result = write_hook_config(
+            project_dir=temp_dir,
+            agent_key="claude",
+            commands=["npx tsc --noEmit --pretty 2>&1 | head -20"],
+            mode="show",
+        )
+        assert result == "show"
+        assert config_path.read_text() == original
+
+    def test_default_mode_creates_when_missing(self, temp_dir):
+        """Default mode should create file when it doesn't exist."""
+        from aec.lib.hooks import write_hook_config
+        result = write_hook_config(temp_dir, "claude", ["npx tsc --noEmit --pretty 2>&1 | head -20"])
+        assert result == "created"
+
+    def test_default_mode_skips_when_exists(self, temp_dir):
+        """Default mode (no explicit mode) when file exists should return 'exists'."""
+        config_dir = temp_dir / ".claude"
+        config_dir.mkdir()
+        (config_dir / "settings.json").write_text("{}")
+        from aec.lib.hooks import write_hook_config
+        result = write_hook_config(temp_dir, "claude", ["npx tsc --noEmit --pretty 2>&1 | head -20"])
+        assert result == "exists"
