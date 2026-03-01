@@ -1,17 +1,22 @@
 # Agents Environment Configuration
 
-> **This is a TEMPLATE repository.** It provides shared AI agent configurations that get copied to other projects. Do not add project-specific content here.
+Every new project means setting up AI agent configs from scratch -- `CLAUDE.md`, Cursor rules, Gemini instructions, and more. Then keeping them consistent across projects. Then remembering which agents need frontmatter and which don't.
 
-## What This Repo Is
+This repo eliminates that. Define your development standards once, and `aec` distributes them to every project, formatted correctly for each agent.
 
-This repository contains:
-- **Shared cursor rules** (`.cursor/rules/`) - Development standards for all projects (Cursor format with frontmatter)
-- **Agent-agnostic rules** (`.agent-rules/`) - Same rules without Cursor frontmatter for non-Cursor agents
-- **Agent instruction files** (`CLAUDE.md`, `AGENTS.md`, etc.) - Templates for AI assistants
-- **Setup scripts** - Tools to configure new projects with these standards
+> **Note:** This is a template repository. It provides shared configurations that get copied to your projects. Do not add project-specific content here -- that goes in each project's `AGENTINFO.md`.
+
+## What's Inside
+
+- **Shared Cursor rules** (`.cursor/rules/`) - Development standards in Cursor format (with YAML frontmatter)
+- **Agent-agnostic rules** (`.agent-rules/`) - The same rules without Cursor frontmatter, so other agents don't waste tokens on it
+- **Agent instruction files** (`CLAUDE.md`, `AGENTS.md`, etc.) - Templates that tell each agent where to find your rules
+- **The `aec` CLI** - Sets up new projects, keeps rules in sync, validates parity across formats
 - **Submodules** for agents and skills (`bernierllc/agency-agents`, `bernierllc/skills`)
 
 ## Supported Agents
+
+AEC handles the format differences between agents automatically. You write rules once; each agent gets them in the format it expects.
 
 | Agent | Instruction File | Detection | Hooks | Description |
 |-------|------------------|-----------|-------|-------------|
@@ -29,7 +34,7 @@ Want to add support for another agent? See the [Adding Agent Support](docs/addin
 
 ## Quick Start
 
-### Setting Up This Repo (One Time)
+### First-Time Setup
 
 > **New to Python/pip?** The `pip` command below requires Python 3.10+. If you don't have it installed, see the [official pip installation guide](https://pip.pypa.io/en/stable/installation/) for macOS, Windows, and Linux instructions.
 
@@ -88,6 +93,8 @@ This creates:
 
 ### Setting Up a New Project
 
+Point `aec` at any project directory -- new or existing -- and it handles the rest.
+
 ```bash
 # Using Python CLI (recommended)
 aec repo setup my-new-project
@@ -97,13 +104,11 @@ aec repo setup /path/to/existing/project
 ./scripts/setup-repo.sh my-new-project
 ```
 
-This copies agent files and creates directories in the target project.
-
 **Raycast users:** The same script exists at `raycast_scripts/setup-repo.sh` with Raycast metadata.
 
 ## Lint Hooks
 
-AEC can automatically install lint/type-check hooks that run after every file edit, catching errors in real-time as your AI agent writes code.
+AI agents write code fast, but they don't always check their work. AEC can install lint and type-check hooks that run after every file edit, so errors get caught the moment they're introduced -- not three prompts later.
 
 **Supported languages:** TypeScript, Rust, Python, Go, Ruby
 
@@ -118,9 +123,9 @@ You control how hooks are handled:
 
 See [docs/users/lint-hooks.md](docs/users/lint-hooks.md) for details. To add support for more languages or agents, see [docs/contributors/adding-hook-support.md](docs/contributors/adding-hook-support.md).
 
-## Python CLI
+## The `aec` CLI
 
-The `aec` CLI provides cross-platform support (macOS, Linux, Windows).
+All operations are available through the `aec` command, which works on macOS, Linux, and Windows.
 
 ### Installation
 
@@ -219,6 +224,8 @@ agents-environment-config/          # THIS IS A TEMPLATE - don't add project-spe
 
 ## Rules Architecture
 
+The core problem: Cursor needs YAML frontmatter in its rule files, but every other agent treats that frontmatter as noise. AEC maintains both formats from a single source.
+
 ### Two Rule Formats
 
 | Directory | Format | Used By |
@@ -315,7 +322,7 @@ aec discover --auto       # Auto-add all discovered paths
 
 ## Local Configuration Directory
 
-The scripts create a `~/.agents-environment-config/` directory to store local state:
+AEC tracks which projects you've set up and your preferences in `~/.agents-environment-config/`:
 
 ```
 ~/.agents-environment-config/
@@ -362,6 +369,8 @@ aec agent-tools rollback ~/.agent-tools-backup-TIMESTAMP
 
 ## How Projects Use This
 
+Each project gets its own copy of the agent instruction files, configured to pull rules from the shared `~/.agent-tools/` directory. This means your standards stay centralized while each project can still define its own specifics in `AGENTINFO.md`.
+
 When you run `aec repo setup` (or `setup-repo.sh`) on a project, it:
 
 1. Creates directories: `.cursor/rules/`, `docs/`, and your configured plans directory (default: `.plans/`)
@@ -376,7 +385,7 @@ When you run `aec repo setup` (or `setup-repo.sh`) on a project, it:
 
 ### Batch Project Setup
 
-During `aec install`, or anytime with `aec repo setup-all`, you can walk through all projects in your configured projects directory and set up each one:
+If you have a directory full of projects, you don't have to set them up one at a time. During `aec install` (or anytime with `aec repo setup-all`), AEC walks your projects directory and sets up each one:
 
 ```bash
 # During install, you'll be prompted automatically
@@ -419,6 +428,8 @@ git submodule update --remote --recursive
 | `.agent-rules/*.md` | Development standards (other agents) | No - generated from .cursor/rules/ |
 
 ## Trade-offs
+
+Nothing is free. Here's what you're signing up for:
 
 | Benefit | Cost |
 |---------|------|
