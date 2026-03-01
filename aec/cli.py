@@ -84,7 +84,7 @@ else:
         repo_sub = repo_parser.add_subparsers(dest="repo_command")
 
         repo_setup = repo_sub.add_parser("setup", help="Setup a project with agent files")
-        repo_setup.add_argument("path", help="Project name or path")
+        repo_setup.add_argument("path", nargs="?", default=None, help="Project name or path")
         repo_setup.add_argument("--skip-raycast", action="store_true")
 
         repo_sub.add_parser("list", help="List tracked repositories")

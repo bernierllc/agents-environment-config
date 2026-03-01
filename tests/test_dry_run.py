@@ -151,8 +151,10 @@ class TestRepoDryRun:
         repo_root = temp_dir / "repo"
         repo_root.mkdir()
 
-        # Create a source file
-        (repo_root / "AGENTINFO.md").write_text("# Info")
+        # Create a source file in templates/ (where the code now looks)
+        templates_dir = repo_root / "templates"
+        templates_dir.mkdir()
+        (templates_dir / "AGENTINFO.md").write_text("# Info")
 
         monkeypatch.setattr("aec.commands.repo.AGENT_FILES", ["AGENTINFO.md"])
 

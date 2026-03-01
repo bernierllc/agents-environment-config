@@ -34,6 +34,7 @@ from ..lib import (
     get_migration_files,
     AGENT_TOOLS_DIR,
 )
+from ..lib.config import load_env_file
 from ..lib.git import clone_repo
 
 if HAS_TYPER:
@@ -593,7 +594,7 @@ def _setup_lint_hooks(project_dir: Path, batch: bool = False) -> None:
 
 
 def setup(
-    path: str,
+    path: Optional[str] = None,
     skip_raycast: bool = False,
     batch: bool = False,
     dry_run: bool = False,
@@ -601,12 +602,25 @@ def setup(
     """Setup a project with agent files.
 
     Args:
-        path: Project name or path.
+        path: Project name or path. If None, prompts interactively.
         skip_raycast: Skip Raycast script creation.
         batch: Batch mode (skip interactive prompts for already-setup projects).
         dry_run: If True, report what would happen without making changes.
     """
     Console.header("Repository Setup")
+
+    # Load .env from repo root (matches bash script behavior)
+    load_env_file()
+
+    if path is None:
+        try:
+            path = input("Enter project name or path: ").strip()
+        except EOFError:
+            Console.error("No project specified")
+            raise SystemExit(1)
+        if not path:
+            Console.error("No project specified")
+            raise SystemExit(1)
 
     if dry_run:
         Console.warning("DRY RUN MODE - No changes will be made\n")
@@ -793,6 +807,28 @@ def update(
         _update_single_repo(Path(path), dry_run)
 
 
+def _clean_agentinfo_redundancy(project_dir: Path, dry_run: bool = False) -> None:
+    """Check for redundant rule references in AGENTINFO.md.
+
+    AGENTINFO.md should contain project-specific info only. Rule locations
+    belong in agent-specific files (CLAUDE.md, GEMINI.md, etc.).
+    """
+    filepath = project_dir / "AGENTINFO.md"
+    if not filepath.exists():
+        return
+
+    content = filepath.read_text()
+    if any(pattern in content for pattern in [".cursor/rules", ".agent-rules"]):
+        if dry_run:
+            Console.warning("Would clean: AGENTINFO.md (has redundant rule references)")
+            Console.info("  Rule locations belong in agent-specific files (CLAUDE.md, etc.)")
+        else:
+            Console.warning("AGENTINFO.md may have redundant rule references")
+            Console.info("  Manual review recommended:")
+            Console.info("  Remove lines referencing .cursor/rules/ or .agent-rules/")
+            Console.info("  These are defined in agent-specific files (CLAUDE.md, etc.)")
+
+
 def _update_single_repo(project_dir: Path, dry_run: bool = False) -> None:
     """Update a single repository."""
     if not project_dir.exists():
@@ -806,6 +842,9 @@ def _update_single_repo(project_dir: Path, dry_run: bool = False) -> None:
     # Check for migrations
     if _needs_migration(project_dir):
         _migrate_agent_files(project_dir, dry_run)
+
+    # Check for redundant rule references in AGENTINFO.md
+    _clean_agentinfo_redundancy(project_dir, dry_run)
 
     # Migrate legacy plans directories
     if not dry_run:
@@ -869,7 +908,7 @@ def setup_all(dry_run: bool = False) -> None:
 if HAS_TYPER:
     @app.command("setup")
     def setup_cmd(
-        path: str = typer.Argument(..., help="Project name or path"),
+        path: Optional[str] = typer.Argument(None, help="Project name or path"),
         skip_raycast: bool = typer.Option(False, "--skip-raycast", help="Skip Raycast script creation"),
     ):
         """Setup a project with agent files."""
