@@ -64,6 +64,11 @@ from .hooks import (
     generate_hook_config,
     write_hook_config,
 )
+from .agent_files import (
+    generate_all as generate_agent_files,
+    generate_agent_file,
+    organize_rules,
+)
 
 # SUPPORTED_AGENTS is lazy-loaded via config.__getattr__
 # Import it explicitly for backwards compatibility
@@ -130,4 +135,8 @@ __all__ = [
     "detect_languages",
     "generate_hook_config",
     "write_hook_config",
+    # Agent files
+    "generate_agent_files",
+    "generate_agent_file",
+    "organize_rules",
 ]

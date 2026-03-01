@@ -355,66 +355,71 @@ def _generate_inline_content(
 
 
 def main():
-    """Main execution function."""
-    # Determine repository root (assume script is in scripts/)
+    """Main execution function.
+
+    This script can be run standalone or via 'python -m aec files generate'.
+    Uses the shared aec.lib.agent_files module for generation logic.
+    """
+    import sys
+
     script_dir = Path(__file__).parent
     repo_root = script_dir.parent
-    rules_dir = repo_root / '.cursor' / 'rules'
 
-    if not rules_dir.exists():
-        print(f"Error: Rules directory not found at {rules_dir}")
-        return 1
+    # Add repo root to path so we can import aec
+    sys.path.insert(0, str(repo_root))
 
-    print(f"Reading rules from {rules_dir}...")
-    organized_rules = organize_rules(rules_dir)
+    try:
+        from aec.lib.agent_files import generate_all
+    except ImportError:
+        # Fallback: use local functions if aec package not importable
+        print("Warning: Could not import aec.lib.agent_files, using local functions")
+        rules_dir = repo_root / '.cursor' / 'rules'
+        if not rules_dir.exists():
+            print(f"Error: Rules directory not found at {rules_dir}")
+            return 1
 
-    # Count rules
-    total_rules = sum(len(rules) for rules in organized_rules.values())
-    print(f"Found {total_rules} rule files")
+        organized_rules = organize_rules(rules_dir)
 
-    # Load agent generation config from agents.json registry
-    agents_json_path = repo_root / 'agents.json'
-    if agents_json_path.exists():
+        # Load agents from agents.json
         import json
-        with open(agents_json_path) as f:
-            registry = json.load(f)
-        agents = {}
-        for agent_data in registry.get('agents', {}).values():
-            instruction_file = agent_data.get('instruction_file')
-            if instruction_file:
-                agents[instruction_file] = (
-                    agent_data['display_name'],
-                    agent_data.get('use_agent_rules', True),
-                )
+        agents_json_path = repo_root / 'agents.json'
+        if agents_json_path.exists():
+            with open(agents_json_path) as f:
+                registry = json.load(f)
+            agents = {}
+            for agent_data in registry.get('agents', {}).values():
+                instruction_file = agent_data.get('instruction_file')
+                if instruction_file:
+                    agents[instruction_file] = (
+                        agent_data['display_name'],
+                        agent_data.get('use_agent_rules', True),
+                    )
+        else:
+            agents = {
+                'AGENTS.md': ('Codex', True),
+                'GEMINI.md': ('Gemini CLI', True),
+                'QWEN.md': ('Qwen Code', True),
+                'CLAUDE.md': ('Claude Code', True),
+            }
+
+        results = {}
+        for filename, (agent_name, use_agent_rules) in agents.items():
+            content = generate_agent_file(
+                agent_name, organized_rules, rules_dir,
+                use_agent_rules=use_agent_rules,
+            )
+            results[filename] = content
     else:
-        # Fallback: hardcoded for standalone use without agents.json
-        agents = {
-            'AGENTS.md': ('Codex', True),
-            'GEMINI.md': ('Gemini CLI', True),
-            'QWEN.md': ('Qwen Code', True),
-            'CLAUDE.md': ('Claude Code', True),
-        }
+        print(f"Reading rules from {repo_root / '.cursor' / 'rules'}...")
+        results = generate_all(repo_root)
 
-    for filename, (agent_name, use_agent_rules) in agents.items():
-        print(f"Generating {filename} for {agent_name}...")
-        content = generate_agent_file(
-            agent_name,
-            organized_rules,
-            rules_dir,
-            use_agent_rules=use_agent_rules
-        )
-
-        output_path = repo_root / "templates" / filename
+    templates_dir = repo_root / "templates"
+    for filename, content in results.items():
+        output_path = templates_dir / filename
         output_path.write_text(content, encoding='utf-8')
         print(f"  Written to {output_path}")
 
-    print("\nDone! Generated agent instruction files:")
-    for filename in agents.keys():
-        print(f"  - {filename}")
-
-    print("\nNote: All agents now reference ~/.agent-tools/rules/agents-environment-config/*.md")
-    print("Cursor IDE uses .cursor/rules/*.mdc directly via symlinks.")
-
+    print(f"\nDone! Generated {len(results)} agent instruction files in templates/")
     return 0
 
 

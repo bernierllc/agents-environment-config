@@ -32,11 +32,12 @@ if HAS_TYPER:
         check_pending_preferences()
 
     # Import and register command groups
-    from .commands import repo, agent_tools, rules, install, discover, preferences
+    from .commands import repo, agent_tools, rules, files, install, discover, preferences
 
     app.add_typer(repo.app, name="repo", help="Manage project repositories")
     app.add_typer(agent_tools.app, name="agent-tools", help="Manage ~/.agent-tools/ directory")
     app.add_typer(rules.app, name="rules", help="Manage agent rules")
+    app.add_typer(files.app, name="files", help="Manage agent instruction files")
 
     app.add_typer(preferences.app, name="preferences", help="Manage optional feature preferences")
 
@@ -109,6 +110,11 @@ else:
         rules_sub = rules_parser.add_subparsers(dest="rules_command")
         rules_sub.add_parser("generate", help="Generate .agent-rules/")
         rules_sub.add_parser("validate", help="Validate rule parity")
+
+        # files commands
+        files_parser = subparsers.add_parser("files", help="Manage agent instruction files")
+        files_sub = files_parser.add_subparsers(dest="files_command")
+        files_sub.add_parser("generate", help="Generate agent instruction files in templates/")
 
         # Top-level commands
         install_parser = subparsers.add_parser("install", help="Full setup")
@@ -195,6 +201,13 @@ else:
                 rules_cmd.validate()
             else:
                 rules_parser.print_help()
+
+        elif args.command == "files":
+            from .commands import files as files_cmd
+            if args.files_command == "generate":
+                files_cmd.generate()
+            else:
+                files_parser.print_help()
 
         elif args.command == "discover":
             discover_cmd.discover(

@@ -42,5 +42,5 @@ Do NOT memorize all rules - read the specific rule file when working in that are
 ## Regenerating This File
 
 ```bash
-python3 scripts/generate-agent-files.py
+python3 -m aec files generate
 ```
