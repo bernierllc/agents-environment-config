@@ -450,6 +450,148 @@ def _migrate_agent_files(project_dir: Path, dry_run: bool = False) -> int:
     return changes
 
 
+def _setup_lint_hooks(project_dir: Path, batch: bool = False) -> None:
+    """Configure lint hooks for detected AI agents.
+
+    Detects languages in the project, determines which agents support hooks,
+    and writes hook configuration files for each qualifying agent.
+
+    Args:
+        project_dir: Path to the project root directory.
+        batch: If True, skip interactive prompts and use all detected languages.
+    """
+    from ..lib.preferences import get_setting, set_setting
+    from ..lib.hooks import (
+        LANGUAGE_HOOKS,
+        AGENT_HOOK_CONFIGS,
+        detect_languages,
+        write_hook_config,
+    )
+
+    Console.subheader("Setting up lint hooks...")
+
+    # Step 1: Get or prompt for hook_mode
+    hook_mode = get_setting("hook_mode")
+    if hook_mode is None:
+        if batch:
+            hook_mode = "auto"
+        else:
+            Console.print("\nLint hook mode determines when hooks are installed:")
+            Console.print("  1) auto     - Install hooks for all detected languages")
+            Console.print("  2) per-repo - Ask which languages per project")
+            Console.print("  3) never    - Never install lint hooks")
+            Console.print()
+            try:
+                choice = input("Choose hook mode [1]: ").strip() or "1"
+            except EOFError:
+                choice = "1"
+
+            mode_map = {"1": "auto", "2": "per-repo", "3": "never"}
+            hook_mode = mode_map.get(choice, "auto")
+
+        set_setting("hook_mode", hook_mode)
+        Console.info(f"Saved hook_mode={hook_mode}")
+
+    # Step 2: If never, bail out
+    if hook_mode == "never":
+        Console.skip("Lint hooks disabled (hook_mode=never)")
+        return
+
+    # Step 3: Detect languages
+    languages = detect_languages(project_dir)
+    if not languages:
+        Console.info("No supported languages detected, skipping lint hooks")
+        return
+
+    # Step 4: Determine which languages to use
+    if hook_mode == "auto" or batch:
+        selected_languages = languages
+    else:
+        # per-repo mode: prompt user
+        Console.print("\nDetected languages:")
+        for i, lang in enumerate(languages, 1):
+            display = LANGUAGE_HOOKS[lang]["display_name"]
+            Console.print(f"  {i}) {display}")
+        all_option = len(languages) + 1
+        none_option = len(languages) + 2
+        Console.print(f"  {all_option}) All detected")
+        Console.print(f"  {none_option}) None")
+        Console.print()
+
+        try:
+            choice = input("Select languages for lint hooks: ").strip()
+        except EOFError:
+            choice = str(all_option)
+
+        if choice == str(none_option):
+            Console.skip("No languages selected, skipping lint hooks")
+            return
+        elif choice == str(all_option):
+            selected_languages = languages
+        else:
+            # Single language selection
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(languages):
+                    selected_languages = [languages[idx]]
+                else:
+                    selected_languages = languages
+            except (ValueError, IndexError):
+                selected_languages = languages
+
+    # Step 5: Gather commands for selected languages
+    commands = [LANGUAGE_HOOKS[lang]["command"] for lang in selected_languages]
+
+    # Step 6: Detect agents and filter to those with hook support
+    detected = detect_agents()
+    qualifying_agents = {
+        name: config
+        for name, config in detected.items()
+        if config.get("supports_hooks") and name in AGENT_HOOK_CONFIGS
+    }
+
+    if not qualifying_agents:
+        Console.info("No agents with hook support detected")
+        return
+
+    # Step 7: Write hook configs for each qualifying agent
+    for agent_key in qualifying_agents:
+        agent_config_path = project_dir / AGENT_HOOK_CONFIGS[agent_key]["config_path"]
+
+        if agent_config_path.exists() and hook_mode == "per-repo" and not batch:
+            Console.print(f"\n{agent_key}: {agent_config_path.name} already exists")
+            Console.print("  1) Skip")
+            Console.print("  2) Merge hooks into existing config")
+            Console.print("  3) Show config (don't write)")
+            Console.print()
+            try:
+                action = input("Choice [1]: ").strip() or "1"
+            except EOFError:
+                action = "1"
+
+            action_map = {"1": "skip", "2": "merge", "3": "show"}
+            mode = action_map.get(action, "skip")
+        else:
+            mode = "auto"
+
+        result = write_hook_config(project_dir, agent_key, commands, mode=mode)
+
+        if result == "created":
+            Console.success(f"Created {AGENT_HOOK_CONFIGS[agent_key]['config_path']}")
+        elif result == "merged":
+            Console.success(f"Merged hooks into {AGENT_HOOK_CONFIGS[agent_key]['config_path']}")
+        elif result == "skipped":
+            Console.skip(f"Skipped {agent_key} (config already exists)")
+        elif result == "exists":
+            Console.skip(f"Skipped {agent_key} (config already exists)")
+        elif result == "show":
+            from ..lib.hooks import generate_hook_config
+            import json
+            config = generate_hook_config(agent_key, commands)
+            Console.print(f"\n{agent_key} hook config:")
+            Console.print(json.dumps(config, indent=2))
+
+
 def setup(
     path: str,
     skip_raycast: bool = False,
@@ -572,6 +714,10 @@ def setup(
 
     # Copy optional rules based on user preferences
     _copy_optional_rules(project_dir, repo_root, dry_run)
+
+    # Setup lint hooks
+    if not dry_run:
+        _setup_lint_hooks(project_dir, batch=batch)
 
     # Update .gitignore
     _update_gitignore(project_dir, dry_run)
