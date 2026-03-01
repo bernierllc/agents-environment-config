@@ -77,11 +77,11 @@ def _copy_agent_files(project_dir: Path, repo_root: Path) -> None:
     Console.subheader("Copying agent files...")
 
     for filename in AGENT_FILES:
-        source = repo_root / filename
+        source = repo_root / "templates" / filename
         target = project_dir / filename
 
         if not source.exists():
-            Console.warning(f"{filename} not found in repo")
+            Console.warning(f"{filename} not found in templates/")
             continue
 
         if target.exists():
@@ -93,7 +93,7 @@ def _copy_agent_files(project_dir: Path, repo_root: Path) -> None:
                 Console.error(f"Failed to copy {filename}")
 
     # Copy CURSOR.mdc
-    cursor_src = repo_root / ".cursor" / "rules" / "CURSOR.mdc"
+    cursor_src = repo_root / "templates" / ".cursor" / "rules" / "CURSOR.mdc"
     cursor_dst = project_dir / ".cursor" / "rules" / "CURSOR.mdc"
 
     if cursor_src.exists():

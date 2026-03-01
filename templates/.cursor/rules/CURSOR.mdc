@@ -1,3 +1,9 @@
+---
+description: Cursor Code Agent Instructions - Development rules and standards for Cursor AI coding assistant
+alwaysApply: true
+tags: [cursor, agent, instructions, general]
+---
+
 # Cursor Code Agent Instructions
 
 > 🚨 **Canonical Source**: All project-specific standards live in `AGENTINFO.md`. Read/update that file first; this profile only highlights Cursor-specific reminders.
