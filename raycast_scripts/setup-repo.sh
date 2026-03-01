@@ -14,8 +14,8 @@
 # @raycast.author matt_bernier
 # @raycast.authorURL https://raycast.com/matt_bernier
 
-# This Raycast script is a thin wrapper around scripts/setup-repo.sh
-# All logic is maintained in one place for consistency.
+# This Raycast script is a thin wrapper around the Python CLI (aec).
+# All logic is maintained in aec/commands/repo.py for consistency.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -44,9 +44,8 @@ else
     INPUT="$1"
 fi
 
-# Run the main setup script
-# Use 'yes' to auto-confirm prompts in non-interactive mode, but 'n' for Raycast scripts question
-echo -e "n" | "$REPO_ROOT/scripts/setup-repo.sh" "$INPUT"
+# Run setup via Python CLI, skip Raycast script prompt (already in Raycast)
+python3 -m aec repo setup --skip-raycast "$INPUT"
 
 # Show completion dialog
 PROJECT_NAME=$(basename "$INPUT")
