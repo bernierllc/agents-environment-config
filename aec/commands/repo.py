@@ -155,7 +155,7 @@ def _copy_optional_rules(project_dir: Path, repo_root: Path, dry_run: bool = Fal
             ensure_directory(target.parent)
 
             if copy_file(source, target):
-                Console.success(f"Copied optional rule: {relative}")
+                Console.success(f"Added optional rule to .cursor/rules/{relative}")
             else:
                 Console.error(f"Failed to copy optional rule: {relative}")
 

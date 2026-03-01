@@ -1,8 +1,29 @@
 """Cross-platform colored console output."""
 
+import os
 import platform
 import sys
+import time
+from contextlib import contextmanager
 from typing import Optional
+
+
+class _LineCountingStream:
+    """Wraps stdout to count newline characters written."""
+
+    def __init__(self, real_stdout):
+        self._real = real_stdout
+        self.line_count = 0
+
+    def write(self, text: str) -> int:
+        self.line_count += text.count("\n")
+        return self._real.write(text)
+
+    def flush(self):
+        return self._real.flush()
+
+    def __getattr__(self, name: str):
+        return getattr(self._real, name)
 
 # Enable ANSI colors on Windows 10+
 if platform.system() == "Windows":
@@ -44,6 +65,9 @@ class Console:
     # Check if we should use colors
     _use_colors: Optional[bool] = None
 
+    # Check if section-replace UX is enabled
+    _sections_enabled: Optional[bool] = None
+
     @classmethod
     def _should_use_colors(cls) -> bool:
         """Determine if we should output colors."""
@@ -51,7 +75,6 @@ class Console:
             return cls._use_colors
 
         # Check NO_COLOR environment variable (standard)
-        import os
         if os.environ.get("NO_COLOR"):
             cls._use_colors = False
             return False
@@ -63,6 +86,82 @@ class Console:
 
         cls._use_colors = True
         return True
+
+    # ANSI cursor control sequences
+    CURSOR_UP = "\033[A"
+    CLEAR_LINE = "\033[2K"
+
+    @classmethod
+    def _should_use_sections(cls) -> bool:
+        """Determine if section-replace UX should be used."""
+        if cls._sections_enabled is not None:
+            return cls._sections_enabled
+
+        if not sys.stdout.isatty():
+            cls._sections_enabled = False
+            return False
+
+        if os.environ.get("NO_COLOR"):
+            cls._sections_enabled = False
+            return False
+
+        if os.environ.get("AEC_NO_SECTIONS"):
+            cls._sections_enabled = False
+            return False
+
+        if os.environ.get("TERM") == "dumb":
+            cls._sections_enabled = False
+            return False
+
+        cls._sections_enabled = True
+        return True
+
+    @classmethod
+    @contextmanager
+    def section(cls, name: str, collapse: bool = True, delay: float = 0.5):
+        """Context manager that shows section output, then collapses to a summary line.
+
+        Args:
+            name: Section name (used for subheader and summary).
+            collapse: Whether to collapse on clean exit. False keeps full output.
+            delay: Seconds to pause before collapsing (gives user time to read).
+        """
+        real_stdout = sys.stdout
+
+        # Print the subheader to real stdout
+        colored = cls._colorize(cls.BLUE, name)
+        real_stdout.write(f"\n{colored}\n")
+        real_stdout.flush()
+        subheader_lines = 2  # leading \n + text\n
+
+        if not collapse or not cls._should_use_sections():
+            # No collapsing — just yield and let output flow
+            yield
+            return
+
+        # Install line-counting stream
+        counter = _LineCountingStream(real_stdout)
+        sys.stdout = counter
+        try:
+            yield
+        except BaseException:
+            # On exception, restore stdout but do NOT collapse
+            sys.stdout = real_stdout
+            raise
+        else:
+            # Clean exit — collapse the section
+            sys.stdout = real_stdout
+            total_lines = counter.line_count + subheader_lines
+            time.sleep(delay)
+
+            # Move cursor up and clear each line
+            for _ in range(total_lines):
+                real_stdout.write(f"{cls.CURSOR_UP}{cls.CLEAR_LINE}")
+
+            # Write the summary line
+            symbol = cls._colorize(cls.GREEN, "✓")
+            real_stdout.write(f"  {symbol} {name}\n")
+            real_stdout.flush()
 
     @classmethod
     def _colorize(cls, color: str, text: str) -> str:
