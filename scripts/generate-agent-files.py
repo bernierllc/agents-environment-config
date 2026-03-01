@@ -404,7 +404,7 @@ def main():
             use_agent_rules=use_agent_rules
         )
 
-        output_path = repo_root / filename
+        output_path = repo_root / "templates" / filename
         output_path.write_text(content, encoding='utf-8')
         print(f"  Written to {output_path}")
 
