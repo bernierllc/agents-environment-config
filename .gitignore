@@ -23,6 +23,16 @@ __pycache__/
 dist/
 build/
 
+# Agent instruction files — templates live in templates/, root copies are local-only
+/AGENTINFO.md
+/CLAUDE.md
+/GEMINI.md
+/QWEN.md
+/AGENTS.md
+
+# Worktrees
+.worktrees/
+
 # Raycast scripts - exclude agent-specific scripts
 raycast_scripts/claude-*.sh
 raycast_scripts/cursor-*.sh

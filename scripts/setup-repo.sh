@@ -337,13 +337,16 @@ copy_fresh_agent_files() {
     # Uses AGENT_INSTRUCTION_FILES from sourced _agent-config.sh
 
     for file in "${AGENT_INSTRUCTION_FILES[@]}"; do
-        if [ -f "$REPO_ROOT/$file" ]; then
+        source_file="$REPO_ROOT/templates/$file"
+        if [ -f "$source_file" ]; then
             if [ -f "$project_dir/$file" ]; then
                 echo -e "  ${YELLOW}⚠${NC} $file already exists (skipping)"
             else
-                cp "$REPO_ROOT/$file" "$project_dir/$file"
+                cp "$source_file" "$project_dir/$file"
                 echo -e "  ${GREEN}✓${NC} Copied $file"
             fi
+        else
+            echo -e "  ${YELLOW}⚠${NC} $file not found in templates/"
         fi
     done
 }
@@ -499,8 +502,8 @@ echo -e "${GREEN}✓ Created .cursor/rules/, docs/, plans/${NC}"
 # Copy agent files
 copy_fresh_agent_files "$PROJECT_DIR"
 
-# Copy CURSOR.mdc
-CURSOR_SRC="$REPO_ROOT/.cursor/rules/CURSOR.mdc"
+# Copy CURSOR.mdc from templates/
+CURSOR_SRC="$REPO_ROOT/templates/.cursor/rules/CURSOR.mdc"
 CURSOR_DST="$PROJECT_DIR/.cursor/rules/CURSOR.mdc"
 if [ -f "$CURSOR_SRC" ]; then
     if [ -f "$CURSOR_DST" ]; then

@@ -163,7 +163,7 @@ def get_repo_root() -> Optional[Path]:
             return _repo_root
 
         # Also check for .git with our specific structure
-        if (current / ".git").exists() and (current / "CLAUDE.md").exists():
+        if (current / ".git").exists() and (current / "templates").is_dir():
             _repo_root = current
             return _repo_root
 
