@@ -13,13 +13,13 @@ This repository contains:
 
 ## Supported Agents
 
-| Agent | Instruction File | Detection | Description |
-|-------|------------------|-----------|-------------|
-| Claude Code | `CLAUDE.md` | `claude` command or `~/.claude` | Anthropic's CLI coding agent |
-| Cursor | `.cursor/rules/*.mdc` | `cursor` command or `/Applications/Cursor.app` | AI-first IDE with Cursor rules |
-| Codex | `AGENTS.md` | `codex` command | OpenAI's coding agent |
-| Gemini CLI | `GEMINI.md` | `gemini` command | Google's CLI coding agent |
-| Qwen Code | `QWEN.md` | `qwen` command | Alibaba's coding agent |
+| Agent | Instruction File | Detection | Hooks | Description |
+|-------|------------------|-----------|-------|-------------|
+| Claude Code | `CLAUDE.md` | `claude` command or `~/.claude` | Yes | Anthropic's CLI coding agent |
+| Cursor | `.cursor/rules/*.mdc` | `cursor` command or `/Applications/Cursor.app` | Yes | AI-first IDE with Cursor rules |
+| Codex | `AGENTS.md` | `codex` command | No | OpenAI's coding agent |
+| Gemini CLI | `GEMINI.md` | `gemini` command | Yes | Google's CLI coding agent |
+| Qwen Code | `QWEN.md` | `qwen` command | No | Alibaba's coding agent |
 
 All non-Cursor agents use `.agent-rules/*.md` (standard markdown, no frontmatter). Cursor uses `.cursor/rules/*.mdc` (with YAML frontmatter). See [Rules Architecture](#rules-architecture) for details.
 
@@ -100,6 +100,23 @@ aec repo setup /path/to/existing/project
 This copies agent files and creates directories in the target project.
 
 **Raycast users:** The same script exists at `raycast_scripts/setup-repo.sh` with Raycast metadata.
+
+## Lint Hooks
+
+AEC can automatically install lint/type-check hooks that run after every file edit, catching errors in real-time as your AI agent writes code.
+
+**Supported languages:** TypeScript, Rust, Python, Go, Ruby
+
+**Supported agents:** Claude Code, Gemini CLI, Cursor
+
+During `aec repo setup`, AEC auto-detects your project's language and offers to install the appropriate hooks. Multi-language projects are supported — a TypeScript + Python monorepo gets both `tsc` and `mypy` hooks composed into a single config.
+
+You control how hooks are handled:
+- **Per-repo** (default): prompted each time, choose which languages to hook
+- **Auto**: always install for detected languages
+- **Never**: skip hook setup entirely
+
+See [docs/users/lint-hooks.md](docs/users/lint-hooks.md) for details. To add support for more languages or agents, see [docs/contributors/adding-hook-support.md](docs/contributors/adding-hook-support.md).
 
 ## Python CLI
 
@@ -351,8 +368,9 @@ When you run `aec repo setup` (or `setup-repo.sh`) on a project, it:
 2. Copies template files: `AGENTINFO.md`, `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `QWEN.md`
 3. Copies `CURSOR.mdc` to `.cursor/rules/`
 4. Migrates legacy plan files from `plans/` or `docs/plans/` to your configured plans directory
-5. Updates `.gitignore` to ignore agent files (and plans directory if configured)
-6. Optionally creates Raycast launcher scripts
+5. Detects project languages and installs lint hooks for supported agents
+6. Updates `.gitignore` to ignore agent files (and plans directory if configured)
+7. Optionally creates Raycast launcher scripts
 
 **After setup, edit `AGENTINFO.md`** in the target project with project-specific info.
 
