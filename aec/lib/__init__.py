@@ -57,6 +57,13 @@ from .preferences import (
     get_pending_prompts,
     check_pending_preferences,
 )
+from .hooks import (
+    LANGUAGE_HOOKS,
+    AGENT_HOOK_CONFIGS,
+    detect_languages,
+    generate_hook_config,
+    write_hook_config,
+)
 
 # SUPPORTED_AGENTS is lazy-loaded via config.__getattr__
 # Import it explicitly for backwards compatibility
@@ -117,4 +124,10 @@ __all__ = [
     "set_setting",
     "get_pending_prompts",
     "check_pending_preferences",
+    # Hooks
+    "LANGUAGE_HOOKS",
+    "AGENT_HOOK_CONFIGS",
+    "detect_languages",
+    "generate_hook_config",
+    "write_hook_config",
 ]
