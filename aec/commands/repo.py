@@ -48,9 +48,11 @@ AGENT_FILES = get_agent_files()
 
 def _resolve_project_path(path_input: str) -> Path:
     """Resolve a project name or path to an absolute path."""
-    # Check if it's an absolute or home-relative path
-    if path_input.startswith("/") or path_input.startswith("~"):
-        return Path(path_input).expanduser().resolve()
+    p = Path(path_input).expanduser()
+
+    # Check if it's an absolute path (works on both Unix and Windows)
+    if p.is_absolute():
+        return p.resolve()
 
     # Otherwise, it's a project name - look in projects directory
     return get_projects_dir() / path_input
