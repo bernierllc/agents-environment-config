@@ -10,7 +10,7 @@ This repo eliminates that. Define your development standards once, and `aec` dis
 
 - **Shared Cursor rules** (`.cursor/rules/`) - Development standards in Cursor format (with YAML frontmatter)
 - **Agent-agnostic rules** (`.agent-rules/`) - The same rules without Cursor frontmatter, so other agents don't waste tokens on it
-- **Agent instruction files** (`CLAUDE.md`, `AGENTS.md`, etc.) - Templates that tell each agent where to find your rules
+- **Agent instruction files** (`templates/CLAUDE.md`, `templates/AGENTS.md`, etc.) - Templates that tell each agent where to find your rules
 - **The `aec` CLI** - Sets up new projects, keeps rules in sync, validates parity across formats
 - **Submodules** for agents and skills (`bernierllc/agency-agents`, `bernierllc/skills`)
 
@@ -155,6 +155,7 @@ pip install -e .
 | `aec agent-tools migrate` | Migrate from old symlink structure |
 | `aec agent-tools rollback <backup>` | Rollback migration |
 | `aec discover` | Discover repos from existing Raycast scripts |
+| `aec files generate` | Regenerate agent instruction files from templates |
 | `aec rules generate` | Generate .agent-rules/ from .cursor/rules/ |
 | `aec rules validate` | Validate rule parity |
 
@@ -213,12 +214,14 @@ agents-environment-config/          # THIS IS A TEMPLATE - don't add project-spe
 │   ├── setup-repo.sh               # Raycast version of setup-repo
 │   ├── cleanup-hung-processes.sh   # Raycast version (calls scripts/)
 │   └── *.sh                        # Project launcher scripts
+├── templates/                      # Canonical templates (copied to projects)
+│   ├── AGENTINFO.md                # TEMPLATE - gets filled in per-project
+│   ├── CLAUDE.md                   # TEMPLATE - references .agent-rules/
+│   ├── AGENTS.md                   # TEMPLATE - for Codex (references .agent-rules/)
+│   ├── GEMINI.md                   # TEMPLATE - for Gemini (references .agent-rules/)
+│   ├── QWEN.md                     # TEMPLATE - for Qwen (references .agent-rules/)
+│   └── .cursor/rules/CURSOR.mdc   # TEMPLATE - for Cursor
 ├── agents.json                     # Single source of truth for agent definitions
-├── AGENTINFO.md                    # TEMPLATE - gets filled in per-project
-├── CLAUDE.md                       # TEMPLATE - references .agent-rules/
-├── AGENTS.md                       # TEMPLATE - for Codex (references .agent-rules/)
-├── GEMINI.md                       # TEMPLATE - for Gemini (references .agent-rules/)
-├── QWEN.md                         # TEMPLATE - for Qwen (references .agent-rules/)
 └── README.md                       # This file
 ```
 
@@ -265,6 +268,7 @@ Most operations are available via both the Python CLI and shell scripts:
 | Setup all projects | `aec repo setup-all` | — |
 | List tracked projects | `aec repo list` | `scripts/setup-repo.sh --list` |
 | Manage preferences | `aec preferences list\|set\|reset` | — |
+| Generate agent files | `aec files generate` | `scripts/generate-agent-files.py` |
 | Generate .agent-rules/ | `aec rules generate` | `scripts/generate-agent-rules.py` |
 | Validate rule parity | `aec rules validate` | `scripts/validate-rule-parity.py` |
 | Health check | `aec doctor` | — |
@@ -374,7 +378,7 @@ Each project gets its own copy of the agent instruction files, configured to pul
 When you run `aec repo setup` (or `setup-repo.sh`) on a project, it:
 
 1. Creates directories: `.cursor/rules/`, `docs/`, and your configured plans directory (default: `.plans/`)
-2. Copies template files: `AGENTINFO.md`, `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `QWEN.md`
+2. Copies template files from `templates/`: `AGENTINFO.md`, `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `QWEN.md`
 3. Copies `CURSOR.mdc` to `.cursor/rules/`
 4. Migrates legacy plan files from `plans/` or `docs/plans/` to your configured plans directory
 5. Detects project languages and installs lint hooks for supported agents
@@ -403,11 +407,11 @@ When cursor rules in `.cursor/rules/` change:
 # Regenerate the agent-agnostic rules
 aec rules generate
 
-# Regenerate the agent instruction files
-python3 scripts/generate-agent-files.py
+# Regenerate the agent instruction files (from templates/)
+aec files generate
 
 # Commit the changes
-git add .agent-rules/ CLAUDE.md AGENTS.md GEMINI.md QWEN.md
+git add .agent-rules/ templates/
 git commit -m "chore: regenerate agent rules and files"
 ```
 

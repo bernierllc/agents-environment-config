@@ -47,3 +47,9 @@ raycast_scripts/gemini-*.sh
 # Local symlinks (created by setup, point to absolute paths)
 .cursor/commands/agents-environment-config
 .cursor/rules/agents-environment-config
+AGENTINFO.md
+CLAUDE.md
+GEMINI.md
+QWEN.md
+AGENTS.md
+.cursor/rules
