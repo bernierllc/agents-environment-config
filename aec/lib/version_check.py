@@ -108,3 +108,26 @@ def check_for_update() -> Optional[dict]:
         return None
     except Exception:
         return None
+
+
+def print_update_banner(update_info: Optional[dict]) -> None:
+    """Print a colored banner if an update is available."""
+    if update_info is None:
+        return
+
+    from .console import Console
+
+    current = update_info["current_version"]
+    latest = update_info["latest_version"]
+    url = update_info["release_url"]
+
+    repo_root = get_repo_root()
+    if repo_root:
+        update_cmd = f"cd {repo_root} && git pull && pip install -e ."
+    else:
+        update_cmd = "cd <aec-repo> && git pull && pip install -e ."
+
+    Console.print()
+    Console.warning(f"Update available: aec v{current} \u2192 v{latest}")
+    Console.print(f"    Run: {Console.cmd(update_cmd)}")
+    Console.print(f"    Release notes: {Console.dim(url)}")

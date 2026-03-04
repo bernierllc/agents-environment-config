@@ -64,6 +64,10 @@ from .hooks import (
     generate_hook_config,
     write_hook_config,
 )
+from .version_check import (
+    check_for_update,
+    print_update_banner,
+)
 from .agent_files import (
     generate_all as generate_agent_files,
     generate_agent_file,
@@ -135,6 +139,9 @@ __all__ = [
     "detect_languages",
     "generate_hook_config",
     "write_hook_config",
+    # Version check
+    "check_for_update",
+    "print_update_banner",
     # Agent files
     "generate_agent_files",
     "generate_agent_file",

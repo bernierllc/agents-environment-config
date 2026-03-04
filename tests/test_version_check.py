@@ -210,3 +210,26 @@ class TestCheckForUpdate:
         with patch("aec.lib.version_check.urllib.request.urlopen", side_effect=Exception("boom")):
             from aec.lib.version_check import check_for_update
             assert check_for_update() is None
+
+
+class TestPrintUpdateBanner:
+    """Test print_update_banner output."""
+
+    def test_prints_banner_when_update_info_provided(self, capsys):
+        from aec.lib.version_check import print_update_banner
+        print_update_banner({
+            "current_version": "2.0.0",
+            "latest_version": "2.1.0",
+            "release_url": "https://example.com/releases/v2.1.0",
+        })
+        output = capsys.readouterr().out
+        assert "2.0.0" in output
+        assert "2.1.0" in output
+        assert "git pull" in output
+        assert "https://example.com/releases/v2.1.0" in output
+
+    def test_does_nothing_when_none(self, capsys):
+        from aec.lib.version_check import print_update_banner
+        print_update_banner(None)
+        output = capsys.readouterr().out
+        assert output == ""
