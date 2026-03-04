@@ -22,6 +22,14 @@ OPTIONAL_FEATURES: Dict[str, Dict[str, Any]] = {
         ),
         "default": True,
     },
+    "update_check": {
+        "description": "Automatic Update Check",
+        "prompt": (
+            "Enable automatic update checks? AEC will check GitHub weekly\n"
+            "for new releases and show a notification. (Y/n): "
+        ),
+        "default": True,
+    },
 }
 
 

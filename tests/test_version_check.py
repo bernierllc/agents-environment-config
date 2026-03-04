@@ -233,3 +233,41 @@ class TestPrintUpdateBanner:
         print_update_banner(None)
         output = capsys.readouterr().out
         assert output == ""
+
+
+class TestUpdateCheckPreference:
+    """Test that update_check is registered as a preference."""
+
+    def test_update_check_in_optional_features(self):
+        from aec.lib.preferences import OPTIONAL_FEATURES
+        assert "update_check" in OPTIONAL_FEATURES
+        assert "description" in OPTIONAL_FEATURES["update_check"]
+
+
+class TestCLIIntegration:
+    """Test that version check runs via CLI callback."""
+
+    def test_maybe_check_for_update_respects_disabled_preference(self, temp_dir, monkeypatch):
+        """When update_check preference is False, skip the check entirely."""
+        monkeypatch.setattr("aec.lib.version_check.VERSION_CACHE_FILE", temp_dir / "vc.json")
+
+        from aec.lib.preferences import set_preference
+        monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
+        set_preference("update_check", False)
+
+        from aec.lib.version_check import maybe_check_for_update
+        with patch("aec.lib.version_check.check_for_update") as mock_check:
+            maybe_check_for_update()
+            mock_check.assert_not_called()
+
+    def test_maybe_check_for_update_runs_when_enabled(self, temp_dir, monkeypatch):
+        """When update_check preference is True or unset, run the check."""
+        monkeypatch.setattr("aec.lib.version_check.VERSION_CACHE_FILE", temp_dir / "vc.json")
+        monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
+
+        from aec.lib.version_check import maybe_check_for_update
+        with patch("aec.lib.version_check.check_for_update", return_value=None) as mock_check:
+            maybe_check_for_update()
+            mock_check.assert_called_once()
