@@ -49,3 +49,62 @@ def _write_cache(latest_version: str, release_url: str) -> None:
         VERSION_CACHE_FILE.write_text(json.dumps(data, indent=2) + "\n")
     except OSError:
         pass  # Cache write failure is non-critical
+
+
+def _fetch_latest_release() -> Optional[dict]:
+    """Fetch latest release info from GitHub. Returns None on any error."""
+    try:
+        req = urllib.request.Request(
+            GITHUB_RELEASES_URL,
+            headers={
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": "aec-version-check",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+
+        if data.get("prerelease"):
+            return None
+
+        tag = data["tag_name"]
+        return {
+            "latest_version": tag.lstrip("v"),
+            "release_url": data["html_url"],
+        }
+    except Exception:
+        return None
+
+
+def check_for_update() -> Optional[dict]:
+    """
+    Check if a newer AEC version is available.
+
+    Returns None if up-to-date, on error, or if check is cached.
+    Returns {"current_version", "latest_version", "release_url"} if update available.
+    """
+    try:
+        # Try cache first
+        cached = _read_cache()
+        if cached is not None:
+            latest = cached["latest_version"]
+            release_url = cached["release_url"]
+        else:
+            # Fetch from GitHub
+            result = _fetch_latest_release()
+            if result is None:
+                return None
+            latest = result["latest_version"]
+            release_url = result["release_url"]
+            _write_cache(latest, release_url)
+
+        # Compare versions
+        if parse_version(latest) > parse_version(VERSION):
+            return {
+                "current_version": VERSION,
+                "latest_version": latest,
+                "release_url": release_url,
+            }
+        return None
+    except Exception:
+        return None

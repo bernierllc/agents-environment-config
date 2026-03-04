@@ -1,6 +1,8 @@
 """Tests for aec.lib.version_check module."""
 
 import pytest
+from unittest.mock import patch, MagicMock
+import json as json_mod
 
 
 class TestParseVersion:
@@ -100,3 +102,111 @@ class TestCache:
 
         from aec.lib.version_check import _read_cache
         assert _read_cache() is None
+
+
+class TestFetchLatestRelease:
+    """Test _fetch_latest_release (mocks GitHub API — external service)."""
+
+    def test_returns_version_and_url_on_success(self):
+        mock_response = MagicMock()
+        mock_response.read.return_value = json_mod.dumps({
+            "tag_name": "v2.1.0",
+            "html_url": "https://github.com/bernierllc/agents-environment-config/releases/tag/v2.1.0",
+            "prerelease": False,
+        }).encode()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+
+        with patch("aec.lib.version_check.urllib.request.urlopen", return_value=mock_response):
+            from aec.lib.version_check import _fetch_latest_release
+            result = _fetch_latest_release()
+            assert result is not None
+            assert result["latest_version"] == "2.1.0"
+            assert "releases/tag/v2.1.0" in result["release_url"]
+
+    def test_returns_none_on_network_error(self):
+        with patch("aec.lib.version_check.urllib.request.urlopen", side_effect=Exception("timeout")):
+            from aec.lib.version_check import _fetch_latest_release
+            assert _fetch_latest_release() is None
+
+    def test_skips_prerelease(self):
+        mock_response = MagicMock()
+        mock_response.read.return_value = json_mod.dumps({
+            "tag_name": "v3.0.0-beta.1",
+            "html_url": "https://example.com",
+            "prerelease": True,
+        }).encode()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+
+        with patch("aec.lib.version_check.urllib.request.urlopen", return_value=mock_response):
+            from aec.lib.version_check import _fetch_latest_release
+            assert _fetch_latest_release() is None
+
+
+class TestCheckForUpdate:
+    """Test check_for_update main entry point."""
+
+    def test_returns_none_when_up_to_date(self, temp_dir, monkeypatch):
+        monkeypatch.setattr("aec.lib.version_check.VERSION_CACHE_FILE", temp_dir / "vc.json")
+        monkeypatch.setattr("aec.lib.version_check.VERSION", "2.1.0")
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = json_mod.dumps({
+            "tag_name": "v2.1.0",
+            "html_url": "https://example.com",
+            "prerelease": False,
+        }).encode()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+
+        with patch("aec.lib.version_check.urllib.request.urlopen", return_value=mock_response):
+            from aec.lib.version_check import check_for_update
+            assert check_for_update() is None
+
+    def test_returns_info_when_update_available(self, temp_dir, monkeypatch):
+        monkeypatch.setattr("aec.lib.version_check.VERSION_CACHE_FILE", temp_dir / "vc.json")
+        monkeypatch.setattr("aec.lib.version_check.VERSION", "2.0.0")
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = json_mod.dumps({
+            "tag_name": "v2.1.0",
+            "html_url": "https://github.com/bernierllc/agents-environment-config/releases/tag/v2.1.0",
+            "prerelease": False,
+        }).encode()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+
+        with patch("aec.lib.version_check.urllib.request.urlopen", return_value=mock_response):
+            from aec.lib.version_check import check_for_update
+            result = check_for_update()
+            assert result is not None
+            assert result["current_version"] == "2.0.0"
+            assert result["latest_version"] == "2.1.0"
+
+    def test_uses_cache_when_fresh(self, temp_dir, monkeypatch):
+        cache_file = temp_dir / "vc.json"
+        monkeypatch.setattr("aec.lib.version_check.VERSION_CACHE_FILE", cache_file)
+        monkeypatch.setattr("aec.lib.version_check.VERSION", "2.0.0")
+
+        from datetime import datetime, timezone
+        cache_file.write_text(json_mod.dumps({
+            "last_check": datetime.now(timezone.utc).isoformat(),
+            "latest_version": "2.1.0",
+            "release_url": "https://example.com",
+        }))
+
+        # urlopen should NOT be called (using cache)
+        with patch("aec.lib.version_check.urllib.request.urlopen") as mock_urlopen:
+            from aec.lib.version_check import check_for_update
+            result = check_for_update()
+            mock_urlopen.assert_not_called()
+            assert result is not None
+            assert result["latest_version"] == "2.1.0"
+
+    def test_returns_none_on_any_error(self, temp_dir, monkeypatch):
+        monkeypatch.setattr("aec.lib.version_check.VERSION_CACHE_FILE", temp_dir / "vc.json")
+
+        with patch("aec.lib.version_check.urllib.request.urlopen", side_effect=Exception("boom")):
+            from aec.lib.version_check import check_for_update
+            assert check_for_update() is None
