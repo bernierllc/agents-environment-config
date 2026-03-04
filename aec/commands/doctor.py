@@ -239,6 +239,25 @@ def run_doctor() -> Tuple[bool, List[str]]:
             Console.info(f"  Run: {Console.cmd('python -m aec rules generate')}")
             issues.append(".agent-rules/ directory not generated")
 
+    # Check 7: Version check status
+    Console.subheader("Update Check")
+    from ..lib.preferences import get_preference
+    update_pref = get_preference("update_check")
+    if update_pref is False:
+        Console.info("Automatic update checking is disabled")
+        Console.print(f"    Enable with: {Console.cmd('aec preferences set update_check on')}")
+    else:
+        Console.success("Automatic update checking is enabled")
+        from ..lib.version_check import VERSION_CACHE_FILE
+        if VERSION_CACHE_FILE.exists():
+            try:
+                import json as _json
+                cache_data = _json.loads(VERSION_CACHE_FILE.read_text())
+                Console.info(f"Last checked: {cache_data.get('last_check', 'unknown')}")
+                Console.info(f"Latest known: v{cache_data.get('latest_version', 'unknown')}")
+            except Exception:
+                pass
+
     # Summary
     Console.header("Summary")
     all_passed = len(issues) == 0

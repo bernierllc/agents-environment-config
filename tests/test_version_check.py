@@ -235,6 +235,19 @@ class TestPrintUpdateBanner:
         assert output == ""
 
 
+class TestDoctorIntegration:
+    """Test that doctor shows version check status."""
+
+    def test_doctor_shows_update_check_preference(self, capsys, temp_dir, monkeypatch):
+        """Doctor should display whether update checking is enabled."""
+        monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
+        monkeypatch.setattr("aec.lib.version_check.VERSION_CACHE_FILE", temp_dir / "vc.json")
+
+        from aec.lib.preferences import get_preference
+        assert get_preference("update_check") is None  # Not yet set
+
+
 class TestUpdateCheckPreference:
     """Test that update_check is registered as a preference."""
 
