@@ -190,7 +190,8 @@ class TestGetPendingPrompts:
         prefs_file.write_text(json.dumps({
             "schema_version": "1.0",
             "optional_rules": {
-                "leave-it-better": {"enabled": True, "asked_at": "2026-01-01T00:00:00Z"}
+                "leave-it-better": {"enabled": True, "asked_at": "2026-01-01T00:00:00Z"},
+                "update_check": {"enabled": True, "asked_at": "2026-01-01T00:00:00Z"}
             }
         }))
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
@@ -206,7 +207,8 @@ class TestGetPendingPrompts:
         prefs_file.write_text(json.dumps({
             "schema_version": "1.0",
             "optional_rules": {
-                "leave-it-better": {"enabled": False, "asked_at": "2026-01-01T00:00:00Z"}
+                "leave-it-better": {"enabled": False, "asked_at": "2026-01-01T00:00:00Z"},
+                "update_check": {"enabled": False, "asked_at": "2026-01-01T00:00:00Z"}
             }
         }))
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
@@ -294,7 +296,8 @@ class TestCheckPendingPreferences:
         prefs_file.write_text(json.dumps({
             "schema_version": "1.0",
             "optional_rules": {
-                "leave-it-better": {"enabled": False, "asked_at": "2026-01-01T00:00:00Z"}
+                "leave-it-better": {"enabled": False, "asked_at": "2026-01-01T00:00:00Z"},
+                "update_check": {"enabled": True, "asked_at": "2026-01-01T00:00:00Z"}
             }
         }))
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)

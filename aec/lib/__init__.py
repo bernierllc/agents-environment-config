@@ -67,6 +67,7 @@ from .hooks import (
 from .version_check import (
     check_for_update,
     print_update_banner,
+    maybe_check_for_update,
 )
 from .agent_files import (
     generate_all as generate_agent_files,
@@ -142,6 +143,7 @@ __all__ = [
     # Version check
     "check_for_update",
     "print_update_banner",
+    "maybe_check_for_update",
     # Agent files
     "generate_agent_files",
     "generate_agent_file",

@@ -25,11 +25,15 @@ if HAS_TYPER:
 
     @app.callback(invoke_without_command=True)
     def _cli_callback(ctx: typer.Context):
-        """Pre-command hook: check for unanswered optional feature preferences."""
+        """Pre-command hook: check for unanswered preferences and register update check."""
         if ctx.invoked_subcommand is None:
             return
         from .lib.preferences import check_pending_preferences
         check_pending_preferences()
+
+        import atexit
+        from .lib.version_check import maybe_check_for_update
+        atexit.register(maybe_check_for_update)
 
     # Import and register command groups
     from .commands import repo, agent_tools, rules, files, install, discover, preferences
@@ -154,6 +158,10 @@ else:
         # Check for unanswered optional features
         from .lib.preferences import check_pending_preferences
         check_pending_preferences()
+
+        import atexit
+        from .lib.version_check import maybe_check_for_update
+        atexit.register(maybe_check_for_update)
 
         # Dispatch to command handlers
         from .commands import repo as repo_cmd

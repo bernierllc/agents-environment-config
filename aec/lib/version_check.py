@@ -131,3 +131,21 @@ def print_update_banner(update_info: Optional[dict]) -> None:
     Console.warning(f"Update available: aec v{current} \u2192 v{latest}")
     Console.print(f"    Run: {Console.cmd(update_cmd)}")
     Console.print(f"    Release notes: {Console.dim(url)}")
+
+
+def maybe_check_for_update() -> None:
+    """
+    Check for updates if the user hasn't disabled the preference.
+
+    Safe to call from CLI callback — never raises, never blocks long.
+    """
+    try:
+        from .preferences import get_preference
+        pref = get_preference("update_check")
+        if pref is False:
+            return
+
+        update_info = check_for_update()
+        print_update_banner(update_info)
+    except Exception:
+        pass  # Never break CLI over version check
