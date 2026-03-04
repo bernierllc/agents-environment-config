@@ -322,6 +322,38 @@ def install(dry_run: bool = False) -> None:
         else:
             Console.info("Would regenerate rules with applied settings")
 
+    # Repair hook key casing in all tracked repos
+    with Console.section("Repairing hook configurations...", collapse=not dry_run):
+        from ..lib.tracking import list_repos as tracking_list_repos
+        from ..lib.hooks import repair_hook_keys, AGENT_HOOK_CONFIGS
+
+        tracked = tracking_list_repos()
+        fixed_count = 0
+        for repo in tracked:
+            if not repo.exists:
+                continue
+            if dry_run:
+                results = repair_hook_keys(repo.path)
+                for agent_key, status in results.items():
+                    if status == "fixed":
+                        Console.warning(
+                            f"Would fix hook key casing: {repo.path.name}/{AGENT_HOOK_CONFIGS[agent_key]['config_path']}"
+                        )
+                        fixed_count += 1
+            else:
+                results = repair_hook_keys(repo.path)
+                for agent_key, status in results.items():
+                    if status == "fixed":
+                        Console.success(
+                            f"Fixed hook key casing: {repo.path.name}/{AGENT_HOOK_CONFIGS[agent_key]['config_path']}"
+                        )
+                        fixed_count += 1
+
+        if fixed_count == 0:
+            Console.success("All hook configs use correct key casing")
+        elif dry_run:
+            Console.info(f"Would fix {fixed_count} hook config(s)")
+
     # Batch project setup (interactive — never collapse)
     _batch_project_setup(dry_run)
 
