@@ -102,6 +102,72 @@ AGENT_HOOK_CONFIGS: Dict[str, Dict[str, Any]] = {
 }
 
 
+# Known camelCase → PascalCase hook key fixes per agent.
+# These were shipped incorrectly in earlier versions of aec.
+HOOK_KEY_FIXES: Dict[str, Dict[str, str]] = {
+    "claude": {
+        "postToolUse": "PostToolUse",
+        "preToolUse": "PreToolUse",
+        "postToolUseFailure": "PostToolUseFailure",
+        "sessionStart": "SessionStart",
+        "userPromptSubmit": "UserPromptSubmit",
+        "notification": "Notification",
+        "stop": "Stop",
+    },
+}
+
+
+def repair_hook_keys(project_dir: Path) -> Dict[str, str]:
+    """Fix camelCase hook keys in agent config files.
+
+    Scans known agent config files for hook keys that use camelCase
+    instead of the required PascalCase and rewrites them.
+
+    Args:
+        project_dir: Path to the project root directory.
+
+    Returns:
+        Dict mapping agent_key to status:
+        "fixed", "ok", "no_file", or "error:<message>".
+    """
+    results: Dict[str, str] = {}
+
+    for agent_key, fixes in HOOK_KEY_FIXES.items():
+        if agent_key not in AGENT_HOOK_CONFIGS:
+            continue
+
+        config_path = project_dir / AGENT_HOOK_CONFIGS[agent_key]["config_path"]
+
+        if not config_path.exists():
+            results[agent_key] = "no_file"
+            continue
+
+        try:
+            data = json.loads(config_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            results[agent_key] = f"error:{e}"
+            continue
+
+        hooks = data.get("hooks")
+        if not isinstance(hooks, dict):
+            results[agent_key] = "ok"
+            continue
+
+        changed = False
+        for bad_key, good_key in fixes.items():
+            if bad_key in hooks:
+                hooks[good_key] = hooks.pop(bad_key)
+                changed = True
+
+        if changed:
+            config_path.write_text(json.dumps(data, indent=2) + "\n")
+            results[agent_key] = "fixed"
+        else:
+            results[agent_key] = "ok"
+
+    return results
+
+
 def generate_hook_config(agent_key: str, commands: List[str]) -> Dict[str, Any]:
     """Generate hook configuration for a specific agent.
 

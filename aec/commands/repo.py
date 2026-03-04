@@ -831,6 +831,32 @@ def _clean_agentinfo_redundancy(project_dir: Path, dry_run: bool = False) -> Non
             Console.info("  These are defined in agent-specific files (CLAUDE.md, etc.)")
 
 
+def _repair_hook_keys(project_dir: Path, dry_run: bool = False) -> None:
+    """Fix camelCase hook keys in agent config files.
+
+    Earlier versions of aec wrote 'postToolUse' instead of 'PostToolUse'
+    in .claude/settings.json, which Claude Code rejects as invalid.
+    """
+    from ..lib.hooks import repair_hook_keys
+
+    if dry_run:
+        # Still check so we can report what would happen
+        results = repair_hook_keys(project_dir)
+        for agent_key, status in results.items():
+            if status == "fixed":
+                Console.warning(f"Would fix hook key casing in {agent_key} config")
+        return
+
+    results = repair_hook_keys(project_dir)
+    for agent_key, status in results.items():
+        if status == "fixed":
+            from ..lib.hooks import AGENT_HOOK_CONFIGS
+            config_path = AGENT_HOOK_CONFIGS[agent_key]["config_path"]
+            Console.success(f"Fixed hook key casing in {config_path}")
+        elif status.startswith("error:"):
+            Console.warning(f"Could not check {agent_key} hooks: {status[6:]}")
+
+
 def _update_single_repo(project_dir: Path, dry_run: bool = False) -> None:
     """Update a single repository."""
     if not project_dir.exists():
@@ -844,6 +870,9 @@ def _update_single_repo(project_dir: Path, dry_run: bool = False) -> None:
     # Check for migrations
     if _needs_migration(project_dir):
         _migrate_agent_files(project_dir, dry_run)
+
+    # Fix hook key casing (postToolUse -> PostToolUse)
+    _repair_hook_keys(project_dir, dry_run)
 
     # Check for redundant rule references in AGENTINFO.md
     _clean_agentinfo_redundancy(project_dir, dry_run)

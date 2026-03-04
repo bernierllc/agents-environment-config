@@ -172,7 +172,49 @@ def run_doctor() -> Tuple[bool, List[str]]:
         Console.info("~/.cursor/ not found (Cursor may not be installed)")
         checks_passed += 1  # OK if not installed
 
-    # Check 5: .agent-rules/ directory (if in repo)
+    # Check 5: Hook key casing in tracked repos
+    Console.subheader("Hook Configuration")
+    repos_with_bad_hooks = []
+    tracked = list_repos()
+    if tracked:
+        from ..lib.hooks import repair_hook_keys, HOOK_KEY_FIXES
+        import json
+        from ..lib.hooks import AGENT_HOOK_CONFIGS
+
+        for repo in tracked:
+            if not repo.exists:
+                continue
+            for agent_key, fixes in HOOK_KEY_FIXES.items():
+                if agent_key not in AGENT_HOOK_CONFIGS:
+                    continue
+                config_path = repo.path / AGENT_HOOK_CONFIGS[agent_key]["config_path"]
+                if not config_path.exists():
+                    continue
+                try:
+                    data = json.loads(config_path.read_text())
+                    hooks = data.get("hooks", {})
+                    if isinstance(hooks, dict):
+                        bad_keys = [k for k in fixes if k in hooks]
+                        if bad_keys:
+                            repos_with_bad_hooks.append((repo.path, agent_key, bad_keys))
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+        checks_total += 1
+        if repos_with_bad_hooks:
+            for path, agent, keys in repos_with_bad_hooks:
+                Console.error(f"Bad hook keys in {path}: {', '.join(keys)}")
+            issues.append(
+                f"{len(repos_with_bad_hooks)} repo(s) have camelCase hook keys "
+                f"(fix with: python -m aec repo update --all)"
+            )
+        else:
+            Console.success("All hook configs use correct PascalCase keys")
+            checks_passed += 1
+    else:
+        Console.info("No tracked repos to check")
+
+    # Check 6: .agent-rules/ directory (if in repo)
     if repo_root:
         Console.subheader("Rule Files")
         agent_rules_dir = repo_root / ".agent-rules"
