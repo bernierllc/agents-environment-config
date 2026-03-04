@@ -123,6 +123,20 @@ You control how hooks are handled:
 
 See [docs/users/lint-hooks.md](docs/users/lint-hooks.md) for details. To add support for more languages or agents, see [docs/contributors/adding-hook-support.md](docs/contributors/adding-hook-support.md).
 
+### Hook Key Repair
+
+Earlier versions of AEC wrote `.claude/settings.json` with camelCase hook keys (e.g., `postToolUse`) instead of the PascalCase keys Claude Code requires (`PostToolUse`). This causes Claude Code to reject the settings file on startup with an "Invalid key in record" error.
+
+AEC automatically detects and fixes this issue in all tracked repos when you run:
+
+```bash
+aec install          # fixes all tracked repos during install
+aec repo update --all  # fixes all tracked repos during update
+aec doctor           # reports which repos have the issue
+```
+
+No manual editing is needed -- the repair preserves all existing hook content and other settings in the file.
+
 ## The `aec` CLI
 
 All operations are available through the `aec` command, which works on macOS, Linux, and Windows.
