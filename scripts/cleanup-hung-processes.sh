@@ -175,6 +175,156 @@ else
     echo "Docker cleanup complete"
 fi
 
+# Cache directory cleanup (>.next, node_modules/.cache, etc. older than 48h)
+echo ""
+echo "Starting cache directory cleanup..."
+echo "================================="
+
+PROJECTS_DIR="$HOME/projects"
+CACHE_DIRS_DELETED=0
+CACHE_BYTES_FREED=0
+
+if [ -d "$PROJECTS_DIR" ]; then
+    # Known cache directory patterns to clean
+    CACHE_PATTERNS=(".next" ".nuxt" ".turbo" ".parcel-cache" ".cache" "dist" ".output" ".svelte-kit")
+
+    for pattern in "${CACHE_PATTERNS[@]}"; do
+        while IFS= read -r cache_dir; do
+            [[ -z "$cache_dir" ]] && continue
+            # Check if directory is older than 48 hours (modified time)
+            if find "$cache_dir" -maxdepth 0 -mmin +2880 -print -quit 2>/dev/null | grep -q .; then
+                DIR_SIZE=$(du -sk "$cache_dir" 2>/dev/null | awk '{print $1}')
+                DIR_SIZE=${DIR_SIZE:-0}
+                echo "  Removing $cache_dir ($(( DIR_SIZE / 1024 ))MB, >48h old)"
+                rm -rf "$cache_dir" 2>/dev/null && {
+                    ((CACHE_DIRS_DELETED++)) || true
+                    CACHE_BYTES_FREED=$((CACHE_BYTES_FREED + DIR_SIZE))
+                }
+            fi
+        done < <(find "$PROJECTS_DIR" -maxdepth 3 -type d -name "$pattern" 2>/dev/null)
+    done
+
+    # Also clean node_modules/.cache directories (webpack/babel/eslint caches)
+    while IFS= read -r cache_dir; do
+        [[ -z "$cache_dir" ]] && continue
+        if find "$cache_dir" -maxdepth 0 -mmin +2880 -print -quit 2>/dev/null | grep -q .; then
+            DIR_SIZE=$(du -sk "$cache_dir" 2>/dev/null | awk '{print $1}')
+            DIR_SIZE=${DIR_SIZE:-0}
+            echo "  Removing $cache_dir ($(( DIR_SIZE / 1024 ))MB, >48h old)"
+            rm -rf "$cache_dir" 2>/dev/null && {
+                ((CACHE_DIRS_DELETED++)) || true
+                CACHE_BYTES_FREED=$((CACHE_BYTES_FREED + DIR_SIZE))
+            }
+        fi
+    done < <(find "$PROJECTS_DIR" -maxdepth 4 -type d -path "*/node_modules/.cache" 2>/dev/null)
+
+    echo ""
+    echo "  Cache cleanup: $CACHE_DIRS_DELETED directories removed (~$(( CACHE_BYTES_FREED / 1024 ))MB freed)"
+else
+    echo "  Projects directory not found at $PROJECTS_DIR, skipping"
+fi
+
+# Claude temp file cleanup
+echo ""
+echo "Starting Claude temp file cleanup..."
+echo "================================="
+
+CLAUDE_CLEANED=0
+
+# 1. /tmp/claude and /tmp/claude-* directories (session temp files, safe to clean if >48h)
+for tmp_dir in /tmp/claude /tmp/claude-*; do
+    [ -d "$tmp_dir" ] || continue
+    while IFS= read -r subdir; do
+        [[ -z "$subdir" ]] && continue
+        if find "$subdir" -maxdepth 0 -mmin +2880 -print -quit 2>/dev/null | grep -q .; then
+            echo "  Removing $subdir"
+            rm -rf "$subdir" 2>/dev/null && ((CLAUDE_CLEANED++)) || true
+        fi
+    done < <(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
+done
+
+# 2. macOS temp dir claude files (var/folders)
+MACOS_TMP="${TMPDIR:-/tmp}"
+for tmp_item in "$MACOS_TMP"/claude-*; do
+    [ -e "$tmp_item" ] || continue
+    if find "$tmp_item" -maxdepth 0 -mmin +2880 -print -quit 2>/dev/null | grep -q .; then
+        echo "  Removing $tmp_item"
+        rm -rf "$tmp_item" 2>/dev/null && ((CLAUDE_CLEANED++)) || true
+    fi
+done
+
+# 3. ~/.claude/projects - clean JSONL conversation logs older than 7 days
+#    (These are the biggest space consumers - conversation histories)
+if [ -d "$HOME/.claude/projects" ]; then
+    JSONL_FREED=0
+    while IFS= read -r jsonl_file; do
+        [[ -z "$jsonl_file" ]] && continue
+        FILE_SIZE=$(du -sk "$jsonl_file" 2>/dev/null | awk '{print $1}')
+        FILE_SIZE=${FILE_SIZE:-0}
+        # Only clean files > 1MB and older than 7 days
+        if [ "$FILE_SIZE" -gt 1024 ]; then
+            echo "  Removing old conversation log: $(basename "$(dirname "$jsonl_file")")/$(basename "$jsonl_file") ($(( FILE_SIZE / 1024 ))MB)"
+            rm -f "$jsonl_file" 2>/dev/null && {
+                ((CLAUDE_CLEANED++)) || true
+                JSONL_FREED=$((JSONL_FREED + FILE_SIZE))
+            }
+        fi
+    done < <(find "$HOME/.claude/projects" -name "*.jsonl" -mtime +7 2>/dev/null)
+    [ "$JSONL_FREED" -gt 0 ] && echo "  Freed ~$(( JSONL_FREED / 1024 ))MB from old conversation logs"
+fi
+
+# 4. ~/Library/Caches/claude-cli-nodejs - safe to clean entirely if >48h old
+CLAUDE_CACHE="$HOME/Library/Caches/claude-cli-nodejs"
+if [ -d "$CLAUDE_CACHE" ]; then
+    if find "$CLAUDE_CACHE" -maxdepth 0 -mmin +2880 -print -quit 2>/dev/null | grep -q .; then
+        CACHE_SIZE=$(du -sh "$CLAUDE_CACHE" 2>/dev/null | awk '{print $1}')
+        echo "  Clearing Claude CLI cache ($CACHE_SIZE)"
+        rm -rf "$CLAUDE_CACHE" 2>/dev/null && ((CLAUDE_CLEANED++)) || true
+    fi
+fi
+
+echo ""
+echo "  Claude cleanup: $CLAUDE_CLEANED items cleaned"
+
+# Package manager and system cache cleanup
+echo ""
+echo "Starting package manager cache cleanup..."
+echo "================================="
+
+if command -v pnpm >/dev/null 2>&1; then
+    echo "  Pruning pnpm store..."
+    pnpm store prune 2>&1 | tail -1 || echo "  (pnpm store prune failed)"
+else
+    echo "  pnpm not found, skipping"
+fi
+
+if command -v yarn >/dev/null 2>&1; then
+    echo "  Cleaning yarn cache..."
+    yarn cache clean 2>&1 | tail -1 || echo "  (yarn cache clean failed)"
+else
+    echo "  yarn not found, skipping"
+fi
+
+if command -v brew >/dev/null 2>&1; then
+    echo "  Running brew cleanup..."
+    brew cleanup 2>&1 | tail -5 || echo "  (brew cleanup failed)"
+else
+    echo "  brew not found, skipping"
+fi
+
+if command -v pip >/dev/null 2>&1; then
+    echo "  Purging pip cache..."
+    pip cache purge 2>&1 | tail -1 || echo "  (pip cache purge failed)"
+elif command -v pip3 >/dev/null 2>&1; then
+    echo "  Purging pip3 cache..."
+    pip3 cache purge 2>&1 | tail -1 || echo "  (pip3 cache purge failed)"
+else
+    echo "  pip not found, skipping"
+fi
+
+echo ""
+echo "Package manager cache cleanup complete"
+
 echo ""
 echo "================================="
 echo "All cleanup tasks complete"
