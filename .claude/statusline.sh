@@ -22,18 +22,23 @@ CURRENT_DIR=$(echo "$INPUT" | jq -r '.workspace.current_dir // .cwd // empty')
 MODEL_NAME=$(echo "$INPUT" | jq -r '.model.display_name // .model.name // .model.id // empty')
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 
-# Parse transcript JSONL file for actual token usage
-CURRENT_TOKENS=0
-if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
-	CURRENT_TOKENS=$(tail -n 100 "$TRANSCRIPT_PATH" 2>/dev/null | \
-		jq -s 'map(select(.type == "assistant" and .message.usage and (.isSidechain // false) == false)) |
-		       last | .message.usage |
-		       (.input_tokens // 0) + (.output_tokens // 0) +
-		       (.cache_creation_input_tokens // 0) + (.cache_read_input_tokens // 0)' 2>/dev/null || echo "0")
-fi
+# Extract context window info from Claude Code's JSON input
+CONTEXT_PERCENTAGE=$(echo "$INPUT" | jq -r '.context_window.used_percentage // empty' 2>/dev/null)
+CONTEXT_WINDOW_SIZE=$(echo "$INPUT" | jq -r '.context_window.context_window_size // empty' 2>/dev/null)
 
-# Use 160K tokens as threshold (80% of 200K context limit)
-BUDGET_TOKENS=160000
+# Fallback: parse transcript if context_window fields aren't available
+if [ -z "$CONTEXT_PERCENTAGE" ]; then
+	CURRENT_TOKENS=0
+	if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+		CURRENT_TOKENS=$(tail -n 100 "$TRANSCRIPT_PATH" 2>/dev/null | \
+			jq -s 'map(select(.type == "assistant" and .message.usage and (.isSidechain // false) == false)) |
+			       last | .message.usage |
+			       (.input_tokens // 0) + (.output_tokens // 0) +
+			       (.cache_creation_input_tokens // 0) + (.cache_read_input_tokens // 0)' 2>/dev/null || echo "0")
+	fi
+	# Use 80% of context window as budget threshold, default to 200K if unknown
+	BUDGET_TOKENS=$(( ${CONTEXT_WINDOW_SIZE:-200000} * 80 / 100 ))
+fi
 
 # Get git root directory
 GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
@@ -56,9 +61,13 @@ if [ -z "$PROJECT_NAME" ] && [ -n "$CURRENT_DIR" ]; then
 fi
 
 # Calculate token usage percentage
-PERCENTAGE=0
-if [ "$BUDGET_TOKENS" != "0" ]; then
-	PERCENTAGE=$((CURRENT_TOKENS * 100 / BUDGET_TOKENS))
+if [ -n "$CONTEXT_PERCENTAGE" ]; then
+	PERCENTAGE=$CONTEXT_PERCENTAGE
+else
+	PERCENTAGE=0
+	if [ "$BUDGET_TOKENS" != "0" ]; then
+		PERCENTAGE=$((CURRENT_TOKENS * 100 / BUDGET_TOKENS))
+	fi
 fi
 
 # Choose color based on percentage
