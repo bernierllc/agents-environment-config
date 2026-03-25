@@ -4,5 +4,5 @@ agents-environment-config CLI (aec)
 Cross-platform CLI for managing AI agent configurations.
 """
 
-__version__ = "2.0.0"
+from .lib.config import VERSION as __version__  # noqa: N812
 __app_name__ = "aec"
