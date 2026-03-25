@@ -21,16 +21,16 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Map legacy flags to CLI commands
 case "${1:-}" in
     --update-all)
-        python3 -m aec repo update --all
+        aec repo update --all
         ;;
     --list)
-        python3 -m aec repo list
+        aec repo list
         ;;
     --discover)
         shift
-        python3 -m aec discover "$@"
+        aec discover "$@"
         ;;
     *)
-        python3 -m aec repo setup "$@"
+        aec repo setup "$@"
         ;;
 esac

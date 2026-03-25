@@ -198,7 +198,7 @@ def validate() -> Tuple[bool, List[str]]:
         for error in errors:
             Console.print(f"  - {error}")
         Console.print()
-        Console.print(f"Run {Console.cmd('python -m aec rules generate')} to fix.")
+        Console.print(f"Run {Console.cmd('aec rules generate')} to fix.")
         return False, errors
     else:
         Console.success(f"Rule parity check passed - .agent-rules/ matches .cursor/rules/")

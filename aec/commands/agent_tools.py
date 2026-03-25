@@ -286,7 +286,7 @@ def migrate(dry_run: bool = False) -> None:
     else:
         Console.success("Migration completed successfully")
         Console.print(f"\nBackup: {Console.path(backup_dir)}")
-        Console.print(f"\nTo rollback: {Console.cmd(f'python -m aec agent-tools rollback {backup_dir}')}")
+        Console.print(f"\nTo rollback: {Console.cmd(f'aec agent-tools rollback {backup_dir}')}")
 
 
 def rollback(backup_dir: str) -> None:
@@ -380,7 +380,7 @@ def rollback(backup_dir: str) -> None:
     Console.header("Rollback Complete")
     Console.success("Restored old symlink structure")
     Console.print(f"\nThe backup has been preserved at: {backup_path}")
-    Console.print(f"\nTo re-run migration: {Console.cmd('python -m aec agent-tools migrate')}")
+    Console.print(f"\nTo re-run migration: {Console.cmd('aec agent-tools migrate')}")
 
 
 # Typer command decorators (if available)

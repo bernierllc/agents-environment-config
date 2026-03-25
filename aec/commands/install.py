@@ -372,6 +372,6 @@ def install(dry_run: bool = False) -> None:
         Console.print(f"  - .agent-rules/                  (frontmatter-stripped rules)")
         Console.print()
         Console.print("Next steps:")
-        Console.print(f"  1. Setup a project: {Console.cmd('python -m aec repo setup <project>')}")
-        Console.print(f"  2. Check health:    {Console.cmd('python -m aec doctor')}")
+        Console.print(f"  1. Setup a project: {Console.cmd('aec repo setup <project>')}")
+        Console.print(f"  2. Check health:    {Console.cmd('aec doctor')}")
         Console.print()

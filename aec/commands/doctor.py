@@ -131,7 +131,7 @@ def run_doctor() -> Tuple[bool, List[str]]:
                 issues.append(f"~/.agent-tools/{subdir}/ directory missing")
     else:
         Console.warning("~/.agent-tools/ not found")
-        Console.info(f"  Run: {Console.cmd('python -m aec agent-tools setup')}")
+        Console.info(f"  Run: {Console.cmd('aec agent-tools setup')}")
         issues.append("~/.agent-tools/ directory not set up")
 
     # Check 4: Agent-specific directories
@@ -206,7 +206,7 @@ def run_doctor() -> Tuple[bool, List[str]]:
                 Console.error(f"Bad hook keys in {path}: {', '.join(keys)}")
             issues.append(
                 f"{len(repos_with_bad_hooks)} repo(s) have camelCase hook keys "
-                f"(fix with: python -m aec repo update --all)"
+                f"(fix with: aec repo update --all)"
             )
         else:
             Console.success("All hook configs use correct PascalCase keys")
@@ -233,10 +233,10 @@ def run_doctor() -> Tuple[bool, List[str]]:
                     Console.success(f"Rule count matches .cursor/rules/ ({len(mdc_files)} files)")
                 else:
                     Console.warning(f"Rule count mismatch: {len(md_files)} vs {len(mdc_files)}")
-                    Console.info(f"  Run: {Console.cmd('python -m aec rules generate')}")
+                    Console.info(f"  Run: {Console.cmd('aec rules generate')}")
         else:
             Console.warning(".agent-rules/ not found")
-            Console.info(f"  Run: {Console.cmd('python -m aec rules generate')}")
+            Console.info(f"  Run: {Console.cmd('aec rules generate')}")
             issues.append(".agent-rules/ directory not generated")
 
     # Check 7: Version check status
@@ -271,6 +271,6 @@ def run_doctor() -> Tuple[bool, List[str]]:
         for issue in issues:
             Console.print(f"  - {issue}")
         Console.print()
-        Console.print(f"To fix most issues, run: {Console.cmd('python -m aec install')}")
+        Console.print(f"To fix most issues, run: {Console.cmd('aec install')}")
 
     return all_passed, issues

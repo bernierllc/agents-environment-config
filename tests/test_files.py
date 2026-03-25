@@ -118,7 +118,7 @@ class TestGenerateAgentFile:
 
         content = generate_agent_file("Test Agent", {})
 
-        assert "python3 -m aec files generate" in content
+        assert "aec files generate" in content
 
     def test_generate_with_agent_rules_references_home_dir(self):
         """When use_agent_rules=True, references ~/.agent-tools/ paths."""

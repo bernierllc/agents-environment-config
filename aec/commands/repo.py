@@ -647,7 +647,7 @@ def setup(
             "Agent files reference rules in ~/.agent-tools/rules/agents-environment-config/ "
             "which does not exist."
         )
-        Console.print(f"\nRun this first: {Console.cmd('python -m aec install')}")
+        Console.print(f"\nRun this first: {Console.cmd('aec install')}")
         raise SystemExit(1)
 
     # Resolve path
@@ -777,7 +777,7 @@ def setup(
         Console.print("  2. Review .cursor/rules/CURSOR.mdc for Cursor settings")
         Console.print("  3. Start coding with your AI assistant!")
         Console.print()
-        Console.print(f"Future updates: {Console.cmd('python -m aec repo update --all')}")
+        Console.print(f"Future updates: {Console.cmd('aec repo update --all')}")
 
 
 def list_repos() -> None:
@@ -788,7 +788,7 @@ def list_repos() -> None:
 
     if not repos:
         Console.print("No repositories have been set up yet.")
-        Console.print(f"\nRun: {Console.cmd('python -m aec repo setup <path>')}")
+        Console.print(f"\nRun: {Console.cmd('aec repo setup <path>')}")
         return
 
     Console.print(f"{'Timestamp':<26} | {'Version':<7} | Path")

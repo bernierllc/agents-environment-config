@@ -357,7 +357,7 @@ def _generate_inline_content(
 def main():
     """Main execution function.
 
-    This script can be run standalone or via 'python -m aec files generate'.
+    This script can be run standalone or via 'aec files generate'.
     Uses the shared aec.lib.agent_files module for generation logic.
     """
     import sys

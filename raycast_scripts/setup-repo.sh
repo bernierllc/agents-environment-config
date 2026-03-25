@@ -45,7 +45,7 @@ else
 fi
 
 # Run setup via Python CLI, skip Raycast script prompt (already in Raycast)
-python3 -m aec repo setup --skip-raycast "$INPUT"
+aec repo setup --skip-raycast "$INPUT"
 
 # Show completion dialog
 PROJECT_NAME=$(basename "$INPUT")

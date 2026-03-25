@@ -1,0 +1,173 @@
+name: Version Bump & Release
+
+on:
+  push:
+    branches: [main]
+
+# Only one version bump at a time
+concurrency:
+  group: version-bump
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  version-bump:
+    runs-on: ubuntu-latest
+    # Skip version bump for commits made by this action
+    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for commit analysis
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get latest tag
+        id: latest_tag
+        run: |
+          TAG=$(git tag -l 'v*' --sort=-v:refname | head -n 1)
+          if [ -z "$TAG" ]; then
+            TAG="v0.0.0"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Latest tag: $TAG"
+
+      - name: Analyze commits for bump level
+        id: bump
+        run: |
+          TAG="${{ steps.latest_tag.outputs.tag }}"
+
+          # Get commits since last tag
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            COMMITS=$(git log "$TAG"..HEAD --pretty=format:"%s%n%b" --no-merges)
+          else
+            COMMITS=$(git log --pretty=format:"%s%n%b" --no-merges)
+          fi
+
+          if [ -z "$COMMITS" ]; then
+            echo "No commits since last tag"
+            echo "level=none" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Commits since $TAG:"
+          echo "$COMMITS"
+          echo "---"
+
+          LEVEL="none"
+
+          # Check for breaking changes (major)
+          if echo "$COMMITS" | grep -qiE "^[a-z]+(\(.*\))?!:|BREAKING CHANGE:"; then
+            LEVEL="major"
+          # Check for features (minor)
+          elif echo "$COMMITS" | grep -qE "^feat(\(.*\))?:"; then
+            LEVEL="minor"
+          # Check for fixes, docs, chore, refactor, etc. (patch)
+          elif echo "$COMMITS" | grep -qE "^(fix|docs|chore|refactor|perf|style|test|build|ci)(\(.*\))?:"; then
+            LEVEL="patch"
+          fi
+
+          echo "Bump level: $LEVEL"
+          echo "level=$LEVEL" >> "$GITHUB_OUTPUT"
+
+      - name: Calculate new version
+        id: version
+        if: steps.bump.outputs.level != 'none'
+        run: |
+          TAG="${{ steps.latest_tag.outputs.tag }}"
+          LEVEL="${{ steps.bump.outputs.level }}"
+
+          # Strip 'v' prefix and split
+          CURRENT="${TAG#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+
+          case "$LEVEL" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $CURRENT -> $NEW_VERSION ($LEVEL)"
+
+      - name: Update pyproject.toml
+        if: steps.bump.outputs.level != 'none'
+        run: |
+          NEW="${{ steps.version.outputs.new_version }}"
+          sed -i "s/^version = \".*\"/version = \"$NEW\"/" pyproject.toml
+          echo "Updated pyproject.toml to $NEW"
+          grep '^version' pyproject.toml
+
+      - name: Generate release notes
+        id: notes
+        if: steps.bump.outputs.level != 'none'
+        run: |
+          TAG="${{ steps.latest_tag.outputs.tag }}"
+          NEW="v${{ steps.version.outputs.new_version }}"
+
+          # Build release notes from conventional commits
+          {
+            echo "## What's Changed"
+            echo ""
+
+            # Features
+            FEATS=$(git log "$TAG"..HEAD --pretty=format:"- %s" --no-merges | grep -E "^- feat" || true)
+            if [ -n "$FEATS" ]; then
+              echo "### Features"
+              echo "$FEATS"
+              echo ""
+            fi
+
+            # Fixes
+            FIXES=$(git log "$TAG"..HEAD --pretty=format:"- %s" --no-merges | grep -E "^- fix" || true)
+            if [ -n "$FIXES" ]; then
+              echo "### Bug Fixes"
+              echo "$FIXES"
+              echo ""
+            fi
+
+            # Other changes
+            OTHER=$(git log "$TAG"..HEAD --pretty=format:"- %s" --no-merges | grep -vE "^- (feat|fix)" || true)
+            if [ -n "$OTHER" ]; then
+              echo "### Other Changes"
+              echo "$OTHER"
+              echo ""
+            fi
+
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$TAG...$NEW"
+          } > /tmp/release-notes.md
+
+          cat /tmp/release-notes.md
+
+      - name: Commit version bump
+        if: steps.bump.outputs.level != 'none'
+        run: |
+          NEW="${{ steps.version.outputs.new_version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml
+          git commit -m "chore(release): v$NEW"
+          git tag "v$NEW"
+          git push origin main --tags
+
+      - name: Create GitHub Release
+        if: steps.bump.outputs.level != 'none'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NEW="v${{ steps.version.outputs.new_version }}"
+          gh release create "$NEW" \
+            --title "$NEW" \
+            --notes-file /tmp/release-notes.md

@@ -6,8 +6,35 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-# Version
-VERSION = "2.0.0"
+# Version — read from pyproject.toml so there's a single source of truth
+def _read_version() -> str:
+    """Read version from pyproject.toml, falling back to hardcoded default."""
+    try:
+        import tomllib
+    except ImportError:
+        try:
+            import tomli as tomllib  # type: ignore[no-redef]
+        except ImportError:
+            tomllib = None  # type: ignore[assignment]
+
+    if tomllib is not None:
+        pyproject = Path(__file__).resolve().parent.parent.parent / "pyproject.toml"
+        if pyproject.exists():
+            with open(pyproject, "rb") as f:
+                data = tomllib.load(f)
+            return data.get("project", {}).get("version", "2.0.0")
+
+    # Fallback: parse version line directly (no toml library needed)
+    pyproject = Path(__file__).resolve().parent.parent.parent / "pyproject.toml"
+    if pyproject.exists():
+        for line in pyproject.read_text().splitlines():
+            if line.strip().startswith("version"):
+                return line.split("=", 1)[1].strip().strip('"')
+
+    return "2.0.0"
+
+
+VERSION = _read_version()
 
 # Platform detection
 IS_WINDOWS = platform.system() == "Windows"

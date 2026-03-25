@@ -252,13 +252,13 @@ When you run `aec repo setup` to configure a project with agent files, the CLI r
 
 ```bash
 # List all tracked projects
-python -m aec repo list
+aec repo list
 
 # Update all tracked projects
-python -m aec repo update --all
+aec repo update --all
 
 # Update a specific project
-python -m aec repo update /path/to/project
+aec repo update /path/to/project
 ```
 
 ## Can I delete this directory?

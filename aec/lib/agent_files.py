@@ -190,7 +190,7 @@ def generate_agent_file(
         "## Regenerating This File",
         "",
         "```bash",
-        "python3 -m aec files generate",
+        "aec files generate",
         "```",
         "",
     ])
