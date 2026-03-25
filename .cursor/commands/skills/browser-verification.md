@@ -1,9 +1,8 @@
 ---
 name: "browser-verification"
 description: "Use when performing manual QA verification of web application features in a browser, running verification checklists, or testing a feature and its tangential features after code changes"
-tags: ["skill"]
+tags: "["skill"]"
 ---
-
 
 # Browser Verification
 
@@ -12,6 +11,10 @@ tags: ["skill"]
 Automated manual QA using browser tools against verification checklists in `docs/verification/`. Walks through every checklist item in a real browser, explores full CRUD on each page, finds issues, fixes what's safe, and logs everything.
 
 **Core principle:** Verify in the browser, not in your head. Evidence from the DOM, console, and network — not assumptions.
+
+**Graceful failure standard:** A feature is not PASS if it works on the happy path but fails ungracefully on any error path. "Works but crashes ugly" is FAIL. Every interaction has a happy path and failure paths — both must behave well. If a checklist item has an `*Expected:*` type, that tells you what kind of outcome to verify. If an item has no explicit error path items nearby, test basic error scenarios anyway (empty input, network failure at deep depth) and flag missing coverage.
+
+**Companion skill:** Verification docs are generated and maintained by the **verification-writer** skill. If you find docs are stale, missing, or incomplete during a run, invoke verification-writer to update them (see "Cross-Skill Integration" below).
 
 ## Verification Depth
 
@@ -144,8 +147,24 @@ digraph startup {
 
 1. Read `docs/verification/index.md` for prerequisites and login credentials
 2. Read each verification doc in scope
-3. Parse checklist items — format: `- [ ] **Action** --- Expected result. *Requires: preconditions.*`
-4. Note required login credentials per section
+3. Parse checklist items — format: `- [ ] [depth] **Action** --- Expected result. *Expected: type*`
+4. **Filter by depth:** Only run items tagged with the current depth or lower (smoke < standard < deep). Smoke items run at all depths; deep items only run at deep depth.
+5. Note the `*Expected: type*` on each item — this tells you what kind of outcome to verify:
+   - `success` — happy path works
+   - `warning dialog` — warned before destructive action
+   - `client-side validation error` — bad input caught before server
+   - `graceful server error` — server rejects, UI handles gracefully
+   - `auth boundary enforcement` — access control works
+   - `success with side effects` — works AND downstream effects happen
+   - `graceful empty state` — no-data scenario handled appropriately
+6. Note required login credentials per section
+7. **If no verification docs exist:** Tell the user and suggest running `/verification-writer` to generate them. Do not proceed without docs.
+
+**Staleness detection:** As you run items, watch for signs the docs are out of date:
+- Item describes UI that doesn't exist (button removed, route renamed)
+- Item's expected behavior doesn't match actual behavior
+- Page has interactive elements with no checklist items
+- These get logged and sent to verification-writer for update (see Cross-Skill Integration)
 
 ## Step 4: Run Verification Sections
 
@@ -390,6 +409,12 @@ Write to `docs/verification/logs/YYYY-MM-DD-verification-run.md`:
 ## Proposed Verification Doc Additions
 ### [filename] - [Section Name]
 - [ ] **Proposed new item** --- Expected result.
+
+## Doc Staleness Detected
+- [item]: [what the doc says vs. what reality is]
+
+## Doc Updates Triggered
+- verification-writer invoked for [scope]: [stale items updated, missing items added, fixed items revised]
 ```
 
 ### Terminal Summary
@@ -403,6 +428,21 @@ Fixes applied: [list of short descriptions]
 Systemic issues: [list of short descriptions]
 Proposed doc additions: X new items across Y files (see log for details)
 ```
+
+## Log Management
+
+**On first run in a project (no existing `docs/verification/logs/` directory):** Ask the user:
+
+1. **Git tracking:** "Should verification run logs be tracked in git, or should I add `docs/verification/logs/` to `.gitignore`?"
+   - If gitignored: add the path to `.gitignore`
+   - If tracked: leave `.gitignore` unchanged
+   - Default suggestion: gitignore run logs (they're ephemeral per-run output)
+
+2. **Old log cleanup:** "Should I clean up old verification run logs, or keep them all?"
+   - If cleanup: keep only the most recent 5 run logs, delete older ones
+   - If keep all: leave everything
+
+**On subsequent runs:** Check the established pattern and follow it. Don't re-ask.
 
 ## Common Mistakes
 
@@ -425,6 +465,37 @@ Proposed doc additions: X new items across Y files (see log for details)
 | Missing tangential features | Grep for imports of changed files to find affected features |
 | Trusting the checklist is complete | Explore beyond listed items on every page |
 | Proceeding without login confirmation | On staging/prod, always wait for user to confirm login |
+
+## Cross-Skill Integration with verification-writer
+
+### When to invoke verification-writer
+
+During a verification run, track staleness. After completing all sections, if any of the following are true, invoke verification-writer with an update payload:
+
+- **Stale items found:** Checklist items describe UI/behavior that doesn't match current code
+- **Missing coverage:** Interactive elements found on pages with no corresponding checklist items
+- **Fixes applied:** You fixed code during the run, changing expected behavior
+- **No docs exist:** `docs/verification/` is empty or missing for the feature in scope
+
+### How to invoke
+
+After completing Step 5 (fixes) and before Step 6 (log), invoke verification-writer:
+
+```
+Invoke verification-writer to update docs:
+- Section: [role/feature/route]
+- Stale items: [list of items that don't match reality]
+- Missing items: [elements/interactions with no checklist coverage]
+- Fixed items: [items where expected behavior changed due to fixes in this run]
+```
+
+Verification-writer will re-analyze the affected sections against current code and update the docs. After it returns, note the updates in your verification log under "Doc Updates Triggered."
+
+### When NOT to invoke
+
+- If the only issues are FAIL items where the code is broken (not the docs) — that's a fix or systemic issue, not a doc update
+- If running on staging/production — doc updates should happen against local code
+- If the user explicitly said not to update docs
 
 ## Red Flags - STOP
 
