@@ -1,9 +1,8 @@
 ---
 name: "verification-writer"
 description: "Use when generating, updating, or auditing manual verification docs (docs/verification/*.md) for browser-based QA. Analyzes codebase routes, components, forms, error handling, and user types to produce tiered verification checklists and a findings report of gaps. Also invoked by browser-verification when docs are stale or missing."
-tags: ["skill"]
+tags: "["skill"]"
 ---
-
 
 # Verification Writer
 
@@ -32,12 +31,108 @@ Determine which applies from context:
 You MUST complete these in order:
 
 1. **Determine scope and entry point**
-2. **Run Phase 1: Codebase Analysis**
-3. **Run Phase 2: Generate outputs**
-4. **Apply fixes within thresholds**
-5. **Run test suite to verify fixes**
-6. **Produce findings report**
-7. **Suggest verification run**
+2. **Determine doc location and organization** (first run only)
+3. **Run Phase 1: Codebase Analysis**
+4. **Run Phase 2: Generate outputs**
+5. **Apply fixes within thresholds**
+6. **Run test suite to verify fixes**
+7. **Produce findings report**
+8. **Suggest verification run**
+
+## Doc Location and Organization
+
+**On first run in a project (no existing verification docs):** Ask the user before generating anything:
+
+### Where to put the docs
+
+Default: `docs/verification/`. But ask:
+
+> "I'll generate verification docs for this project. Where would you like them? Default is `docs/verification/` — or specify a different path."
+
+Accept whatever path they give. If they have an existing `docs/` structure, suggest something that fits (e.g., `docs/qa/verification/`, `docs/testing/verification/`). Store the chosen path and use it consistently.
+
+### How to organize the files
+
+Analyze what was found in Phase 1 (user types, route count, feature count) and propose an organization that fits the project:
+
+**Multi-role apps (2+ user types, role-based routing):**
+One file per role + shared. This is the default for projects with role-based access.
+
+```
+verification/
+├── index.md
+├── admin.md
+├── educator.md
+├── student.md
+├── shared.md          # Public pages, cross-role components
+├── findings/
+└── logs/
+```
+
+**Single-role or no-role apps (one user type, or no auth):**
+Organize by feature area instead of role.
+
+```
+verification/
+├── index.md
+├── authentication.md
+├── dashboard.md
+├── settings.md
+├── billing.md
+├── shared.md          # Common components, navigation
+├── findings/
+└── logs/
+```
+
+**Large apps (50+ routes):**
+Split further — one file per major feature area within each role, or by product section.
+
+```
+verification/
+├── index.md
+├── admin/
+│   ├── user-management.md
+│   ├── settings.md
+│   └── analytics.md
+├── educator/
+│   ├── classes.md
+│   ├── assignments.md
+│   └── gradebook.md
+├── shared.md
+├── findings/
+└── logs/
+```
+
+**API-only projects (no UI routes):**
+Organize by API domain. Items verify API responses, error codes, and auth boundaries via `curl` or API testing tools rather than browser interaction.
+
+```
+verification/
+├── index.md
+├── auth-endpoints.md
+├── user-endpoints.md
+├── data-endpoints.md
+├── webhook-endpoints.md
+├── findings/
+└── logs/
+```
+
+**Present your recommendation to the user based on what Phase 1 found:**
+
+> "This project has [X] user types and [Y] routes. I'd recommend organizing verification docs as [describe structure]. Does that work, or would you prefer a different breakdown?"
+
+### When to split a file
+
+A verification file should be split when:
+- It exceeds 300 checklist items (too large to navigate)
+- It covers 10+ unrelated feature sections (too broad)
+- A single section has 50+ items (that section deserves its own file)
+
+When splitting, update the index and any cross-references. Tell the user what you split and why.
+
+### On subsequent runs
+
+Check the existing structure and follow it. Don't reorganize without asking. If the project has grown enough that the current organization is strained (files getting too large), suggest a restructure but don't do it automatically.
 
 ## Phase 1: Codebase Analysis
 
@@ -85,9 +180,9 @@ Record each as:
 
 Read `references/verification-item-format.md` for item syntax details.
 
-### Output 1: Verification Docs (`docs/verification/*.md`)
+### Output 1: Verification Docs
 
-One file per user type/role. Each covers all routes that user type can access.
+Written to the location and structure determined in "Doc Location and Organization" above. Each file covers the scope assigned to it (by role, by feature, or by API domain).
 
 **Item format:** `- [ ] [depth] **Action** --- Expected result. *Expected: type*`
 
@@ -112,7 +207,7 @@ One file per user type/role. Each covers all routes that user type can access.
 
 **Items for Partial/Missing handling:** If error handling is Partial, write the item documenting what SHOULD happen (so browser-verification will find the gap). If Missing, write the item only after the fix is applied or note it in the findings report.
 
-### Output 2: Findings Report (`docs/verification/findings/YYYY-MM-DD-analysis.md`)
+### Output 2: Findings Report (`<verification-path>/findings/YYYY-MM-DD-analysis.md`)
 
 Read `references/findings-report-format.md` for full template.
 
@@ -122,7 +217,7 @@ Always generated, even if zero gaps found. Includes:
 - Gaps requiring manual fix (with severity, current vs. expected behavior, suggested approach)
 - Systemic issues (patterns affecting multiple routes/user types)
 
-### Output 3: Index (`docs/verification/index.md`)
+### Output 3: Index (`<verification-path>/index.md`)
 
 Master index: all verification files, prerequisites, login credentials, date each file was last generated/updated.
 
@@ -170,11 +265,39 @@ Suggest (do not auto-invoke) a verification run:
 
 > "Verification docs updated for [scope]. Run `/browser-verification` at smoke depth to confirm these items are accurate?"
 
+## Memory Integration
+
+After determining the doc location, organization, and log preferences for a project, **save this to memory** so that both verification-writer and browser-verification can find it in future sessions without re-asking.
+
+**What to save (project memory):**
+
+```markdown
+---
+name: verification-docs-config
+description: Verification doc location, organization, and preferences for [project name]
+type: project
+---
+
+Verification docs for [project name] are at `<verification-path>/`.
+
+Organization: [by role | by feature | by API domain | nested by role]
+Files: [list the files that exist]
+Git tracking: [logs gitignored, findings tracked | both tracked | both gitignored]
+Log cleanup: [keep 5 most recent | keep all]
+
+**Why:** Configured on [date] during initial verification-writer run.
+**How to apply:** browser-verification reads this to find docs. verification-writer reads this to know where to write and how to organize.
+```
+
+**When to save:** After the user confirms the location, organization, and preferences in the first run. Update the memory whenever files are added, split, or reorganized.
+
+**When to read:** At the start of every verification-writer AND browser-verification run. If this memory doesn't exist, verification-writer should ask the user and create it. If browser-verification reads it and the docs don't exist at the specified path, it should tell the user to run verification-writer first.
+
 ## Log and Report Management
 
-**On first run in a project (no existing `docs/verification/` directory):** Ask the user two questions before generating outputs:
+**On first run in a project:** After determining the doc location, ask:
 
-1. **Git tracking:** "Should verification logs and findings reports be tracked in git, or should I add `docs/verification/logs/` and `docs/verification/findings/` to `.gitignore`?"
+1. **Git tracking:** "Should verification logs and findings reports be tracked in git, or should I add `<verification-path>/logs/` and `<verification-path>/findings/` to `.gitignore`?"
    - If gitignored: add both paths to `.gitignore`
    - If tracked: leave `.gitignore` unchanged — logs become part of project history
    - Default suggestion: track findings reports (they document code quality over time), gitignore run logs (they're ephemeral)

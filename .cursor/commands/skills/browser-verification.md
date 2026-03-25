@@ -39,14 +39,29 @@ This skill operates at three depth levels. **Ask the user which depth they want*
 
 You MUST complete these in order:
 
-1. **Determine scope**
-2. **Detect environment**
-3. **Load verification docs**
-4. **Run verification sections**
-5. **Fix or log issues**
-6. **Produce log file and summary**
+1. **Find verification docs**
+2. **Determine scope and depth**
+3. **Detect environment**
+4. **Load verification docs**
+5. **Run verification sections**
+6. **Fix or log issues**
+7. **Update stale docs** (invoke verification-writer if needed)
+8. **Produce log file and summary**
 
-## Step 1: Determine Scope and Depth
+## Step 1: Find Verification Docs
+
+Before anything else, locate the verification docs for this project.
+
+1. **Check memory** for a `verification-docs-config` project memory. This tells you the doc location, organization, and preferences set by verification-writer.
+2. **If memory exists:** Verify the path still has docs (files may have been deleted). If docs exist at the path, proceed to Step 2.
+3. **If memory exists but docs are missing at the path:** Tell the user:
+   > "Memory says verification docs should be at `<path>`, but they're not there. Run `/verification-writer` to generate them, or tell me the correct location."
+4. **If no memory exists:** Check `docs/verification/` as a default. If docs exist there, use them and note the location. If nothing exists anywhere, tell the user:
+   > "No verification docs found for this project. Run `/verification-writer` to generate them first — it will analyze the codebase and create verification checklists."
+
+   Do not proceed without docs. There is nothing to verify against.
+
+## Step 2: Determine Scope and Depth
 
 Ask the user or infer from context. You need two things: **scope** (which pages/features) and **depth** (smoke, standard, or deep). If the user only specifies one, ask for the other or use defaults (standard depth, git-diff-based scope).
 
@@ -112,7 +127,7 @@ digraph startup {
     "Start dev server\n(npm run dev)\nrun_in_background" [shape=box];
     "Wait for services" [shape=box];
     "Verify all healthy" [shape=diamond];
-    "Proceed to Step 3" [shape=doublecircle];
+    "Proceed to Load Docs" [shape=doublecircle];
     "Report failure" [shape=box];
 
     "Check Supabase" -> "Supabase running?";
@@ -125,7 +140,7 @@ digraph startup {
     "Wait for services" -> "Start dev server\n(npm run dev)\nrun_in_background";
     "Start dev server\n(npm run dev)\nrun_in_background" -> "Verify all healthy";
     "Dev server running?" -> "Verify all healthy" [label="yes (all running)"];
-    "Verify all healthy" -> "Proceed to Step 3" [label="yes"];
+    "Verify all healthy" -> "Proceed to Load Docs" [label="yes"];
     "Verify all healthy" -> "Report failure" [label="no"];
 }
 ```
@@ -431,9 +446,11 @@ Proposed doc additions: X new items across Y files (see log for details)
 
 ## Log Management
 
-**On first run in a project (no existing `docs/verification/logs/` directory):** Ask the user:
+**Check the `verification-docs-config` memory** for log preferences. If preferences are already stored (set by verification-writer), follow them.
 
-1. **Git tracking:** "Should verification run logs be tracked in git, or should I add `docs/verification/logs/` to `.gitignore`?"
+**If no preferences exist (first run, verification-writer hasn't been run):** Ask the user:
+
+1. **Git tracking:** "Should verification run logs be tracked in git, or should I add `<verification-path>/logs/` to `.gitignore`?"
    - If gitignored: add the path to `.gitignore`
    - If tracked: leave `.gitignore` unchanged
    - Default suggestion: gitignore run logs (they're ephemeral per-run output)
@@ -442,7 +459,7 @@ Proposed doc additions: X new items across Y files (see log for details)
    - If cleanup: keep only the most recent 5 run logs, delete older ones
    - If keep all: leave everything
 
-**On subsequent runs:** Check the established pattern and follow it. Don't re-ask.
+Save preferences to the `verification-docs-config` memory so future runs don't re-ask.
 
 ## Common Mistakes
 
