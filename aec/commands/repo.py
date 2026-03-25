@@ -54,6 +54,11 @@ def _resolve_project_path(path_input: str) -> Path:
     if p.is_absolute():
         return p.resolve()
 
+    # If it looks like a relative path (contains separators or is . or ..),
+    # resolve it relative to cwd instead of treating it as a project name
+    if os.sep in path_input or path_input in (".", "..") or path_input.startswith(("./", "../")):
+        return Path(path_input).resolve()
+
     # Otherwise, it's a project name - look in projects directory
     return get_projects_dir() / path_input
 
@@ -806,7 +811,7 @@ def update(
     if update_all or path is None:
         _update_all_repos(dry_run)
     else:
-        _update_single_repo(Path(path), dry_run)
+        _update_single_repo(_resolve_project_path(path), dry_run)
 
 
 def _clean_agentinfo_redundancy(project_dir: Path, dry_run: bool = False) -> None:

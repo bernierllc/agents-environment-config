@@ -38,6 +38,38 @@ class TestResolveProjectPath:
         result = _resolve_project_path("my-project")
         assert result == tmp_path / "my-project"
 
+    def test_dot_resolves_to_cwd(self):
+        """'.' resolves to current working directory."""
+        from aec.commands.repo import _resolve_project_path
+
+        result = _resolve_project_path(".")
+        assert result.is_absolute()
+        assert result == Path.cwd().resolve()
+
+    def test_dot_slash_resolves_to_cwd(self):
+        """'./' resolves to current working directory."""
+        from aec.commands.repo import _resolve_project_path
+
+        result = _resolve_project_path("./")
+        assert result.is_absolute()
+        assert result == Path.cwd().resolve()
+
+    def test_dotdot_resolves_to_parent(self):
+        """'..' resolves to parent of current working directory."""
+        from aec.commands.repo import _resolve_project_path
+
+        result = _resolve_project_path("..")
+        assert result.is_absolute()
+        assert result == Path.cwd().resolve().parent
+
+    def test_relative_path_with_slash_resolves_to_cwd(self):
+        """'./subdir' resolves relative to cwd, not projects_dir."""
+        from aec.commands.repo import _resolve_project_path
+
+        result = _resolve_project_path("./subdir")
+        assert result.is_absolute()
+        assert result == (Path.cwd() / "subdir").resolve()
+
 
 class TestGetRepoRoot:
     """Test get_repo_root() works cross-platform."""
