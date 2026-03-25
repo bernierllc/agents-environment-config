@@ -3,4 +3,4 @@
 	url = https://github.com/bernierllc/agency-agents.git
 [submodule ".claude/skills"]
 	path = .claude/skills
-	url = https://github.com/bernierllc/skills.git
+	url = https://github.com/bernierllc/claude-skills.git
