@@ -26,6 +26,7 @@ from ..lib import (
     is_logged,
     get_version,
     list_repos as tracking_list_repos,
+    prune_stale as tracking_prune_stale,
     detect_agents,
     generate_raycast_script,
     VERSION,
@@ -802,6 +803,39 @@ def list_repos() -> None:
     Console.print(f"Legend: {Console._colorize(Console.GREEN, '✓')} = exists, {Console._colorize(Console.RED, '✗')} = not found")
 
 
+def prune(yes: bool = False, dry_run: bool = False) -> None:
+    """Remove stale entries from the tracking file where the path no longer exists."""
+    Console.header("Prune Stale Tracking Entries")
+
+    stale = tracking_prune_stale(dry_run=True)
+
+    if not stale:
+        Console.success("No stale entries found. Tracking file is clean.")
+        return
+
+    Console.print(f"Found {len(stale)} stale entry(ies):\n")
+    for repo in stale:
+        Console.print(f"  {Console._colorize(Console.RED, '✗')} {repo.path}")
+
+    if dry_run:
+        Console.print(f"\nRun without --dry-run to remove these entries.")
+        return
+
+    if not yes:
+        Console.print()
+        try:
+            answer = input("Remove these entries? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            Console.print("\nAborted.")
+            return
+        if answer != "y":
+            Console.print("Aborted.")
+            return
+
+    pruned = tracking_prune_stale()
+    Console.success(f"Pruned {len(pruned)} stale entry(ies) from tracking file.")
+
+
 def update(
     path: Optional[str] = None,
     dry_run: bool = False,
@@ -918,10 +952,18 @@ def _update_all_repos(dry_run: bool = False) -> None:
             Console.warning(f"Skipping (not found): {repo.path}")
             skipped += 1
 
+    # Auto-prune stale entries
+    pruned = 0
+    if skipped > 0 and not dry_run:
+        pruned_entries = tracking_prune_stale()
+        pruned = len(pruned_entries)
+
     Console.header("Update Summary")
     Console.print(f"Total tracked: {total}")
     Console.print(f"Updated: {Console._colorize(Console.GREEN, str(updated))}")
     Console.print(f"Skipped: {Console._colorize(Console.YELLOW, str(skipped))}")
+    if pruned > 0:
+        Console.print(f"Pruned: {Console._colorize(Console.YELLOW, str(pruned))} stale entry(ies)")
 
     if dry_run:
         Console.print("\nRun without --dry-run to apply changes.")
@@ -959,6 +1001,14 @@ if HAS_TYPER:
     def setup_all_cmd():
         """Setup all projects in the configured projects directory."""
         setup_all()
+
+    @app.command("prune")
+    def prune_cmd(
+        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+        dry_run: bool = typer.Option(False, "--dry-run", help="Preview without making changes"),
+    ):
+        """Remove stale entries from tracking where path no longer exists."""
+        prune(yes, dry_run)
 
     @app.command("update")
     def update_cmd(

@@ -172,6 +172,9 @@ class TestSetupPrerequisiteCheck:
         # Mock is_logged to avoid "already set up" flow
         monkeypatch.setattr("aec.commands.repo.is_logged", lambda p: False)
 
+        # Mock log_setup to prevent writing to real tracking file
+        monkeypatch.setattr("aec.commands.repo.log_setup", lambda p, dry_run=False: None)
+
         # Mock input to avoid interactive prompts
         monkeypatch.setattr("builtins.input", lambda _: "n")
 

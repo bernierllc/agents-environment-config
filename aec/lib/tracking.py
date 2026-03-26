@@ -155,6 +155,51 @@ def list_repos() -> List[TrackedRepo]:
     return repos
 
 
+def prune_stale(dry_run: bool = False) -> List[TrackedRepo]:
+    """
+    Remove entries from the tracking file where the path no longer exists.
+
+    Args:
+        dry_run: If True, report what would be pruned without making changes.
+
+    Returns:
+        List of TrackedRepo entries that were (or would be) pruned.
+    """
+    if not AEC_SETUP_LOG.exists():
+        return []
+
+    content = AEC_SETUP_LOG.read_text().strip()
+    if not content:
+        return []
+
+    keep: list[str] = []
+    pruned: list[TrackedRepo] = []
+
+    for line in content.split("\n"):
+        if not line:
+            continue
+
+        parts = line.split("|")
+        if len(parts) >= 3:
+            path = Path(parts[2])
+            if path.exists():
+                keep.append(line)
+            else:
+                pruned.append(TrackedRepo(
+                    timestamp=parts[0],
+                    version=parts[1],
+                    path=path,
+                    exists=False,
+                ))
+        else:
+            keep.append(line)
+
+    if pruned and not dry_run:
+        AEC_SETUP_LOG.write_text("\n".join(keep) + "\n" if keep else "")
+
+    return pruned
+
+
 def discover_from_scripts(raycast_dir: Path) -> List[Path]:
     """
     Discover project paths from existing Raycast launcher scripts.

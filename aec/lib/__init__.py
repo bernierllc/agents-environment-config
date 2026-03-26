@@ -42,6 +42,7 @@ from .tracking import (
     is_logged,
     get_version,
     list_repos,
+    prune_stale,
     discover_from_scripts,
     TrackedRepo,
 )
@@ -121,6 +122,7 @@ __all__ = [
     "is_logged",
     "get_version",
     "list_repos",
+    "prune_stale",
     "discover_from_scripts",
     "TrackedRepo",
     # Preferences

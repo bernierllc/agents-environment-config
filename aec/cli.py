@@ -95,6 +95,10 @@ else:
 
         repo_sub.add_parser("setup-all", help="Setup all projects in configured projects directory")
 
+        repo_prune = repo_sub.add_parser("prune", help="Remove stale tracking entries")
+        repo_prune.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
+        repo_prune.add_argument("--dry-run", action="store_true")
+
         repo_update = repo_sub.add_parser("update", help="Update repositories")
         repo_update.add_argument("path", nargs="?", help="Specific project to update")
         repo_update.add_argument("--all", action="store_true", help="Update all repos")
@@ -187,6 +191,8 @@ else:
                 repo_cmd.setup_all()
             elif args.repo_command == "list":
                 repo_cmd.list_repos()
+            elif args.repo_command == "prune":
+                repo_cmd.prune(args.yes, args.dry_run)
             elif args.repo_command == "update":
                 repo_cmd.update(args.path, args.dry_run, args.all)
             else:
