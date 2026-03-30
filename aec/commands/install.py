@@ -1,6 +1,7 @@
 """Install command: aec install - Full setup of agents-environment-config."""
 
 from pathlib import Path
+from typing import Optional
 
 try:
     import typer
@@ -11,6 +12,40 @@ except ImportError:
 from ..lib import Console, get_repo_root, init_aec_home
 from ..lib.git import is_git_repo, has_gitmodules, init_submodules, update_submodule
 from . import agent_tools, rules
+
+
+def _cleanup_legacy_symlinks(
+    claude_skills_dir: Optional[Path] = None,
+    agent_tools_skills_dir: Optional[Path] = None,
+    dry_run: bool = False,
+) -> None:
+    """Remove AEC-created skill symlinks from known paths.
+
+    Only removes symlinks whose targets contain 'agent-tools' or
+    'agents-environment-config' in the resolution chain.
+    """
+    if claude_skills_dir is None:
+        from ..lib import CLAUDE_DIR
+        claude_skills_dir = CLAUDE_DIR / "skills"
+    if agent_tools_skills_dir is None:
+        from ..lib import AGENT_TOOLS_DIR
+        agent_tools_skills_dir = AGENT_TOOLS_DIR / "skills"
+
+    targets = [
+        claude_skills_dir / "agents-environment-config",
+        agent_tools_skills_dir / "agents-environment-config",
+    ]
+
+    for link_path in targets:
+        if not link_path.is_symlink():
+            continue
+        resolved = str(link_path.resolve())
+        if "agent-tools" in resolved or "agents-environment-config" in resolved:
+            if dry_run:
+                Console.info(f"Would remove legacy symlink: {link_path}")
+            else:
+                link_path.unlink()
+                Console.success(f"Cleaned up legacy symlink: {link_path}")
 
 
 def _find_projects(projects_dir: Path, git_only: bool = True) -> list[Path]:
@@ -394,6 +429,17 @@ def install(dry_run: bool = False) -> None:
     # Setup agent-tools
     with Console.section("Setting up ~/.agent-tools/ structure...", collapse=not dry_run):
         agent_tools.setup(dry_run)
+
+    # Clean up legacy skill symlinks
+    with Console.section("Cleaning up legacy symlinks...", collapse=not dry_run):
+        _cleanup_legacy_symlinks(dry_run=dry_run)
+        if not dry_run:
+            Console.success("Legacy symlink cleanup complete")
+
+    # Skills install/update step
+    with Console.section("Skills management...", collapse=False):
+        from . import skills
+        skills.install_step(dry_run=dry_run)
 
     # Detect and display agents
     with Console.section("Detecting installed agents...", collapse=not dry_run):
