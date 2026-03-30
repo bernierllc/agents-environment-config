@@ -110,6 +110,28 @@ def save_installed_manifest(manifest: dict, path: Path) -> None:
     path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 
+def _scan_skill_paths(source_dir: Path) -> dict:
+    """Scan source directory to build a name -> relative path mapping."""
+    paths = {}
+    for item in sorted(source_dir.iterdir()):
+        if not item.is_dir() or item.name.startswith("."):
+            continue
+        if (item / "SKILL.md").exists():
+            fm = parse_skill_frontmatter(item)
+            if fm:
+                paths[fm["name"]] = item.name
+            continue
+        # Check nested (e.g., document-skills/docx/)
+        for sub in sorted(item.iterdir()):
+            if not sub.is_dir() or sub.name.startswith("."):
+                continue
+            if (sub / "SKILL.md").exists():
+                sub_fm = parse_skill_frontmatter(sub)
+                if sub_fm:
+                    paths[sub_fm["name"]] = f"{item.name}/{sub.name}"
+    return paths
+
+
 def discover_available_skills(source_dir: Path) -> dict:
     """Discover available skills from the skills source directory.
 
@@ -121,7 +143,14 @@ def discover_available_skills(source_dir: Path) -> dict:
         try:
             data = json.loads(manifest_file.read_text(encoding="utf-8"))
             if isinstance(data, dict) and "skills" in data:
-                return data["skills"]
+                skills = data["skills"]
+                # Ensure all entries have a 'path' field by scanning directories
+                needs_path = [k for k, v in skills.items() if "path" not in v]
+                if needs_path:
+                    scanned = _scan_skill_paths(source_dir)
+                    for name in needs_path:
+                        skills[name]["path"] = scanned.get(name, name)
+                return skills
         except (json.JSONDecodeError, OSError):
             pass
 
