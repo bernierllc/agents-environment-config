@@ -143,13 +143,20 @@ def run_doctor() -> Tuple[bool, List[str]]:
         Console.success("~/.claude/ exists")
         checks_passed += 1
 
-        for subdir in ["agents", "skills"]:
-            link_path = CLAUDE_DIR / subdir / "agents-environment-config"
-            if is_symlink(link_path):
-                target = get_symlink_target(link_path)
-                Console.success(f"  └─ {subdir}/agents-environment-config -> {target}")
-            else:
-                Console.info(f"  └─ {subdir}/agents-environment-config not linked")
+        # Check agents symlink (still symlink-based)
+        agents_link = CLAUDE_DIR / "agents" / "agents-environment-config"
+        if is_symlink(agents_link):
+            target = get_symlink_target(agents_link)
+            Console.success(f"  └─ agents/agents-environment-config -> {target}")
+        else:
+            Console.info(f"  └─ agents/agents-environment-config not linked")
+
+        # Check skills (now managed by aec skills, not symlinks)
+        skills_link = CLAUDE_DIR / "skills" / "agents-environment-config"
+        if skills_link.is_symlink():
+            Console.warning(f"  └─ skills/agents-environment-config (legacy symlink, run: aec install)")
+        else:
+            Console.success(f"  └─ skills/ (managed by: aec skills)")
     else:
         Console.info("~/.claude/ not found (Claude Code may not be installed)")
         checks_passed += 1  # OK if not installed
@@ -171,6 +178,47 @@ def run_doctor() -> Tuple[bool, List[str]]:
     else:
         Console.info("~/.cursor/ not found (Cursor may not be installed)")
         checks_passed += 1  # OK if not installed
+
+    # Check: Skills installation
+    Console.subheader("Skills")
+
+    from ..lib.skills_manifest import load_installed_manifest
+
+    manifest_path = AEC_HOME / "installed-skills.json"
+    checks_total += 1
+    if manifest_path.exists():
+        try:
+            manifest = load_installed_manifest(manifest_path)
+            skill_count = len(manifest.get("skills", {}))
+            Console.success(f"installed-skills.json valid ({skill_count} skills tracked)")
+            checks_passed += 1
+
+            # Verify each tracked skill exists on disk
+            for name, info in manifest.get("skills", {}).items():
+                skill_dir = CLAUDE_DIR / "skills" / name
+                checks_total += 1
+                if skill_dir.exists():
+                    Console.success(f"  {name} ({info.get('version', '?')})")
+                    checks_passed += 1
+                else:
+                    Console.error(f"  {name} tracked but directory missing")
+                    issues.append(f"Skill '{name}' in manifest but missing from ~/.claude/skills/")
+        except Exception as e:
+            Console.error(f"installed-skills.json: {e}")
+            issues.append("installed-skills.json is corrupt")
+    else:
+        Console.info("installed-skills.json not found (run: aec skills install)")
+        checks_passed += 1  # OK on first run
+
+    # Check for stale AEC symlinks
+    checks_total += 1
+    stale_link = CLAUDE_DIR / "skills" / "agents-environment-config"
+    if stale_link.is_symlink():
+        Console.error("Legacy symlink found: ~/.claude/skills/agents-environment-config")
+        issues.append("Legacy skills symlink still exists (fix with: aec install)")
+    else:
+        Console.success("No legacy skills symlinks")
+        checks_passed += 1
 
     # Check 5: Hook key casing in tracked repos
     Console.subheader("Hook Configuration")
