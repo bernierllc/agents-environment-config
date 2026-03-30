@@ -1,9 +1,8 @@
 ---
 name: "plan-review"
 description: "Use when reviewing, auditing, or cleaning up plan files. Discovers plans across the repo and Claude's project directory, correlates them with git branches, performs deep code inspection to determine actual completion state vs. claimed status, and produces a gap analysis report. Also triggered by "review my plans", "what's the state of my plans", "clean up plans", or "status of plan X"."
-tags: ["skill"]
+tags: "["skill"]"
 ---
-
 
 # Plan Review
 
