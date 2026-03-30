@@ -57,6 +57,17 @@ from .preferences import (
     set_setting,
     get_pending_prompts,
     check_pending_preferences,
+    get_instruction_config,
+    set_instruction_config,
+    is_instruction_configured,
+)
+from .configurable_instructions import (
+    CONFIGURABLE_INSTRUCTIONS,
+    apply_instruction_config,
+    get_all_agent_keys,
+    get_agent_display_name,
+    scan_file_for_instruction,
+    get_agent_global_file,
 )
 from .hooks import (
     LANGUAGE_HOOKS,
@@ -74,6 +85,16 @@ from .agent_files import (
     generate_all as generate_agent_files,
     generate_agent_file,
     organize_rules,
+)
+from .skills_manifest import (
+    parse_skill_frontmatter,
+    parse_version,
+    version_is_newer,
+    hash_skill_directory,
+    load_installed_manifest,
+    save_installed_manifest,
+    discover_available_skills,
+    rebuild_manifest_from_installed,
 )
 
 # SUPPORTED_AGENTS is lazy-loaded via config.__getattr__
@@ -136,6 +157,16 @@ __all__ = [
     "set_setting",
     "get_pending_prompts",
     "check_pending_preferences",
+    "get_instruction_config",
+    "set_instruction_config",
+    "is_instruction_configured",
+    # Configurable instructions
+    "CONFIGURABLE_INSTRUCTIONS",
+    "apply_instruction_config",
+    "get_all_agent_keys",
+    "get_agent_display_name",
+    "scan_file_for_instruction",
+    "get_agent_global_file",
     # Hooks
     "LANGUAGE_HOOKS",
     "AGENT_HOOK_CONFIGS",
@@ -150,4 +181,13 @@ __all__ = [
     "generate_agent_files",
     "generate_agent_file",
     "organize_rules",
+    # Skills manifest
+    "parse_skill_frontmatter",
+    "parse_version",
+    "version_is_newer",
+    "hash_skill_directory",
+    "load_installed_manifest",
+    "save_installed_manifest",
+    "discover_available_skills",
+    "rebuild_manifest_from_installed",
 ]
