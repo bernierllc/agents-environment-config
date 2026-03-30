@@ -36,12 +36,13 @@ if HAS_TYPER:
         atexit.register(maybe_check_for_update)
 
     # Import and register command groups
-    from .commands import repo, agent_tools, rules, files, install, discover, preferences
+    from .commands import repo, agent_tools, rules, files, install, discover, preferences, skills
 
     app.add_typer(repo.app, name="repo", help="Manage project repositories")
     app.add_typer(agent_tools.app, name="agent-tools", help="Manage ~/.agent-tools/ directory")
     app.add_typer(rules.app, name="rules", help="Manage agent rules")
     app.add_typer(files.app, name="files", help="Manage agent instruction files")
+    app.add_typer(skills.app, name="skills", help="Manage Claude Code skills")
 
     app.add_typer(preferences.app, name="preferences", help="Manage optional feature preferences")
 
@@ -153,6 +154,20 @@ else:
         prefs_reset = prefs_sub.add_parser("reset", help="Reset a feature preference")
         prefs_reset.add_argument("feature", help="Feature name")
 
+        # skills commands
+        skills_parser = subparsers.add_parser("skills", help="Manage Claude Code skills")
+        skills_sub = skills_parser.add_subparsers(dest="skills_command")
+        skills_sub.add_parser("list", help="List available and installed skills")
+        skills_install = skills_sub.add_parser("install", help="Install skills")
+        skills_install.add_argument("names", nargs="+", help="Skill name(s) to install")
+        skills_install.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
+        skills_uninstall = skills_sub.add_parser("uninstall", help="Uninstall skills")
+        skills_uninstall.add_argument("names", nargs="+", help="Skill name(s) to uninstall")
+        skills_uninstall.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
+        skills_update = skills_sub.add_parser("update", help="Update installed skills")
+        skills_update.add_argument("name", nargs="?", default=None, help="Skill name to update (all if omitted)")
+        skills_update.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
+
         args = parser.parse_args()
 
         if args.command is None:
@@ -239,6 +254,20 @@ else:
                 prefs_cmd.reset_pref(args.feature)
             else:
                 prefs_parser.print_help()
+
+        elif args.command == "skills":
+            from .commands import skills as skills_cmd
+            if args.skills_command == "list":
+                skills_cmd.list_skills()
+            elif args.skills_command == "install":
+                skills_cmd.install_skills(names=args.names, yes=args.yes)
+            elif args.skills_command == "uninstall":
+                skills_cmd.uninstall_skills(names=args.names, yes=args.yes)
+            elif args.skills_command == "update":
+                names = [args.name] if args.name else None
+                skills_cmd.update_skills(names=names, yes=args.yes)
+            else:
+                skills_parser.print_help()
 
 
 def main():
