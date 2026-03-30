@@ -109,7 +109,6 @@ def setup(dry_run: bool = False) -> None:
     symlinks = [
         (repo_root / ".agent-rules", AGENT_TOOLS_DIR / "rules" / "agents-environment-config", "Rules"),
         (repo_root / ".claude" / "agents", AGENT_TOOLS_DIR / "agents" / "agents-environment-config", "Agents"),
-        (repo_root / ".claude" / "skills", AGENT_TOOLS_DIR / "skills" / "agents-environment-config", "Skills"),
         (repo_root / ".cursor" / "commands", AGENT_TOOLS_DIR / "commands" / "agents-environment-config", "Commands"),
     ]
 
@@ -146,8 +145,6 @@ def setup(dry_run: bool = False) -> None:
         claude_links = [
             (AGENT_TOOLS_DIR / "agents" / "agents-environment-config",
              CLAUDE_DIR / "agents" / "agents-environment-config", "Claude agents"),
-            (AGENT_TOOLS_DIR / "skills" / "agents-environment-config",
-             CLAUDE_DIR / "skills" / "agents-environment-config", "Claude skills"),
         ]
 
         for source, target, name in claude_links:
@@ -203,7 +200,7 @@ def setup(dry_run: bool = False) -> None:
         Console.print("  ├── agents/")
         Console.print("  │   └── agents-environment-config/ → repo/.claude/agents/")
         Console.print("  ├── skills/")
-        Console.print("  │   └── agents-environment-config/ → repo/.claude/skills/")
+        Console.print("  │   └── [managed by: aec skills]")
         Console.print("  └── commands/")
         Console.print("      └── [for future use - Cursor global commands currently broken]")
 
