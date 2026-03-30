@@ -5,25 +5,14 @@
 
 ## Stack Information
 
-<!-- AGENT TASK: If the section below still contains the placeholder, detect this
-     project's stack and replace the placeholder with real information. Analyze
-     package.json, requirements.txt, pyproject.toml, Cargo.toml, go.mod, Gemfile,
-     or other manifest files to determine:
-     - Language(s) and version(s)
-     - Framework(s) (e.g. Next.js, FastAPI, Rails, etc.)
-     - Package manager (npm, pnpm, yarn, pip, poetry, cargo, etc.)
-     - Database(s) if detectable (Postgres, MongoDB, Redis, etc.)
-     - Key dependencies and their roles
-     Then replace everything between the STACK-START and STACK-END markers with
-     the detected information. Remove this comment block when done. -->
-
 <!-- STACK-START -->
-**Language:** Python 3.9+
-**Framework:** CLI tool (`aec` command) built with setuptools
-**Test Runner:** pytest (dev dependency, tests in `tests/`)
-**Type Check:** Not configured (no mypy or pyright)
-**Lint:** Not explicitly configured
-**Package Manager:** pip with pyproject.toml
+- **Language:** Python 3.9+
+- **Framework:** CLI tool (`aec` command) built with setuptools
+- **Package manager:** pip with `pyproject.toml`
+- **CLI framework:** Typer (optional dev dependency, argparse fallback)
+- **Test runner:** pytest (dev dependency)
+- **Key dependencies:** None at runtime (zero-dependency); `typer>=0.9.0` and `pytest>=7.0.0` as dev deps
+- **Database:** None
 <!-- STACK-END -->
 
 ## Project Structure

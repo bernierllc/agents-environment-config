@@ -53,3 +53,6 @@ GEMINI.md
 QWEN.md
 AGENTS.md
 .cursor/rules
+
+# Blog posts (local content, not part of the tool)
+blog/

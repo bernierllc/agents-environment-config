@@ -44,3 +44,6 @@ Do NOT memorize all rules - read the specific rule file when working in that are
 ```bash
 python3 scripts/generate-agent-files.py
 ```
+
+## Session Discipline
+- Do not combine planning and implementation in a single session. If the user asks to plan, produce the plan and stop. If the user asks to implement, start from an existing plan and begin coding immediately.
