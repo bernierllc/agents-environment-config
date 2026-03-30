@@ -848,6 +848,55 @@ def update(
         _update_single_repo(_resolve_project_path(path), dry_run)
 
 
+def _apply_configurable_instructions(project_dir: Path, dry_run: bool = False) -> None:
+    """Apply configurable instruction preferences to agent files in a project.
+
+    For each configured instruction, adds or removes it from agent files
+    based on the user's per-agent preferences.
+    """
+    from ..lib.configurable_instructions import (
+        CONFIGURABLE_INSTRUCTIONS,
+        get_agent_project_file,
+        get_agent_display_name,
+        add_instruction_to_file,
+        remove_instruction_from_file,
+    )
+    from ..lib.preferences import get_instruction_config
+
+    for key in CONFIGURABLE_INSTRUCTIONS:
+        agent_configs = get_instruction_config(key)
+        if agent_configs is None:
+            continue
+
+        for agent_key, enabled in agent_configs.items():
+            project_file = get_agent_project_file(agent_key, project_dir)
+            if not project_file or not project_file.exists():
+                continue
+
+            display = get_agent_display_name(agent_key)
+
+            if enabled:
+                if add_instruction_to_file(project_file, key, dry_run):
+                    if dry_run:
+                        Console.info(
+                            f"Would add session-separation to {project_file.name}"
+                        )
+                    else:
+                        Console.success(
+                            f"Added session-separation to {project_file.name}"
+                        )
+            else:
+                if remove_instruction_from_file(project_file, key, dry_run):
+                    if dry_run:
+                        Console.info(
+                            f"Would remove session-separation from {project_file.name}"
+                        )
+                    else:
+                        Console.success(
+                            f"Removed session-separation from {project_file.name}"
+                        )
+
+
 def _clean_agentinfo_redundancy(project_dir: Path, dry_run: bool = False) -> None:
     """Check for redundant rule references in AGENTINFO.md.
 
@@ -912,6 +961,9 @@ def _update_single_repo(project_dir: Path, dry_run: bool = False) -> None:
 
     # Fix hook key casing (postToolUse -> PostToolUse)
     _repair_hook_keys(project_dir, dry_run)
+
+    # Apply configurable instruction preferences
+    _apply_configurable_instructions(project_dir, dry_run)
 
     # Check for redundant rule references in AGENTINFO.md
     _clean_agentinfo_redundancy(project_dir, dry_run)

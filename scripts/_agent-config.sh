@@ -36,7 +36,7 @@ AGENT_cursor_HAS_RESUME="false"
 # Gemini CLI
 AGENT_gemini_DISPLAY_NAME="Gemini CLI"
 AGENT_gemini_COMMANDS="gemini"
-AGENT_gemini_ALT_PATHS=""
+AGENT_gemini_ALT_PATHS="$HOME/.gemini"
 AGENT_gemini_TERMINAL_LAUNCH="true"
 AGENT_gemini_LAUNCH_ARGS="--yolo"
 AGENT_gemini_HAS_RESUME="true"
@@ -45,7 +45,7 @@ AGENT_gemini_RESUME_ARGS="--yolo --resume"
 # Qwen Code
 AGENT_qwen_DISPLAY_NAME="Qwen Code"
 AGENT_qwen_COMMANDS="qwen"
-AGENT_qwen_ALT_PATHS=""
+AGENT_qwen_ALT_PATHS="$HOME/.qwen"
 AGENT_qwen_TERMINAL_LAUNCH="true"
 AGENT_qwen_LAUNCH_ARGS="--yolo"
 AGENT_qwen_HAS_RESUME="true"
@@ -54,7 +54,7 @@ AGENT_qwen_RESUME_ARGS="--yolo --continue"
 # Codex
 AGENT_codex_DISPLAY_NAME="Codex"
 AGENT_codex_COMMANDS="codex"
-AGENT_codex_ALT_PATHS=""
+AGENT_codex_ALT_PATHS="$HOME/.codex"
 AGENT_codex_TERMINAL_LAUNCH="true"
 AGENT_codex_LAUNCH_ARGS="--dangerously-bypass-approvals-and-sandbox"
 AGENT_codex_HAS_RESUME="true"
@@ -77,17 +77,17 @@ detect_installed_agents() {
     fi
 
     # Gemini CLI
-    if command -v gemini &>/dev/null; then
+    if command -v gemini &>/dev/null || [ -d "$HOME/.gemini" ]; then
         DETECTED_AGENTS="$DETECTED_AGENTS gemini"
     fi
 
     # Qwen Code
-    if command -v qwen &>/dev/null; then
+    if command -v qwen &>/dev/null || [ -d "$HOME/.qwen" ]; then
         DETECTED_AGENTS="$DETECTED_AGENTS qwen"
     fi
 
     # Codex
-    if command -v codex &>/dev/null; then
+    if command -v codex &>/dev/null || [ -d "$HOME/.codex" ]; then
         DETECTED_AGENTS="$DETECTED_AGENTS codex"
     fi
 

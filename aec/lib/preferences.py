@@ -35,7 +35,12 @@ OPTIONAL_FEATURES: Dict[str, Dict[str, Any]] = {
 
 def _default_preferences() -> Dict[str, Any]:
     """Return the default (empty) preferences structure."""
-    return {"schema_version": "1.1", "optional_rules": {}, "settings": {}}
+    return {
+        "schema_version": "1.2",
+        "optional_rules": {},
+        "settings": {},
+        "configurable_instructions": {},
+    }
 
 
 def load_preferences() -> Dict[str, Any]:
@@ -56,6 +61,7 @@ def load_preferences() -> Dict[str, Any]:
         data.setdefault("schema_version", "1.0")
         data.setdefault("optional_rules", {})
         data.setdefault("settings", {})
+        data.setdefault("configurable_instructions", {})
         return data
     except (json.JSONDecodeError, OSError):
         return _default_preferences()
@@ -172,6 +178,42 @@ def check_pending_preferences() -> None:
             Console.info(f"Disabled: {feature['description']}")
 
     Console.print()
+
+
+def get_instruction_config(instruction_key: str) -> Optional[Dict[str, Any]]:
+    """Get the per-agent configuration for a configurable instruction.
+
+    Returns:
+        Dict of {agent_key: enabled} if configured, None if never asked.
+    """
+    prefs = load_preferences()
+    entry = prefs.get("configurable_instructions", {}).get(instruction_key)
+    if entry is None:
+        return None
+    return entry.get("agents")
+
+
+def set_instruction_config(
+    instruction_key: str, agents: Dict[str, bool]
+) -> None:
+    """Save per-agent configuration for a configurable instruction.
+
+    Args:
+        instruction_key: The instruction identifier.
+        agents: {agent_key: enabled} mapping.
+    """
+    prefs = load_preferences()
+    prefs["configurable_instructions"][instruction_key] = {
+        "agents": agents,
+        "configured_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    save_preferences(prefs)
+
+
+def is_instruction_configured(instruction_key: str) -> bool:
+    """Check whether a configurable instruction has been configured."""
+    prefs = load_preferences()
+    return instruction_key in prefs.get("configurable_instructions", {})
 
 
 def get_pending_prompts() -> List[Dict[str, Any]]:

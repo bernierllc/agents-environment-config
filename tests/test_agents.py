@@ -147,8 +147,8 @@ class TestGeminiConfig:
     def test_resume_args(self):
         assert SUPPORTED_AGENTS["gemini"]["resume_args"] == "--yolo --resume"
 
-    def test_alt_paths_empty(self):
-        assert SUPPORTED_AGENTS["gemini"]["alt_paths"] == []
+    def test_alt_paths(self):
+        assert len(SUPPORTED_AGENTS["gemini"]["alt_paths"]) == 1
 
     def test_instruction_file(self):
         assert _REGISTRY["agents"]["gemini"]["instruction_file"] == "GEMINI.md"
@@ -175,8 +175,8 @@ class TestQwenConfig:
     def test_resume_args(self):
         assert SUPPORTED_AGENTS["qwen"]["resume_args"] == "--yolo --continue"
 
-    def test_alt_paths_empty(self):
-        assert SUPPORTED_AGENTS["qwen"]["alt_paths"] == []
+    def test_alt_paths(self):
+        assert len(SUPPORTED_AGENTS["qwen"]["alt_paths"]) == 1
 
     def test_instruction_file(self):
         assert _REGISTRY["agents"]["qwen"]["instruction_file"] == "QWEN.md"
@@ -203,8 +203,8 @@ class TestCodexConfig:
     def test_resume_args(self):
         assert SUPPORTED_AGENTS["codex"]["resume_args"] == "resume --last"
 
-    def test_alt_paths_empty(self):
-        assert SUPPORTED_AGENTS["codex"]["alt_paths"] == []
+    def test_alt_paths(self):
+        assert len(SUPPORTED_AGENTS["codex"]["alt_paths"]) == 1
 
     def test_instruction_file(self):
         assert _REGISTRY["agents"]["codex"]["instruction_file"] == "AGENTS.md"
@@ -507,13 +507,18 @@ class TestDetectAgents:
             return None
 
         monkeypatch.setattr("shutil.which", mock_which)
+
+        # Override gemini to use a non-existent alt_path so it's truly undetectable
+        gemini_config = dict(SUPPORTED_AGENTS["gemini"])
+        gemini_config["alt_paths"] = [Path("/nonexistent/gemini")]
+
         monkeypatch.setattr(
             "aec.lib.config.SUPPORTED_AGENTS",
             {
                 "claude": SUPPORTED_AGENTS["claude"],
                 "cursor": SUPPORTED_AGENTS["cursor"],
                 "codex": SUPPORTED_AGENTS["codex"],
-                "gemini": SUPPORTED_AGENTS["gemini"],
+                "gemini": gemini_config,
             },
         )
 

@@ -221,6 +221,104 @@ def _prompt_settings(dry_run: bool = False, show_header: bool = True) -> None:
         _save("plans_completion", "archive" if response == "1" else "delete")
 
 
+def _prompt_configurable_instructions(dry_run: bool = False) -> None:
+    """Prompt user to configure per-agent instruction toggles.
+
+    Checks each configurable instruction. If not yet configured, shows
+    the prompt and lets the user choose per agent. If already configured,
+    skips silently.
+
+    Args:
+        dry_run: If True, report what would happen without persisting.
+    """
+    from ..lib.configurable_instructions import (
+        CONFIGURABLE_INSTRUCTIONS,
+        get_all_agent_keys,
+        get_agent_display_name,
+        apply_instruction_config,
+        scan_file_for_instruction,
+        get_agent_global_file,
+    )
+    from ..lib.preferences import (
+        is_instruction_configured,
+        set_instruction_config,
+    )
+    from ..lib.tracking import list_repos as tracking_list_repos
+
+    for key, instruction in CONFIGURABLE_INSTRUCTIONS.items():
+        if is_instruction_configured(key):
+            Console.success(f"{instruction['description']} (already configured)")
+            continue
+
+        # Show the prompt
+        Console.print(instruction["prompt"])
+
+        agent_keys = get_all_agent_keys()
+        agent_configs = {}
+
+        # Check which agents currently have the instruction
+        for agent_key in agent_keys:
+            display = get_agent_display_name(agent_key)
+            global_file = get_agent_global_file(agent_key)
+            has_it = False
+            if global_file:
+                has_it = scan_file_for_instruction(global_file, key)
+
+            default = "Y" if instruction["default_enabled"] else "n"
+            if has_it:
+                hint = " (currently present)"
+            else:
+                hint = ""
+
+            try:
+                response = input(
+                    f"  Keep for {display}?{hint} ({default}/{'n' if default == 'Y' else 'Y'}): "
+                ).strip().lower()
+            except EOFError:
+                response = ""
+
+            if response == "":
+                enabled = instruction["default_enabled"]
+            elif response in ("y", "yes"):
+                enabled = True
+            elif response in ("n", "no"):
+                enabled = False
+            else:
+                enabled = instruction["default_enabled"]
+
+            agent_configs[agent_key] = enabled
+
+        if dry_run:
+            Console.info("Would save configurable instruction preferences:")
+            for agent_key, enabled in agent_configs.items():
+                display = get_agent_display_name(agent_key)
+                status = "keep" if enabled else "remove"
+                Console.info(f"  {display}: {status}")
+        else:
+            set_instruction_config(key, agent_configs)
+
+            # Apply changes to all tracked repos
+            tracked = tracking_list_repos()
+            repo_paths = [r.path for r in tracked if r.exists]
+
+            results = apply_instruction_config(
+                key, agent_configs, repo_paths, dry_run=False
+            )
+
+            if results["removed"]:
+                Console.success(
+                    f"Removed instruction from {len(results['removed'])} file(s)"
+                )
+            if results["added"]:
+                Console.success(
+                    f"Added instruction to {len(results['added'])} file(s)"
+                )
+            if not results["removed"] and not results["added"]:
+                Console.info("No changes needed")
+
+        Console.print()
+
+
 def install(dry_run: bool = False) -> None:
     """
     Full setup of agents-environment-config.
@@ -353,6 +451,10 @@ def install(dry_run: bool = False) -> None:
             Console.success("All hook configs use correct key casing")
         elif dry_run:
             Console.info(f"Would fix {fixed_count} hook config(s)")
+
+    # Configure per-agent instructions (interactive — never collapse)
+    with Console.section("Configurable Instructions", collapse=False):
+        _prompt_configurable_instructions(dry_run)
 
     # Batch project setup (interactive — never collapse)
     _batch_project_setup(dry_run)

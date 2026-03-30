@@ -29,7 +29,12 @@ class TestLoadPreferences:
         from aec.lib.preferences import load_preferences
 
         result = load_preferences()
-        assert result == {"schema_version": "1.1", "optional_rules": {}, "settings": {}}
+        assert result == {
+            "schema_version": "1.2",
+            "optional_rules": {},
+            "settings": {},
+            "configurable_instructions": {},
+        }
 
     def test_reads_existing_file(self, temp_dir, monkeypatch):
         """Should read and return existing preferences."""
@@ -56,7 +61,12 @@ class TestLoadPreferences:
         from aec.lib.preferences import load_preferences
 
         result = load_preferences()
-        assert result == {"schema_version": "1.1", "optional_rules": {}, "settings": {}}
+        assert result == {
+            "schema_version": "1.2",
+            "optional_rules": {},
+            "settings": {},
+            "configurable_instructions": {},
+        }
 
 
 class TestSavePreferences:
