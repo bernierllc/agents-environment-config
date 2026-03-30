@@ -1,9 +1,8 @@
 ---
 name: "ux-audit"
 description: "Systematically identify user experience problems in web applications through browser inspection and code analysis. Covers navigation flow, task completion friction, error states, feedback/system status, consistency, forms/input UX, content clarity, accessibility (WCAG 2.1 AA), responsive behavior, trust/support risk, onboarding/discoverability, visual hierarchy, recovery/reversibility, performance/perceived speed, data/table UX, search UX, dark mode/theming, and i18n/l10n. Audits through multiple user personas. Use when asked to audit UX, find confusing UI, review user experience, identify support risks, improve usability, or check accessibility. Produces a prioritized findings list with impact/effort scoring, then fixes small issues directly and proposes mockups/plans for larger ones."
-tags: ["skill"]
+tags: "["skill"]"
 ---
-
 
 # UX Audit
 

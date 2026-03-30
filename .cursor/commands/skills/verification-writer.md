@@ -12,6 +12,8 @@ Analyze a codebase to generate and maintain manual verification docs for use by 
 
 **Core principle:** Every user-facing interaction has a happy path and failure paths. Both must be verifiable. If code doesn't handle failure gracefully, that's a finding — flag it, fix it if small, or report it.
 
+**Browser-first principle:** Verification items MUST be written for browser-based verification whenever possible. If a feature has a UI, the verification item tests through the UI — not by calling the API directly. API-only verification items are acceptable ONLY when there is no UI that exercises the functionality (e.g., webhook endpoints, cron handlers, internal service-to-service APIs). See "Browser-First Verification" below for details and flagging requirements.
+
 **Relationship to browser-verification:** This skill creates and maintains the docs. Browser-verification executes against them. The two form a feedback loop.
 
 ## Entry Points
@@ -205,6 +207,31 @@ Written to the location and structure determined in "Doc Location and Organizati
 - Every destructive action gets `[standard]` items verifying the confirmation flow
 - Every error path that has graceful handling gets a `[deep]` item to verify the graceful behavior
 
+**Browser-First Verification:**
+
+Every verification item must be written so that browser-verification can execute it through the UI. The decision tree:
+
+1. **Does a UI exist for this functionality?** (form, page, button, dashboard widget, etc.)
+   - **Yes** → Write the item as a browser interaction. The action is "click", "fill", "navigate", "submit" — not "call API" or "POST to endpoint".
+   - **No** → This is an API-only item. Mark it with `*API-only*` and include an `<!-- API-VERIFICATION-FLAG -->` comment (see format below).
+
+2. **When writing an API-only item**, always include:
+   ```markdown
+   - [ ] [depth] **Action via API** --- Expected result. *Expected: type* *API-only*
+   <!-- API-VERIFICATION-FLAG: reason=[no UI available | webhook endpoint | cron handler | internal service API], durability=[permanent | temporary | needs-review], note=[explanation for human reviewer] -->
+   ```
+
+   **Durability values:**
+   - `permanent` — This endpoint has no UI by design (webhooks, cron handlers, service-to-service). No need to revisit.
+   - `temporary` — UI is planned or in progress. Re-check on next verification-writer run.
+   - `needs-review` — Unclear whether UI should exist. Flag for human decision.
+
+3. **In the findings report**, add a dedicated section listing all API-only verification items with their durability flags. This gives the human a single place to review and confirm intent.
+
+4. **On subsequent runs:** Check existing `API-VERIFICATION-FLAG` comments. If durability is `temporary`, check whether a UI now exists. If it does, rewrite the item as a browser interaction and remove the flag. If durability is `needs-review`, keep flagging it until the human resolves it.
+
+**Common violation:** Writing "POST to /api/events with valid data" when there's a "Create Event" form in the UI. The correct item is "Fill and submit the Create Event form with valid data." The API call happens as a side effect that browser-verification observes in the network tab — it is not the primary action.
+
 **Items for Partial/Missing handling:** If error handling is Partial, write the item documenting what SHOULD happen (so browser-verification will find the gap). If Missing, write the item only after the fix is applied or note it in the findings report.
 
 ### Output 2: Findings Report (`<verification-path>/findings/YYYY-MM-DD-analysis.md`)
@@ -216,6 +243,7 @@ Always generated, even if zero gaps found. Includes:
 - Auto-fixes applied (with file/line details)
 - Gaps requiring manual fix (with severity, current vs. expected behavior, suggested approach)
 - Systemic issues (patterns affecting multiple routes/user types)
+- **API-only verification items** (list all items with `API-VERIFICATION-FLAG`, grouped by durability: permanent, temporary, needs-review — this gives the human a single place to confirm intent)
 
 ### Output 3: Index (`<verification-path>/index.md`)
 
@@ -321,6 +349,8 @@ Log cleanup: [keep 5 most recent | keep all]
 | Trusting tests over code | Tests are hints. Code is truth. Tests may be stale. |
 | Ignoring partial handling | Partial is not handled — flag what's missing |
 | Not running test suite after fixes | Every fix must be verified by tests before committing |
+| Writing API verification when UI exists | If a form/page exercises the API, write the item as a browser interaction — the API call is observed in network tab, not invoked directly |
+| Not flagging API-only items | Every API-only item needs `*API-only*` tag and `<!-- API-VERIFICATION-FLAG -->` comment with durability |
 
 ## Red Flags — STOP
 

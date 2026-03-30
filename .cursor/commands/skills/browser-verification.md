@@ -26,7 +26,9 @@ This skill operates at three depth levels. **Ask the user which depth they want*
 | **Standard** | Post-feature verification, routine QA | Walk every checklist item, check console + network per item, basic exploration of uncovered elements. |
 | **Deep** | Pre-deploy to production, regression after major refactor, "test everything" | Full completionist audit: every interactive element tested, every form with edge cases, server logs, CRUD round-trips, accessibility checks. Nothing skipped. |
 
-**Keyword detection:** If the user says "quick check", "smoke test", "does it load", or "sanity check" → **smoke**. If they say "verify", "check the feature", or "QA" → **standard**. If they say "deep", "thorough", "everything", "full audit", or "production readiness" → **deep**.
+**Keyword detection:** If the user says "quick check", "smoke test", "does it load", or "sanity check" → **smoke**. If they say "verify", "check the feature", or "QA" → **standard**. If they say "deep", "thorough", "everything", "full audit", "fine-toothed comb", "diligent", "production readiness", or "test everything" → **deep**.
+
+**When deep is selected:** Before starting, ask the user clarifying questions about: test data creation preferences (create new vs. use existing), specific user accounts to use, any areas of particular concern, and any preconditions they've already set up (e.g., "I just logged in as admin"). This front-loads alignment and prevents wasted runs.
 
 ## When to Use
 
@@ -263,6 +265,15 @@ After completing the checklist for a page, do a quick scan for obvious gaps:
 ### Depth: Deep
 
 **Goal:** Completionist audit. Every element, every edge case, every log source. Nothing is assumed to work.
+
+**Mindset:** Deep verification is not "standard but more." It is a fundamentally different disposition. You are a QA auditor with unlimited time and a mandate to find every problem. Approach every page as if it is hiding bugs from you — because it probably is.
+
+- **Thoroughness over speed.** Do not optimize for token efficiency or wall-clock time. The user has explicitly chosen deep because they want exhaustive coverage. Take your time.
+- **Every action, every page.** If an element exists on the page, you interact with it. If a form exists, you submit it empty, with valid data, and with edge cases. No skipping.
+- **Diligence over assumptions.** Do not assume something works because a similar thing worked on another page. Verify independently. Do not assume console is clean because it was clean on the last page. Check it.
+- **Status awareness.** Pay attention to field states (disabled, readonly, required, pre-populated), error messages already on the page, existing console errors, and existing network failures BEFORE you start interacting. The page state when you arrive is evidence.
+- **Ask questions first.** If the verification docs are ambiguous, if you're unsure whether to create test data or use existing data, if a precondition is unclear — ask the user before proceeding. Wrong assumptions waste more time than a question.
+- **Log everything.** Every interaction gets a result. Every console check gets recorded. Every network check gets recorded. "Not checked" is never acceptable at deep depth — only "none observed" or a specific finding.
 
 **4b. Per-Page Deep Audit (MANDATORY for every page visited)**
 
