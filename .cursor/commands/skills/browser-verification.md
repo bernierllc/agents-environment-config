@@ -65,46 +65,99 @@ Before anything else, locate the verification docs for this project.
 
 ## Step 2: Determine Scope and Depth
 
-Ask the user or infer from context. You need two things: **scope** (which pages/features) and **depth** (smoke, standard, or deep). If the user only specifies one, ask for the other or use defaults (standard depth, git-diff-based scope).
+Ask the user or infer from context. You need two things: **scope** and **depth** (smoke, standard, or deep). If the user only specifies one, ask for the other or use defaults (standard depth, git-diff-based scope).
+
+### Scope types
+
+Verification docs support four scope types. Determine which applies from the user's request:
+
+| User says | Scope type | What to run |
+|---|---|---|
+| "verify the event detail page" | **Page** | Open `pages/event-detail.md`, run all user type sections (or a specific one if they specify a role) |
+| "verify the countdown timer on event detail" | **Element** | Open `pages/event-detail.md`, find items related to the timer (search by element name, item ID, or `BUSINESS-CONTEXT` annotations) |
+| "verify the event lifecycle flow" | **Flow** | Open `flows/event-lifecycle.md`, run steps in order, switching user types as the flow directs |
+| "verify everything the promoter sees" | **User type** | Read `index.md` user type matrix, run all page files and flows that include the Promoter role (Promoter sections only) |
+| "verify everything" | **Full** | Run all page files (all sections) + all flow files |
+| "verify what I changed" | **Git diff** | Map changed files to page files (see mapping below), propose scope |
+
+### Scope from user request
 
 ```dot
 digraph scope {
     "User request" [shape=box];
-    "Full project?" [shape=diamond];
-    "Run all checklists" [shape=box];
-    "Feature specified?" [shape=diamond];
-    "git diff to find changes" [shape=box];
-    "Map files to verification sections" [shape=box];
+    "Scope type clear?" [shape=diamond];
+    "Ask user" [shape=box];
+    "Full?" [shape=diamond];
+    "Run all pages + flows" [shape=box];
+    "Page/element/flow/role?" [shape=diamond];
+    "Find matching doc(s)" [shape=box];
+    "Git diff scope" [shape=box];
+    "Map files to page docs" [shape=box];
+    "Include tangential pages" [shape=box];
     "Propose scope to user" [shape=box];
     "User approves?" [shape=diamond];
     "Adjust scope" [shape=box];
-    "Run approved sections" [shape=box];
+    "Run approved scope" [shape=doublecircle];
 
-    "User request" -> "Full project?";
-    "Full project?" -> "Run all checklists" [label="yes"];
-    "Full project?" -> "Feature specified?" [label="no"];
-    "Feature specified?" -> "Map files to verification sections" [label="yes"];
-    "Feature specified?" -> "git diff to find changes" [label="no"];
-    "git diff to find changes" -> "Map files to verification sections";
-    "Map files to verification sections" -> "Propose scope to user";
+    "User request" -> "Scope type clear?";
+    "Scope type clear?" -> "Ask user" [label="no"];
+    "Ask user" -> "Scope type clear?";
+    "Scope type clear?" -> "Full?" [label="yes"];
+    "Full?" -> "Run all pages + flows" [label="yes"];
+    "Full?" -> "Page/element/flow/role?" [label="no"];
+    "Page/element/flow/role?" -> "Find matching doc(s)" [label="specified"];
+    "Page/element/flow/role?" -> "Git diff scope" [label="not specified"];
+    "Git diff scope" -> "Map files to page docs";
+    "Map files to page docs" -> "Include tangential pages";
+    "Find matching doc(s)" -> "Include tangential pages";
+    "Include tangential pages" -> "Propose scope to user";
     "Propose scope to user" -> "User approves?";
-    "User approves?" -> "Run approved sections" [label="yes"];
+    "User approves?" -> "Run approved scope" [label="yes"];
     "User approves?" -> "Adjust scope" [label="no"];
     "Adjust scope" -> "Propose scope to user";
 }
 ```
 
-**File-to-section mapping:** Match changed file paths to verification docs:
-- `app/admin/*` -> `docs/verification/admin.md`
-- `app/educator/*` or `app/(educator)/*` -> `docs/verification/educator.md`
-- `app/employer/*` or `app/(employer)/*` -> `docs/verification/employer.md`
-- `app/student/*` or `app/(student)/*` -> `docs/verification/student.md`
-- `app/guardian/*` or `app/(guardian)/*` -> `docs/verification/guardian.md`
-- `app/community-center/*` -> `docs/verification/community-center.md`
-- `components/*`, `hooks/*`, `lib/*`, `middleware*` -> `docs/verification/shared.md` + all role docs that import the changed file
-- `app/api/*` -> Check which UI features call that API, verify those sections
+### Running a page scope
 
-**Tangential detection:** When a changed file is imported by other features, include those features in scope. Use grep/glob to trace imports.
+Open the page file. Determine which user type sections to run:
+- If the user specified a role ("verify event detail as admin"), run only that role's section + the "All User Types" section.
+- If no role specified, run all sections. Switch login/auth between sections as needed.
+- For each section, run items filtered by depth (smoke items at all depths, standard at standard+deep, deep only at deep).
+
+### Running an element scope
+
+Open the page file and find items related to the requested element. Search by:
+- Element name in item text ("countdown timer", "delete button", "artist dropdown")
+- `BUSINESS-CONTEXT` annotations that mention the element
+- Item IDs if the user provides them
+
+Run only the matching items across all user type sections (the element may behave differently per role). If the element has `BUSINESS-CONTEXT` annotations, read them before interacting.
+
+### Running a flow scope
+
+Open the flow file. Run steps in the order defined:
+1. Read the flow's prerequisites and set up any required state
+2. For each step: switch to the specified user type, navigate to the specified page, run the listed items
+3. After each step: run the "After this step" checks (cross-step state verification, data integrity)
+4. After all steps: verify the end-to-end expectations
+
+Flow runs are always at least standard depth. If the user requests smoke, warn that flows test cross-page interactions which require interaction (not just page loads), and suggest standard instead.
+
+### Running a user type scope
+
+Read `index.md` to find all page files and flows that include the specified user type. Run only that role's sections in each page file. For flows that involve the role, run the full flow (all steps, all roles) since flows test cross-role interaction — but note which steps are the focus role's steps.
+
+### Git diff scope mapping
+
+Map changed source files to page verification files:
+- `app/**/page.tsx`, `app/**/layout.tsx` → find the page file covering that route
+- `components/*` → find page files whose items test UI that uses the component (grep page files for the component name or check `shared.md`)
+- `hooks/*`, `lib/*`, `utils/*` → trace imports to find which pages use them, map to those page files
+- `middleware*` → `shared.md` + all page files
+- `app/api/*` → find page files whose items interact with that API endpoint (search `BUSINESS-CONTEXT` annotations and item descriptions)
+
+**Tangential detection:** When a changed file is imported by other pages, include those page files in scope. Use grep/glob to trace imports. Also check flow files — if a changed page participates in a flow, propose running the flow too.
 
 ## Step 2: Detect Environment and Start Services
 
@@ -162,8 +215,13 @@ digraph startup {
 
 ## Step 3: Load Verification Docs
 
-1. Read `docs/verification/index.md` for prerequisites and login credentials
-2. Read each verification doc in scope
+1. Read `<verification-path>/index.md` for prerequisites, login credentials, and the page/flow/user-type inventory
+2. Based on scope type determined in Step 2:
+   - **Page scope:** Read the page file(s) in `pages/`
+   - **Element scope:** Read the page file, locate items for the specific element
+   - **Flow scope:** Read the flow file in `flows/`, then read each page file referenced by the flow steps
+   - **User type scope:** Read the user type matrix in `index.md`, then read all page files and flow files listed for that role
+   - **Full scope:** Read all page files and all flow files
 3. Parse checklist items — format: `- [ ] [depth] **Action** --- Expected result. *Expected: type*`
 4. **Filter by depth:** Only run items tagged with the current depth or lower (smoke < standard < deep). Smoke items run at all depths; deep items only run at deep depth.
 5. Note the `*Expected: type*` on each item — this tells you what kind of outcome to verify:
@@ -175,7 +233,14 @@ digraph startup {
    - `success with side effects` — works AND downstream effects happen
    - `graceful empty state` — no-data scenario handled appropriately
 6. Note required login credentials per section
-7. **If no verification docs exist:** Tell the user and suggest running `/verification-writer` to generate them. Do not proceed without docs.
+7. **Parse `<!-- BUSINESS-CONTEXT -->` annotations** on items that verify dynamic/computed values. These annotations provide:
+   - `rule:` — the business logic and code source that determines the expected value
+   - `valid_range:` — bounds and constraints the displayed value must satisfy
+   - `cross_reference:` — other values on the same page that should be consistent
+   - `red_flags:` — specific symptoms of data bugs and what they mean
+   
+   When running an item with a business context annotation, you are not just checking "does the component render" — you are checking "does the displayed value make sense given the business rule." Read the annotation before interacting with the component so you know what to look for.
+8. **If no verification docs exist:** Tell the user and suggest running `/verification-writer` to generate them. Do not proceed without docs.
 
 **Staleness detection:** As you run items, watch for signs the docs are out of date:
 - Item describes UI that doesn't exist (button removed, route renamed)
@@ -285,41 +350,52 @@ After completing the checklist for a page, do a quick scan for obvious gaps:
 3. Check for visual defects: broken layouts, overlapping elements, truncated text, missing images, incorrect spacing, inconsistent styling
 4. Verify empty states, loading states, and error states render correctly where applicable
 
+**Affordance inspection — does the UI keep its visual promises?**
+5. Identify elements with visual affordances that imply specific interactions: dashed/dotted borders (drag-and-drop), grip handles (reorder), cursor pointer on non-link elements (clickable), hover lift effects on cards (clickable/expandable), resize handles (resizable)
+6. For each affordance found, test the *implied* interaction — not just the obvious fallback. If a file upload area has drop-zone styling, drag a file onto it. If cards have hover effects, click the card body (not just the action button). If list items have grip handles, attempt to drag-reorder.
+7. Record: does the implied interaction work, or does only the fallback work? A drop zone where only the button works is a FAIL on the drag-and-drop item, even if upload via button passes.
+
+**Contextual coherence — does every element belong on this page?**
+8. Determine the page's purpose (information display, data entry, public marketing, admin management, etc.) and its audience (public visitor, specific user role, admin)
+9. For each significant element (buttons, action links, data sections, toolbars), ask: "Does this serve this page's purpose?" and "Should this page's audience see this?"
+10. Flag elements that fail either question. Common red flags: admin actions on public pages, asset management tools on information-display pages, internal identifiers (UUIDs, status codes) on user-facing pages, CRUD actions for unrelated entities, debug/dev components in production views
+11. Record flagged elements in the log under "Contextual Coherence Flags" with: what the element is, why it looks out of place, and a disposition (`confirm-intended` | `likely-misplaced` | `needs-discussion`)
+
 **Functional inspection — interact with EVERYTHING:**
-5. Click every button and verify its behavior (does it do what the label says?)
-6. Click every link and verify it navigates correctly (then come back)
-7. Open every dropdown/select and verify options are populated and selectable
-8. Toggle every toggle/checkbox and verify state changes
-9. Expand every accordion/collapsible section
-10. Switch every tab and verify content loads
-11. If there's a form: submit it empty, submit it with valid data, submit it with edge cases (special characters, very long input, boundary values)
-12. If there's a table/list: verify sorting, filtering, pagination all work
-13. If there's CRUD: create an item, read it, update it, delete it — verify each operation round-trips correctly
+12. Click every button and verify its behavior (does it do what the label says?)
+13. Click every link and verify it navigates correctly (then come back)
+14. Open every dropdown/select and verify options are populated and selectable
+15. Toggle every toggle/checkbox and verify state changes
+16. Expand every accordion/collapsible section
+17. Switch every tab and verify content loads
+18. If there's a form: submit it empty, submit it with valid data, submit it with edge cases (special characters, very long input, boundary values)
+19. If there's a table/list: verify sorting, filtering, pagination all work
+20. If there's CRUD: create an item, read it, update it, delete it — verify each operation round-trips correctly
 
 **Console audit (REQUIRED — not optional):**
-14. Read ALL console messages after every interaction (`mcp__claude-in-chrome__read_console_messages` or `mcp__playwright__browser_console_messages`)
-15. Log every warning and error — do NOT dismiss console warnings as unimportant
-16. If a console error appears, note which interaction triggered it
+21. Read ALL console messages after every interaction (`mcp__claude-in-chrome__read_console_messages` or `mcp__playwright__browser_console_messages`)
+22. Log every warning and error — do NOT dismiss console warnings as unimportant
+23. If a console error appears, note which interaction triggered it
 
 **Network audit (REQUIRED — not optional):**
-17. Read ALL network requests after every interaction (`mcp__claude-in-chrome__read_network_requests` or `mcp__playwright__browser_network_requests`)
-18. Flag any failed requests (4xx, 5xx status codes)
-19. Flag any unusually slow requests (> 2 seconds)
-20. Verify API calls return expected data shapes (spot-check response bodies)
+24. Read ALL network requests after every interaction (`mcp__claude-in-chrome__read_network_requests` or `mcp__playwright__browser_network_requests`)
+25. Flag any failed requests (4xx, 5xx status codes)
+26. Flag any unusually slow requests (> 2 seconds)
+27. Verify API calls return expected data shapes (spot-check response bodies)
 
 **Server log audit (REQUIRED for local environments):**
-21. Check the dev server terminal output for errors, warnings, or unhandled exceptions after each page load and after significant interactions
-22. Check Supabase logs if database operations are involved
-23. Correlate any server-side errors with the client-side behavior you observed
+28. Check the dev server terminal output for errors, warnings, or unhandled exceptions after each page load and after significant interactions
+29. Check Supabase logs if database operations are involved
+30. Correlate any server-side errors with the client-side behavior you observed
 
 **4c. Walk the Checklist**
 
 For each checklist item:
 1. Perform the action described
 2. Check if the expected result matches what's in the browser
-3. Run the console audit (steps 14-16 above) — this is not a suggestion, it is required
-4. Run the network audit (steps 17-20 above) — this is not a suggestion, it is required
-5. Run the server log audit (steps 21-23 above) if local
+3. Run the console audit (steps 21-23 above) — this is not a suggestion, it is required
+4. Run the network audit (steps 24-27 above) — this is not a suggestion, it is required
+5. Run the server log audit (steps 28-30 above) if local
 6. Record result: PASS, FAIL (with details), or BLOCKED (precondition not met)
 
 **A checklist item is not PASS unless you have evidence from the DOM, console, AND network that it works.** "It looked right" is not evidence.
@@ -332,6 +408,11 @@ After completing listed items, you are NOT done with the page. Go back and find 
 - Try edge cases the checklist didn't mention: empty forms, special characters, very long input, rapid clicks, back-button navigation
 - Check responsive behavior if relevant
 - Look for accessibility issues: missing labels, keyboard navigation, focus indicators
+- **Data plausibility scan:** Look at every displayed value on the page — numbers, dates, timers, counts, percentages, status labels. Even if there is no `BUSINESS-CONTEXT` annotation, apply common-sense checks:
+  - Do any numbers look implausible? (negative counts, percentages > 100%, prices of $0 or $999,999, dates far in the past or future)
+  - Do values on the same page contradict each other? (a list shows 5 items but the header says "3 items", a timer shows 167 hours but the deadline label says "72 hours")
+  - Do status labels match the visible state? (badge says "Complete" but a required field is empty, status says "Active" but all controls are disabled)
+  - Are there placeholder or default values that look like they were never populated? ("Lorem ipsum", "TODO", "null", "undefined", "NaN", "[object Object]")
 - Note any functionality not covered by the checklist — these become proposed additions to the verification docs
 
 **Record per item:**
@@ -436,6 +517,16 @@ Write to `docs/verification/logs/YYYY-MM-DD-verification-run.md`:
 ### [filename] - [Section Name]
 - [ ] **Proposed new item** --- Expected result.
 
+## Affordance Mismatches
+- [page/component]: [visual signal] implies [interaction], but [what actually happens]
+
+## Data Plausibility Issues
+- [page/component]: [displayed value] — Expected [valid range/rule] — [what's wrong and why it matters]
+
+## Contextual Coherence Flags
+### [page route] — Purpose: [purpose], Audience: [audience]
+- [element]: [why it looks out of place] — Disposition: [confirm-intended | likely-misplaced | needs-discussion]
+
 ## Doc Staleness Detected
 - [item]: [what the doc says vs. what reality is]
 
@@ -490,9 +581,18 @@ Save preferences to the `verification-docs-config` memory so future runs don't r
 | Fixing on staging/production | ALWAYS check environment before fixing |
 | Fixing shared code without asking | Trace imports — if file is used outside the current feature, ask |
 | Not re-verifying after fix | Re-run the failed item after every fix |
-| Missing tangential features | Grep for imports of changed files to find affected features |
+| Missing tangential pages | Grep for imports of changed files to find affected page files; if a changed page is in a flow, propose running the flow |
 | Trusting the checklist is complete | Explore beyond listed items on every page |
+| Running only one role on a multi-role page | If a page file has multiple user type sections, run them all unless the user explicitly scoped to one role |
+| Skipping flow cross-step checks | Flow files have "After this step" checks — these verify data integrity between user types and are often where bugs hide |
 | Proceeding without login confirmation | On staging/prod, always wait for user to confirm login |
+| Testing only the button when a drop zone is visible | If the UI has drop-zone styling (dashed border, "drag here" text), test drag-and-drop — the button working doesn't mean the affordance works |
+| Ignoring visual affordances | Hover effects, drag handles, cursor pointers all promise interactions — test what the UI visually promises, not just the obvious action |
+| Not questioning elements on the page | At deep depth, ask "does this element belong here?" for every significant element — flag admin actions on public pages, management tools on info pages, etc. |
+| Accepting elements at face value | An element can be functional (it works) and still be wrong (it shouldn't be on this page for this audience) — both are worth checking |
+| Ignoring `BUSINESS-CONTEXT` annotations | When an item has a business context annotation, check the displayed value against the rule and valid range — not just whether the component renders |
+| Not cross-referencing values on the same page | If a timer says 167 hours and a label says "72-hour deadline," those contradict — catch it even without an annotation |
+| Treating "it rendered" as "it's correct" for dynamic values | A timer that counts down is functional; a timer counting down from the wrong number is a data bug — verify the value, not just the behavior |
 
 ## Cross-Skill Integration with verification-writer
 
