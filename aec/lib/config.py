@@ -49,6 +49,7 @@ AEC_HOME = HOME / ".agents-environment-config"
 AEC_SETUP_LOG = AEC_HOME / "setup-repo-locations.txt"
 AEC_README = AEC_HOME / "README.md"
 AEC_PREFERENCES = AEC_HOME / "preferences.json"
+INSTALLED_MANIFEST_V2 = AEC_HOME / "installed-manifest.json"
 
 # Agent tools directory (shared across agents)
 AGENT_TOOLS_DIR = HOME / ".agent-tools"
