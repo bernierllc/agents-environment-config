@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 
-def _parse_yaml_frontmatter(text: str) -> Optional[dict]:
+def parse_yaml_frontmatter(text: str) -> Optional[dict]:
     """Parse YAML frontmatter from a markdown file.
 
     Simple parser that handles key: value pairs without requiring PyYAML.
@@ -46,7 +46,7 @@ def parse_skill_frontmatter(skill_dir: Path) -> Optional[dict]:
         return None
 
     text = skill_md.read_text(encoding="utf-8")
-    fm = _parse_yaml_frontmatter(text)
+    fm = parse_yaml_frontmatter(text)
     if not fm or "name" not in fm:
         return None
 

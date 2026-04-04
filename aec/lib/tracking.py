@@ -200,6 +200,22 @@ def prune_stale(dry_run: bool = False) -> List[TrackedRepo]:
     return pruned
 
 
+def untrack_repo(project_dir: Path) -> bool:
+    """Remove a repo from the tracking log. Returns True if found and removed."""
+    if not AEC_SETUP_LOG.exists():
+        return False
+    abs_path = str(Path(project_dir).resolve())
+    content = AEC_SETUP_LOG.read_text().strip()
+    if not content:
+        return False
+    lines = content.split("\n")
+    new_lines = [line for line in lines if line and not line.endswith(f"|{abs_path}")]
+    if len(new_lines) == len(lines):
+        return False
+    AEC_SETUP_LOG.write_text("\n".join(new_lines) + "\n" if new_lines else "")
+    return True
+
+
 def discover_from_scripts(raycast_dir: Path) -> List[Path]:
     """
     Discover project paths from existing Raycast launcher scripts.
@@ -287,23 +303,29 @@ It's a repository that provides:
 
 ## Why track setup locations?
 
-When you run `aec repo setup` to configure a project with agent files, the CLI records the project path here. This allows:
+When you run `aec setup <path>` to configure a project with agent files, the CLI records the project path here. This allows:
 
-1. **Cascading updates** - When agent file formats change, run `aec repo update --all` to update all your projects at once
+1. **Cascading updates** - When sources change, run `aec update && aec upgrade` to update all your projects
 2. **Re-run detection** - If you run setup on a project that's already configured, the CLI can offer to check for updates instead of re-copying files
-3. **Inventory** - Run `aec repo list` to see all projects you've configured
+3. **Inventory** - Run `aec list` to see all installed items, or `aec outdated` to check for updates
 
 ## CLI Commands
 
 ```bash
-# List all tracked projects
-aec repo list
+# List all installed items
+aec list
 
-# Update all tracked projects
-aec repo update --all
+# Check for updates
+aec update
 
-# Update a specific project
-aec repo update /path/to/project
+# Apply updates
+aec upgrade
+
+# Install a skill
+aec install skill verification-writer
+
+# Track a new project
+aec setup /path/to/project
 ```
 
 ## Can I delete this directory?
