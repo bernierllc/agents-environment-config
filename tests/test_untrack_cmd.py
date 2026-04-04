@@ -9,10 +9,14 @@ def untrack_env(temp_dir, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: temp_dir)
     aec_home = temp_dir / ".agents-environment-config"
     aec_home.mkdir()
+    log = aec_home / "setup-repo-locations.txt"
     project = temp_dir / "projects" / "my-app"
     project.mkdir(parents=True)
-    log = aec_home / "setup-repo-locations.txt"
     log.write_text(f"2026-04-04T00:00:00Z|2.5.4|{project.resolve()}\n")
+    # Monkeypatch the precomputed AEC_SETUP_LOG constant so tracking functions
+    # use the temp directory even when run after other tests that cached it
+    import aec.lib.tracking as tracking_mod
+    monkeypatch.setattr(tracking_mod, "AEC_SETUP_LOG", log)
     return {"project": project, "log": log}
 
 
