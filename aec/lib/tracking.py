@@ -200,6 +200,22 @@ def prune_stale(dry_run: bool = False) -> List[TrackedRepo]:
     return pruned
 
 
+def untrack_repo(project_dir: Path) -> bool:
+    """Remove a repo from the tracking log. Returns True if found and removed."""
+    if not AEC_SETUP_LOG.exists():
+        return False
+    abs_path = str(Path(project_dir).resolve())
+    content = AEC_SETUP_LOG.read_text().strip()
+    if not content:
+        return False
+    lines = content.split("\n")
+    new_lines = [line for line in lines if line and not line.endswith(f"|{abs_path}")]
+    if len(new_lines) == len(lines):
+        return False
+    AEC_SETUP_LOG.write_text("\n".join(new_lines) + "\n" if new_lines else "")
+    return True
+
+
 def discover_from_scripts(raycast_dir: Path) -> List[Path]:
     """
     Discover project paths from existing Raycast launcher scripts.

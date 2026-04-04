@@ -43,6 +43,7 @@ from .tracking import (
     get_version,
     list_repos,
     prune_stale,
+    untrack_repo,
     discover_from_scripts,
     TrackedRepo,
 )
@@ -144,6 +145,7 @@ __all__ = [
     "get_version",
     "list_repos",
     "prune_stale",
+    "untrack_repo",
     "discover_from_scripts",
     "TrackedRepo",
     # Preferences
