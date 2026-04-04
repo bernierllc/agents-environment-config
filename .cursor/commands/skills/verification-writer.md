@@ -38,6 +38,7 @@ You MUST complete these in order:
 4. **Run Phase 2: Generate outputs**
 5. **Apply fixes within thresholds**
 6. **Run test suite to verify fixes**
+6.5. **Generate/update flow visualizations**
 7. **Produce findings report**
 8. **Suggest verification run**
 
@@ -52,6 +53,8 @@ Default: `docs/verification/`. But ask:
 > "I'll generate verification docs for this project. Where would you like them? Default is `docs/verification/` — or specify a different path."
 
 Accept whatever path they give. If they have an existing `docs/` structure, suggest something that fits (e.g., `docs/qa/verification/`, `docs/testing/verification/`). Store the chosen path and use it consistently.
+
+**Visualizations:** The `visualizations/` directory is created automatically at step 6.5 alongside `pages/` and `flows/`. No user input needed for its location — it always sits under the verification root.
 
 ### How to organize the files
 
@@ -84,7 +87,11 @@ verification/
 │   └── flyer-upload-flow.md
 ├── shared.md             # Cross-page components (nav, layout, toasts, modals)
 ├── findings/
-└── logs/
+├── logs/
+└── visualizations/           # Flow diagrams and interactive map
+    ├── event-lifecycle.md
+    ├── artist-onboarding.md
+    └── app-overview.html
 ```
 
 #### Page files
@@ -255,6 +262,12 @@ When splitting, update the index, update any flow file references, and tell the 
 | Promoter | magic-link-landing, event-detail | event-lifecycle, flyer-upload-flow |
 | Artist | magic-link-landing | event-lifecycle |
 | Public | public-event-page, public-venue-page | — |
+
+## Visualizations
+| File | Source Flow | User Types | Last Updated |
+|---|---|---|---|
+| [Event Lifecycle](visualizations/event-lifecycle.md) | flows/event-lifecycle.md | Admin, Promoter, Artist | 2026-04-04 |
+| [Interactive Map](visualizations/app-overview.html) | all flows | all | 2026-04-04 |
 ```
 
 #### API-only projects
@@ -616,6 +629,30 @@ Always generated, even if zero gaps found. Includes:
 
 Master index: all verification files, prerequisites, login credentials, date each file was last generated/updated.
 
+## Phase 2.5: Flow Visualizations
+
+Read `references/flow-visualization.md` for visualization generation rules, templates, and change detection mechanics. Summary:
+
+Visualizations are comprehension aids for humans — they show what happens in a flow, who's involved, and where handoffs occur. They are NOT data dashboards. Deeper verification detail stays in the verification docs.
+
+**Outputs:**
+
+1. **Mermaid flow diagrams** — One per flow file, placed in `visualizations/` with the same base name as the source flow. Each diagram shows the flow's steps as nodes (with page names), transitions as edges, and color-codes by user type.
+
+2. **Interactive HTML artifact** (optional) — Format chosen by user on first run (upgraded flow views, sitemap, both, or skip). Self-contained single HTML file with no external dependencies.
+
+**When this step runs:**
+
+| Entry point | Visualization scope |
+|---|---|
+| **New project** | Generate all Mermaid diagrams for all flow files. Ask about HTML preference. |
+| **New feature** | Generate/update only visualizations for flows that reference changed pages or were themselves modified |
+| **After code changes** | Same as new feature + check all existing visualizations for orphaned source flows |
+| **On demand** | Generate/update only visualizations for flows within the user-specified scope |
+| **Called by browser-verification** | Skip visualization step |
+
+**Change detection:** Each visualization includes a staleness marker with a content hash of the source flow file. Only regenerate when the hash differs. See `references/flow-visualization.md` for full mechanics.
+
 ## Fix Behavior
 
 Thresholds identical to browser-verification — ALL must be true:
@@ -681,6 +718,7 @@ Flow files: [list files in flows/]
 User types: [list user types and how they're accessed — e.g., Admin: email login, Promoter: magic link]
 Git tracking: [logs gitignored, findings tracked | both tracked | both gitignored]
 Log cleanup: [keep 5 most recent | keep all]
+HTML visualization: [flow-views | sitemap | both | none]
 
 **Why:** Configured on [date] during initial verification-writer run.
 **How to apply:** browser-verification reads this to find docs and determine scope. verification-writer reads this to know where to write. Use index.md for user-type-to-page mapping.
@@ -731,6 +769,10 @@ Log cleanup: [keep 5 most recent | keep all]
 | Not identifying cross-reference pairs | If two elements on the same page display related values (deadline date + countdown timer, item count badge + item list), they need a cross-reference item to verify consistency |
 | Writing API verification when UI exists | If a form/page exercises the API, write the item as a browser interaction — the API call is observed in network tab, not invoked directly |
 | Not flagging API-only items | Every API-only item needs `*API-only*` tag and `<!-- API-VERIFICATION-FLAG -->` comment with durability |
+| Regenerating visualizations when only items changed | Check staleness hash — only regenerate when flow file content or structure changed, not when items within pages changed |
+| Including shared components as nodes in flow diagrams | Shared components (nav, toasts, modals) are infrastructure — exclude from diagrams unless the component IS the interaction |
+| Generating HTML artifact without checking preference | Always check memory for HTML visualization preference; ask on first run or when field is missing; respect "skip" choice |
+| Inconsistent user type colors across visualizations | Use the deterministic alphabetical palette from flow-visualization.md — never assign colors ad hoc |
 
 ## Red Flags — STOP
 
