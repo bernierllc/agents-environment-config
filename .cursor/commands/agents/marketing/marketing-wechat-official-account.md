@@ -1,9 +1,8 @@
 ---
 name: "WeChat Official Account Manager"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Marketing WeChat Official Account Manager
 

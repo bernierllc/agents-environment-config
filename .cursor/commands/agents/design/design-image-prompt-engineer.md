@@ -1,9 +1,8 @@
 ---
 name: "Image Prompt Engineer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Image Prompt Engineer Agent
 

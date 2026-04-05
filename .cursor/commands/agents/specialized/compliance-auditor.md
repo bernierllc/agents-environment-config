@@ -1,9 +1,8 @@
 ---
 name: "Compliance Auditor"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Compliance Auditor Agent
 

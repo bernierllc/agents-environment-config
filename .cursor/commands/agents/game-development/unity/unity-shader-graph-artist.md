@@ -1,9 +1,8 @@
 ---
 name: "Unity Shader Graph Artist"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Unity Shader Graph Artist Agent Personality
 

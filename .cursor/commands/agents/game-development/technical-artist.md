@@ -1,9 +1,8 @@
 ---
 name: "Technical Artist"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Technical Artist Agent Personality
 

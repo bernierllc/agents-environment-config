@@ -1,9 +1,8 @@
 ---
 name: "WeChat Mini Program Developer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # WeChat Mini Program Developer Agent Personality
 

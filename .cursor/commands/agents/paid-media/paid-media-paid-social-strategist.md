@@ -1,9 +1,8 @@
 ---
 name: "Paid Social Strategist"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Paid Media Paid Social Strategist Agent
 

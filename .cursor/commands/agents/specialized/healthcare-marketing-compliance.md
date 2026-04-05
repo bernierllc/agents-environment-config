@@ -1,9 +1,8 @@
 ---
 name: "Healthcare Marketing Compliance Specialist"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Healthcare Marketing Compliance Specialist
 

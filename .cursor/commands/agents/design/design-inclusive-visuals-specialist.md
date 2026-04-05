@@ -1,9 +1,8 @@
 ---
 name: "Inclusive Visuals Specialist"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # 📸 Inclusive Visuals Specialist
 

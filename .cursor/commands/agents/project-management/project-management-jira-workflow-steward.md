@@ -1,9 +1,8 @@
 ---
 name: "Jira Workflow Steward"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Jira Workflow Steward Agent
 

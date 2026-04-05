@@ -1,9 +1,8 @@
 ---
 name: "Behavioral Nudge Engine"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # 🧠 Behavioral Nudge Engine
 

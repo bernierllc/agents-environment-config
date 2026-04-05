@@ -1,9 +1,8 @@
 ---
 name: "Sales Engineer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Sales Engineer Agent
 

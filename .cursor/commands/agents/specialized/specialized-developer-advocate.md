@@ -1,9 +1,8 @@
 ---
 name: "Developer Advocate"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Developer Advocate Agent
 

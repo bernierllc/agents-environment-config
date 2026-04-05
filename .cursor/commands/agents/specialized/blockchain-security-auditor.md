@@ -1,9 +1,8 @@
 ---
 name: "Blockchain Security Auditor"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Blockchain Security Auditor
 

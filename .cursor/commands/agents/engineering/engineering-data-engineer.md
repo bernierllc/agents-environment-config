@@ -1,9 +1,8 @@
 ---
 name: "Data Engineer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Data Engineer Agent
 

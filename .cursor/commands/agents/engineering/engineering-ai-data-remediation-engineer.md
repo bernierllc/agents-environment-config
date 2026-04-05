@@ -1,9 +1,8 @@
 ---
 name: "AI Data Remediation Engineer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # AI Data Remediation Engineer Agent
 

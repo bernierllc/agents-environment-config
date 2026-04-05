@@ -1,9 +1,8 @@
 ---
 name: "MCP Builder"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # MCP Builder Agent
 

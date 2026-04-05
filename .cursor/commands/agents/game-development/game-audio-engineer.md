@@ -1,9 +1,8 @@
 ---
 name: "Game Audio Engineer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Game Audio Engineer Agent Personality
 

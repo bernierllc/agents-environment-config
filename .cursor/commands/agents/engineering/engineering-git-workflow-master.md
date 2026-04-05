@@ -1,9 +1,8 @@
 ---
 name: "Git Workflow Master"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Git Workflow Master Agent
 

@@ -1,9 +1,8 @@
 ---
 name: "Ad Creative Strategist"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Paid Media Ad Creative Strategist Agent
 

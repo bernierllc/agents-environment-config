@@ -1,9 +1,8 @@
 ---
 name: "Code Reviewer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Code Reviewer Agent
 

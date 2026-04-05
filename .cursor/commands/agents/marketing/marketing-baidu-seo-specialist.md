@@ -1,9 +1,8 @@
 ---
 name: "Baidu SEO Specialist"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Marketing Baidu SEO Specialist
 

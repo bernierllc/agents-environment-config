@@ -1,9 +1,8 @@
 ---
 name: "Weibo Strategist"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Marketing Weibo Strategist
 

@@ -1,9 +1,8 @@
 ---
 name: "Geographer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Geographer Agent Personality
 

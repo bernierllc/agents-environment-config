@@ -1,9 +1,8 @@
 ---
 name: "Identity Graph Operator"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Identity Graph Operator
 

@@ -1,9 +1,8 @@
 ---
 name: "Supply Chain Strategist"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Supply Chain Strategist Agent
 

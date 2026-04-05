@@ -1,9 +1,8 @@
 ---
 name: "Kuaishou Strategist"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Marketing Kuaishou Strategist
 

@@ -1,9 +1,8 @@
 ---
 name: "Security Engineer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Security Engineer Agent
 

@@ -1,9 +1,8 @@
 ---
 name: "Sales Coach"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Sales Coach Agent
 

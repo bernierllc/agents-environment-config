@@ -1,9 +1,8 @@
 ---
 name: "Narrative Designer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Narrative Designer Agent Personality
 

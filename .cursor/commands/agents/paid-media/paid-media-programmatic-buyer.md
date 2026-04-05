@@ -1,9 +1,8 @@
 ---
 name: "Programmatic & Display Buyer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Paid Media Programmatic & Display Buyer Agent
 

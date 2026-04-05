@@ -1,9 +1,8 @@
 ---
 name: "Software Architect"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Software Architect Agent
 

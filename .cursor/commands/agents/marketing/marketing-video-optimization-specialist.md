@@ -1,9 +1,8 @@
 ---
 name: "Video Optimization Specialist"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Marketing Video Optimization Specialist Agent
 

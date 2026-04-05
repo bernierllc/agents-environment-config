@@ -1,9 +1,8 @@
 ---
 name: "ZK Steward"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # ZK Steward Agent
 

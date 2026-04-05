@@ -1,9 +1,8 @@
 ---
 name: "Autonomous Optimization Architect"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # ⚙️ Autonomous Optimization Architect
 

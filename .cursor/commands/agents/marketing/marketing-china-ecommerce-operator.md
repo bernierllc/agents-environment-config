@@ -1,9 +1,8 @@
 ---
 name: "China E-Commerce Operator"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Marketing China E-Commerce Operator
 

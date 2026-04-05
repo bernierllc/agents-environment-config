@@ -1,9 +1,8 @@
 ---
 name: "Unity Architect"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Unity Architect Agent Personality
 

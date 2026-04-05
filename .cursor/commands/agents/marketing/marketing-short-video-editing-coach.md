@@ -1,9 +1,8 @@
 ---
 name: "Short-Video Editing Coach"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Marketing Short-Video Editing Coach
 

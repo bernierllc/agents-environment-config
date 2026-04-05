@@ -1,9 +1,8 @@
 ---
 name: "Product Manager"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # 🧭 Product Manager Agent
 

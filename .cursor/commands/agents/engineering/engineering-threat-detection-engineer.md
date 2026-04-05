@@ -1,9 +1,8 @@
 ---
 name: "Threat Detection Engineer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Threat Detection Engineer Agent
 

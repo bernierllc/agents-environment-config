@@ -1,9 +1,8 @@
 ---
 name: "Godot Shader Developer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Godot Shader Developer Agent Personality
 

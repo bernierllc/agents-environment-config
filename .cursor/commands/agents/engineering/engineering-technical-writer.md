@@ -1,9 +1,8 @@
 ---
 name: "Technical Writer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Technical Writer Agent
 

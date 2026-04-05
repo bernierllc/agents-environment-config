@@ -1,9 +1,8 @@
 ---
 name: "Accounts Payable Agent"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Accounts Payable Agent Personality
 

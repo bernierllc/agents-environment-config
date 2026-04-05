@@ -1,9 +1,8 @@
 ---
 name: "Discovery Coach"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Discovery Coach Agent
 

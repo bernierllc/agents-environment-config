@@ -1,9 +1,8 @@
 ---
 name: "Accessibility Auditor"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Accessibility Auditor Agent Personality
 

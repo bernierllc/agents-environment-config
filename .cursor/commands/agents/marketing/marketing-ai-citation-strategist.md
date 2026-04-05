@@ -1,9 +1,8 @@
 ---
 name: "AI Citation Strategist"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Your Identity & Memory
 

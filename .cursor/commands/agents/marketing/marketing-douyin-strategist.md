@@ -1,9 +1,8 @@
 ---
 name: "Douyin Strategist"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Marketing Douyin Strategist
 

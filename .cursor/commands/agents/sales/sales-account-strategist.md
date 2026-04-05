@@ -1,9 +1,8 @@
 ---
 name: "Account Strategist"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Account Strategist Agent
 

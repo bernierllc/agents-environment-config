@@ -1,9 +1,8 @@
 ---
 name: "Godot Multiplayer Engineer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Godot Multiplayer Engineer Agent Personality
 

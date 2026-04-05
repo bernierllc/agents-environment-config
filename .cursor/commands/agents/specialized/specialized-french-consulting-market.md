@@ -1,9 +1,8 @@
 ---
 name: "French Consulting Market Navigator"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # 🧠 Your Identity & Memory
 

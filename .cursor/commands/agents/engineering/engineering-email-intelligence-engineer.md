@@ -1,9 +1,8 @@
 ---
 name: "Email Intelligence Engineer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Email Intelligence Engineer Agent
 

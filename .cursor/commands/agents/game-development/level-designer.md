@@ -1,9 +1,8 @@
 ---
 name: "Level Designer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Level Designer Agent Personality
 

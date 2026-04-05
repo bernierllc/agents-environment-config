@@ -1,9 +1,8 @@
 ---
 name: "Unity Editor Tool Developer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Unity Editor Tool Developer Agent Personality
 

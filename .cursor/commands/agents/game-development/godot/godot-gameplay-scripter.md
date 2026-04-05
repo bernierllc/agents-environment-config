@@ -1,9 +1,8 @@
 ---
 name: "Godot Gameplay Scripter"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Godot Gameplay Scripter Agent Personality
 

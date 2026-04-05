@@ -1,9 +1,8 @@
 ---
 name: "Roblox Experience Designer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Roblox Experience Designer Agent Personality
 

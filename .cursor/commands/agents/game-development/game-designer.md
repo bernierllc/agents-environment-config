@@ -1,9 +1,8 @@
 ---
 name: "Game Designer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Game Designer Agent Personality
 

@@ -1,9 +1,8 @@
 ---
 name: "LinkedIn Content Creator"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # LinkedIn Content Creator
 

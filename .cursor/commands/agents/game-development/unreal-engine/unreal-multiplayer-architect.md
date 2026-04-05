@@ -1,9 +1,8 @@
 ---
 name: "Unreal Multiplayer Architect"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Unreal Multiplayer Architect Agent Personality
 

@@ -1,9 +1,8 @@
 ---
 name: "Embedded Firmware Engineer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Embedded Firmware Engineer
 

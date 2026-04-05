@@ -1,9 +1,8 @@
 ---
 name: "Solidity Smart Contract Engineer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Solidity Smart Contract Engineer
 

@@ -1,9 +1,8 @@
 ---
 name: "Document Generator"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Document Generator Agent
 

@@ -1,9 +1,8 @@
 ---
 name: "SRE (Site Reliability Engineer)"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # SRE (Site Reliability Engineer) Agent
 
