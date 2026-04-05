@@ -39,9 +39,18 @@ def rules_source(temp_dir):
 def agents_source(temp_dir):
     source = temp_dir / "agents"
     source.mkdir()
+    eng = source / "engineering"
+    eng.mkdir()
+    (eng / "engineering-senior-developer.md").write_text(
+        "---\nname: Senior Developer\nversion: 1.2.0\ndescription: Premium implementation specialist\nauthor: test\ndivision: engineering\n---\n# Senior Dev"
+    )
     (source / "code-reviewer.md").write_text(
         "---\nname: code-reviewer\nversion: 1.0.0\ndescription: Reviews code\n---\n# Reviewer"
     )
+    # Files that should be filtered out (no valid frontmatter)
+    (source / "README.md").write_text("# Agents\n\nThis is a readme.")
+    (source / "CONTRIBUTING.md").write_text("# Contributing\n\nHow to contribute.")
+    (eng / "QUICKSTART.md").write_text("# Quick Start\n\nGet started fast.")
     return source
 
 
@@ -60,13 +69,27 @@ class TestDiscoverAvailable:
     def test_discovers_rules(self, rules_source):
         from aec.lib.sources import discover_available
         available = discover_available(rules_source, item_type="rules")
-        assert "languages/typescript/typing-standards" in available
+        assert "typescript/typing-standards" in available
 
     def test_discovers_agents(self, agents_source):
         from aec.lib.sources import discover_available
         available = discover_available(agents_source, item_type="agents")
         assert "code-reviewer" in available
         assert available["code-reviewer"]["version"] == "1.0.0"
+
+    def test_discovers_nested_agents(self, agents_source):
+        from aec.lib.sources import discover_available
+        available = discover_available(agents_source, item_type="agents")
+        assert "engineering-senior-developer" in available
+        assert available["engineering-senior-developer"]["version"] == "1.2.0"
+        assert available["engineering-senior-developer"]["division"] == "engineering"
+
+    def test_skips_files_without_frontmatter(self, agents_source):
+        from aec.lib.sources import discover_available
+        available = discover_available(agents_source, item_type="agents")
+        # README, CONTRIBUTING, QUICKSTART should all be filtered out
+        for name in available:
+            assert name not in ("README", "CONTRIBUTING", "QUICKSTART")
 
     def test_returns_empty_for_missing_dir(self, temp_dir):
         from aec.lib.sources import discover_available
