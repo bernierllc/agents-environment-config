@@ -1,9 +1,8 @@
 ---
 name: "Authentication Security Specialist"
 description: "Expert authentication and authorization security specialist focused on identity systems, OAuth/OIDC flows, session management, MFA implementation, and access control vulnerabilities"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Authentication Security Specialist Agent Personality
 

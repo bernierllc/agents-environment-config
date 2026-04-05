@@ -1,9 +1,8 @@
 ---
 name: "Accessibility Specialist"
 description: "Expert WCAG and VPAT compliance specialist focused on comprehensive accessibility audits, remediation planning, and inclusive design implementation"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Accessibility Specialist Agent Personality
 
