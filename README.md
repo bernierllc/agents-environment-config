@@ -63,7 +63,8 @@ This creates:
 1. `~/.agent-tools/` - Centralized directory for rules, agents, skills, and commands
 2. Agent-specific symlinks for Claude and Cursor
 3. User settings (projects directory, plans directory, completion behavior)
-4. Optionally walks your projects directory to set up each project
+4. Quality infrastructure prompts (port registry, scheduled tests, report viewer preferences)
+5. Optionally walks your projects directory to set up each project
 
 ### Directory Structure After Setup
 
@@ -137,6 +138,221 @@ aec doctor           # reports which repos have the issue
 
 No manual editing is needed -- the repair preserves all existing hook content and other settings in the file.
 
+## Per-Project Configuration (`.aec.json`)
+
+Each project can have an `.aec.json` file at its root that stores project-specific AEC configuration: port assignments, test suites, and installed tooling metadata. This file is created automatically during `aec setup`.
+
+### Schema Overview
+
+```json
+{
+  "$schema": "https://aec.bernier.dev/schema/aec.json",
+  "version": "1.0.0",
+  "project": {
+    "name": "my-project",
+    "description": "My project description"
+  },
+  "ports": {
+    "dev-server": {
+      "port": 3333,
+      "protocol": "http",
+      "description": "Next.js dev server"
+    },
+    "test-database": {
+      "port": 5433,
+      "protocol": "postgresql",
+      "description": "Docker test DB"
+    }
+  },
+  "test": {
+    "suites": {
+      "unit": { "command": "npm run test:unit", "cleanup": null },
+      "integration": {
+        "command": "npm run test:integration",
+        "cleanup": "docker compose -f docker-compose.test.yml down"
+      }
+    },
+    "prerequisites": ["docker"],
+    "scheduled": ["unit", "integration"]
+  },
+  "installed": {
+    "skills": {},
+    "rules": {},
+    "agents": {}
+  }
+}
+```
+
+### How It's Created
+
+`aec setup` creates `.aec.json` automatically. It detects test frameworks, prompts for port assignments, and populates the `installed` section from the central manifest. You can also edit it manually.
+
+### Gitignore Behavior
+
+`.aec.json` is committed to git by default so all contributors benefit from the metadata. To gitignore it instead:
+
+```bash
+aec config set aec_json_gitignored true
+```
+
+When `aec_json_gitignored` is `true`, `aec setup` adds `.aec.json` to `.gitignore`. When `false`, it removes that entry if present.
+
+### Sections
+
+| Section | Purpose |
+|---------|---------|
+| `project` | Name and description (name defaults to directory name) |
+| `ports` | Port assignments with protocol and description |
+| `test` | Test suites, prerequisites, and scheduled run whitelist |
+| `installed` | Local copy of installed skills/rules/agents (synced from central manifest) |
+
+---
+
+## Port Registry
+
+When you manage multiple projects on one machine, port collisions are inevitable. Project A claims port 3000, project B also claims 3000, and you discover the conflict at runtime when a dev server fails to bind.
+
+The port registry solves this with a central registry at `~/.agents-environment-config/ports-registry.json`. Ports are assigned first-come-first-served based on registration timestamp.
+
+### How It Works
+
+1. Each project declares its ports in `.aec.json` (see above)
+2. During `aec setup`, ports are registered against the central registry
+3. Conflicts are surfaced as warnings -- they do not block setup
+4. You fix the `.aec.json` and re-register
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `aec ports list` | Show all registered ports across all projects, grouped by project |
+| `aec ports check [path]` | Check for conflicts without registering (defaults to current directory) |
+| `aec ports register [path]` | Register ports from `.aec.json` into the central registry |
+| `aec ports unregister [path]` | Remove all port registrations for a project |
+| `aec ports validate` | Find stale entries (project directories that no longer exist) |
+
+### Conflict Resolution
+
+Port conflicts warn but do not block. When a conflict is detected, AEC shows which project registered the port first and when:
+
+```
+⚠ Port conflict: port 3000 is already registered to "mbernier.com"
+  (registered 2026-03-15T10:00:00Z)
+  Your .aec.json assigns 3000 to "dev-server"
+  → Update your .aec.json to use a different port, or run
+    aec ports list to see all registered ports
+```
+
+Stale entries (from deleted project directories) are cleaned up automatically by `aec prune`.
+
+---
+
+## Test Framework Detection
+
+During `aec setup`, AEC scans your project for test frameworks by checking for config files and parsing `package.json` / `pyproject.toml`.
+
+### Supported Frameworks
+
+| Framework | Language | Detection |
+|-----------|----------|-----------|
+| Jest | TypeScript, JavaScript | `jest.config.*`, `package.json` devDependencies |
+| Vitest | TypeScript, JavaScript | `vitest.config.*`, `package.json` devDependencies |
+| pytest | Python | `pytest.ini`, `conftest.py`, `pyproject.toml` |
+| Playwright | TypeScript, JavaScript, Python | `playwright.config.*`, `package.json` devDependencies |
+| Cargo Test | Rust | `Cargo.toml` |
+| Go Test | Go | `go.mod` |
+| RSpec | Ruby | `.rspec`, `spec/spec_helper.rb` |
+
+### Interactive Suite Selection
+
+After detection, `aec setup` presents the detected frameworks and any test scripts found in `package.json`, then lets you choose which to include in `.aec.json`:
+
+```
+Detected test frameworks:
+  ✓ Jest (jest.config.ts)
+  ✓ Playwright (playwright.config.ts)
+
+Found test scripts in package.json:
+  • test:unit → jest --config jest.config.unit.ts
+  • test:integration → jest --config jest.config.integration.ts
+  • test:e2e → playwright test
+
+Which should be included in .aec.json test suites?
+[x] test:unit
+[x] test:integration
+[ ] test:e2e
+```
+
+### Scheduled Whitelist
+
+The `test.scheduled` array in `.aec.json` controls which suites run in automated scheduled runs (wired in Phase 2/3). E2E suites that require browsers or heavy infrastructure can exist in `.aec.json` for documentation without being included in unattended runs.
+
+### Extensibility
+
+Adding a new framework requires only adding a dict entry to `TEST_FRAMEWORK_HOOKS` in `aec/lib/test_detection.py`. No other code changes needed -- same pattern as `LANGUAGE_HOOKS` for lint hooks.
+
+---
+
+## Report Viewers
+
+After scheduled test runs (Phase 2/3), AEC can automatically open the report in your preferred viewer. You configure this during `aec install` when opting into scheduled tests, or anytime with `aec config set report_viewer <key>`.
+
+### Available Viewers by OS
+
+**macOS:**
+
+| Key | Viewer | Command |
+|-----|--------|---------|
+| `cursor` | Cursor | `cursor {file}` |
+| `vscode` | VS Code | `code {file}` |
+| `open` | Default App | `open {file}` |
+| `nano` | nano | `nano {file}` |
+| `vim` | vim | `vim {file}` |
+
+**Linux:**
+
+| Key | Viewer | Command |
+|-----|--------|---------|
+| `vscode` | VS Code | `code {file}` |
+| `xdg` | Default App | `xdg-open {file}` |
+| `nano` | nano | `nano {file}` |
+| `vim` | vim | `vim {file}` |
+
+**Windows:**
+
+| Key | Viewer | Command |
+|-----|--------|---------|
+| `vscode` | VS Code | `code {file}` |
+| `notepad` | Notepad | `notepad {file}` |
+| `start` | Default App | `start {file}` |
+
+### Custom Command
+
+Select "Other" during the interactive prompt to enter a custom command. Include `{file}` as a placeholder for the report path:
+
+```bash
+aec config set report_viewer "my-editor {file}"
+```
+
+---
+
+## Configuration Settings
+
+### Quality Infrastructure Settings
+
+These settings are prompted during `aec install` and manageable via `aec config set <key> <value>`:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `aec_json_gitignored` | `false` | Whether `.aec.json` is added to `.gitignore` during setup |
+| `port_registry_enabled` | prompted | Whether the port registry is active |
+| `scheduled_tests_enabled` | prompted | Whether scheduled test runs are enabled (wired in Phase 2/3) |
+| `report_viewer` | prompted | Key for the report viewer command, or `null` for no auto-open |
+| `report_retention_mode` | prompted | `auto` (prune after N days) or `manual` |
+| `report_retention_days` | `30` | Days to keep reports (only used when `report_retention_mode` is `auto`) |
+
+---
+
 ## The `aec` CLI
 
 All operations are available through the `aec` command, which works on macOS, Linux, and Windows.
@@ -155,13 +371,18 @@ pip install -e .
 
 | Command | Description |
 |---------|-------------|
-| `aec install` | Full setup (submodules, rules, agent-tools, settings, project walk) |
+| `aec install` | Full setup (submodules, rules, agent-tools, settings, quality infra prompts, project walk) |
 | `aec doctor` | Health check for installation |
 | `aec version` | Show version |
-| `aec repo setup <path>` | Setup a project with agent files |
+| `aec repo setup <path>` | Setup a project (agent files, `.aec.json`, port registration, test detection) |
 | `aec repo setup-all` | Setup all projects in configured projects directory |
 | `aec repo list` | List tracked repositories |
 | `aec repo update [--all]` | Update repositories |
+| `aec ports list` | Show all registered ports across all projects |
+| `aec ports check [path]` | Check for port conflicts without registering |
+| `aec ports register [path]` | Register ports from `.aec.json` |
+| `aec ports unregister [path]` | Remove port registrations for a project |
+| `aec ports validate` | Find stale port registry entries |
 | `aec preferences list` | Show current preferences and settings |
 | `aec preferences set <key> <value>` | Set a preference |
 | `aec preferences reset <key>` | Reset a preference (re-prompts on next run) |
@@ -179,7 +400,7 @@ pip install -e .
 # Check installation health
 aec doctor
 
-# Setup a new project
+# Setup a new project (creates .aec.json, detects tests, registers ports)
 aec repo setup my-app
 
 # List all tracked projects
@@ -190,6 +411,12 @@ aec repo update --all
 
 # Validate rules are in sync
 aec rules validate
+
+# View all registered ports
+aec ports list
+
+# Check for port conflicts before registering
+aec ports check /path/to/project
 ```
 
 ### Windows Support
@@ -282,6 +509,7 @@ Most operations are available via both the Python CLI and shell scripts:
 | Setup all projects | `aec repo setup-all` | — |
 | List tracked projects | `aec repo list` | `scripts/setup-repo.sh --list` |
 | Manage preferences | `aec preferences list\|set\|reset` | — |
+| Manage ports | `aec ports list\|check\|register\|unregister\|validate` | — |
 | Generate agent files | `aec files generate` | `scripts/generate-agent-files.py` |
 | Generate .agent-rules/ | `aec rules generate` | `scripts/generate-agent-rules.py` |
 | Validate rule parity | `aec rules validate` | `scripts/validate-rule-parity.py` |
@@ -346,11 +574,13 @@ AEC tracks which projects you've set up and your preferences in `~/.agents-envir
 ~/.agents-environment-config/
 ├── README.md                    # Explains why this directory exists
 ├── preferences.json             # User settings and optional feature toggles
+├── ports-registry.json          # Central port registry (all projects)
 └── setup-repo-locations.txt     # Tracks projects set up with agent files
 ```
 
 `preferences.json` stores:
 - **Settings**: Projects root directory, plans directory name, git tracking preference, plan completion behavior (archive/delete)
+- **Quality infrastructure**: Port registry toggle, scheduled test toggle, report viewer, retention settings
 - **Optional rules**: Feature toggles like "Leave It Better"
 
 This directory enables:
@@ -358,6 +588,7 @@ This directory enables:
 - **Re-run detection**: Detects if a project was already set up
 - **Inventory**: List all configured projects
 - **Consistent settings**: Plans directory and completion behavior applied across all projects
+- **Port conflict detection**: Central registry prevents port collisions across projects
 
 ```bash
 # List all tracked projects
@@ -396,8 +627,10 @@ When you run `aec repo setup` (or `setup-repo.sh`) on a project, it:
 3. Copies `CURSOR.mdc` to `.cursor/rules/`
 4. Migrates legacy plan files from `plans/` or `docs/plans/` to your configured plans directory
 5. Detects project languages and installs lint hooks for supported agents
-6. Updates `.gitignore` to ignore agent files (and plans directory if configured)
-7. Optionally creates Raycast launcher scripts
+6. Creates or updates `.aec.json` with project metadata, detected test suites, and installed tooling
+7. Registers the project's ports against the central port registry (warns on conflicts)
+8. Updates `.gitignore` to ignore agent files (and plans directory if configured)
+9. Optionally creates Raycast launcher scripts
 
 **After setup, edit `AGENTINFO.md`** in the target project with project-specific info.
 
