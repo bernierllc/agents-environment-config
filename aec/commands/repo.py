@@ -834,7 +834,7 @@ def _manage_aec_json_gitignore_step(
 
     should_ignore = get_setting("aec_json_gitignored")
     if should_ignore is None:
-        should_ignore = True  # Default: gitignore .aec.json
+        should_ignore = False  # Default: .aec.json is committed to git
 
     if dry_run:
         action = "gitignore" if should_ignore else "track"

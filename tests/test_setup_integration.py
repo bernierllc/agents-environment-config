@@ -377,8 +377,8 @@ class TestPruneFreesPortsForRemovedProjects:
 class TestManageAecJsonGitignoreStep:
     """Test _manage_aec_json_gitignore_step in repo.py."""
 
-    def test_adds_to_gitignore_by_default(self, temp_dir, monkeypatch):
-        """Adds .aec.json to .gitignore when setting is None (default)."""
+    def test_does_not_gitignore_by_default(self, temp_dir, monkeypatch):
+        """Does not add .aec.json to .gitignore when setting is None (default: committed)."""
         from aec.commands.repo import _manage_aec_json_gitignore_step
 
         project_dir = temp_dir / "gitignore-project"
@@ -393,7 +393,7 @@ class TestManageAecJsonGitignoreStep:
         _manage_aec_json_gitignore_step(project_dir)
 
         content = (project_dir / ".gitignore").read_text()
-        assert ".aec.json" in content
+        assert ".aec.json" not in content
 
 
 class TestSyncInstalledSection:
