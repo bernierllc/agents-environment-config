@@ -354,6 +354,92 @@ def _prompt_configurable_instructions(dry_run: bool = False) -> None:
         Console.print()
 
 
+def _prompt_quality_settings(dry_run: bool = False) -> None:
+    """Prompt for quality infrastructure settings.
+
+    Handles port registry and scheduled test configuration. When scheduled
+    tests are enabled, also prompts for report viewer and retention policy.
+
+    Args:
+        dry_run: If True, report what would happen without persisting.
+    """
+    from ..lib.preferences import get_preference, set_setting
+
+    Console.subheader("Quality Infrastructure")
+
+    # Helper: persist or report based on dry_run
+    def _save(key: str, value: object) -> None:
+        if dry_run:
+            Console.info(f"Would save: {key} = {value}")
+        else:
+            set_setting(key, value)
+
+    # Check if scheduled tests are enabled (from OPTIONAL_FEATURES prompt)
+    scheduled_enabled = get_preference("scheduled_tests_enabled")
+    if not scheduled_enabled:
+        Console.info("Scheduled tests not enabled — skipping viewer/retention prompts.")
+        return
+
+    # Report viewer selection
+    viewer_value = None
+    try:
+        from aec.lib.viewers import detect_viewers  # type: ignore[import-not-found]
+
+        viewers = detect_viewers()
+        if viewers:
+            Console.print("\nAvailable report viewers:")
+            for i, viewer in enumerate(viewers, 1):
+                Console.print(f"  {i}) {viewer}")
+            Console.print(f"  {len(viewers) + 1}) None")
+            try:
+                choice = input("Choose a viewer [1]: ").strip() or "1"
+            except EOFError:
+                choice = "1"
+            idx = int(choice) - 1
+            if 0 <= idx < len(viewers):
+                viewer_value = viewers[idx]
+        else:
+            viewer_value = None
+    except ImportError:
+        Console.print(
+            "\nEnter a command to open test reports (use {file} as placeholder),\n"
+            'or "none" to skip:'
+        )
+        try:
+            cmd = input("Viewer command [none]: ").strip() or "none"
+        except EOFError:
+            cmd = "none"
+        if cmd.lower() != "none":
+            viewer_value = cmd
+
+    _save("report_viewer", viewer_value)
+
+    # Report retention mode
+    Console.print(
+        "\nHow should test reports be managed?\n"
+        "  1. Automatically prune after N days (default: 30)\n"
+        "  2. Manage manually"
+    )
+    try:
+        retention_choice = input("Choice (1/2): ").strip() or "1"
+    except EOFError:
+        retention_choice = "1"
+
+    if retention_choice == "1":
+        _save("report_retention_mode", "auto")
+        try:
+            days_str = input("Prune reports after how many days? [30]: ").strip() or "30"
+        except EOFError:
+            days_str = "30"
+        try:
+            days = int(days_str)
+        except ValueError:
+            days = 30
+        _save("report_retention_days", days)
+    else:
+        _save("report_retention_mode", "manual")
+
+
 def install(dry_run: bool = False) -> None:
     """
     Full setup of agents-environment-config.
@@ -456,6 +542,10 @@ def install(dry_run: bool = False) -> None:
     # Prompt for settings (interactive — never collapse)
     with Console.section("Configuration", collapse=False):
         _prompt_settings(dry_run, show_header=False)
+
+    # Quality infrastructure preferences (interactive — never collapse)
+    with Console.section("Quality Infrastructure", collapse=False):
+        _prompt_quality_settings(dry_run)
 
     # Regenerate rules with new settings applied
     with Console.section("Applying settings to rules...", collapse=not dry_run):
