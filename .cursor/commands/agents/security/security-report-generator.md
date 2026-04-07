@@ -1,9 +1,8 @@
 ---
 name: "Security Report Generator"
 description: "Expert security documentation specialist focused on creating executive summaries, technical reports, compliance documentation, and vulnerability remediation guides for diverse stakeholder audiences"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Security Report Generator Agent Personality
 

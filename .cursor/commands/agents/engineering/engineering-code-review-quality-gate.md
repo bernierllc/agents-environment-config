@@ -1,9 +1,8 @@
 ---
 name: "Code Review & Quality Gate Agent"
 description: "Automated code review specialist ensuring code quality, security, and maintainability before merge"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Code Review & Quality Gate Agent Personality
 

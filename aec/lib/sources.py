@@ -31,19 +31,24 @@ def discover_available(source_dir: Path, item_type: str) -> dict:
 
 
 def _discover_available_rules(source_dir: Path) -> dict:
-    """Discover available rules from the agent-rules source."""
+    """Discover available rules from the agent-rules source.
+
+    Only includes files with valid frontmatter containing name and version.
+    """
     rules = {}
     if not source_dir.exists():
         return rules
     for md_file in sorted(source_dir.rglob("*.md")):
         if md_file.name.startswith("."):
             continue
-        rel = md_file.relative_to(source_dir)
-        name = str(rel).removesuffix(".md")
         text = md_file.read_text(encoding="utf-8")
-        fm = parse_yaml_frontmatter(text) or {}
+        fm = parse_yaml_frontmatter(text)
+        if not fm or "name" not in fm or "version" not in fm:
+            continue
+        rel = md_file.relative_to(source_dir)
+        name = fm["name"]
         rules[name] = {
-            "version": fm.get("version", "0.0.0"),
+            "version": fm["version"],
             "description": fm.get("description", ""),
             "path": str(rel),
         }
@@ -51,20 +56,29 @@ def _discover_available_rules(source_dir: Path) -> dict:
 
 
 def _discover_available_agents(source_dir: Path) -> dict:
-    """Discover available agents from the agents source."""
+    """Discover available agents from the agents source.
+
+    Only includes files with valid frontmatter containing name and version.
+    Files without proper frontmatter (README, CONTRIBUTING, etc.) are skipped.
+    """
     agents = {}
     if not source_dir.exists():
         return agents
     for md_file in sorted(source_dir.rglob("*.md")):
         if md_file.name.startswith("."):
             continue
-        name = md_file.stem
         text = md_file.read_text(encoding="utf-8")
-        fm = parse_yaml_frontmatter(text) or {}
+        fm = parse_yaml_frontmatter(text)
+        if not fm or "name" not in fm or "version" not in fm:
+            continue
+        name = md_file.stem
+        rel = md_file.relative_to(source_dir)
         agents[name] = {
-            "version": fm.get("version", "0.0.0"),
+            "version": fm["version"],
             "description": fm.get("description", ""),
-            "path": md_file.name,
+            "author": fm.get("author", ""),
+            "division": fm.get("division", ""),
+            "path": str(rel),
         }
     return agents
 

@@ -1,9 +1,8 @@
 ---
 name: "gdocs"
 description: "Writes and updates Google Docs with intelligent content synthesis. Transforms raw content (notes, transcripts, research, drafts) into professional, document-appropriate text with proper formatting and attribution. Supports multi-tab documents, structure-aware insertion (tables, lists, paragraphs), and automatic style matching."
-tags: ["skill"]
+tags: "["skill"]"
 ---
-
 
 # Google Docs Writing and Editing Skill
 

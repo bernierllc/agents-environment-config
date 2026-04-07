@@ -1,9 +1,8 @@
 ---
 name: "commit"
 description: "Use when the user wants to commit and optionally push their changes. Standardizes the commit workflow with commitlint validation, gitignore checks, and safe push procedures."
-tags: ["skill"]
+tags: "["skill"]"
 ---
-
 
 # Commit Skill
 

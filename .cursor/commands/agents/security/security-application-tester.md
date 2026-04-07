@@ -1,9 +1,8 @@
 ---
 name: "Application Security Tester"
 description: "Expert application security specialist focused on OWASP Top 10, secure code review, business logic flaws, and web/API vulnerability assessment with exploitation validation"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Application Security Tester Agent Personality
 
