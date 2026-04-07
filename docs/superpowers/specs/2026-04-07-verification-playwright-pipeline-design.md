@@ -85,7 +85,11 @@ The playwright-test-generator has two execution modes:
 
 ```
 tests/verification-playwright/
-├── manifest.json                    # Item-to-test mapping, hashes, import index
+├── manifest/
+│   ├── items.json                   # Item-to-test mapping, content hashes, testid status
+│   ├── import-index.json            # Source file → verification page mapping
+│   └── config.json                  # Tier configuration, pipeline settings
+├── pending-generation.json          # Queue of items needing LLM generation (transient)
 ├── playwright.config.ts             # Extends root config, verification-specific settings
 ├── testid-gaps.md                   # Report of verification items missing data-testids
 ├── helpers/
@@ -134,7 +138,11 @@ Every generated test gets three tags in its test name:
 - `@standard` — depth tier (for filtering by smoke/standard/deep)
 - `@admin-event-form` — page file name (for running all tests for a page)
 
-#### Manifest structure
+#### Manifest structure (split files)
+
+The manifest is split into three independent files so each can fail and be rebuilt independently. `--force-index` rebuilds only the import index without losing item hashes. `--force-items` rebuilds item mappings without losing config. `--force` rebuilds everything.
+
+**`manifest/items.json`** — Item-to-test mapping:
 
 ```json
 {
@@ -144,18 +152,43 @@ Every generated test gets three tags in its test name:
     "EVT-FRM-TKT-03": {
       "source_doc": "docs/verification/pages/admin-event-form.md",
       "spec_file": "tests/verification-playwright/pages/admin-event-form.spec.ts",
-      "content_hash": "a1b2c3d4",
+      "content_hash": "a1b2c3d4e5f6...",
+      "generated_hash": "f6e5d4c3b2a1...",
       "depth": "standard",
       "status": "active",
+      "pinned": false,
       "testids_required": ["ticket-price-min", "ticket-price-max", "submit-event", "ticket-price-error"],
       "testids_missing": ["ticket-price-error"]
     }
-  },
-  "import_index": {
+  }
+}
+```
+
+Fields:
+- `content_hash` — SHA-256 of the normalized verification item (see hash normalization below). Used to detect doc changes.
+- `generated_hash` — SHA-256 of the generated test code between `@begin`/`@end` markers. Used to detect manual edits.
+- `pinned` — When `true`, the skill will not overwrite this test. Set automatically when `generated_hash` no longer matches the actual file content (developer manually edited the test). Can also be set manually. `--force` overrides pinned tests.
+
+**`manifest/import-index.json`** — Source file to page mapping:
+
+```json
+{
+  "version": "1.0",
+  "generated_at": "2026-04-07T18:00:00Z",
+  "entries": {
     "admin/static/admin/src/components/EventForm.tsx": ["admin-event-form"],
     "admin/static/admin/src/components/ArtistSection.tsx": ["admin-event-form", "admin-artist-form"],
     "admin/app/routers/events.py": ["admin-event-form", "admin-event-detail", "admin-event-list"]
-  },
+  }
+}
+```
+
+**`manifest/config.json`** — Tier configuration and pipeline settings:
+
+```json
+{
+  "version": "1.0",
+  "dry_run": false,
   "tiers": {
     "gate": {
       "trigger": "pre-commit",
@@ -181,8 +214,68 @@ Every generated test gets three tags in its test name:
       "maxTests": null,
       "timeoutMs": null
     }
+  },
+  "test_isolation": {
+    "strategy": "per-test-user",
+    "cleanup": "after-each",
+    "notes": "Project-specific. Set during init."
   }
 }
+```
+
+#### Content hash normalization
+
+All content hashes use SHA-256 of a normalized representation to prevent churn from whitespace reformatting:
+
+1. Strip leading/trailing whitespace per line
+2. Collapse multiple consecutive spaces to a single space
+3. Lowercase the item ID
+4. Remove HTML comment markers (`<!--`, `-->`) from annotations before hashing annotation content
+5. Sort annotation fields alphabetically within each annotation block
+
+This ensures reformatted docs with identical semantic content produce identical hashes.
+
+#### Concurrency safety
+
+Multiple Claude sessions editing different verification docs simultaneously can both trigger `sync-tests.js`. To prevent silent overwrites:
+
+1. **Atomic writes:** All manifest file updates write to `<file>.tmp` first, then rename atomically. This prevents partial writes from corrupting the file.
+2. **Lockfile:** `sync-tests.js` acquires a lockfile (`manifest/.lock`) before reading/writing any manifest file. The lock uses PID-based staleness detection — if the lock is held by a process that no longer exists, or is older than 10 seconds, it is considered stale and overridden.
+3. **Queue deduplication:** When the skill reads `pending-generation.json`, it deduplicates item IDs before processing. Multiple sync-tests.js runs may append the same item ID — the skill handles this gracefully.
+
+#### Test pinning
+
+When a developer manually edits a generated test to fix a bad selector, wrong assertion, or add project-specific setup:
+
+1. On the next `sync-tests.js` run, the script detects that the test file content between `@begin:ID`/`@end:ID` markers no longer matches `generated_hash` in `items.json`
+2. It sets `"pinned": true` for that item
+3. Pinned tests are never overwritten by the skill — they are reported as "pinned (manually edited)" in the generation log
+4. To un-pin (allow regeneration), either: set `"pinned": false` in `items.json`, or use `--force` to regenerate everything
+
+This gives developers an escape hatch for tests that need manual tuning without fighting the pipeline or resorting to `--no-verify`.
+
+#### Dry-run mode
+
+For the first weeks of pipeline adoption, set `"dry_run": true` in `manifest/config.json`. In dry-run mode:
+
+- Pre-commit and pre-push hooks run the affected tests but always exit 0 (report results, never block)
+- Output is prefixed with `[DRY RUN]` so the developer sees what would have been blocked
+- Can also be enabled via environment variable: `VERIFICATION_PIPELINE_DRY_RUN=1`
+
+This smooths adoption across multiple projects — enable the pipeline, observe its behavior for a week, then disable dry-run when confident.
+
+#### Test isolation
+
+Generated Playwright tests that modify application state (creating events, adding artists) will interfere with each other if run in parallel. The `test_isolation` config in `manifest/config.json` defines the project-specific strategy:
+
+| Strategy | Description | When to use |
+|---|---|---|
+| `per-test-user` | Each test uses a unique test user account (e.g., `test-user-{uuid}@example.com`) | Projects with user-scoped data |
+| `per-test-seed` | Each test seeds its own data in a `beforeEach` and cleans up in `afterEach` | Projects with API-based seed endpoints |
+| `serial` | Tests run sequentially, no parallelism | Small test suites or shared-state projects |
+| `database-reset` | Reset database to seed state before each test file | Projects with fast seed scripts |
+
+The skill asks about isolation strategy during project initialization and configures `playwright.config.ts` accordingly (e.g., setting `fullyParallel: false` for `serial`, or generating fixture setup code for `per-test-seed`).
 ```
 
 #### Import index construction
@@ -197,7 +290,10 @@ The `import_index` in the manifest maps source files to the verification page do
 
 The index is rebuilt on every full skill invocation. The `sync-tests.js` script reads the existing index but does not rebuild it — if the index is stale, the skill must be invoked to refresh it.
 
-**Staleness detection:** If the pre-commit hook's `map-changes.js` encounters a staged file not present in the import_index, it logs a warning: "File `X` not in import index — run playwright-test-generator to refresh." The commit is not blocked by a stale index; it just means that file's changes won't trigger tests until the index is refreshed.
+**Staleness detection:** Two types of staleness are handled:
+
+1. **New files not in index:** If `map-changes.js` encounters a staged file not present in `import-index.json`, it logs a warning: "File `X` not in import index — run playwright-test-generator to refresh." The commit is not blocked; it just means that file's changes won't trigger tests until the index is refreshed.
+2. **Stale entries pointing to deleted/moved files:** `map-changes.js` validates that every file it looks up in the index actually exists on disk (`fs.existsSync`). If an index entry points to a nonexistent file, it is excluded from results and a warning is logged: "Index entry `X` is stale (file no longer exists)." This prevents mapping changes from new files at an old path to incorrect test tags.
 
 #### map-changes.js specification
 
@@ -208,7 +304,7 @@ The index is rebuilt on every full skill invocation. The `sync-tests.js` script 
 - `--since-main` flag: uses `git diff --name-only $(git merge-base HEAD main)..HEAD` to find all changed files since branching from main
 
 **Algorithm:**
-1. Read `manifest.json`
+1. Read `manifest/import-index.json`. If the file does not exist, output nothing and exit 0 (pipeline not initialized).
 2. For each input file:
    - If it's a verification doc (`docs/verification/**`): extract its page tag directly (filename minus extension)
    - If it's a source file: look up in `import_index` → get associated page tags
@@ -219,7 +315,7 @@ The index is rebuilt on every full skill invocation. The `sync-tests.js` script 
 
 #### select-tier.js specification
 
-`scripts/verification-playwright/select-tier.js` reads the manifest's tier config and matches the target branch.
+`scripts/verification-playwright/select-tier.js` reads `manifest/config.json`'s tier config and matches the target branch.
 
 **Input:** Target branch name (positional arg)
 **Algorithm:** For each tier (checked in order: full → thorough → gate), check if the branch matches the tier's `branches` pattern (glob matching, `*` matches all). Return the first match. **Order is significant:** tiers are checked most-restrictive-first. Since `gate` has `branches: "*"` (catch-all), it must always be checked last. The script validates this on startup and errors if a catch-all tier is not last.
@@ -231,7 +327,34 @@ During project initialization, the skill checks for and installs required depend
 
 1. **@playwright/test** — If not in devDependencies, asks: "Playwright is required for the verification pipeline. Add @playwright/test to devDependencies?" Installs if confirmed.
 2. **Browser binaries** — After installing Playwright, runs `npx playwright install chromium` (gate tier minimum). For thorough/full tiers, installs additional browsers: `npx playwright install firefox webkit`. Warns about download size (~150MB per browser).
-3. **Node.js scripts** — Copies `map-changes.js`, `select-tier.js`, and `sync-tests.js` to `scripts/verification-playwright/`. These are managed by AEC and updated via `aec upgrade`.
+3. **Node.js scripts** — Copies `map-changes.js`, `select-tier.js`, `sync-tests.js`, and `verify-pipeline.js` to `scripts/verification-playwright/`. These are managed by AEC and updated via `aec upgrade`.
+
+#### Pipeline health diagnostic
+
+`scripts/verification-playwright/verify-pipeline.js` is a diagnostic command that checks pipeline integrity:
+
+1. **Manifest integrity:** All three manifest files parse as valid JSON
+2. **Source file existence:** Every file in `import-index.json` exists on disk. Stale entries are reported.
+3. **Spec file existence:** Every spec file referenced in `items.json` exists on disk. Orphaned entries are reported.
+4. **Item-to-test consistency:** Every item ID in `items.json` has a corresponding `@begin:ID`/`@end:ID` block in its spec file. Orphaned tests (tests without manifest entries) are reported.
+5. **Import index coverage:** Routes from verification doc headers are traced to source files and compared against the index. Missing entries are reported.
+6. **Pinned test audit:** Reports which tests are pinned and why (manual edits detected).
+7. **Pending generation queue:** Reports items in `pending-generation.json` that haven't been generated yet.
+
+**Invocation:** `node scripts/verification-playwright/verify-pipeline.js` or via `aec doctor` (which runs it for every project with the pipeline enabled).
+
+**Output:** A status report with pass/warn/fail per check. Example:
+
+```
+Pipeline Health Check
+  ✓ Manifest files valid (3/3)
+  ✓ Source files exist (47/47)
+  ⚠ 2 stale import index entries (run --force-index to rebuild)
+  ✓ Spec files exist (32/32)
+  ✓ Item-to-test consistency (298/298)
+  ⚠ 3 pinned tests (manually edited)
+  ✓ No pending generation items
+```
 
 #### testid-gaps.md format
 
@@ -268,6 +391,8 @@ The postToolUse hook is always in `.claude/settings.json` (not a git hook) and i
 #### Full tier safety
 
 The full tier has `maxTests: null` and `timeoutMs: null` by default, meaning no artificial limits. This is intentional — when pushing to main/production, you want to know about every failure, not just the first 100. However, the user can set limits during configuration if their test suite grows large enough that full runs become impractical. The suggested default is documented as "no limit (recommended for production gates)" with a note that projects with 500+ tests may want to set a timeout of 600000ms (10 minutes).
+
+**`timeoutMs` is the primary constraint, `maxTests` is the secondary circuit breaker.** A state-dependency test that sets up a multi-step form flow takes 10x longer than a field validation test. 30 state-dependency tests could take 5 minutes, but 30 simple validation tests take 30 seconds. The timeout prevents unexpectedly slow runs from blocking the developer regardless of test count.
 
 **Tier configuration is fully user-configurable.** The values above are suggested defaults. During skill initialization, the user is asked which tiers to enable and can customize branches, browsers, depths, and caps. All settings are stored in the manifest and read by the hooks at runtime.
 
@@ -311,7 +436,7 @@ The `testid-gaps.md` report is the prioritized work list for adding test infrast
 **What sync-tests.js does (deterministic, no LLM, runs in <2 seconds):**
 
 1. Parse the changed verification doc file
-2. Compute content hashes for each item, compare against manifest
+2. Acquire lockfile (`manifest/.lock`). Compute content hashes for each item, compare against `manifest/items.json`
 3. For each change detected:
    - **Removed items:** delete test function (between `@begin:ID` / `@end:ID` markers), remove from manifest
    - **ID renamed:** update `@tag` in test name, update manifest key
@@ -332,6 +457,16 @@ This split means the hook is fast and non-blocking (shell script, no LLM), while
 
 ```bash
 # Fires on every commit
+
+# Check pipeline is initialized
+if [ ! -f "scripts/verification-playwright/map-changes.js" ]; then
+  exit 0  # Pipeline not initialized, pass through silently
+fi
+
+# Check for dry-run mode
+dry_run=$(node -e "try{const c=require('./tests/verification-playwright/manifest/config.json');console.log(c.dry_run||false)}catch(e){console.log(false)}" 2>/dev/null)
+if [ "$VERIFICATION_PIPELINE_DRY_RUN" = "1" ]; then dry_run="true"; fi
+
 staged_files=$(git diff --staged --name-only)
 
 # Categorize files
@@ -348,8 +483,8 @@ if [ "$test_count" -eq 0 ]; then
   exit 0  # No affected tests, commit proceeds
 fi
 
-# Read maxTests from manifest gate tier config (default 30)
-max_tests=$(node -e "const m=require('./tests/verification-playwright/manifest.json'); console.log(m.tiers.gate.maxTests || 30)")
+# Read maxTests from config (default 30)
+max_tests=$(node -e "const c=require('./tests/verification-playwright/manifest/config.json'); console.log(c.tiers.gate.maxTests || 30)")
 
 if [ "$test_count" -gt "$max_tests" ]; then
   if [ -t 1 ]; then
@@ -372,12 +507,35 @@ npx playwright test \
   --config tests/verification-playwright/playwright.config.ts \
   --project chromium \
   --grep "$(echo $affected_tags | tr ' ' '|')"
+
+# In dry-run mode: report results but never block
+if [ "$dry_run" = "true" ]; then
+  echo "[DRY RUN] Tests completed. Commit would have been $([ $? -eq 0 ] && echo 'allowed' || echo 'blocked')."
+  exit 0
+fi
 ```
 
 #### Pre-push hook (branch-aware tiers)
 
 ```bash
-target_branch=$(git rev-parse --abbrev-ref @{push} 2>/dev/null || echo "")
+# Pre-push hooks receive refspecs on stdin: <local ref> <local sha> <remote ref> <remote sha>
+# Parse the remote ref to determine actual target branch (more reliable than @{push})
+target_branch=""
+while read local_ref local_sha remote_ref remote_sha; do
+  # Extract branch name from remote ref (e.g., refs/heads/staging → staging)
+  target_branch=$(echo "$remote_ref" | sed 's|refs/heads/||')
+  break  # Use the first refspec
+done
+
+# Fallback to @{push} if stdin was empty (shouldn't happen in normal git push)
+if [ -z "$target_branch" ]; then
+  target_branch=$(git rev-parse --abbrev-ref @{push} 2>/dev/null || echo "")
+fi
+
+# Check pipeline is initialized
+if [ ! -f "scripts/verification-playwright/select-tier.js" ]; then
+  exit 0  # Pipeline not initialized, pass through
+fi
 
 # Read tier config from manifest
 tier=$(node scripts/verification-playwright/select-tier.js "$target_branch")
@@ -422,7 +580,7 @@ When run for the first time in a project with verification docs (or via `aec set
    - postToolUse hook in `.claude/settings.json` for `docs/verification/**`
    - Pre-commit hook (gate tier)
    - Pre-push hook (thorough/full tiers, branch-aware)
-   - Initial manifest at `tests/verification-playwright/manifest.json`
+   - Initial manifest files at `tests/verification-playwright/manifest/` (items.json, import-index.json, config.json)
    - Runs initial full generation from existing verification docs (section by section, reports progress)
 5. Records in AEC project tracking that this project has the pipeline enabled
 
@@ -433,9 +591,17 @@ aec uninstall skill playwright-test-generator
 ```
 
 1. Removes the postToolUse hook entries from `.claude/settings.json` in every opted-in project
-2. Removes the pre-commit and pre-push hook entries (or the verification-specific portions)
+2. Removes the pre-commit and pre-push hook entries (or the verification-specific portions, per hook management strategy)
 3. Asks: "Remove generated Playwright tests and manifest too, or keep them as static tests?"
 4. Updates AEC project tracking
+
+#### Diagnostics
+
+```bash
+aec doctor
+```
+
+When the pipeline is enabled for a project, `aec doctor` runs `verify-pipeline.js` as part of its health check. Reports stale index entries, orphaned tests, pending generation items, and pinned test counts.
 
 #### Upgrades
 
@@ -523,4 +689,9 @@ Mapping back to the original 23 bugs found in barevents:
 
 1. **CI integration** — Should the full tier also run in CI (GitHub Actions / Railway) as a safety net beyond local hooks? Likely yes, but deferred to a separate spec.
 2. **Existing hand-written Playwright tests** — Migration plan: verification-writer generates docs covering what the hand-written tests check, playwright-test-generator produces the automated versions, then hand-written tests are removed. Incremental, not big-bang.
-3. **Test data management** — Playwright tests need seed data. Should the skill generate fixtures, or reference the project's existing test data setup? Project-specific decision during init.
+
+## Resolved During Design
+
+1. **Test data management** — Resolved via `test_isolation` config in `manifest/config.json`. Project-specific strategy selected during init (per-test-user, per-test-seed, serial, or database-reset).
+2. **Browser contention** — Resolved by architecture. Regression testing uses headless Playwright (no browser MCP needed). Browser-verification moves to exploratory-only role. No queue system needed.
+3. **Manifest corruption recovery** — Resolved by splitting manifest into three independent files with per-file `--force` flags and `verify-pipeline.js` diagnostic.
