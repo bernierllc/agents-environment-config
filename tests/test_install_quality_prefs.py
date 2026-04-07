@@ -47,11 +47,11 @@ class TestPromptQualitySettings:
         """Should prompt for viewer and store it when scheduled tests are on."""
         self._enable_scheduled_tests(temp_dir, monkeypatch)
 
-        # detect_viewers not available => fallback to command input
+        # Pick viewer #1 from detected list, auto retention, 30 days
         inputs = iter([
-            "open {file}",  # viewer command
-            "1",            # auto retention
-            "30",           # 30 days
+            "1",   # first viewer in list
+            "1",   # auto retention
+            "30",  # 30 days
         ])
         monkeypatch.setattr("builtins.input", lambda _: next(inputs))
 
@@ -59,16 +59,21 @@ class TestPromptQualitySettings:
         _prompt_quality_settings()
 
         from aec.lib.preferences import get_setting
-        assert get_setting("report_viewer") == "open {file}"
+        # Should store a viewer key (string), not None
+        assert get_setting("report_viewer") is not None
 
     def test_stores_retention_auto_with_days(self, temp_dir, monkeypatch):
         """Should store auto retention mode with custom day count."""
         self._enable_scheduled_tests(temp_dir, monkeypatch)
 
+        # Pick "None" viewer (last option), auto retention, 14 days
+        # detect_viewers returns N viewers; N+1 is "None"
+        from aec.lib.viewers import detect_viewers
+        n_viewers = len(detect_viewers())
         inputs = iter([
-            "none",  # no viewer
-            "1",     # auto retention
-            "14",    # 14 days
+            str(n_viewers + 1),  # "None" option
+            "1",                 # auto retention
+            "14",                # 14 days
         ])
         monkeypatch.setattr("builtins.input", lambda _: next(inputs))
 
@@ -84,9 +89,11 @@ class TestPromptQualitySettings:
         """Should store manual retention mode without days."""
         self._enable_scheduled_tests(temp_dir, monkeypatch)
 
+        from aec.lib.viewers import detect_viewers
+        n_viewers = len(detect_viewers())
         inputs = iter([
-            "none",  # no viewer
-            "2",     # manual retention
+            str(n_viewers + 1),  # "None" option
+            "2",                 # manual retention
         ])
         monkeypatch.setattr("builtins.input", lambda _: next(inputs))
 
@@ -121,8 +128,8 @@ class TestPromptQualitySettings:
         _prompt_quality_settings()
 
         from aec.lib.preferences import get_setting
-        # Defaults: no viewer (none), auto retention, 30 days
-        assert get_setting("report_viewer") is None
+        # Defaults: first viewer from detected list, auto retention, 30 days
+        assert get_setting("report_viewer") is not None
         assert get_setting("report_retention_mode") == "auto"
         assert get_setting("report_retention_days") == 30
 
@@ -131,9 +138,9 @@ class TestPromptQualitySettings:
         self._enable_scheduled_tests(temp_dir, monkeypatch)
 
         inputs = iter([
-            "open {file}",  # viewer command
-            "1",            # auto retention
-            "30",           # 30 days
+            "1",   # first viewer
+            "1",   # auto retention
+            "30",  # 30 days
         ])
         monkeypatch.setattr("builtins.input", lambda _: next(inputs))
 

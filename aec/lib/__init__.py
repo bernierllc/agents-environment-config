@@ -8,6 +8,7 @@ from .config import (
     HOME,
     AEC_HOME,
     AEC_SETUP_LOG,
+    AEC_PORTS_REGISTRY,
     AGENT_TOOLS_DIR,
     CLAUDE_DIR,
     CURSOR_DIR,
@@ -98,6 +99,58 @@ from .skills_manifest import (
     rebuild_manifest_from_installed,
 )
 
+# Ports module
+try:
+    from .ports import (
+        load_registry,
+        save_registry,
+        register_port,
+        unregister_project_ports,
+        check_conflicts,
+        validate_registry,
+        list_ports_by_project,
+    )
+except ImportError:
+    pass
+
+# aec_json module
+try:
+    from .aec_json import (
+        AEC_JSON_FILENAME,
+        create_skeleton,
+        load_aec_json,
+        save_aec_json,
+        aec_json_exists,
+        update_ports_section,
+        update_test_section,
+        update_installed_section,
+        manage_aec_json_gitignore,
+    )
+except ImportError:
+    pass
+
+# Test detection module
+try:
+    from .test_detection import (
+        TEST_FRAMEWORK_HOOKS,
+        detect_test_frameworks,
+        scan_test_scripts,
+    )
+except ImportError:
+    pass
+
+# Viewers module
+try:
+    from .viewers import (
+        REPORT_VIEWERS,
+        detect_viewers,
+        get_viewer_command,
+        format_viewer_command,
+        get_platform_key,
+    )
+except ImportError:
+    pass
+
 # SUPPORTED_AGENTS is lazy-loaded via config.__getattr__
 # Import it explicitly for backwards compatibility
 SUPPORTED_AGENTS = get_supported_agents()
@@ -111,6 +164,7 @@ __all__ = [
     "HOME",
     "AEC_HOME",
     "AEC_SETUP_LOG",
+    "AEC_PORTS_REGISTRY",
     "AGENT_TOOLS_DIR",
     "CLAUDE_DIR",
     "CURSOR_DIR",
@@ -192,4 +246,32 @@ __all__ = [
     "save_installed_manifest",
     "discover_available_skills",
     "rebuild_manifest_from_installed",
+    # Ports
+    "load_registry",
+    "save_registry",
+    "register_port",
+    "unregister_project_ports",
+    "check_conflicts",
+    "validate_registry",
+    "list_ports_by_project",
+    # aec_json
+    "AEC_JSON_FILENAME",
+    "create_skeleton",
+    "load_aec_json",
+    "save_aec_json",
+    "aec_json_exists",
+    "update_ports_section",
+    "update_test_section",
+    "update_installed_section",
+    "manage_aec_json_gitignore",
+    # Test detection
+    "TEST_FRAMEWORK_HOOKS",
+    "detect_test_frameworks",
+    "scan_test_scripts",
+    # Viewers
+    "REPORT_VIEWERS",
+    "detect_viewers",
+    "get_viewer_command",
+    "format_viewer_command",
+    "get_platform_key",
 ]
