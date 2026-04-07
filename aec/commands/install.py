@@ -389,15 +389,18 @@ def _prompt_quality_settings(dry_run: bool = False) -> None:
         if viewers:
             Console.print("\nAvailable report viewers:")
             for i, viewer in enumerate(viewers, 1):
-                Console.print(f"  {i}) {viewer}")
+                Console.print(f"  {i}) {viewer['display_name']}")
             Console.print(f"  {len(viewers) + 1}) None")
             try:
                 choice = input("Choose a viewer [1]: ").strip() or "1"
             except EOFError:
                 choice = "1"
-            idx = int(choice) - 1
+            try:
+                idx = int(choice) - 1
+            except ValueError:
+                idx = 0
             if 0 <= idx < len(viewers):
-                viewer_value = viewers[idx]
+                viewer_value = viewers[idx]["key"]
         else:
             viewer_value = None
     except ImportError:

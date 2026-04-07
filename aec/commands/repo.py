@@ -666,7 +666,7 @@ def _detect_and_prompt_test_suites(
         if frameworks:
             Console.subheader("Detected test frameworks:")
             for fw in frameworks:
-                Console.success(f"{fw['display_name']} ({fw['config_file']})")
+                Console.success(f"{fw['display_name']} ({fw['detected_by']})")
 
         if scripts:
             Console.subheader("Found test scripts:")
@@ -716,7 +716,12 @@ def _detect_and_prompt_test_suites(
             selected = []
 
         if selected:
-            aec_data = update_test_section(aec_data, selected)
+            # Convert list of candidates to suites dict keyed by name
+            suites_dict = {
+                s["name"]: {"command": s["command"], "cleanup": None}
+                for s in selected
+            }
+            aec_data = update_test_section(aec_data, suites=suites_dict)
             if not dry_run:
                 Console.success(f"Added {len(selected)} test suite(s)")
 
@@ -757,18 +762,26 @@ def _register_ports(
 
         # Check for conflicts first
         conflicts = check_conflicts(registry, ports, project_path)
-        for service_name, port, conflicting_project in conflicts:
+        for conflict in conflicts:
             Console.warning(
-                f"Port {port} ({service_name}) conflicts with {conflicting_project}"
+                f"Port {conflict['port']} ({conflict['key']}) conflicts with "
+                f"{conflict['existing_project']}"
             )
 
         # Register non-conflicting ports
-        conflict_ports = {c[1] for c in conflicts}
+        conflict_ports = {c["port"] for c in conflicts}
+        project_name = project_dir.name
         registered = 0
-        for service_name, port in ports.items():
-            if port not in conflict_ports:
-                register_port(registry, port, project_path, service_name)
-                registered += 1
+        for key_name, spec in ports.items():
+            port_num = spec.get("port") if isinstance(spec, dict) else spec
+            if port_num and port_num not in conflict_ports:
+                result = register_port(
+                    registry, port_num, project_name, project_path, key_name,
+                    protocol=spec.get("protocol", "") if isinstance(spec, dict) else "",
+                    description=spec.get("description", "") if isinstance(spec, dict) else "",
+                )
+                if result == "registered":
+                    registered += 1
 
         if registered:
             save_registry(registry, AEC_PORTS_REGISTRY)
@@ -797,12 +810,12 @@ def _sync_installed_section(aec_data: dict) -> dict:
     if not manifest:
         return aec_data
 
-    aec_data = update_installed_section(
-        aec_data,
-        skills=list(manifest.get("skills", {}).keys()),
-        rules=list(manifest.get("rules", {}).keys()),
-        agents=list(manifest.get("agents", {}).keys()),
-    )
+    installed = {
+        "skills": manifest.get("skills", {}),
+        "rules": manifest.get("rules", {}),
+        "agents": manifest.get("agents", {}),
+    }
+    aec_data = update_installed_section(aec_data, installed)
     return aec_data
 
 
