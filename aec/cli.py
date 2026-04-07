@@ -197,6 +197,46 @@ if HAS_TYPER:
         from .commands.generate import run_prune
         run_prune(yes=yes, dry_run=dry_run)
 
+    # --- ports subcommands ---
+    ports_app = typer.Typer(help="Manage project port registry")
+    app.add_typer(ports_app, name="ports")
+
+    @ports_app.command("list")
+    def ports_list_cmd():
+        """Show all registered ports grouped by project."""
+        from .commands.ports import run_ports_list
+        run_ports_list()
+
+    @ports_app.command("check")
+    def ports_check_cmd(
+        path: str = typer.Argument(".", help="Project path containing .aec.json"),
+    ):
+        """Check a project's ports against the registry."""
+        from .commands.ports import run_ports_check
+        run_ports_check(path)
+
+    @ports_app.command("register")
+    def ports_register_cmd(
+        path: str = typer.Argument(".", help="Project path containing .aec.json"),
+    ):
+        """Register ports from a project's .aec.json."""
+        from .commands.ports import run_ports_register
+        run_ports_register(path)
+
+    @ports_app.command("unregister")
+    def ports_unregister_cmd(
+        path: str = typer.Argument(".", help="Project path to unregister"),
+    ):
+        """Remove all port registrations for a project."""
+        from .commands.ports import run_ports_unregister
+        run_ports_unregister(path)
+
+    @ports_app.command("validate")
+    def ports_validate_cmd():
+        """Scan registry for stale entries (dead paths)."""
+        from .commands.ports import run_ports_validate
+        run_ports_validate()
+
     # --- existing top-level commands ---
     from .commands import discover
     app.command("discover")(discover.discover_cmd)
@@ -516,6 +556,18 @@ else:
         prune_parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
         prune_parser.add_argument("--dry-run", action="store_true", help="Preview without changes")
 
+        # ports
+        ports_parser = subparsers.add_parser("ports", help="Manage project port registry")
+        ports_sub = ports_parser.add_subparsers(dest="ports_command")
+        ports_sub.add_parser("list", help="List registered ports")
+        ports_check = ports_sub.add_parser("check", help="Check ports against registry")
+        ports_check.add_argument("path", nargs="?", default=".", help="Project path")
+        ports_reg = ports_sub.add_parser("register", help="Register ports from .aec.json")
+        ports_reg.add_argument("path", nargs="?", default=".", help="Project path")
+        ports_unreg = ports_sub.add_parser("unregister", help="Unregister project ports")
+        ports_unreg.add_argument("path", nargs="?", default=".", help="Project path")
+        ports_sub.add_parser("validate", help="Validate registry entries")
+
         # discover
         discover_parser = subparsers.add_parser("discover", help="Discover repos from Raycast scripts")
         discover_parser.add_argument("--dry-run", action="store_true", help="Preview")
@@ -703,6 +755,24 @@ else:
         elif args.command == "doctor":
             from .commands.doctor import run_doctor
             run_doctor()
+
+        elif args.command == "ports":
+            from .commands.ports import (
+                run_ports_list, run_ports_check, run_ports_register,
+                run_ports_unregister, run_ports_validate,
+            )
+            if args.ports_command == "list":
+                run_ports_list()
+            elif args.ports_command == "check":
+                run_ports_check(args.path)
+            elif args.ports_command == "register":
+                run_ports_register(args.path)
+            elif args.ports_command == "unregister":
+                run_ports_unregister(args.path)
+            elif args.ports_command == "validate":
+                run_ports_validate()
+            else:
+                ports_parser.print_help()
 
         # --- Deprecated command groups ---
         elif args.command == "repo":
