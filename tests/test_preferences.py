@@ -196,13 +196,15 @@ class TestGetPendingPrompts:
 
     def test_returns_empty_when_all_answered(self, temp_dir, monkeypatch):
         """Should return empty list when all features have been answered."""
+        from aec.lib.preferences import OPTIONAL_FEATURES
         prefs_file = temp_dir / "preferences.json"
+        all_answered = {
+            key: {"enabled": True, "asked_at": "2026-01-01T00:00:00Z"}
+            for key in OPTIONAL_FEATURES
+        }
         prefs_file.write_text(json.dumps({
-            "schema_version": "1.0",
-            "optional_rules": {
-                "leave-it-better": {"enabled": True, "asked_at": "2026-01-01T00:00:00Z"},
-                "update_check": {"enabled": True, "asked_at": "2026-01-01T00:00:00Z"}
-            }
+            "schema_version": "1.2",
+            "optional_rules": all_answered,
         }))
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
 
@@ -213,13 +215,15 @@ class TestGetPendingPrompts:
 
     def test_skips_disabled_features(self, temp_dir, monkeypatch):
         """Should NOT prompt for features the user has declined (enabled=False)."""
+        from aec.lib.preferences import OPTIONAL_FEATURES
         prefs_file = temp_dir / "preferences.json"
+        all_declined = {
+            key: {"enabled": False, "asked_at": "2026-01-01T00:00:00Z"}
+            for key in OPTIONAL_FEATURES
+        }
         prefs_file.write_text(json.dumps({
-            "schema_version": "1.0",
-            "optional_rules": {
-                "leave-it-better": {"enabled": False, "asked_at": "2026-01-01T00:00:00Z"},
-                "update_check": {"enabled": False, "asked_at": "2026-01-01T00:00:00Z"}
-            }
+            "schema_version": "1.2",
+            "optional_rules": all_declined,
         }))
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
 
@@ -302,13 +306,15 @@ class TestCheckPendingPreferences:
 
     def test_no_prompt_when_all_answered(self, temp_dir, monkeypatch):
         """Should not prompt when all preferences are answered."""
+        from aec.lib.preferences import OPTIONAL_FEATURES
         prefs_file = temp_dir / "preferences.json"
+        all_answered = {
+            key: {"enabled": True, "asked_at": "2026-01-01T00:00:00Z"}
+            for key in OPTIONAL_FEATURES
+        }
         prefs_file.write_text(json.dumps({
-            "schema_version": "1.0",
-            "optional_rules": {
-                "leave-it-better": {"enabled": False, "asked_at": "2026-01-01T00:00:00Z"},
-                "update_check": {"enabled": True, "asked_at": "2026-01-01T00:00:00Z"}
-            }
+            "schema_version": "1.2",
+            "optional_rules": all_answered,
         }))
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
 
