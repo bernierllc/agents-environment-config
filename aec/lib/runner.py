@@ -338,6 +338,96 @@ def apply_retention(config: dict) -> None:
     prune_old_profiles(profiles_dir, keep_days)
 
 
+def write_reports(
+    project_results: dict,
+    timestamp: str,
+    seed: int,
+    execution_order: list,
+) -> Path:
+    """Write test reports and profiles to disk.
+
+    Args:
+        project_results: Dict mapping project paths to result dicts.
+        timestamp: ISO timestamp for this run.
+        seed: Random seed used for ordering.
+        execution_order: List of project names in execution order.
+
+    Returns:
+        Path to the summary.txt file.
+    """
+    from aec.lib.config import AEC_HOME, AEC_PROFILES_DIR, AEC_TESTS_DIR
+    from aec.lib.preferences import get_setting
+    from aec.lib.profiler import save_profile
+    from aec.lib.reports import (
+        count_report_days,
+        create_report_dir,
+        generate_summary,
+        write_suite_output,
+    )
+
+    safe_ts = timestamp.replace(":", "-")
+
+    # Create report directory
+    report_dir = create_report_dir(AEC_TESTS_DIR, safe_ts)
+
+    # Write per-project output files
+    for project_path, result in project_results.items():
+        project_name = result.get("project", Path(project_path).name)
+        # Combine all suite outputs into one file per project
+        combined_output = []
+        for suite_name, suite_result in result.get("suites", {}).items():
+            output = suite_result.get("output", "")
+            if output:
+                combined_output.append(f"=== {suite_name} ===\n{output}\n")
+        if combined_output:
+            write_suite_output(report_dir, project_name, "\n".join(combined_output))
+
+    # Build flat results list for generate_summary
+    flat_results = []
+    all_observations_port = []
+    all_observations_proc = []
+    for project_path, result in project_results.items():
+        project_name = result.get("project", Path(project_path).name)
+        for suite_name, suite_result in result.get("suites", {}).items():
+            flat_results.append({
+                "project": project_name,
+                "suite": suite_name,
+                "status": suite_result.get("status", "unknown"),
+                "duration_seconds": suite_result.get("duration_seconds"),
+                "exit_code": suite_result.get("exit_code"),
+                "skip_reason": suite_result.get("reason"),
+            })
+        for obs in result.get("observations", []):
+            if obs.get("type") == "port":
+                all_observations_port.append(obs)
+            else:
+                all_observations_proc.append(obs)
+
+    retention_mode = get_setting("report_retention_mode") or "auto"
+    report_count = count_report_days(AEC_TESTS_DIR)
+
+    summary_path = generate_summary(
+        report_dir,
+        flat_results,
+        all_observations_port,
+        all_observations_proc,
+        execution_order,
+        seed,
+        retention_mode,
+        report_count,
+    )
+
+    # Save profiles per-project
+    AEC_PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+    for project_path, result in project_results.items():
+        project_name = result.get("project", Path(project_path).name)
+        profiles = result.get("profiles", {})
+        if profiles:
+            save_profile(AEC_PROFILES_DIR, project_name, safe_ts, profiles)
+
+    return summary_path
+
+
 def run_all_projects(global_mode: bool = True) -> dict:
     """Run scheduled test suites across all tracked projects.
 
@@ -348,14 +438,7 @@ def run_all_projects(global_mode: bool = True) -> dict:
         Overall results dict with per-project results.
     """
     from aec.lib.aec_json import load_aec_json
-    from aec.lib.config import AEC_HOME
-    from aec.lib.profiler import save_profile
-    from aec.lib.reports import (
-        create_report_dir,
-        generate_summary,
-        open_report,
-        write_suite_output,
-    )
+    from aec.lib.reports import open_report
     from aec.lib.scheduler_config import (
         load_scheduler_config,
         save_scheduler_config,
@@ -384,6 +467,7 @@ def run_all_projects(global_mode: bool = True) -> dict:
     random.seed(seed)
     random.shuffle(eligible)
 
+    execution_order = [r.path.name for r in eligible]
     project_results = {}
     total_passed = 0
     total_failed = 0
@@ -401,39 +485,10 @@ def run_all_projects(global_mode: bool = True) -> dict:
         else:
             total_skipped += 1
 
-    # Generate reports
-    reports_dir = AEC_HOME / "reports"
-    report_dir = create_report_dir(reports_dir, timestamp.replace(":", "-"))
-
-    for project_path, result in project_results.items():
-        project_name = result.get("project", Path(project_path).name)
-        for suite_name, suite_result in result.get("suites", {}).items():
-            output = suite_result.get("output", "")
-            write_suite_output(report_dir, project_name, suite_name, output)
-
-    overall_results = {
-        "timestamp": timestamp,
-        "seed": seed,
-        "total_projects": len(eligible),
-        "passed": total_passed,
-        "failed": total_failed,
-        "skipped": total_skipped,
-        "projects": project_results,
-    }
-
-    summary_path = generate_summary(report_dir, overall_results)
-
-    # Save profiles
-    profiles_dir = AEC_HOME / "profiles"
-    profiles_dir.mkdir(parents=True, exist_ok=True)
-    all_profiles = {}
-    for project_path, result in project_results.items():
-        profiles = result.get("profiles", {})
-        if profiles:
-            all_profiles[result.get("project", Path(project_path).name)] = profiles
-    if all_profiles:
-        profile_path = profiles_dir / f"{timestamp.replace(':', '-')}.json"
-        save_profile(all_profiles, profile_path)
+    # Write reports and profiles
+    summary_path = write_reports(
+        project_results, timestamp, seed, execution_order,
+    )
 
     # Update scheduler config
     stats = {
@@ -454,8 +509,18 @@ def run_all_projects(global_mode: bool = True) -> dict:
 
         viewer = get_setting("report_viewer")
         if viewer:
-            open_report(summary_path)
+            open_report(summary_path, viewer)
     except Exception:
         pass
 
-    return overall_results
+    return {
+        "timestamp": timestamp,
+        "seed": seed,
+        "execution_order": execution_order,
+        "total_projects": len(eligible),
+        "passed": total_passed,
+        "failed": total_failed,
+        "skipped": total_skipped,
+        "summary_path": str(summary_path),
+        "projects": project_results,
+    }

@@ -6,13 +6,50 @@ from pathlib import Path
 from ..lib.console import Console
 
 
+def _print_results(result: dict) -> None:
+    """Format and print test results to terminal."""
+    project_name = result.get("project", "unknown")
+    Console.subheader(project_name)
+
+    for suite_name, suite_result in result.get("suites", {}).items():
+        status = suite_result.get("status", "unknown")
+        duration = suite_result.get("duration_seconds")
+        dur_str = f"{duration:6.1f}s" if duration is not None else "      "
+
+        if status == "passed":
+            Console.success(f"{suite_name:<25} {dur_str}   passed")
+        elif status == "skipped":
+            reason = suite_result.get("reason", "")
+            Console.info(f"{suite_name:<25}          skipped ({reason})")
+        else:
+            exit_code = suite_result.get("exit_code", 1)
+            Console.error(f"{suite_name:<25} {dur_str}   FAILED (exit {exit_code})")
+
+    observations = result.get("observations", [])
+    if observations:
+        Console.print()
+        for obs in observations:
+            Console.warning(obs.get("message", str(obs)))
+
+
 def run_test_run(global_flag: bool = False) -> None:
     """Run test suites for one or all tracked projects."""
-    from ..lib.runner import run_single_project, run_all_projects
+    from ..lib.runner import run_single_project, run_all_projects, write_reports
+    from datetime import datetime, timezone
 
     if global_flag:
         Console.info("Running tests for all tracked projects...")
-        exit_code = run_all_projects(global_mode=True)
+        results = run_all_projects(global_mode=True)
+        Console.print()
+        for project_path, result in results.get("projects", {}).items():
+            _print_results(result)
+        Console.print()
+        passed = results.get("passed", 0)
+        failed = results.get("failed", 0)
+        skipped = results.get("skipped", 0)
+        Console.print(f"Projects: {passed} passed, {failed} failed, {skipped} skipped")
+        if results.get("summary_path"):
+            Console.info(f"Report: {results['summary_path']}")
     else:
         from ..lib.scope import find_tracked_repo
 
@@ -24,12 +61,26 @@ def run_test_run(global_flag: bool = False) -> None:
             )
             return
         Console.info(f"Running tests for {repo.name}...")
-        exit_code = run_single_project(repo, run_all=True)
+        result = run_single_project(repo, run_all=True)
 
-    if exit_code == 0:
-        Console.success("All tests passed.")
-    else:
-        Console.error(f"Some tests failed (exit code {exit_code}).")
+        # Write reports for local runs too
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        project_name = result.get("project", repo.name)
+        summary_path = write_reports(
+            {str(repo): result}, timestamp, seed=0,
+            execution_order=[project_name],
+        )
+
+        Console.print()
+        _print_results(result)
+        Console.print()
+
+        statuses = [s.get("status") for s in result.get("suites", {}).values()]
+        passed = sum(1 for s in statuses if s == "passed")
+        failed = sum(1 for s in statuses if s == "failed")
+        skipped = sum(1 for s in statuses if s == "skipped")
+        Console.print(f"Suites: {passed} passed, {failed} failed, {skipped} skipped")
+        Console.info(f"Report: {summary_path}")
 
 
 def run_test_schedule() -> None:

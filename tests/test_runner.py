@@ -426,6 +426,12 @@ def _patch_run_all_dependencies(monkeypatch):
         lambda path: {"version": "1.0.0", "ports": {}},
     )
     monkeypatch.setattr(
+        "aec.lib.config.AEC_TESTS_DIR", Path("/tmp/aec-tests"),
+    )
+    monkeypatch.setattr(
+        "aec.lib.config.AEC_PROFILES_DIR", Path("/tmp/aec-profiles"),
+    )
+    monkeypatch.setattr(
         "aec.lib.profiler.take_snapshot",
         lambda: {"ports": [], "processes": [], "timestamp": ""},
     )
@@ -439,7 +445,7 @@ def _patch_run_all_dependencies(monkeypatch):
         },
     )
     monkeypatch.setattr(
-        "aec.lib.profiler.save_profile", lambda data, path: None
+        "aec.lib.profiler.save_profile", lambda profiles_dir, project_name, timestamp, profile_data: None
     )
     monkeypatch.setattr(
         "aec.lib.reports.create_report_dir",
@@ -453,7 +459,8 @@ def _patch_run_all_dependencies(monkeypatch):
         "aec.lib.reports.generate_summary",
         lambda *args: Path("/tmp/reports/summary.json"),
     )
-    monkeypatch.setattr("aec.lib.reports.open_report", lambda path: None)
+    monkeypatch.setattr("aec.lib.reports.open_report", lambda path, viewer=None: None)
+    monkeypatch.setattr("aec.lib.reports.count_report_days", lambda base: 0)
     monkeypatch.setattr("aec.lib.preferences.get_setting", lambda key: None)
 
     fake_result = subprocess.CompletedProcess(
