@@ -138,24 +138,24 @@ def discover_available_skills(source_dir: Path) -> dict:
     Prefers skills-manifest.json if present. Falls back to scanning directories.
     Returns dict of skill_name -> {version, description, author, path}.
     """
+    # Load manifest entries if available (used as base, not as gate)
     manifest_file = source_dir / "skills-manifest.json"
+    manifest_skills = {}
     if manifest_file.exists():
         try:
             data = json.loads(manifest_file.read_text(encoding="utf-8"))
             if isinstance(data, dict) and "skills" in data:
-                skills = data["skills"]
-                # Ensure all entries have a 'path' field by scanning directories
-                needs_path = [k for k, v in skills.items() if "path" not in v]
+                manifest_skills = data["skills"]
+                needs_path = [k for k, v in manifest_skills.items() if "path" not in v]
                 if needs_path:
                     scanned = _scan_skill_paths(source_dir)
                     for name in needs_path:
-                        skills[name]["path"] = scanned.get(name, name)
-                return skills
+                        manifest_skills[name]["path"] = scanned.get(name, name)
         except (json.JSONDecodeError, OSError):
             pass
 
-    # Fallback: scan directories
-    skills = {}
+    # Scan directories for skills not in the manifest (catches newly added skills)
+    skills = dict(manifest_skills)
     for item in sorted(source_dir.iterdir()):
         if not item.is_dir() or item.name.startswith("."):
             continue
@@ -163,12 +163,13 @@ def discover_available_skills(source_dir: Path) -> dict:
         # Check if this directory itself is a skill
         fm = parse_skill_frontmatter(item)
         if fm:
-            skills[fm["name"]] = {
-                "version": fm.get("version", "0.0.0"),
-                "description": fm.get("description", ""),
-                "author": fm.get("author", ""),
-                "path": item.name,
-            }
+            if fm["name"] not in skills:
+                skills[fm["name"]] = {
+                    "version": fm.get("version", "0.0.0"),
+                    "description": fm.get("description", ""),
+                    "author": fm.get("author", ""),
+                    "path": item.name,
+                }
             continue
 
         # Check for nested skills (e.g., document-skills/docx/)
@@ -176,7 +177,7 @@ def discover_available_skills(source_dir: Path) -> dict:
             if not sub.is_dir() or sub.name.startswith("."):
                 continue
             sub_fm = parse_skill_frontmatter(sub)
-            if sub_fm:
+            if sub_fm and sub_fm["name"] not in skills:
                 skills[sub_fm["name"]] = {
                     "version": sub_fm.get("version", "0.0.0"),
                     "description": sub_fm.get("description", ""),

@@ -1,12 +1,14 @@
 """aec install <type> <name> -- install a skill, rule, or agent."""
 
+import json
 import shutil
 from pathlib import Path
 
 from ..lib import Console
 from ..lib.config import get_repo_root
+from ..lib.hooks import get_verification_playwright_hook
 from ..lib.manifest_v2 import load_manifest, save_manifest, record_install
-from ..lib.scope import resolve_scope, ScopeError
+from ..lib.scope import resolve_scope, Scope, ScopeError
 from ..lib.sources import discover_available, get_source_dirs
 from ..lib.skills_manifest import hash_skill_directory
 
@@ -96,3 +98,134 @@ def run_install(
     save_manifest(manifest, manifest_file)
 
     Console.success(f"Installed {name} v{item_info.get('version', '0.0.0')}")
+
+    # Skill-specific post-install steps
+    if item_type == "skill" and name == "playwright-test-generator":
+        _post_install_playwright_pipeline(name, scope, yes=yes)
+
+
+def _post_install_playwright_pipeline(name: str, scope: Scope, yes: bool = False) -> None:
+    """Post-install for playwright-test-generator: copy scripts, write hook, create manifests."""
+    if scope.is_global:
+        return
+
+    repo_path = scope.repo_path
+    if repo_path is None:
+        return
+
+    verification_dir = repo_path / "docs" / "verification"
+    if not verification_dir.exists():
+        Console.info("No docs/verification/ directory found — skipping pipeline setup.")
+        return
+
+    if not yes:
+        try:
+            resp = input(
+                "This project has verification docs. "
+                "Copy pipeline scripts to scripts/verification-playwright/? [y/N]: "
+            ).strip().lower()
+        except EOFError:
+            resp = "n"
+        if resp != "y":
+            Console.info("Skipped pipeline scripts.")
+            return
+
+    # Copy scripts, excluding dev artifacts
+    skill_scripts = scope.skills_dir / name / "scripts"
+    skip_names = {"__tests__", "node_modules", "package.json", "package-lock.json", ".gitignore"}
+
+    pipeline_dst = repo_path / "scripts" / "verification-playwright"
+    if skill_scripts.is_dir():
+        pipeline_dst.mkdir(parents=True, exist_ok=True)
+        for item in skill_scripts.iterdir():
+            if item.name in skip_names:
+                continue
+            dst_item = pipeline_dst / item.name
+            if item.is_dir():
+                if dst_item.exists():
+                    shutil.rmtree(dst_item)
+                shutil.copytree(item, dst_item, ignore=shutil.ignore_patterns(".*"))
+            else:
+                shutil.copy2(item, dst_item)
+        # Minimal package.json for ES module support
+        runtime_pkg = pipeline_dst / "package.json"
+        if not runtime_pkg.exists():
+            runtime_pkg.write_text('{"type": "module"}\n')
+        Console.success(f"Copied pipeline scripts to {pipeline_dst}")
+    else:
+        Console.warning("Skill has no scripts/ directory to copy.")
+        return
+
+    # Create default manifest files
+    manifest_dir = repo_path / "tests" / "verification-playwright" / "manifest"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+
+    config_path = manifest_dir / "config.json"
+    if not config_path.exists():
+        default_config = {
+            "version": "1.0",
+            "dry_run": True,
+            "tiers": {
+                "gate": {
+                    "trigger": "pre-commit", "branches": "*",
+                    "browsers": ["chromium"], "depths": ["smoke", "standard"],
+                    "maxTests": 30, "timeoutMs": 60000,
+                },
+                "thorough": {
+                    "trigger": "pre-push", "branches": ["staging", "develop"],
+                    "browsers": ["chromium", "firefox", "webkit"],
+                    "depths": ["smoke", "standard", "deep"],
+                    "maxTests": 100, "timeoutMs": 300000,
+                },
+                "full": {
+                    "trigger": "pre-push", "branches": ["main", "production"],
+                    "browsers": ["chromium", "firefox", "webkit", "Mobile Chrome", "Mobile Safari"],
+                    "depths": ["smoke", "standard", "deep"],
+                    "maxTests": None, "timeoutMs": None,
+                },
+            },
+            "test_isolation": {
+                "strategy": "serial", "cleanup": "after-each",
+                "notes": "Default. Configure per project needs.",
+            },
+        }
+        config_path.write_text(json.dumps(default_config, indent=2) + "\n")
+
+    index_path = manifest_dir / "import-index.json"
+    if not index_path.exists():
+        index_path.write_text(json.dumps({"version": "1.0", "entries": {}}, indent=2) + "\n")
+
+    # Write PostToolUse hook to .claude/settings.json
+    settings_path = repo_path / ".claude" / "settings.json"
+    hook_config = get_verification_playwright_hook()
+
+    if settings_path.exists():
+        try:
+            existing = json.loads(settings_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            existing = {}
+    else:
+        existing = {}
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+
+    existing_hooks = existing.setdefault("hooks", {})
+    existing_post = existing_hooks.setdefault("PostToolUse", [])
+    new_hook_entry = hook_config["hooks"]["PostToolUse"][0]
+
+    # Avoid duplicates
+    new_cmd = new_hook_entry["hooks"][0]["command"]
+    already_present = any(
+        h.get("hooks", [{}])[0].get("command") == new_cmd
+        for h in existing_post
+        if isinstance(h, dict)
+    )
+    if not already_present:
+        existing_post.append(new_hook_entry)
+
+    settings_path.write_text(json.dumps(existing, indent=2) + "\n")
+    Console.success(f"Wrote PostToolUse hook to {settings_path}")
+
+    Console.print(f"\nPipeline setup summary:")
+    Console.print(f"  Scripts: {pipeline_dst}")
+    Console.print(f"  Hook:    {settings_path}")
+    Console.print(f"  Trigger: edits to docs/verification/ will auto-sync Playwright tests")

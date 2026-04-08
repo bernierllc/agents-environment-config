@@ -227,3 +227,31 @@ def write_hook_config(
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(json.dumps(new_config, indent=2) + "\n")
     return "created"
+
+
+# --- Verification-Playwright pipeline hook ---
+
+VERIFICATION_PLAYWRIGHT_HOOK: Dict[str, Any] = {
+    "matcher": "Edit|Write",
+    "hooks": [{
+        "type": "command",
+        "command": (
+            'if echo "$CLAUDE_FILE_PATH" | grep -q "docs/verification/"; '
+            'then node scripts/verification-playwright/sync-tests.js '
+            '"$CLAUDE_FILE_PATH" 2>&1 | tail -5; fi'
+        ),
+    }],
+}
+
+
+def get_verification_playwright_hook() -> Dict[str, Any]:
+    """Return a PostToolUse hook config for the verification-playwright pipeline.
+
+    The hook triggers sync-tests.js when any file in docs/verification/ is edited.
+    Ready to be merged into .claude/settings.json's PostToolUse array.
+    """
+    return {
+        "hooks": {
+            "PostToolUse": [VERIFICATION_PLAYWRIGHT_HOOK],
+        },
+    }
