@@ -151,6 +151,34 @@ try:
 except ImportError:
     pass
 
+# Phase 2: Test runner
+try:
+    from .prerequisites import check_prerequisite, check_prerequisites, PREREQUISITE_CHECKS
+except ImportError:
+    pass
+try:
+    from .profiler import take_snapshot, diff_snapshots, save_profile, load_profiles
+except ImportError:
+    pass
+try:
+    from .reports import generate_report, save_report, load_report
+except ImportError:
+    pass
+try:
+    from .scheduler_config import (
+        load_scheduler_config,
+        save_scheduler_config,
+        create_default_config,
+        get_schedule_time,
+        is_schedule_enabled,
+    )
+except ImportError:
+    pass
+try:
+    from .runner import run_single_project, run_all_projects
+except ImportError:
+    pass
+
 # SUPPORTED_AGENTS is lazy-loaded via config.__getattr__
 # Import it explicitly for backwards compatibility
 SUPPORTED_AGENTS = get_supported_agents()

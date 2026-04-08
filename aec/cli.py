@@ -237,6 +237,58 @@ if HAS_TYPER:
         from .commands.ports import run_ports_validate
         run_ports_validate()
 
+    # --- test subcommands ---
+    test_app = typer.Typer(help="Manage test suites, scheduling, and reports")
+    app.add_typer(test_app, name="test")
+
+    @test_app.command("run")
+    def test_run_cmd(
+        global_flag: bool = typer.Option(False, "--global", "-g", help="Run all tracked projects"),
+    ):
+        """Run test suites."""
+        from .commands.test_cmd import run_test_run
+        run_test_run(global_flag=global_flag)
+
+    @test_app.command("schedule")
+    def test_schedule_cmd():
+        """Set up or update the daily test schedule."""
+        from .commands.test_cmd import run_test_schedule
+        run_test_schedule()
+
+    @test_app.command("status")
+    def test_status_cmd(
+        global_flag: bool = typer.Option(False, "--global", "-g", help="Show global schedule status"),
+    ):
+        """Show test configuration or schedule status."""
+        from .commands.test_cmd import run_test_status
+        run_test_status(global_flag=global_flag)
+
+    @test_app.command("enable")
+    def test_enable_cmd():
+        """Enable scheduled test runs."""
+        from .commands.test_cmd import run_test_enable
+        run_test_enable()
+
+    @test_app.command("disable")
+    def test_disable_cmd():
+        """Disable scheduled test runs."""
+        from .commands.test_cmd import run_test_disable
+        run_test_disable()
+
+    @test_app.command("report")
+    def test_report_cmd(
+        global_flag: bool = typer.Option(False, "--global", "-g", help="Show global report"),
+    ):
+        """View test reports."""
+        from .commands.test_cmd import run_test_report
+        run_test_report(global_flag=global_flag)
+
+    @test_app.command("detect")
+    def test_detect_cmd():
+        """Re-detect test frameworks for current project."""
+        from .commands.test_cmd import run_test_detect
+        run_test_detect()
+
     # --- existing top-level commands ---
     from .commands import discover
     app.command("discover")(discover.discover_cmd)
@@ -568,6 +620,20 @@ else:
         ports_unreg.add_argument("path", nargs="?", default=".", help="Project path")
         ports_sub.add_parser("validate", help="Validate registry entries")
 
+        # test
+        test_parser = subparsers.add_parser("test", help="Manage test suites, scheduling, and reports")
+        test_sub = test_parser.add_subparsers(dest="test_command")
+        test_run = test_sub.add_parser("run", help="Run test suites")
+        test_run.add_argument("-g", "--global", dest="global_flag", action="store_true", help="Run all tracked projects")
+        test_sub.add_parser("schedule", help="Set up daily test schedule")
+        test_status = test_sub.add_parser("status", help="Show test config or schedule status")
+        test_status.add_argument("-g", "--global", dest="global_flag", action="store_true", help="Show global status")
+        test_sub.add_parser("enable", help="Enable scheduled test runs")
+        test_sub.add_parser("disable", help="Disable scheduled test runs")
+        test_report = test_sub.add_parser("report", help="View test reports")
+        test_report.add_argument("-g", "--global", dest="global_flag", action="store_true", help="Show global report")
+        test_sub.add_parser("detect", help="Re-detect test frameworks")
+
         # discover
         discover_parser = subparsers.add_parser("discover", help="Discover repos from Raycast scripts")
         discover_parser.add_argument("--dry-run", action="store_true", help="Preview")
@@ -773,6 +839,29 @@ else:
                 run_ports_validate()
             else:
                 ports_parser.print_help()
+
+        elif args.command == "test":
+            from .commands.test_cmd import (
+                run_test_run, run_test_schedule, run_test_status,
+                run_test_enable, run_test_disable, run_test_report,
+                run_test_detect,
+            )
+            if args.test_command == "run":
+                run_test_run(global_flag=args.global_flag)
+            elif args.test_command == "schedule":
+                run_test_schedule()
+            elif args.test_command == "status":
+                run_test_status(global_flag=args.global_flag)
+            elif args.test_command == "enable":
+                run_test_enable()
+            elif args.test_command == "disable":
+                run_test_disable()
+            elif args.test_command == "report":
+                run_test_report(global_flag=args.global_flag)
+            elif args.test_command == "detect":
+                run_test_detect()
+            else:
+                test_parser.print_help()
 
         # --- Deprecated command groups ---
         elif args.command == "repo":
