@@ -225,7 +225,61 @@ def _post_install_playwright_pipeline(name: str, scope: Scope, yes: bool = False
     settings_path.write_text(json.dumps(existing, indent=2) + "\n")
     Console.success(f"Wrote PostToolUse hook to {settings_path}")
 
+    # Copy hook templates and wire into git hooks
+    skill_templates = scope.skills_dir / name / "templates" / "hooks"
+    hooks_dst = pipeline_dst / "hooks"
+    if skill_templates.is_dir():
+        hooks_dst.mkdir(parents=True, exist_ok=True)
+        for hook_file in skill_templates.iterdir():
+            dst_hook = hooks_dst / hook_file.name
+            shutil.copy2(hook_file, dst_hook)
+            dst_hook.chmod(0o755)
+
+        # Wire into project's hook framework
+        _wire_git_hooks(repo_path)
+        Console.success(f"Installed git hooks (pre-commit, pre-push)")
+
     Console.print(f"\nPipeline setup summary:")
     Console.print(f"  Scripts: {pipeline_dst}")
     Console.print(f"  Hook:    {settings_path}")
+    Console.print(f"  Git:     pre-commit (gate tier), pre-push (thorough/full tiers)")
     Console.print(f"  Trigger: edits to docs/verification/ will auto-sync Playwright tests")
+
+
+_HOOK_SOURCE_LINE = "source scripts/verification-playwright/hooks/{hook}.sh 2>/dev/null || true"
+_HOOK_BEGIN = "# BEGIN verification-playwright"
+_HOOK_END = "# END verification-playwright"
+
+
+def _wire_git_hooks(repo_path: Path) -> None:
+    """Wire verification-playwright into the project's git hook framework."""
+    for hook_name in ("pre-commit", "pre-push"):
+        source_line = _HOOK_SOURCE_LINE.format(hook=hook_name)
+        block = f"{_HOOK_BEGIN}\n{source_line}\n{_HOOK_END}\n"
+
+        # Husky
+        husky_hook = repo_path / ".husky" / hook_name
+        if husky_hook.exists():
+            content = husky_hook.read_text()
+            if _HOOK_BEGIN not in content:
+                husky_hook.write_text(content.rstrip() + "\n\n" + block)
+            continue
+
+        # Lefthook
+        for lefthook_file in (".lefthookrc.yml", ".lefthookrc.yaml", "lefthook.yml"):
+            lefthook_path = repo_path / lefthook_file
+            if lefthook_path.exists():
+                # Don't auto-edit YAML — just inform
+                Console.info(f"  Add verification-playwright to {lefthook_file} manually")
+                break
+        else:
+            # Raw .git/hooks
+            git_hook = repo_path / ".git" / "hooks" / hook_name
+            if git_hook.exists():
+                content = git_hook.read_text()
+                if _HOOK_BEGIN not in content:
+                    git_hook.write_text(content.rstrip() + "\n\n" + block)
+            else:
+                git_hook.parent.mkdir(parents=True, exist_ok=True)
+                git_hook.write_text(f"#!/usr/bin/env bash\n\n{block}")
+                git_hook.chmod(0o755)
