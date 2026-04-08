@@ -52,6 +52,12 @@ AEC_PREFERENCES = AEC_HOME / "preferences.json"
 INSTALLED_MANIFEST_V2 = AEC_HOME / "installed-manifest.json"
 AEC_PORTS_REGISTRY = AEC_HOME / "ports-registry.json"
 
+# Phase 2: Test runner paths
+AEC_TESTS_DIR = AEC_HOME / "tests"
+AEC_PROFILES_DIR = AEC_HOME / "profiles"
+AEC_SCHEDULER_CONFIG = AEC_HOME / "scheduler-config.json"
+AEC_RUNNER_SCRIPT = AEC_HOME / "runner.py"
+
 # Agent tools directory (shared across agents)
 AGENT_TOOLS_DIR = HOME / ".agent-tools"
 
