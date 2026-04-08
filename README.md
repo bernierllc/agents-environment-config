@@ -63,7 +63,7 @@ This creates:
 1. `~/.agent-tools/` - Centralized directory for rules, agents, skills, and commands
 2. Agent-specific symlinks for Claude and Cursor
 3. User settings (projects directory, plans directory, completion behavior)
-4. Quality infrastructure prompts (port registry, scheduled tests, report viewer preferences)
+4. Quality infrastructure prompts (port registry, scheduled tests, report viewer, profiling preferences)
 5. Optionally walks your projects directory to set up each project
 
 ### Directory Structure After Setup
@@ -285,7 +285,7 @@ Which should be included in .aec.json test suites?
 
 ### Scheduled Whitelist
 
-The `test.scheduled` array in `.aec.json` controls which suites run in automated scheduled runs (wired in Phase 2/3). E2E suites that require browsers or heavy infrastructure can exist in `.aec.json` for documentation without being included in unattended runs.
+The `test.scheduled` array in `.aec.json` controls which suites run in automated scheduled runs. E2E suites that require browsers or heavy infrastructure can exist in `.aec.json` for documentation without being included in unattended runs. See [Test Runner](#test-runner) below for how scheduled runs work.
 
 ### Extensibility
 
@@ -293,9 +293,233 @@ Adding a new framework requires only adding a dict entry to `TEST_FRAMEWORK_HOOK
 
 ---
 
+## Test Runner
+
+The test runner executes test suites across your tracked projects, profiles resource usage, detects port and process leaks, and generates structured reports. It builds on the `.aec.json` test configuration from [Test Framework Detection](#test-framework-detection) above.
+
+### `aec test` Commands
+
+| Command | Scope | Description |
+|---------|-------|-------------|
+| `aec test run` | local | Run all suites from the current project's `.aec.json` |
+| `aec test run -g` | global | Run scheduled suites across all tracked projects |
+| `aec test schedule` | global | Interactive setup: pick run time, configure retention, register with OS scheduler |
+| `aec test status` | local | Show this project's test config and last results |
+| `aec test status -g` | global | Show schedule config, last run, next run |
+| `aec test enable` | global | Re-enable scheduled runs (re-registers with OS scheduler) |
+| `aec test disable` | global | Disable scheduled runs (removes OS scheduler registration, keeps config) |
+| `aec test report` | local | Show this project's latest test results |
+| `aec test report -g` | global | Open the full cross-project summary |
+| `aec test detect` | local | Re-run test framework detection for the current project, update `.aec.json` |
+
+**Local vs global scope:** `aec test run` (no `-g`) runs ALL suites in the current project, not just the `scheduled` ones, since the user is explicitly requesting a run. `aec test run -g` runs only the suites listed in `test.scheduled` across every tracked project.
+
+### Examples
+
+```bash
+# Run all test suites for the current project
+aec test run
+
+# Run scheduled suites across all tracked projects
+aec test run -g
+
+# Set up automated daily test runs
+aec test schedule
+
+# Check this project's test configuration
+aec test status
+
+# Check global schedule and last run results
+aec test status -g
+
+# View latest results for this project
+aec test report
+
+# View latest cross-project summary
+aec test report -g
+
+# Re-detect test frameworks after adding a new one
+aec test detect
+```
+
+---
+
+## Scheduled Test Runs
+
+Set up automated daily test runs with `aec test schedule`. The interactive flow prompts for:
+
+1. Run time (default 02:00, 24h format)
+2. Report retention settings
+3. Profile retention settings
+
+AEC registers the schedule with your OS-native scheduler:
+
+| OS | Scheduler | Notes |
+|----|-----------|-------|
+| macOS | launchd | Runs missed jobs on wake (handles laptop sleep) |
+| Linux | cron (user crontab) | Missed runs while off are skipped |
+| Windows | Task Scheduler | Supports "wake to run" option |
+
+### What Runs
+
+Only suites listed in `test.scheduled` in each project's `.aec.json`. Projects without scheduled suites are skipped. Project execution order is randomized each run to expose cross-project contamination that deterministic ordering would mask.
+
+### Where Reports Go
+
+Reports are written to `~/.agents-environment-config/tests/{datetime}/`:
+
+```
+~/.agents-environment-config/
+  tests/
+    2026-04-08T02:00:00Z/
+      summary.txt
+      earnlearn_test_output.txt
+      barevents_test_output.txt
+```
+
+### How to View Reports
+
+```bash
+# View latest results for the current project
+aec test report
+
+# View latest cross-project summary
+aec test report -g
+```
+
+If `report_viewer` is configured (see [Report Viewers](#report-viewers)), the summary opens automatically in your preferred viewer after each run.
+
+### Managing the Schedule
+
+```bash
+# Check schedule status
+aec test status -g
+
+# Temporarily disable without losing config
+aec test disable
+
+# Re-enable
+aec test enable
+```
+
+The schedule configuration lives in `~/.agents-environment-config/scheduler-config.json`. You can edit it directly or use `aec test schedule` to reconfigure interactively.
+
+---
+
+## Test Profiling
+
+Every test suite execution is profiled automatically. The runner captures resource snapshots before and after each suite to track performance trends and detect leaks.
+
+### What's Profiled
+
+| Metric | Description |
+|--------|-------------|
+| Duration | Wall-clock time for each suite |
+| Memory | Peak memory usage during execution |
+| Ports | Listening ports before and after (compared against port registry) |
+| Docker containers | Containers started and remaining after cleanup |
+| Process counts | Zombies, stuck I/O, node/test processes before and after |
+
+### Where Profiles Are Stored
+
+Profile data lives at `~/.agents-environment-config/profiles/{project}/`:
+
+```
+~/.agents-environment-config/
+  profiles/
+    earnlearn/
+      2026-04-08T02:00:00Z.json
+      2026-04-07T02:00:00Z.json
+    barevents/
+      2026-04-08T02:00:00Z.json
+```
+
+Profile data has its own retention setting (`profile_retention_days`, default 90 days), separate from test report retention (default 30 days). Profiles stick around longer because they're used for parallelization analysis and trend detection.
+
+### Port Discovery
+
+Port observations happen during every suite execution, regardless of whether the port registry is enabled:
+
+- **Port registry ON:** Unregistered ports that appear during tests are surfaced in the report with a suggestion to register them in `.aec.json`.
+- **Port registry OFF:** Observed ports are cross-referenced across all projects. Overlapping ports are flagged as potential problems for parallel development.
+
+### Process Leak Detection
+
+The runner takes before/after process snapshots for each suite. Only increases are reported -- decreases are just cleanup working correctly. Leaked processes are logged with PID, command, and elapsed time for debugging.
+
+The runner never kills anything. If leaks are detected, you can:
+- Fix cleanup commands in `.aec.json`
+- Run `scripts/cleanup-hung-processes.sh` manually
+- Ignore harmless leaks
+
+---
+
+## Smart Parallelization
+
+By default, projects run sequentially in randomized order. After enough profiling data accumulates, the runner suggests parallel lane groupings.
+
+### How It Works
+
+1. **Sequential first.** The runner profiles each project's resource usage over multiple runs.
+2. **After 3 runs**, the runner analyzes profiles to compute lane groupings where no two projects in the same lane share ports, both use Docker heavily, or would exceed memory limits together.
+3. **Suggestion in report.** The proposed lanes appear in the test summary:
+   ```
+   Suggested lanes based on port/resource analysis:
+     Lane 1: barevents, mbernier.com (no shared ports, low memory)
+     Lane 2: earnlearn, neverhub (no shared ports, both use docker)
+   Enable with: aec config set parallel_enabled true
+   ```
+4. **User opts in.** Parallelization is never automatic:
+   ```bash
+   aec config set parallel_enabled true
+   ```
+5. **Lanes run concurrently.** Projects within the same lane still run sequentially to avoid resource conflicts.
+
+---
+
+## Test Prerequisites
+
+Prerequisites gate test execution. They exist at two levels in `.aec.json`:
+
+### Project-Level Prerequisites
+
+If any project-level prerequisite fails, ALL suites for that project are skipped.
+
+```json
+{
+  "test": {
+    "prerequisites": ["docker"],
+    "suites": { ... }
+  }
+}
+```
+
+### Per-Suite Prerequisites
+
+Suite-level prerequisites are checked individually. A failed prerequisite skips only that suite -- other suites still run.
+
+```json
+{
+  "test": {
+    "suites": {
+      "unit": { "command": "npm run test:unit" },
+      "integration": {
+        "command": "npm run test:integration",
+        "cleanup": "docker compose -f docker-compose.test.yml down",
+        "prerequisites": ["docker"]
+      }
+    }
+  }
+}
+```
+
+In this example, `unit` runs regardless of Docker availability, while `integration` is skipped if Docker isn't present. Prerequisites are checked via `shutil.which()` or service-specific checks (e.g., `docker info`).
+
+---
+
 ## Report Viewers
 
-After scheduled test runs (Phase 2/3), AEC can automatically open the report in your preferred viewer. You configure this during `aec install` when opting into scheduled tests, or anytime with `aec config set report_viewer <key>`.
+After scheduled test runs, AEC can automatically open the report in your preferred viewer. You configure this during `aec install` when opting into scheduled tests, or anytime with `aec config set report_viewer <key>`.
 
 ### Available Viewers by OS
 
@@ -350,6 +574,8 @@ These settings are prompted during `aec install` and manageable via `aec config 
 | `report_viewer` | prompted | Key for the report viewer command, or `null` for no auto-open |
 | `report_retention_mode` | prompted | `auto` (prune after N days) or `manual` |
 | `report_retention_days` | `30` | Days to keep reports (only used when `report_retention_mode` is `auto`) |
+| `profile_retention_days` | `90` | Days to keep profile data in `profiles/` (separate from report retention) |
+| `parallel_enabled` | `false` | Enable parallel lane execution (opt in after reviewing suggested lanes) |
 
 ---
 
@@ -393,6 +619,14 @@ pip install -e .
 | `aec files generate` | Regenerate agent instruction files from templates |
 | `aec rules generate` | Generate .agent-rules/ from .cursor/rules/ |
 | `aec rules validate` | Validate rule parity |
+| `aec test run` | Run test suites for the current project |
+| `aec test run -g` | Run scheduled suites across all tracked projects |
+| `aec test schedule` | Interactive setup for automated daily test runs |
+| `aec test status [-g]` | Show test config (local) or schedule status (global) |
+| `aec test enable` | Enable scheduled test runs |
+| `aec test disable` | Disable scheduled test runs |
+| `aec test report [-g]` | View latest test results (local) or full summary (global) |
+| `aec test detect` | Re-run test framework detection, update `.aec.json` |
 
 ### Examples
 
@@ -513,6 +747,10 @@ Most operations are available via both the Python CLI and shell scripts:
 | Generate agent files | `aec files generate` | `scripts/generate-agent-files.py` |
 | Generate .agent-rules/ | `aec rules generate` | `scripts/generate-agent-rules.py` |
 | Validate rule parity | `aec rules validate` | `scripts/validate-rule-parity.py` |
+| Run project tests | `aec test run` | — |
+| Run all scheduled tests | `aec test run -g` | — |
+| Schedule test runs | `aec test schedule` | — |
+| View test reports | `aec test report [-g]` | — |
 | Health check | `aec doctor` | — |
 | Install git hooks | — | `scripts/install-git-hooks.sh` |
 | Cleanup hung processes | — | `scripts/cleanup-hung-processes.sh` (macOS/Linux) or `scripts/cleanup-hung-processes.ps1` (Windows) |
@@ -575,12 +813,21 @@ AEC tracks which projects you've set up and your preferences in `~/.agents-envir
 ├── README.md                    # Explains why this directory exists
 ├── preferences.json             # User settings and optional feature toggles
 ├── ports-registry.json          # Central port registry (all projects)
-└── setup-repo-locations.txt     # Tracks projects set up with agent files
+├── scheduler-config.json        # Test schedule, execution, and retention config
+├── runner.py                    # Generic test runner script
+├── setup-repo-locations.txt     # Tracks projects set up with agent files
+├── tests/                       # Test reports (one directory per run)
+│   └── {datetime}/
+│       ├── summary.txt
+│       └── {project}_test_output.txt
+└── profiles/                    # Profile data (one directory per project)
+    └── {project}/
+        └── {datetime}.json
 ```
 
 `preferences.json` stores:
 - **Settings**: Projects root directory, plans directory name, git tracking preference, plan completion behavior (archive/delete)
-- **Quality infrastructure**: Port registry toggle, scheduled test toggle, report viewer, retention settings
+- **Quality infrastructure**: Port registry toggle, scheduled test toggle, report viewer, retention settings, profile retention, parallelization
 - **Optional rules**: Feature toggles like "Leave It Better"
 
 This directory enables:
