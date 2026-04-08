@@ -197,6 +197,21 @@ def prune_stale(dry_run: bool = False) -> List[TrackedRepo]:
     if pruned and not dry_run:
         AEC_SETUP_LOG.write_text("\n".join(keep) + "\n" if keep else "")
 
+        # Also free ports for pruned projects
+        try:
+            from .ports import load_registry, save_registry, unregister_project_ports
+            from .config import AEC_PORTS_REGISTRY
+            registry = load_registry(AEC_PORTS_REGISTRY)
+            any_freed = False
+            for repo in pruned:
+                freed = unregister_project_ports(registry, str(repo.path))
+                if freed:
+                    any_freed = True
+            if any_freed:
+                save_registry(registry, AEC_PORTS_REGISTRY)
+        except ImportError:
+            pass  # ports module not yet available
+
     return pruned
 
 

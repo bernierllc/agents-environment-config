@@ -65,6 +65,18 @@ Add project-specific testing notes here:
 - Secrets management approach
 - Configuration files location
 
+## Port Registry
+
+This project's ports are registered with AEC. Before assigning new ports,
+check `aec ports list` to see all registered ports and avoid conflicts.
+
+To register new ports:
+1. Add them to `.aec.json` in the `ports` section
+2. Run `aec ports register` to register them centrally
+
+Port assignments use first-come-first-served. See `.aec.json` for this
+project's current port assignments.
+
 ## Documentation
 
 - Where docs live

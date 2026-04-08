@@ -30,6 +30,22 @@ OPTIONAL_FEATURES: Dict[str, Dict[str, Any]] = {
         ),
         "default": True,
     },
+    "port_registry_enabled": {
+        "description": "Port Registry",
+        "prompt": (
+            "Enable the port registry? AEC will track port assignments across\n"
+            "your projects to prevent collisions. (Y/n): "
+        ),
+        "default": True,
+    },
+    "scheduled_tests_enabled": {
+        "description": "Scheduled Test Runs",
+        "prompt": (
+            "Enable scheduled test runs? AEC can run your test suites on a\n"
+            "schedule and generate reports. (Y/n): "
+        ),
+        "default": False,
+    },
 }
 
 

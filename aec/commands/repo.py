@@ -601,6 +601,296 @@ def _setup_lint_hooks(project_dir: Path, batch: bool = False) -> None:
             Console.print(json.dumps(config, indent=2))
 
 
+def _create_or_update_aec_json(
+    project_dir: Path,
+    dry_run: bool = False,
+) -> dict:
+    """Create or load .aec.json for the project.
+
+    Args:
+        project_dir: Path to the project root.
+        dry_run: If True, report what would happen without making changes.
+
+    Returns:
+        The loaded or created aec_json data dict.
+    """
+    from ..lib.aec_json import (
+        aec_json_exists,
+        load_aec_json,
+        create_skeleton,
+    )
+
+    with Console.section("Project configuration (.aec.json)"):
+        if aec_json_exists(project_dir):
+            aec_data = load_aec_json(project_dir)
+            Console.info("Found existing .aec.json")
+        else:
+            aec_data = create_skeleton(project_dir.name)
+            if dry_run:
+                Console.info("Would create .aec.json")
+            else:
+                Console.success("Created .aec.json")
+
+    return aec_data
+
+
+def _detect_and_prompt_test_suites(
+    project_dir: Path,
+    aec_data: dict,
+    dry_run: bool = False,
+    batch_mode: bool = False,
+) -> dict:
+    """Detect test frameworks and scripts, optionally prompt user to select.
+
+    Args:
+        project_dir: Path to the project root.
+        aec_data: Current .aec.json data.
+        dry_run: If True, report what would happen without making changes.
+        batch_mode: If True, use all detected as defaults (no prompts).
+
+    Returns:
+        Updated aec_data dict.
+    """
+    from ..lib.test_detection import detect_test_frameworks, scan_test_scripts
+    from ..lib.aec_json import update_test_section
+
+    with Console.section("Test suite detection"):
+        frameworks = detect_test_frameworks(project_dir)
+        scripts = scan_test_scripts(project_dir)
+
+        if not frameworks and not scripts:
+            Console.info("No test frameworks or scripts detected")
+            return aec_data
+
+        # Display findings
+        if frameworks:
+            Console.subheader("Detected test frameworks:")
+            for fw in frameworks:
+                Console.success(f"{fw['display_name']} ({fw['detected_by']})")
+
+        if scripts:
+            Console.subheader("Found test scripts:")
+            for script in scripts:
+                Console.print(f"  \u2022 {script['name']} \u2192 {script['command']}")
+
+        # Build candidate suites from scripts (these are the actionable items)
+        candidates = [
+            {"name": s["name"], "command": s["command"], "source": s["source"]}
+            for s in scripts
+        ]
+
+        # In batch mode or dry_run, use all candidates
+        if batch_mode or dry_run:
+            selected = candidates
+            if dry_run and candidates:
+                Console.info(f"Would add {len(candidates)} test suite(s) to .aec.json")
+        elif candidates:
+            # Interactive selection
+            Console.print()
+            Console.print("Which should be included in .aec.json test suites?")
+            for i, c in enumerate(candidates, 1):
+                Console.print(f"  {i}) {c['name']} \u2192 {c['command']}")
+            Console.print(f"  Type 'all' for all, 'none' to skip")
+            Console.print()
+
+            try:
+                choice = input("Selection (comma-separated numbers, 'all', or 'none'): ").strip().lower()
+            except EOFError:
+                choice = "all"
+
+            if choice == "none":
+                selected = []
+            elif choice == "all":
+                selected = candidates
+            else:
+                indices = []
+                for part in choice.split(","):
+                    try:
+                        idx = int(part.strip()) - 1
+                        if 0 <= idx < len(candidates):
+                            indices.append(idx)
+                    except ValueError:
+                        pass
+                selected = [candidates[i] for i in indices]
+        else:
+            selected = []
+
+        if selected:
+            # Convert list of candidates to suites dict keyed by name
+            suites_dict = {
+                s["name"]: {"command": s["command"], "cleanup": None}
+                for s in selected
+            }
+            aec_data = update_test_section(aec_data, suites=suites_dict)
+            if not dry_run:
+                Console.success(f"Added {len(selected)} test suite(s)")
+
+    return aec_data
+
+
+def _register_ports(
+    project_dir: Path,
+    aec_data: dict,
+    dry_run: bool = False,
+) -> None:
+    """Register project ports in the central registry if enabled.
+
+    Args:
+        project_dir: Path to the project root.
+        aec_data: Current .aec.json data.
+        dry_run: If True, report what would happen without making changes.
+    """
+    from ..lib.preferences import get_preference
+    from ..lib.ports import load_registry, save_registry, register_port, check_conflicts
+    from ..lib.config import AEC_PORTS_REGISTRY
+
+    port_enabled = get_preference("port_registry_enabled")
+    if not port_enabled:
+        return
+
+    ports = aec_data.get("ports", {})
+    if not ports:
+        return
+
+    with Console.section("Port registration"):
+        if dry_run:
+            Console.info(f"Would register {len(ports)} port(s)")
+            return
+
+        registry = load_registry(AEC_PORTS_REGISTRY)
+        project_path = str(project_dir.resolve())
+
+        # Check for conflicts first
+        conflicts = check_conflicts(registry, ports, project_path)
+        for conflict in conflicts:
+            Console.warning(
+                f"Port {conflict['port']} ({conflict['key']}) conflicts with "
+                f"{conflict['existing_project']}"
+            )
+
+        # Register non-conflicting ports
+        conflict_ports = {c["port"] for c in conflicts}
+        project_name = project_dir.name
+        registered = 0
+        for key_name, spec in ports.items():
+            port_num = spec.get("port") if isinstance(spec, dict) else spec
+            if port_num and port_num not in conflict_ports:
+                result = register_port(
+                    registry, port_num, project_name, project_path, key_name,
+                    protocol=spec.get("protocol", "") if isinstance(spec, dict) else "",
+                    description=spec.get("description", "") if isinstance(spec, dict) else "",
+                )
+                if result == "registered":
+                    registered += 1
+
+        if registered:
+            save_registry(registry, AEC_PORTS_REGISTRY)
+            Console.success(f"Registered {registered} port(s)")
+
+
+def _sync_installed_section(aec_data: dict) -> dict:
+    """Sync the installed section from the manifest into aec_data.
+
+    Args:
+        aec_data: Current .aec.json data.
+
+    Returns:
+        Updated aec_data dict.
+    """
+    from ..lib.aec_json import update_installed_section
+
+    try:
+        from ..lib.skills_manifest import load_installed_manifest
+        from ..lib.config import AGENT_TOOLS_DIR
+        manifest_path = AGENT_TOOLS_DIR / "installed-manifest.json"
+        manifest = load_installed_manifest(manifest_path)
+    except (ImportError, OSError, ValueError):
+        return aec_data
+
+    if not manifest:
+        return aec_data
+
+    installed = {
+        "skills": manifest.get("skills", {}),
+        "rules": manifest.get("rules", {}),
+        "agents": manifest.get("agents", {}),
+    }
+    aec_data = update_installed_section(aec_data, installed)
+    return aec_data
+
+
+def _manage_aec_json_gitignore_step(
+    project_dir: Path,
+    dry_run: bool = False,
+) -> None:
+    """Add or remove .aec.json from .gitignore based on settings.
+
+    Args:
+        project_dir: Path to the project root.
+        dry_run: If True, report what would happen without making changes.
+    """
+    from ..lib.preferences import get_setting
+    from ..lib.aec_json import manage_aec_json_gitignore
+
+    should_ignore = get_setting("aec_json_gitignored")
+    if should_ignore is None:
+        should_ignore = False  # Default: .aec.json is committed to git
+
+    if dry_run:
+        action = "gitignore" if should_ignore else "track"
+        Console.info(f"Would {action} .aec.json")
+        return
+
+    manage_aec_json_gitignore(project_dir, should_ignore)
+
+
+def _inject_port_registry_agentinfo(
+    project_dir: Path,
+    dry_run: bool = False,
+) -> None:
+    """Append Port Registry section to AGENTINFO.md if applicable.
+
+    Args:
+        project_dir: Path to the project root.
+        dry_run: If True, report what would happen without making changes.
+    """
+    from ..lib.preferences import get_preference
+
+    port_enabled = get_preference("port_registry_enabled")
+    if not port_enabled:
+        return
+
+    agentinfo_path = project_dir / "AGENTINFO.md"
+    if not agentinfo_path.exists():
+        return
+
+    content = agentinfo_path.read_text()
+    if "## Port Registry" in content:
+        return
+
+    port_section = """
+## Port Registry
+
+This project's ports are registered with AEC. Before assigning new ports,
+check `aec ports list` to see all registered ports and avoid conflicts.
+
+To register new ports:
+1. Add them to `.aec.json` in the `ports` section
+2. Run `aec ports register` to register them centrally
+
+Port assignments use first-come-first-served. See `.aec.json` for this
+project's current port assignments.
+"""
+
+    if dry_run:
+        Console.info("Would add Port Registry section to AGENTINFO.md")
+        return
+
+    with open(agentinfo_path, "a") as f:
+        f.write(port_section)
+    Console.success("Added Port Registry section to AGENTINFO.md")
+
+
 def setup(
     path: Optional[str] = None,
     skip_raycast: bool = False,
@@ -743,6 +1033,29 @@ def setup(
 
     # Update .gitignore
     _update_gitignore(project_dir, dry_run)
+
+    # Create or load .aec.json
+    aec_data = _create_or_update_aec_json(project_dir, dry_run)
+
+    # Detect test suites
+    aec_data = _detect_and_prompt_test_suites(project_dir, aec_data, dry_run, batch_mode=batch)
+
+    # Register ports
+    _register_ports(project_dir, aec_data, dry_run)
+
+    # Sync installed section from manifest
+    aec_data = _sync_installed_section(aec_data)
+
+    # Save updated .aec.json (if we modified it)
+    if not dry_run:
+        from ..lib.aec_json import save_aec_json
+        save_aec_json(project_dir, aec_data)
+
+    # Manage .aec.json gitignore
+    _manage_aec_json_gitignore_step(project_dir, dry_run)
+
+    # Inject port registry info into AGENTINFO.md
+    _inject_port_registry_agentinfo(project_dir, dry_run)
 
     # Log setup
     log_setup(project_dir, dry_run)
