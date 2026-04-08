@@ -404,18 +404,21 @@ def _patch_run_all_dependencies(monkeypatch):
     """Patch all external dependencies used by run_all_projects."""
     monkeypatch.setattr(
         "aec.lib.scheduler_config.load_scheduler_config",
-        lambda: {
+        lambda path: {
             "version": "1.0.0",
             "last_run": None,
-            "retention": {"mode": "manual", "keep_days": 30},
+            "retention": {"report_mode": "manual", "report_days": 30, "profile_days": 90},
         },
     )
     monkeypatch.setattr(
-        "aec.lib.scheduler_config.save_scheduler_config", lambda cfg: None
+        "aec.lib.scheduler_config.save_scheduler_config", lambda cfg, path: None
     )
     monkeypatch.setattr(
         "aec.lib.scheduler_config.update_last_run",
-        lambda cfg, stats: cfg,
+        lambda cfg, **kwargs: cfg,
+    )
+    monkeypatch.setattr(
+        "aec.lib.config.AEC_SCHEDULER_CONFIG", Path("/tmp/aec-scheduler-config.json"),
     )
     monkeypatch.setattr(
         "aec.lib.prerequisites.check_prerequisites",
@@ -620,13 +623,13 @@ class TestApplyRetention:
             lambda base, keep: prune_profiles_calls.append((base, keep)) or 0,
         )
 
-        config = {"retention": {"mode": "auto", "keep_days": 14}}
+        config = {"retention": {"report_mode": "auto", "report_days": 14, "profile_days": 60}}
         apply_retention(config)
 
         assert len(prune_reports_calls) == 1
         assert prune_reports_calls[0][1] == 14
         assert len(prune_profiles_calls) == 1
-        assert prune_profiles_calls[0][1] == 14
+        assert prune_profiles_calls[0][1] == 60
 
     def test_does_nothing_when_manual(self, monkeypatch):
         """Prune functions are NOT called when retention mode is 'manual'."""
@@ -643,7 +646,7 @@ class TestApplyRetention:
             lambda base, keep: prune_calls.append("profiles") or 0,
         )
 
-        config = {"retention": {"mode": "manual", "keep_days": 30}}
+        config = {"retention": {"report_mode": "manual", "report_days": 30, "profile_days": 90}}
         apply_retention(config)
 
         assert prune_calls == []

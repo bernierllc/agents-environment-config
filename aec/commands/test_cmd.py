@@ -85,6 +85,7 @@ def run_test_run(global_flag: bool = False) -> None:
 
 def run_test_schedule() -> None:
     """Interactive schedule setup for daily test runs."""
+    from ..lib.config import AEC_SCHEDULER_CONFIG
     from ..lib.preferences import get_preference, set_preference
     from ..lib.scheduler_config import (
         load_scheduler_config,
@@ -104,7 +105,7 @@ def run_test_schedule() -> None:
             return
         set_preference("scheduled_tests_enabled", True)
 
-    config = load_scheduler_config()
+    config = load_scheduler_config(AEC_SCHEDULER_CONFIG)
     schedule = config.setdefault("schedule", {})
 
     # 2. Prompt for run time
@@ -145,19 +146,23 @@ def run_test_schedule() -> None:
 
     # 5. Save config
     schedule["enabled"] = True
-    save_scheduler_config(config)
+    save_scheduler_config(config, AEC_SCHEDULER_CONFIG)
 
     # 6. Register with OS scheduler
+    from ..lib.config import AEC_RUNNER_SCRIPT
+    from ..lib.scheduler_config import get_schedule_time
     scheduler = get_scheduler()
-    runner_path = str(Path(sys.executable).parent / "aec")
-    scheduler.register(runner_path, schedule["time"])
+    hour, minute = get_schedule_time(config)
+    msg = scheduler.register(AEC_RUNNER_SCRIPT, hour, minute)
+    Console.info(msg)
 
-    Console.success(f"Scheduled test runs enabled at {schedule['time']} daily")
+    Console.success(f"Scheduled test runs enabled at {hour:02d}:{minute:02d} daily")
 
 
 def run_test_status(global_flag: bool = False) -> None:
     """Show test configuration or global schedule status."""
     if global_flag:
+        from ..lib.config import AEC_SCHEDULER_CONFIG
         from ..lib.scheduler_config import (
             load_scheduler_config,
             is_schedule_enabled,
@@ -166,20 +171,30 @@ def run_test_status(global_flag: bool = False) -> None:
         from ..lib.schedulers import get_scheduler
         from ..lib.tracking import list_repos
 
-        config = load_scheduler_config()
+        config = load_scheduler_config(AEC_SCHEDULER_CONFIG)
         enabled = is_schedule_enabled(config)
-        time = get_schedule_time(config)
+        hour, minute = get_schedule_time(config)
         scheduler = get_scheduler()
 
-        Console.subheader("Scheduled Test Status")
-        Console.print(f"  Enabled:       {'yes' if enabled else 'no'}")
-        Console.print(f"  Run time:      {time}")
-        Console.print(f"  Last run:      {scheduler.last_run() or 'never'}")
-        Console.print(f"  Next run:      {scheduler.next_run() or 'not scheduled'}")
-        Console.print(f"  Parallel mode: {'yes' if config.get('parallel') else 'no'}")
+        Console.subheader("AEC Test Schedule")
+        Console.print(f"  Status:        {'enabled' if enabled else 'disabled'}")
+        Console.print(f"  Time:          {hour:02d}:{minute:02d} daily")
+        next_run = scheduler.get_next_run()
+        Console.print(f"  Next run:      {next_run or 'not registered'}")
+        last_run = config.get("last_run")
+        if last_run:
+            Console.print(f"  Last run:      {last_run.get('timestamp', 'unknown')}")
+            Console.print(f"    Projects: {last_run.get('projects_run', 0)}, "
+                         f"Passed: {last_run.get('suites_passed', 0)}, "
+                         f"Failed: {last_run.get('suites_failed', 0)}")
+        else:
+            Console.print(f"  Last run:      never")
+
+        parallel = config.get("execution", {}).get("parallel_enabled", False)
+        Console.print(f"  Parallel:      {'enabled' if parallel else 'disabled'}")
 
         repos = list_repos()
-        Console.print(f"  Tracked projects: {len(repos)}")
+        Console.print(f"  Projects:      {len(repos)} tracked")
     else:
         from ..lib.scope import find_tracked_repo
         from ..lib.aec_json import load_aec_json
@@ -220,33 +235,36 @@ def run_test_status(global_flag: bool = False) -> None:
 
 def run_test_enable() -> None:
     """Enable scheduled test runs."""
-    from ..lib.scheduler_config import load_scheduler_config, save_scheduler_config
+    from ..lib.config import AEC_SCHEDULER_CONFIG, AEC_RUNNER_SCRIPT
+    from ..lib.scheduler_config import load_scheduler_config, save_scheduler_config, get_schedule_time
     from ..lib.schedulers import get_scheduler
 
-    config = load_scheduler_config()
-    schedule = config.setdefault("schedule", {})
-    time = schedule.get("time", "02:00")
+    config = load_scheduler_config(AEC_SCHEDULER_CONFIG)
+    hour, minute = get_schedule_time(config)
 
     scheduler = get_scheduler()
-    runner_path = str(Path(sys.executable).parent / "aec")
-    scheduler.register(runner_path, time)
+    runner_path = AEC_RUNNER_SCRIPT
+    msg = scheduler.register(runner_path, hour, minute)
+    Console.info(msg)
 
-    schedule["enabled"] = True
-    save_scheduler_config(config)
-    Console.success(f"Scheduled test runs enabled at {time} daily")
+    config.setdefault("schedule", {})["enabled"] = True
+    save_scheduler_config(config, AEC_SCHEDULER_CONFIG)
+    Console.success(f"Scheduled test runs enabled at {hour:02d}:{minute:02d} daily")
 
 
 def run_test_disable() -> None:
     """Disable scheduled test runs."""
+    from ..lib.config import AEC_SCHEDULER_CONFIG
     from ..lib.scheduler_config import load_scheduler_config, save_scheduler_config
     from ..lib.schedulers import get_scheduler
 
-    config = load_scheduler_config()
+    config = load_scheduler_config(AEC_SCHEDULER_CONFIG)
     scheduler = get_scheduler()
-    scheduler.unregister()
+    msg = scheduler.unregister()
+    Console.info(msg)
 
     config.setdefault("schedule", {})["enabled"] = False
-    save_scheduler_config(config)
+    save_scheduler_config(config, AEC_SCHEDULER_CONFIG)
     Console.success("Scheduled test runs disabled")
 
 

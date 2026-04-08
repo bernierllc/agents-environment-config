@@ -326,16 +326,17 @@ def apply_retention(config: dict) -> None:
     from aec.lib.reports import prune_old_profiles, prune_old_reports
     from aec.lib.scheduler_config import get_retention_config
 
+    from aec.lib.config import AEC_PROFILES_DIR, AEC_TESTS_DIR
+
     retention = get_retention_config(config)
-    if retention.get("mode") != "auto":
+    if retention.get("report_mode") != "auto":
         return
 
-    keep_days = retention.get("keep_days", 30)
-    reports_dir = AEC_HOME / "reports"
-    profiles_dir = AEC_HOME / "profiles"
+    report_days = retention.get("report_days", 30)
+    profile_days = retention.get("profile_days", 90)
 
-    prune_old_reports(reports_dir, keep_days)
-    prune_old_profiles(profiles_dir, keep_days)
+    prune_old_reports(AEC_TESTS_DIR, report_days)
+    prune_old_profiles(AEC_PROFILES_DIR, profile_days)
 
 
 def write_reports(
@@ -438,6 +439,7 @@ def run_all_projects(global_mode: bool = True) -> dict:
         Overall results dict with per-project results.
     """
     from aec.lib.aec_json import load_aec_json
+    from aec.lib.config import AEC_SCHEDULER_CONFIG
     from aec.lib.reports import open_report
     from aec.lib.scheduler_config import (
         load_scheduler_config,
@@ -447,7 +449,7 @@ def run_all_projects(global_mode: bool = True) -> dict:
     from aec.lib.tracking import list_repos
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    sched_config = load_scheduler_config()
+    sched_config = load_scheduler_config(AEC_SCHEDULER_CONFIG)
 
     # Get tracked repos that exist on disk
     repos = [r for r in list_repos() if r.exists]
@@ -491,14 +493,15 @@ def run_all_projects(global_mode: bool = True) -> dict:
     )
 
     # Update scheduler config
-    stats = {
-        "total_projects": len(eligible),
-        "passed": total_passed,
-        "failed": total_failed,
-        "skipped": total_skipped,
-    }
-    sched_config = update_last_run(sched_config, stats)
-    save_scheduler_config(sched_config)
+    sched_config = update_last_run(
+        sched_config,
+        projects_run=len(eligible),
+        suites_passed=total_passed,
+        suites_failed=total_failed,
+        suites_skipped=total_skipped,
+        seed=seed,
+    )
+    save_scheduler_config(sched_config, AEC_SCHEDULER_CONFIG)
 
     # Apply retention
     apply_retention(sched_config)
