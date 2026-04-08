@@ -250,7 +250,9 @@ def run_test_detect() -> None:
     """Re-run test framework detection for the current project."""
     from ..lib.scope import find_tracked_repo
     from ..lib.test_detection import detect_test_frameworks, scan_test_scripts
-    from ..lib.aec_json import load_aec_json, save_aec_json, update_test_section
+    from ..lib.aec_json import (
+        load_aec_json, save_aec_json, create_skeleton, update_test_section,
+    )
 
     repo = find_tracked_repo()
     if repo is None:
@@ -270,31 +272,57 @@ def run_test_detect() -> None:
     if frameworks:
         Console.subheader("Detected frameworks")
         for fw in frameworks:
-            Console.print(f"  {fw.get('name', 'unknown')}: {fw.get('command', '(no command)')}")
+            Console.success(f"{fw['display_name']} ({fw['detected_by']})")
 
     if scripts:
         Console.subheader("Detected test scripts")
         for script in scripts:
-            Console.print(f"  {script.get('name', 'unknown')}: {script.get('command', '')}")
+            Console.print(f"  {script['name']}: {script['command']}")
 
-    # Build suites from detections
+    # Build suites from scripts (these are the actionable items)
     suites = {}
-    for fw in frameworks:
-        name = fw.get("name", "unknown")
-        suites[name] = {
-            "command": fw.get("command", ""),
-            "framework": name,
-        }
     for script in scripts:
-        name = script.get("name", "unknown")
-        if name not in suites:
-            suites[name] = {
-                "command": script.get("command", ""),
-            }
+        name = script["name"]
+        suites[name] = {
+            "command": script["command"],
+            "cleanup": None,
+        }
 
-    # Update .aec.json
-    data = load_aec_json(repo) or {}
-    update_test_section(data, suites=suites)
+    # Interactive selection for scheduled suites
+    scheduled = []
+    if suites:
+        Console.print()
+        Console.print("Which suites should run in scheduled (automated) test runs?")
+        suite_names = list(suites.keys())
+        for i, name in enumerate(suite_names, 1):
+            Console.print(f"  {i}) {name}: {suites[name]['command']}")
+        Console.print(f"  Type 'all' for all, 'none' to skip, or comma-separated numbers")
+        Console.print()
+
+        try:
+            choice = input("Selection [none]: ").strip().lower()
+        except EOFError:
+            choice = "none"
+
+        if choice == "all":
+            scheduled = suite_names
+        elif choice and choice != "none":
+            for part in choice.split(","):
+                try:
+                    idx = int(part.strip()) - 1
+                    if 0 <= idx < len(suite_names):
+                        scheduled.append(suite_names[idx])
+                except ValueError:
+                    pass
+
+    # Load or create .aec.json with full skeleton
+    data = load_aec_json(repo)
+    if data is None:
+        data = create_skeleton(repo.name)
+
+    update_test_section(data, suites=suites, scheduled=scheduled)
     save_aec_json(repo, data)
 
     Console.success("Updated test configuration")
+    if scheduled:
+        Console.info(f"Scheduled suites: {', '.join(scheduled)}")

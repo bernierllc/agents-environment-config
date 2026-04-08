@@ -118,9 +118,12 @@ class TestRunTestDetect:
         )
 
         detected_frameworks = [
-            {"name": "jest", "command": "npx jest"},
+            {"key": "jest", "display_name": "Jest", "detected_by": "jest.config.ts"},
         ]
-        detected_scripts = []
+        detected_scripts = [
+            {"name": "test", "command": "npx jest", "source": "package.json"},
+            {"name": "test:unit", "command": "npx jest --testPathPattern=unit", "source": "package.json"},
+        ]
 
         monkeypatch.setattr(
             "aec.lib.test_detection.detect_test_frameworks",
@@ -130,6 +133,8 @@ class TestRunTestDetect:
             "aec.lib.test_detection.scan_test_scripts",
             lambda p: detected_scripts,
         )
+        # Skip interactive scheduling prompt
+        monkeypatch.setattr("builtins.input", lambda _: "none")
 
         saved_data = {}
 
@@ -160,14 +165,17 @@ class TestRunTestDetect:
         )
         monkeypatch.setattr(
             "aec.lib.console.Console.print",
-            staticmethod(lambda msg: None),
+            staticmethod(lambda msg="": None),
         )
 
         run_test_detect()
 
         assert any("Updated" in msg for msg in success_msgs)
         assert "test" in saved_data
-        assert "jest" in saved_data["test"].get("suites", {})
+        suites = saved_data["test"].get("suites", {})
+        assert "test" in suites
+        assert "test:unit" in suites
+        assert suites["test"]["command"] == "npx jest"
 
 
 class TestRunTestReport:
