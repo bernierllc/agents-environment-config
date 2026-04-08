@@ -568,6 +568,20 @@ else:
         ports_unreg.add_argument("path", nargs="?", default=".", help="Project path")
         ports_sub.add_parser("validate", help="Validate registry entries")
 
+        # test
+        test_parser = subparsers.add_parser("test", help="Manage test suites, scheduling, and reports")
+        test_sub = test_parser.add_subparsers(dest="test_command")
+        test_run = test_sub.add_parser("run", help="Run test suites")
+        test_run.add_argument("-g", "--global", dest="global_flag", action="store_true", help="Run all tracked projects")
+        test_sub.add_parser("schedule", help="Set up or update the daily test schedule")
+        test_status = test_sub.add_parser("status", help="Show test configuration or schedule status")
+        test_status.add_argument("-g", "--global", dest="global_flag", action="store_true", help="Show global schedule status")
+        test_sub.add_parser("enable", help="Enable scheduled test runs")
+        test_sub.add_parser("disable", help="Disable scheduled test runs")
+        test_report = test_sub.add_parser("report", help="View test reports")
+        test_report.add_argument("-g", "--global", dest="global_flag", action="store_true", help="Show global report")
+        test_sub.add_parser("detect", help="Re-detect test frameworks for current project")
+
         # discover
         discover_parser = subparsers.add_parser("discover", help="Discover repos from Raycast scripts")
         discover_parser.add_argument("--dry-run", action="store_true", help="Preview")
@@ -773,6 +787,29 @@ else:
                 run_ports_validate()
             else:
                 ports_parser.print_help()
+
+        elif args.command == "test":
+            from .commands.test_cmd import (
+                run_test_run, run_test_schedule, run_test_status,
+                run_test_enable, run_test_disable, run_test_report,
+                run_test_detect,
+            )
+            if args.test_command == "run":
+                run_test_run(global_flag=args.global_flag)
+            elif args.test_command == "schedule":
+                run_test_schedule()
+            elif args.test_command == "status":
+                run_test_status(global_flag=args.global_flag)
+            elif args.test_command == "enable":
+                run_test_enable()
+            elif args.test_command == "disable":
+                run_test_disable()
+            elif args.test_command == "report":
+                run_test_report(global_flag=args.global_flag)
+            elif args.test_command == "detect":
+                run_test_detect()
+            else:
+                test_parser.print_help()
 
         # --- Deprecated command groups ---
         elif args.command == "repo":
