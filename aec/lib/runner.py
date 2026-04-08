@@ -102,7 +102,9 @@ def check_project_prerequisites(aec_data: dict) -> Tuple[bool, List[str]]:
     prereqs = aec_data.get("test", {}).get("prerequisites", [])
     if not prereqs:
         return True, []
-    return check_prerequisites(prereqs)
+    results = check_prerequisites(prereqs)
+    failures = [f"{name}: {detail}" for name, available, detail in results if not available]
+    return len(failures) == 0, failures
 
 
 def check_suite_prerequisites(suite_config: dict) -> Tuple[bool, List[str]]:
@@ -119,7 +121,9 @@ def check_suite_prerequisites(suite_config: dict) -> Tuple[bool, List[str]]:
     prereqs = suite_config.get("prerequisites", [])
     if not prereqs:
         return True, []
-    return check_prerequisites(prereqs)
+    results = check_prerequisites(prereqs)
+    failures = [f"{name}: {detail}" for name, available, detail in results if not available]
+    return len(failures) == 0, failures
 
 
 def analyze_port_observations(

@@ -136,7 +136,7 @@ class TestCheckProjectPrerequisites:
 
         monkeypatch.setattr(
             "aec.lib.prerequisites.check_prerequisites",
-            lambda prereqs: (True, []),
+            lambda prereqs: [(p, True, "available") for p in prereqs],
         )
 
         aec_data = {
@@ -154,7 +154,7 @@ class TestCheckProjectPrerequisites:
 
         monkeypatch.setattr(
             "aec.lib.prerequisites.check_prerequisites",
-            lambda prereqs: (False, ["command not found: nonexistent"]),
+            lambda prereqs: [("nonexistent", False, "command not found")],
         )
 
         aec_data = {
@@ -209,7 +209,7 @@ class TestCheckSuitePrerequisites:
 
         monkeypatch.setattr(
             "aec.lib.prerequisites.check_prerequisites",
-            lambda prereqs: (False, ["command not found: docker"]),
+            lambda prereqs: [("docker", False, "command not found")],
         )
 
         suite_config = {
@@ -242,7 +242,7 @@ class TestRunSingleProject:
         )
         monkeypatch.setattr(
             "aec.lib.prerequisites.check_prerequisites",
-            lambda prereqs: (False, ["command not found: missing-tool"]),
+            lambda prereqs: [("missing-tool", False, "command not found")],
         )
 
         result = run_single_project(Path("/tmp/test-proj"))
@@ -262,9 +262,7 @@ class TestRunSingleProject:
                     "suites": {
                         "unit": {
                             "command": "pytest",
-                            "prerequisites": [
-                                {"type": "command", "value": "docker"}
-                            ],
+                            "prerequisites": ["docker"],
                         }
                     },
                     "scheduled": ["unit"],
@@ -280,8 +278,8 @@ class TestRunSingleProject:
             nonlocal call_count
             call_count += 1
             if not prereqs:
-                return True, []
-            return False, ["command not found: docker"]
+                return [(p, True, "available") for p in prereqs]
+            return [("docker", False, "command not found")]
 
         monkeypatch.setattr(
             "aec.lib.prerequisites.check_prerequisites", mock_check_prereqs
@@ -312,7 +310,7 @@ class TestRunSingleProject:
         )
         monkeypatch.setattr(
             "aec.lib.prerequisites.check_prerequisites",
-            lambda prereqs: (True, []),
+            lambda prereqs: [(p, True, "available") for p in prereqs],
         )
         monkeypatch.setattr(
             "aec.lib.ports.load_registry",
@@ -372,7 +370,7 @@ class TestRunSingleProject:
         )
         monkeypatch.setattr(
             "aec.lib.prerequisites.check_prerequisites",
-            lambda prereqs: (True, []),
+            lambda prereqs: [(p, True, "available") for p in prereqs],
         )
         monkeypatch.setattr(
             "aec.lib.ports.load_registry",
@@ -421,7 +419,7 @@ def _patch_run_all_dependencies(monkeypatch):
     )
     monkeypatch.setattr(
         "aec.lib.prerequisites.check_prerequisites",
-        lambda prereqs: (True, []),
+        lambda prereqs: [(p, True, "available") for p in prereqs],
     )
     monkeypatch.setattr(
         "aec.lib.ports.load_registry",

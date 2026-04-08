@@ -184,7 +184,7 @@ class TestScanTestScripts:
         result = scan_test_scripts(temp_dir)
         assert len(result) == 1
         assert result[0]["name"] == "test"
-        assert result[0]["command"] == "jest"
+        assert result[0]["command"] == "npm run test"
         assert result[0]["source"] == "package.json"
 
     def test_finds_multiple_test_scripts(self, temp_dir: Path):

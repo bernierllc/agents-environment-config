@@ -121,8 +121,8 @@ class TestRunTestDetect:
             {"key": "jest", "display_name": "Jest", "detected_by": "jest.config.ts"},
         ]
         detected_scripts = [
-            {"name": "test", "command": "npx jest", "source": "package.json"},
-            {"name": "test:unit", "command": "npx jest --testPathPattern=unit", "source": "package.json"},
+            {"name": "test", "command": "npm run test", "source": "package.json"},
+            {"name": "test:unit", "command": "npm run test:unit", "source": "package.json"},
         ]
 
         monkeypatch.setattr(
@@ -175,7 +175,7 @@ class TestRunTestDetect:
         suites = saved_data["test"].get("suites", {})
         assert "test" in suites
         assert "test:unit" in suites
-        assert suites["test"]["command"] == "npx jest"
+        assert suites["test"]["command"] == "npm run test"
 
 
 class TestRunTestReport:

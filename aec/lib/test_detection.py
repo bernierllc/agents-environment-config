@@ -298,7 +298,7 @@ def scan_test_scripts(project_dir: Path) -> List[Dict[str, str]]:
             if key.startswith("test"):
                 results.append({
                     "name": key,
-                    "command": value,
+                    "command": f"npm run {key}",
                     "source": "package.json",
                 })
 

@@ -107,7 +107,7 @@ class TestDetectAndPromptTestSuites:
         assert len(suites) >= 1
         # At least one test script was added
         suite_commands = [s["command"] for s in suites.values()] if isinstance(suites, dict) else []
-        assert any("jest" in cmd for cmd in suite_commands)
+        assert any("npm run test" in cmd for cmd in suite_commands)
 
     def test_no_frameworks_or_scripts(self, temp_dir):
         """Returns unchanged data when nothing is detected."""
