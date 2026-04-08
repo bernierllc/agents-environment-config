@@ -78,6 +78,38 @@ def update_test_section(
     return data
 
 
+def update_suite_prerequisites(data: dict, suite_name: str, prerequisites: list) -> dict:
+    """Update prerequisites for a specific test suite.
+
+    Args:
+        data: The .aec.json data dict.
+        suite_name: Name of the suite to update.
+        prerequisites: List of prerequisite names.
+
+    Returns:
+        Updated data dict.
+    """
+    test = data.setdefault("test", {"suites": {}, "prerequisites": [], "scheduled": []})
+    suite = test["suites"].setdefault(suite_name, {})
+    suite["prerequisites"] = prerequisites
+    return data
+
+
+def get_suite_prerequisites(data: dict, suite_name: str) -> list:
+    """Get prerequisites for a specific test suite.
+
+    Args:
+        data: The .aec.json data dict.
+        suite_name: Name of the suite.
+
+    Returns:
+        List of prerequisite names, or empty list if none.
+    """
+    test = data.get("test", {})
+    suite = test.get("suites", {}).get(suite_name, {})
+    return suite.get("prerequisites", [])
+
+
 def update_installed_section(data: dict, installed: dict) -> dict:
     """Replace the installed section wholesale. Returns updated dict."""
     data["installed"] = installed
