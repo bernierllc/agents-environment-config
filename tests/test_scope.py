@@ -81,6 +81,22 @@ class TestFindTrackedRepo:
         assert find_tracked_repo() == tracked_repo
 
 
+    def test_finds_repo_with_only_aec_json(self, temp_dir, monkeypatch):
+        """Repos created by aec setup may only have .aec.json, not .claude/ or .agent-rules/."""
+        from aec.lib.scope import find_tracked_repo
+        base = temp_dir.resolve()
+        repo = base / "projects" / "aec-json-only"
+        repo.mkdir(parents=True)
+        (repo / ".aec.json").write_text('{"version": "1.0.0"}')
+        aec_home = base / ".agents-environment-config"
+        aec_home.mkdir(exist_ok=True)
+        log = aec_home / "setup-repo-locations.txt"
+        log.write_text(f"2026-04-04T00:00:00Z|2.5.4|{repo}\n")
+        monkeypatch.setattr(Path, "home", lambda: base)
+        monkeypatch.chdir(repo)
+        assert find_tracked_repo() == repo
+
+
 class TestGetAllTrackedRepos:
     def test_returns_existing_repos(self, tracked_repo):
         from aec.lib.scope import get_all_tracked_repos

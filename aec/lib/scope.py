@@ -54,7 +54,7 @@ def find_tracked_repo(start: Optional[Path] = None) -> Optional[Path]:
     """Walk up from start (default cwd) to find a tracked repo.
 
     A directory is considered a tracked repo if it appears in the setup log
-    AND has a .claude/ or .agent-rules/ directory.
+    AND has a .claude/ or .agent-rules/ directory or .aec.json file.
     """
     if start is None:
         start = Path.cwd()
@@ -62,7 +62,7 @@ def find_tracked_repo(start: Optional[Path] = None) -> Optional[Path]:
     current = start.resolve()
     for _ in range(20):
         if current in tracked:
-            if (current / ".claude").is_dir() or (current / ".agent-rules").is_dir():
+            if (current / ".claude").is_dir() or (current / ".agent-rules").is_dir() or (current / ".aec.json").is_file():
                 return current
         parent = current.parent
         if parent == current:
