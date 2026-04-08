@@ -98,8 +98,8 @@ Point `aec` at any project directory -- new or existing -- and it handles the re
 
 ```bash
 # Using Python CLI (recommended)
-aec repo setup my-new-project
-aec repo setup /path/to/existing/project
+aec setup my-new-project
+aec setup /path/to/existing/project
 
 # Or using shell script
 ./scripts/setup-repo.sh my-new-project
@@ -115,7 +115,7 @@ AI agents write code fast, but they don't always check their work. AEC can insta
 
 **Supported agents:** Claude Code, Gemini CLI, Cursor
 
-During `aec repo setup`, AEC auto-detects your project's language and offers to install the appropriate hooks. Multi-language projects are supported — a TypeScript + Python monorepo gets both `tsc` and `mypy` hooks composed into a single config.
+During `aec setup`, AEC auto-detects your project's language and offers to install the appropriate hooks. Multi-language projects are supported — a TypeScript + Python monorepo gets both `tsc` and `mypy` hooks composed into a single config.
 
 You control how hooks are handled:
 - **Per-repo** (default): prompted each time, choose which languages to hook
@@ -132,7 +132,7 @@ AEC automatically detects and fixes this issue in all tracked repos when you run
 
 ```bash
 aec install          # fixes all tracked repos during install
-aec repo update --all  # fixes all tracked repos during update
+aec update && aec upgrade  # fixes all tracked repos during update
 aec doctor           # reports which repos have the issue
 ```
 
@@ -236,7 +236,7 @@ The port registry solves this with a central registry at `~/.agents-environment-
 Port conflicts warn but do not block. When a conflict is detected, AEC shows which project registered the port first and when:
 
 ```
-⚠ Port conflict: port 3000 is already registered to "mbernier.com"
+⚠ Port conflict: port 3000 is already registered to "my-portfolio"
   (registered 2026-03-15T10:00:00Z)
   Your .aec.json assigns 3000 to "dev-server"
   → Update your .aec.json to use a different port, or run
@@ -273,9 +273,9 @@ Detected test frameworks:
   ✓ Playwright (playwright.config.ts)
 
 Found test scripts in package.json:
-  • test:unit → jest --config jest.config.unit.ts
-  • test:integration → jest --config jest.config.integration.ts
-  • test:e2e → playwright test
+  • test:unit → npm run test:unit
+  • test:integration → npm run test:integration
+  • test:e2e → npm run test:e2e
 
 Which should be included in .aec.json test suites?
 [x] test:unit
@@ -373,8 +373,8 @@ Reports are written to `~/.agents-environment-config/tests/{datetime}/`:
   tests/
     2026-04-08T02:00:00Z/
       summary.txt
-      earnlearn_test_output.txt
-      barevents_test_output.txt
+      my-webapp_test_output.txt
+      my-api_test_output.txt
 ```
 
 ### How to View Reports
@@ -427,10 +427,10 @@ Profile data lives at `~/.agents-environment-config/profiles/{project}/`:
 ```
 ~/.agents-environment-config/
   profiles/
-    earnlearn/
+    my-webapp/
       2026-04-08T02:00:00Z.json
       2026-04-07T02:00:00Z.json
-    barevents/
+    my-api/
       2026-04-08T02:00:00Z.json
 ```
 
@@ -465,8 +465,8 @@ By default, projects run sequentially in randomized order. After enough profilin
 3. **Suggestion in report.** The proposed lanes appear in the test summary:
    ```
    Suggested lanes based on port/resource analysis:
-     Lane 1: barevents, mbernier.com (no shared ports, low memory)
-     Lane 2: earnlearn, neverhub (no shared ports, both use docker)
+     Lane 1: my-api, my-portfolio (no shared ports, low memory)
+     Lane 2: my-webapp, my-service (no shared ports, both use docker)
    Enable with: aec config set parallel_enabled true
    ```
 4. **User opts in.** Parallelization is never automatic:
@@ -598,27 +598,32 @@ pip install -e .
 | Command | Description |
 |---------|-------------|
 | `aec install` | Full setup (submodules, rules, agent-tools, settings, quality infra prompts, project walk) |
+| `aec update` | Fetch latest sources |
+| `aec upgrade` | Apply available upgrades |
+| `aec install <type> <name>` | Install a skill, rule, or agent |
+| `aec uninstall <type> <name>` | Remove an installed item |
+| `aec list` | Show installed items |
+| `aec search <term>` | Search available items |
+| `aec outdated` | Show what has upgrades available |
+| `aec info <type> <name>` | Show detailed metadata for an item |
+| `aec setup [path]` | Track a project (agent files, `.aec.json`, port registration, test detection) |
+| `aec setup --all` | Track all projects in configured projects directory |
+| `aec untrack <path>` | Stop tracking a project |
+| `aec config list` | Show current preferences and settings |
+| `aec config set <key> <value>` | Set a preference |
+| `aec config reset <key>` | Reset a preference (re-prompts on next run) |
+| `aec generate rules` | Generate .agent-rules/ from .cursor/rules/ |
+| `aec generate files` | Regenerate agent instruction files from templates |
+| `aec validate` | Validate rule parity |
+| `aec prune` | Remove stale tracking entries |
+| `aec discover` | Find repos from Raycast scripts |
 | `aec doctor` | Health check for installation |
 | `aec version` | Show version |
-| `aec repo setup <path>` | Setup a project (agent files, `.aec.json`, port registration, test detection) |
-| `aec repo setup-all` | Setup all projects in configured projects directory |
-| `aec repo list` | List tracked repositories |
-| `aec repo update [--all]` | Update repositories |
 | `aec ports list` | Show all registered ports across all projects |
 | `aec ports check [path]` | Check for port conflicts without registering |
 | `aec ports register [path]` | Register ports from `.aec.json` |
 | `aec ports unregister [path]` | Remove port registrations for a project |
 | `aec ports validate` | Find stale port registry entries |
-| `aec preferences list` | Show current preferences and settings |
-| `aec preferences set <key> <value>` | Set a preference |
-| `aec preferences reset <key>` | Reset a preference (re-prompts on next run) |
-| `aec agent-tools setup` | Create ~/.agent-tools/ structure |
-| `aec agent-tools migrate` | Migrate from old symlink structure |
-| `aec agent-tools rollback <backup>` | Rollback migration |
-| `aec discover` | Discover repos from existing Raycast scripts |
-| `aec files generate` | Regenerate agent instruction files from templates |
-| `aec rules generate` | Generate .agent-rules/ from .cursor/rules/ |
-| `aec rules validate` | Validate rule parity |
 | `aec test run` | Run test suites for the current project |
 | `aec test run -g` | Run scheduled suites across all tracked projects |
 | `aec test schedule` | Interactive setup for automated daily test runs |
@@ -635,16 +640,16 @@ pip install -e .
 aec doctor
 
 # Setup a new project (creates .aec.json, detects tests, registers ports)
-aec repo setup my-app
+aec setup my-app
 
-# List all tracked projects
-aec repo list
+# List installed items
+aec list
 
-# Update all tracked projects
-aec repo update --all
+# Fetch latest and apply upgrades
+aec update && aec upgrade
 
 # Validate rules are in sync
-aec rules validate
+aec validate
 
 # View all registered ports
 aec ports list
@@ -736,17 +741,16 @@ Most operations are available via both the Python CLI and shell scripts:
 | Operation | Python CLI | Shell Script |
 |-----------|------------|--------------|
 | Full setup | `aec install` | `scripts/setup.sh` |
-| Create ~/.agent-tools/ | `aec agent-tools setup` | `scripts/setup-agent-tools.sh` |
-| Migrate existing setup | `aec agent-tools migrate` | `scripts/migrate-to-agent-tools.sh` |
-| Rollback migration | `aec agent-tools rollback <dir>` | `scripts/rollback-agent-tools.sh` |
-| Setup a project | `aec repo setup <path>` | `scripts/setup-repo.sh` |
-| Setup all projects | `aec repo setup-all` | — |
-| List tracked projects | `aec repo list` | `scripts/setup-repo.sh --list` |
-| Manage preferences | `aec preferences list\|set\|reset` | — |
+| Fetch latest sources | `aec update` | — |
+| Apply upgrades | `aec upgrade` | — |
+| Setup a project | `aec setup <path>` | `scripts/setup-repo.sh` |
+| Setup all projects | `aec setup --all` | — |
+| List installed items | `aec list` | — |
+| Manage preferences | `aec config list\|set\|reset` | — |
 | Manage ports | `aec ports list\|check\|register\|unregister\|validate` | — |
-| Generate agent files | `aec files generate` | `scripts/generate-agent-files.py` |
-| Generate .agent-rules/ | `aec rules generate` | `scripts/generate-agent-rules.py` |
-| Validate rule parity | `aec rules validate` | `scripts/validate-rule-parity.py` |
+| Generate agent files | `aec generate files` | `scripts/generate-agent-files.py` |
+| Generate .agent-rules/ | `aec generate rules` | `scripts/generate-agent-rules.py` |
+| Validate rule parity | `aec validate` | `scripts/validate-rule-parity.py` |
 | Run project tests | `aec test run` | — |
 | Run all scheduled tests | `aec test run -g` | — |
 | Schedule test runs | `aec test schedule` | — |
@@ -781,7 +785,7 @@ To install the git hooks:
 
 ## Raycast Integration
 
-During project setup (`aec repo setup` or `scripts/setup-repo.sh`), users are prompted to generate [Raycast](https://raycast.com/) launcher scripts. These scripts provide one-keystroke access to open a project in any detected agent.
+During project setup (`aec setup` or `scripts/setup-repo.sh`), users are prompted to generate [Raycast](https://raycast.com/) launcher scripts. These scripts provide one-keystroke access to open a project in any detected agent.
 
 Scripts are generated per-agent based on what is installed on the machine. The setup detects all [supported agents](#supported-agents) (Claude, Cursor, Gemini, Qwen, Codex) and generates scripts for each one found.
 
@@ -838,14 +842,14 @@ This directory enables:
 - **Port conflict detection**: Central registry prevents port collisions across projects
 
 ```bash
-# List all tracked projects
-aec repo list
+# List installed items
+aec list
 
-# Update all tracked projects
-aec repo update --all
+# Fetch latest and apply upgrades
+aec update && aec upgrade
 
 # Preview updates without making changes
-aec repo update --all --dry-run
+aec update --dry-run
 ```
 
 ## Migration for Existing Users
@@ -854,20 +858,17 @@ If you already have symlinks from a previous setup:
 
 ```bash
 # Preview changes (dry run)
-aec agent-tools migrate --dry-run
+aec install --dry-run
 
-# Run migration (creates backup automatically)
-aec agent-tools migrate
-
-# Rollback if needed
-aec agent-tools rollback ~/.agent-tools-backup-TIMESTAMP
+# Run full setup (handles migration automatically)
+aec install
 ```
 
 ## How Projects Use This
 
 Each project gets its own copy of the agent instruction files, configured to pull rules from the shared `~/.agent-tools/` directory. This means your standards stay centralized while each project can still define its own specifics in `AGENTINFO.md`.
 
-When you run `aec repo setup` (or `setup-repo.sh`) on a project, it:
+When you run `aec setup` (or `setup-repo.sh`) on a project, it:
 
 1. Creates directories: `.cursor/rules/`, `docs/`, and your configured plans directory (default: `.plans/`)
 2. Copies template files from `templates/`: `AGENTINFO.md`, `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `QWEN.md`
@@ -883,14 +884,14 @@ When you run `aec repo setup` (or `setup-repo.sh`) on a project, it:
 
 ### Batch Project Setup
 
-If you have a directory full of projects, you don't have to set them up one at a time. During `aec install` (or anytime with `aec repo setup-all`), AEC walks your projects directory and sets up each one:
+If you have a directory full of projects, you don't have to set them up one at a time. During `aec install` (or anytime with `aec setup --all`), AEC walks your projects directory and sets up each one:
 
 ```bash
 # During install, you'll be prompted automatically
 aec install
 
 # Or run standalone
-aec repo setup-all
+aec setup --all
 ```
 
 ## Updating Rules
@@ -899,10 +900,10 @@ When cursor rules in `.cursor/rules/` change:
 
 ```bash
 # Regenerate the agent-agnostic rules
-aec rules generate
+aec generate rules
 
 # Regenerate the agent instruction files (from templates/)
-aec files generate
+aec generate files
 
 # Commit the changes
 git add .agent-rules/ templates/
