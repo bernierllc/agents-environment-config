@@ -1,10 +1,12 @@
 """Discovery command -- scan for local items similar to AEC catalog."""
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 from ..lib import Console
 from ..lib.aec_json import load_aec_json
+from ..lib.config import AEC_HOME
 from ..lib.scope import resolve_scope, Scope, ScopeError
 from ..lib.sources import discover_available, get_source_dirs
 
@@ -57,10 +59,10 @@ def _format_match(index: int, result: MatchResult) -> str:
     elif match_type == "modified":
         icon = Console._colorize(Console.YELLOW, "⚠ Modified (hash differs from AEC)")
     elif match_type == "renamed":
-        icon = Console._colorize(Console.YELLOW, f"⚠ Renamed (identical to {result.catalog_name})")
+        icon = Console._colorize(Console.YELLOW, f"⚠ Renamed (identical to {result.catalog_item})")
     elif match_type == "similar":
         pct = int((result.similarity or 0) * 100)
-        icon = Console._colorize(Console.YELLOW, f"⚠ Similar ({pct}%) to {result.catalog_name}")
+        icon = Console._colorize(Console.YELLOW, f"⚠ Similar ({pct}%) to {result.catalog_item}")
     else:
         icon = Console.dim("? Unknown match type")
 
@@ -122,12 +124,12 @@ def _install_item(result: MatchResult, scope: Scope, do_backup: bool) -> None:
     singular = item_type_singular.get(result.item_type, result.item_type)
 
     if do_backup:
-        backup_item(result.local_path, scope)
-        ensure_backup_gitignore(scope)
+        backup_item(Path(result.local_path), scope.repo_path)
+        ensure_backup_gitignore(scope.repo_path)
 
     run_install(
         item_type=singular,
-        name=result.catalog_name,
+        name=result.catalog_item,
         global_flag=scope.is_global,
         yes=True,
     )
@@ -136,9 +138,9 @@ def _install_item(result: MatchResult, scope: Scope, do_backup: bool) -> None:
 def _run_scan(
     scope: Scope,
     depth: int,
-    rediscover: bool,
-    catalog: dict,
-    catalog_hashes: dict,
+    rediscover: bool = False,
+    catalog: dict = None,
+    catalog_hashes: dict = None,
 ) -> list:
     """Run the scan logic without UI. Reusable by setup integration.
 
@@ -152,14 +154,30 @@ def _run_scan(
     Returns:
         List of MatchResult objects.
     """
+    if catalog is None:
+        catalog = {}
+    if catalog_hashes is None:
+        catalog_hashes = {}
+
+    # Build installed manifest from .aec.json for scan_local_items
+    aec_json = load_aec_json(scope.repo_path) if scope.repo_path else None
+    installed_manifest = (aec_json or {}).get("installed", {})
+
     all_results = []
+
+    scope_dirs = {
+        "agents": scope.agents_dir,
+        "skills": scope.skills_dir,
+        "rules": scope.rules_dir,
+    }
 
     for item_type in ITEM_TYPES:
         if rediscover:
-            clear_dismissals(scope, item_type)
+            clear_dismissals(item_type, scope)
 
         # Find untracked local items
-        local_items = scan_local_items(scope, item_type)
+        installed = installed_manifest.get(item_type, {})
+        local_items = scan_local_items(scope_dirs[item_type], item_type, installed)
         if not local_items:
             continue
 
@@ -167,7 +185,7 @@ def _run_scan(
         if not rediscover:
             local_items = [
                 item for item in local_items
-                if not is_dismissed(scope, item_type, item.name)
+                if not is_dismissed(item_type, scope, item["name"])
             ]
 
         if not local_items:
@@ -189,7 +207,7 @@ def _run_scan(
         all_results.extend(results)
 
         # Prune stale dismissals
-        prune_stale(scope, item_type, type_catalog)
+        prune_stale(item_type, scope, type_catalog)
 
     return all_results
 
@@ -242,7 +260,7 @@ def _present_results(
                 do_backup = True  # conservative default in --yes mode
                 _install_item(result, scope, do_backup)
             else:
-                save_dismissal(scope, result)
+                save_dismissal(result.item_type, scope, result.local_name, _build_dismissal_record(result))
                 dismissed_count += 1
                 dismissed_types.add(result.item_type)
 
@@ -257,7 +275,7 @@ def _present_results(
         # Skip all -- dismiss everything
         dismissed_types = set()
         for result in results:
-            save_dismissal(scope, result)
+            save_dismissal(result.item_type, scope, result.local_name, _build_dismissal_record(result))
             dismissed_types.add(result.item_type)
         _show_contribution_message(len(results), dismissed_types)
         return
@@ -292,7 +310,7 @@ def _present_results(
                     do_backup = _prompt_backup()
                     _install_item(result, scope, do_backup)
                 else:
-                    save_dismissal(scope, result)
+                    save_dismissal(result.item_type, scope, result.local_name, _build_dismissal_record(result))
                     Console.success("Skipped (won't ask again)")
                     dismissed_count += 1
                     dismissed_types.add(result.item_type)
@@ -308,14 +326,14 @@ def _present_results(
         for result in results:
             Console.newline()
             Console.print(f"  {result.local_name} -- {result.match_type}")
-            if result.catalog_name:
-                Console.print(f"    Matched to: {result.catalog_name}")
+            if result.catalog_item:
+                Console.print(f"    Matched to: {result.catalog_item}")
             choice = _prompt_review_item(result)
             if choice == "install":
                 do_backup = _prompt_backup()
                 _install_item(result, scope, do_backup)
             else:
-                save_dismissal(scope, result)
+                save_dismissal(result.item_type, scope, result.local_name, _build_dismissal_record(result))
                 Console.success("Skipped (won't ask again)")
                 dismissed_count += 1
                 dismissed_types.add(result.item_type)
@@ -323,6 +341,22 @@ def _present_results(
         if dismissed_count > 0:
             _show_contribution_message(dismissed_count, dismissed_types)
         return
+
+
+def _build_dismissal_record(result: MatchResult) -> dict:
+    """Build a dismissal record dict from a MatchResult."""
+    record = {
+        "dismissedAt": datetime.now(timezone.utc).isoformat(),
+        "matchedCatalogItem": result.catalog_item,
+        "matchedCatalogVersion": result.catalog_version,
+        "matchedCatalogHash": result.catalog_hash,
+        "localHash": result.local_hash,
+        "matchType": result.match_type,
+        "scanDepth": result.scan_depth,
+    }
+    if result.match_type == "similar":
+        record["similarity"] = result.similarity
+    return record
 
 
 def _show_contribution_message(count: int, item_types: set) -> None:
@@ -386,9 +420,10 @@ def run_discover(
         catalog[item_type] = discover_available(source_dir, item_type)
 
     # Load catalog hashes
-    catalog_hashes = load_catalog_hashes()
+    catalog_path = AEC_HOME / "catalog-hashes.json"
+    catalog_hashes = load_catalog_hashes(catalog_path)
     if not catalog_hashes:
-        catalog_hashes = regenerate_if_missing()
+        catalog_hashes = regenerate_if_missing(catalog_path, source_dirs)
         if not catalog_hashes:
             Console.warning("Running name-only scan -- hash comparison unavailable.")
             if depth is None or depth > 1:

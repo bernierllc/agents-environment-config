@@ -13,10 +13,14 @@ from typing import Optional
 class MatchResult:
     """Result of comparing a local item against the AEC catalog."""
     local_name: str = ""
-    local_path: Optional[Path] = None
-    catalog_name: str = ""
+    local_path: str = ""
+    catalog_item: str = ""
+    catalog_version: str = ""
+    catalog_hash: str = ""
+    local_hash: str = ""
     match_type: str = ""  # exact, modified, renamed, similar
     similarity: Optional[float] = None
+    scan_depth: int = 1
     item_type: str = ""  # agents, skills, rules
 
 
@@ -25,8 +29,11 @@ def normalize_name(name: str) -> str:
     raise NotImplementedError("Stub -- real implementation on feature branch")
 
 
-def scan_local_items(scope, item_type: str) -> list:
-    """Find untracked local items in the given scope."""
+def scan_local_items(scope_dir: Path, item_type: str, installed: dict) -> list:
+    """Find untracked local items in the given scope directory.
+
+    Returns list[dict] with keys: name, path, is_dir.
+    """
     raise NotImplementedError("Stub -- real implementation on feature branch")
 
 

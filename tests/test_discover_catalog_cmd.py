@@ -6,17 +6,21 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 @dataclass
 class FakeMatchResult:
     """Minimal MatchResult stand-in for testing."""
     local_name: str = ""
-    local_path: Optional[Path] = None
-    catalog_name: str = ""
+    local_path: str = ""
+    catalog_item: str = ""
+    catalog_version: str = ""
+    catalog_hash: str = ""
+    local_hash: str = ""
     match_type: str = "exact"
     similarity: Optional[float] = None
+    scan_depth: int = 1
     item_type: str = "agents"
 
 
@@ -90,6 +94,11 @@ def _apply_patches(stack, scan_results=None, local_items=None, catalog_hashes=No
     mocks["save_dismissal"] = stack.enter_context(patch(f"{P}.save_dismissal"))
     mocks["backup_item"] = stack.enter_context(patch(f"{P}.backup_item"))
     mocks["ensure_backup_gitignore"] = stack.enter_context(patch(f"{P}.ensure_backup_gitignore"))
+    # Patch load_aec_json in _run_scan to avoid re-reading from disk
+    mocks["load_aec_json_scan"] = stack.enter_context(patch(
+        "aec.commands.discover_catalog.load_aec_json",
+        return_value={"installed": {"agents": {}, "skills": {}, "rules": {}}},
+    ))
     return mocks
 
 
@@ -100,12 +109,11 @@ class TestDryRun:
         """Dry run shows results but does not install or dismiss anything."""
         exact = FakeMatchResult(
             local_name="my-agent.md",
-            catalog_name="engineering-agent",
+            catalog_item="engineering-agent",
             match_type="exact",
             item_type="agents",
         )
-        local_item = MagicMock()
-        local_item.name = "my-agent.md"
+        local_item = {"name": "my-agent.md", "path": "/fake/my-agent.md", "is_dir": False}
 
         with ExitStack() as stack:
             mocks = _apply_patches(stack, scan_results=[exact], local_items=[local_item])
@@ -120,12 +128,11 @@ class TestDryRun:
         """Dry run never calls run_install."""
         exact = FakeMatchResult(
             local_name="my-skill/",
-            catalog_name="my-skill",
+            catalog_item="my-skill",
             match_type="exact",
             item_type="skills",
         )
-        local_item = MagicMock()
-        local_item.name = "my-skill/"
+        local_item = {"name": "my-skill/", "path": "/fake/my-skill", "is_dir": True}
 
         with ExitStack() as stack:
             mocks = _apply_patches(stack, scan_results=[exact], local_items=[local_item])
@@ -143,21 +150,20 @@ class TestYesMode:
         """--yes installs exact matches and dismisses non-exact."""
         exact = FakeMatchResult(
             local_name="exact-agent.md",
-            local_path=Path("/fake/exact-agent.md"),
-            catalog_name="exact-agent",
+            local_path="/fake/exact-agent.md",
+            catalog_item="exact-agent",
             match_type="exact",
             item_type="agents",
         )
         similar = FakeMatchResult(
             local_name="similar-agent.md",
-            local_path=Path("/fake/similar-agent.md"),
-            catalog_name="catalog-agent",
+            local_path="/fake/similar-agent.md",
+            catalog_item="catalog-agent",
             match_type="similar",
             similarity=0.85,
             item_type="agents",
         )
-        local_item = MagicMock()
-        local_item.name = "x"
+        local_item = {"name": "x", "path": "/fake/x", "is_dir": False}
 
         with ExitStack() as stack:
             mocks = _apply_patches(stack, scan_results=[exact, similar], local_items=[local_item])
@@ -277,14 +283,13 @@ class TestContributionMessage:
         """When items are dismissed in --yes mode, contribution URLs are shown."""
         agent = FakeMatchResult(
             local_name="custom-agent.md",
-            local_path=Path("/fake/custom-agent.md"),
-            catalog_name="some-agent",
+            local_path="/fake/custom-agent.md",
+            catalog_item="some-agent",
             match_type="similar",
             similarity=0.8,
             item_type="agents",
         )
-        local_item = MagicMock()
-        local_item.name = "x"
+        local_item = {"name": "x", "path": "/fake/x", "is_dir": False}
 
         with ExitStack() as stack:
             mocks = _apply_patches(stack, scan_results=[agent], local_items=[local_item])
@@ -309,11 +314,10 @@ class TestRunScan:
 
         fake_result = FakeMatchResult(
             local_name="test.md",
-            catalog_name="catalog-test",
+            catalog_item="catalog-test",
             match_type="exact",
         )
-        local_item = MagicMock()
-        local_item.name = "test.md"
+        local_item = {"name": "test.md", "path": "/fake/test.md", "is_dir": False}
 
         catalog = {"agents": {}, "skills": {}, "rules": {}}
         catalog_hashes = {"agents": {}, "skills": {}, "rules": {}}
@@ -352,7 +356,7 @@ class TestPresentResults:
         results = [
             FakeMatchResult(
                 local_name="agent.md",
-                catalog_name="catalog-agent",
+                catalog_item="catalog-agent",
                 match_type="exact",
                 item_type="agents",
             )
@@ -416,7 +420,7 @@ class TestFormatMatch:
         from aec.commands.discover_catalog import _format_match
         result = FakeMatchResult(
             local_name="custom.md",
-            catalog_name="catalog-item",
+            catalog_item="catalog-item",
             match_type="similar",
             similarity=0.87,
         )
@@ -439,7 +443,7 @@ class TestFormatMatch:
         from aec.commands.discover_catalog import _format_match
         result = FakeMatchResult(
             local_name="old-name.md",
-            catalog_name="new-name",
+            catalog_item="new-name",
             match_type="renamed",
         )
         formatted = _format_match(4, result)
