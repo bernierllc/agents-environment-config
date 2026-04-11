@@ -98,7 +98,96 @@ verification/
 
 Each page file covers a single page (or a tightly coupled group like create/edit for the same entity). Within the file, items are grouped by user type so the same page can be verified from each perspective.
 
+##### Page frontmatter
+
+Every page file MUST include YAML frontmatter describing the page's requirements. This metadata is the contract between verification-writer and downstream consumers (playwright-test-generator, browser-verification, etc.). Verification-writer owns this frontmatter — no other skill edits it.
+
+```yaml
+---
+version: "1.0.0"         # semver — bump on content changes (see versioning rules below)
+path: /events/{id}        # route pattern
+title: Event Detail Page
+
+# Access control — describes WHAT the page requires, not HOW to satisfy it
+access:
+  public: false           # can unauthenticated actors reach this page?
+  auth_model: rbac        # rbac | abac | session | api-key | oauth-scope | custom | none
+  # Model-specific fields — include only the fields relevant to the auth_model:
+  required_roles: [admin, editor]          # rbac: role names
+  required_permissions: [events:read]      # abac: permission strings
+  required_scopes: [events.read]           # oauth-scope: OAuth scope strings
+  mfa_required: false
+  notes: ""               # free text for non-standard auth (custom model, conditional access, etc.)
+
+# Page characteristics — useful for any downstream consumer
+page:
+  type: dynamic           # static | dynamic | ssr | spa-route | api-only
+  has_forms: false
+  has_modals: true
+  has_realtime: false     # websockets, SSE, polling
+  has_file_upload: false
+
+# Data dependencies — what state must exist for the page to be meaningful
+data_dependencies:
+  - "at least one event exists"
+  - "event has associated venue"
+
+# Environment — what services need to be running (abstract names, not URLs/ports)
+environment:
+  services: [api, database]
+  feature_flags: []
+---
+```
+
+**Frontmatter field rules:**
+
+- **`version`**: Semver string. Bump patch for item text changes, minor for new items or structural changes, major for reorganization or access model changes. Downstream consumers reference this version to detect staleness.
+- **`path`**: The route pattern, including dynamic segments. Use the framework's notation (e.g., `/events/{id}`, `/events/:id`, `/events/[id]`).
+- **`access`**: Describes the page's access requirements as they exist in the codebase. Derived from Layer 1 analysis. Include only the model-specific fields that apply (don't include `required_roles` for an `oauth-scope` model). Set `auth_model: none` and `public: true` for pages with no auth.
+- **`page`**: Characteristics observable from the code. These inform what kinds of tests are possible.
+- **`data_dependencies`**: Plain-language descriptions of state that must exist. Not scripts or setup code — just what needs to be true.
+- **`environment.services`**: Abstract service names. A downstream consumer maps these to actual infrastructure in its own config.
+- **`environment.feature_flags`**: Feature flags that affect this page's behavior. Empty array if none.
+
+**Auth model guidelines:**
+
+| Model | When to use | Model-specific fields |
+|---|---|---|
+| `rbac` | Role-based middleware, role checks in handlers | `required_roles` |
+| `abac` | Attribute/permission-based access control | `required_permissions` |
+| `oauth-scope` | OAuth2 scope-gated endpoints | `required_scopes` |
+| `session` | Authenticated session required, no role differentiation | (none beyond `public: false`) |
+| `api-key` | API key auth (common for API-only endpoints) | (none beyond `public: false`) |
+| `custom` | Non-standard auth scheme | `notes` explaining the scheme |
+| `none` | No auth required | `public: true` |
+
+When a page has different access rules per user type section (e.g., admin sees edit controls, public sees read-only), the frontmatter describes the **most permissive** access (the lowest barrier to reach the page at all). Per-section access differences are already captured in the user type groupings within the doc body.
+
+##### Page content example
+
 ```markdown
+---
+version: "1.0.0"
+path: /events/{id}
+title: Event Detail Page
+access:
+  public: true
+  auth_model: rbac
+  required_roles: [admin, promoter]
+  mfa_required: false
+page:
+  type: dynamic
+  has_forms: false
+  has_modals: true
+  has_realtime: false
+  has_file_upload: false
+data_dependencies:
+  - "at least one event exists"
+environment:
+  services: [api, database]
+  feature_flags: []
+---
+
 # Event Detail Page (`/events/{id}`)
 
 ## All User Types
@@ -119,6 +208,18 @@ Each page file covers a single page (or a tightly coupled group like create/edit
 - [ ] [standard] **EVT-DTL-PUB-01** Verify public page shows event info without admin controls --- Event name, date, venue display. No edit, delete, or management buttons. *Expected: success*
 ```
 
+##### Versioning rules
+
+The `version` field in frontmatter uses semver and enables downstream consumers to detect when their derived artifacts are stale:
+
+- **Patch** (e.g., `1.0.0` → `1.0.1`): Item text clarifications, typo fixes, reordering items within a section. No new items, no structural changes.
+- **Minor** (e.g., `1.0.1` → `1.1.0`): New items added, items removed, new user type sections, new annotations. The page's access model and structure are unchanged.
+- **Major** (e.g., `1.1.0` → `2.0.0`): Access model changed (e.g., page became public, new auth model), page reorganized or split, route path changed, fundamental structural changes.
+
+**When to bump:** Every time verification-writer modifies a doc, it bumps the version in the same edit. Downstream consumers (like playwright-test-generator) reference `doc_path@version` — a version bump signals them to re-evaluate their derived artifacts.
+
+**On first generation:** All docs start at `1.0.0`.
+
 **Naming convention for page files:** Use the entity or feature name, not the route path. `event-detail.md` not `events-id.md`. If a page has sub-pages (tabs, nested views), include them in the same file as sections unless they exceed 50 items, in which case split into `event-detail-overview.md`, `event-detail-artists.md`, etc.
 
 **Item ID convention:** `{PAGE-ABBREV}-{SECTION}-{ROLE-ABBREV}-{NUMBER}`. The role abbreviation makes it easy to filter: `EVT-DTL-ADM-01` is an admin item on the event detail page, `EVT-DTL-PUB-01` is a public visitor item. Items in the "All User Types" section omit the role abbreviation: `EVT-DTL-01`.
@@ -127,7 +228,43 @@ Each page file covers a single page (or a tightly coupled group like create/edit
 
 Flow files define ordered, cross-page verification sequences. They reference items from page files by ID and add flow-specific context (what state to set up, what to check between steps, what the end-to-end expectation is).
 
+##### Flow frontmatter
+
+Flow files also include YAML frontmatter with versioning and metadata:
+
+```yaml
+---
+version: "1.0.0"
+title: Event Lifecycle
+user_types: [admin, promoter, artist]
+pages: [event-create, event-detail, magic-link-landing]
+data_dependencies:
+  - "admin account with editor role"
+  - "at least one artist and one promoter in the system"
+environment:
+  services: [api, database, mailpit]
+  feature_flags: []
+---
+```
+
+Flow frontmatter is lighter than page frontmatter — flows don't have their own `access` block because access is defined per-step by the referenced page docs.
+
+##### Flow content example
+
 ```markdown
+---
+version: "1.0.0"
+title: Event Lifecycle
+user_types: [admin, promoter, artist]
+pages: [event-create, event-detail, magic-link-landing]
+data_dependencies:
+  - "admin account with editor role"
+  - "at least one artist and one promoter in the system"
+environment:
+  services: [api, database, mailpit]
+  feature_flags: []
+---
+
 # Flow: Event Lifecycle
 
 ## Purpose
@@ -293,7 +430,15 @@ verification/
 
 Check the existing structure and follow it. Don't reorganize without asking. If the project has grown enough that the current organization is strained (files getting too large, new pages not fitting existing files), suggest specific changes but don't restructure automatically.
 
-**When adding a new page:** Create a new file in `pages/`, update `index.md`, check if any existing flow files should reference it.
+**Frontmatter migration:** If existing docs lack YAML frontmatter (created before v3.0.0), add frontmatter as part of the update pass. This is not optional — downstream consumers (playwright-test-generator, browser-verification) depend on structured frontmatter. For each doc without frontmatter:
+
+1. Run the normal Layer 1 analysis to determine access requirements
+2. Add frontmatter with `version: "1.0.0"` (treat the migration as the first versioned release)
+3. Report to the user: "Added frontmatter to N verification docs. Downstream skills can now consume structured page metadata."
+
+Do not block the update on frontmatter migration — add frontmatter to docs you're already touching, and note which docs still need it.
+
+**When adding a new page:** Create a new file in `pages/` with frontmatter, update `index.md`, check if any existing flow files should reference it.
 
 **When a page is removed:** Delete the file, update `index.md`, update any flow files that referenced its items.
 
@@ -450,6 +595,27 @@ Components that display computed, derived, or time-sensitive values are high-ris
 
 This data is embedded in verification items as `<!-- BUSINESS-CONTEXT -->` annotations (see item format in Phase 2).
 
+#### Layer 3e: State Dependency Analysis
+
+Forms with interdependent fields are a top source of bugs that pass functional testing but fail in real usage. Layer 3e traces cross-field state dependencies and generates verification items covering state transition edge cases. Read `references/state-dependency-format.md` for the annotation format consumed by playwright-test-generator.
+
+**Step 1: Trace conditional rendering chains.** Scan for conditionals (`if`, ternaries, `&&` guards) where one field's value controls the visibility of other form sections. For each chain, record the trigger field, the condition, and all affected sections.
+
+**Step 2: Read useEffect/watch dependency arrays.** React Hook Form `watch('field')` calls and `useEffect` hooks with field values in their dependency arrays are explicit dependency declarations. Read the dependency array and the effect body to understand what cascades when the watched field changes.
+
+**Step 3: Identify cascading clears.** When field A changes and field B's current value becomes invalid — e.g., removing a promoter who was selected as flyer uploader — a cascading clear should fire. Trace which fields reference other fields' values (via form state, context, or derived selectors) and determine whether the code handles invalidation.
+
+**Step 4: Audit submission payload for stale references.** Read the submit handler and trace how the payload is constructed. Check whether hidden or cleared fields still contribute values to the submission. A field that was conditionally hidden but whose value remains in form state is a stale reference — it may cause FK constraint violations, orphaned data, or silent corruption.
+
+**Recording:** For each state dependency found, produce:
+1. The trigger (which field change initiates the cascade)
+2. The affected fields (which fields depend on the trigger)
+3. The expected cascade (what should happen — clear, hide, revalidate, disable)
+4. A code reference (file and hook/effect that implements the dependency)
+5. The failure mode (what goes wrong if the cascade doesn't fire — FK violation, stale data, UI inconsistency)
+
+This data is embedded in verification items as `<!-- STATE-DEPENDENCY -->` annotations (see Phase 2 generation rules and `references/state-dependency-format.md`).
+
 ### Layer 4: Error Path Analysis
 
 For every interaction point from Layer 3, determine error handling status:
@@ -585,6 +751,30 @@ For each component where Layer 3d extracted business rules for dynamic values:
 - `[deep]` — For values derived from multiple data sources: verify the aggregation is correct. E.g., "Verify '3 of 5 artists confirmed' badge matches the count of confirmed artists in the list below --- Count in badge equals number of artists with 'Confirmed' status. *Expected: success*"
 
 **Why this matters:** A component can render without errors, pass all functional tests, and still display a value that is wrong according to the business rules. The verification-writer has the code context to know what values *should* be — the browser-verification skill only sees what *is*. The `BUSINESS-CONTEXT` annotations bridge that gap.
+
+**State dependency generation rules (using Layer 3e data):**
+
+For each state dependency found in Layer 3e, generate verification items with `<!-- STATE-DEPENDENCY -->` annotations:
+
+- `[deep]` — For each conditional rendering chain: change the trigger field value to activate the condition, then change it back. Verify dependent sections hide AND their state is cleared from the submission payload. Attach a `<!-- STATE-DEPENDENCY -->` annotation with the trigger, affected fields, expected cascade, code reference, and failure mode.
+- `[deep]` — For each cascading clear: set up the dependent state (e.g., select a promoter as flyer uploader), then invalidate it (e.g., remove that promoter). Verify the dependent field is cleared or the form prevents submission with a stale reference.
+- `[standard]` — **Severity elevation:** When the failure mode is FK constraint violation, data corruption, or orphaned records, elevate to `[standard]`. These are not edge cases — they are data integrity failures that affect production.
+- `[deep]` — For each submission payload concern: set up a state where a hidden or cleared field might still have a stale value, then submit. Verify the payload does not include the stale reference (inspect the network request body).
+
+```markdown
+- [ ] [deep] **EVT-FRM-SD-01** Add promoter, set as flyer uploader,
+  then change event type to Private --- Promoter-dependent flyer config
+  is cleared or form prevents submission. *Expected: success*
+<!-- STATE-DEPENDENCY:
+  trigger: eventType field change to non-music type
+  affected_fields: [flyer_uploader_id, responsibility_person_id]
+  expected_cascade: [clear flyer_uploader_id, clear responsibility selections, hide artist/promoter sections]
+  code_ref: EventForm.tsx:useEffect watching eventType
+  failure_mode: FK constraint violation if stale ID submitted
+-->
+```
+
+**Why this matters:** State dependencies are invisible in isolated field testing. A field can pass all its own validation, accept valid input, and display correctly — but submit a stale reference because a cascading clear never fired. These bugs only surface when fields are tested *in combination*, which is exactly what Layer 3e verification items enforce.
 
 **Browser-First Verification:**
 
@@ -773,6 +963,14 @@ HTML visualization: [flow-views | sitemap | both | none]
 | Including shared components as nodes in flow diagrams | Shared components (nav, toasts, modals) are infrastructure — exclude from diagrams unless the component IS the interaction |
 | Generating HTML artifact without checking preference | Always check memory for HTML visualization preference; ask on first run or when field is missing; respect "skip" choice |
 | Inconsistent user type colors across visualizations | Use the deterministic alphabetical palette from flow-visualization.md — never assign colors ad hoc |
+| Testing fields in isolation without state dependency coverage | If Layer 3e finds cross-field dependencies, generate items that test the fields in combination — isolated field tests miss cascading clear failures |
+| Not tracing submit handlers for stale references | Read the submit handler payload construction — a hidden field's stale value in state can cause FK violations even when the UI looks correct |
+| Marking all state dependency items as [deep] | FK constraint violations and data corruption failure modes get elevated to [standard] — these are not edge cases |
+| Missing STATE-DEPENDENCY annotations | Every state dependency item needs a `<!-- STATE-DEPENDENCY -->` annotation with all five fields (trigger, affected_fields, expected_cascade, code_ref, failure_mode) |
+| Page doc missing frontmatter | Every page and flow doc MUST have YAML frontmatter with version, path, access, and page fields. Docs without frontmatter break downstream consumers |
+| Not bumping version on doc changes | Every edit to a verification doc must bump the frontmatter version. Downstream consumers depend on version changes to detect staleness |
+| Wrong auth_model in frontmatter | Read the actual auth code — don't guess. If the app uses RBAC middleware, set `auth_model: rbac`. If it uses OAuth scopes, set `oauth-scope`. Misclassification causes downstream consumers to wire up wrong auth strategies |
+| Including test strategy in frontmatter | Frontmatter describes WHAT the page requires, not HOW to test it. Auth strategies, test bypass endpoints, and actor types belong to the consuming skill's own metadata |
 
 ## Red Flags — STOP
 

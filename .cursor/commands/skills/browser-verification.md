@@ -215,6 +215,23 @@ digraph startup {
 
 ## Step 3: Load Verification Docs
 
+### 3a. Read frontmatter (if present)
+
+Verification docs may include YAML frontmatter with structured page metadata (added by verification-writer v3.0.0+). When frontmatter is present, use it to plan the verification run more efficiently:
+
+- **`access`**: Tells you what auth is needed before you parse section headers. Use `access.auth_model` and `required_roles` to determine which login flow to use, rather than discovering it mid-run.
+- **`page.has_forms` / `page.has_modals` / `page.has_realtime`**: Tells you what kinds of interactions to expect, helping you plan depth-appropriate testing.
+- **`data_dependencies`**: Tells you what state must exist before the page is meaningful. Check prerequisites before navigating rather than discovering empty pages mid-run.
+- **`environment.services`**: Tells you what services need to be running. Cross-reference with the service startup in Step 2 — if a page needs a service that isn't running, flag it before attempting verification.
+
+**If frontmatter is missing:** This is not a blocker — browser-verification has always worked from section headers and inline content. Continue with the normal flow. However, note missing frontmatter in the verification log and suggest running `/verification-writer` to add it:
+
+> "Verification docs for [page] are missing structured frontmatter. Run `/verification-writer` on this project to add frontmatter — it enables auth-aware test generation and faster verification planning."
+
+Do not attempt to add frontmatter yourself — that is verification-writer's job.
+
+### 3b. Parse docs
+
 1. Read `<verification-path>/index.md` for prerequisites, login credentials, and the page/flow/user-type inventory
 2. Based on scope type determined in Step 2:
    - **Page scope:** Read the page file(s) in `pages/`
@@ -593,6 +610,9 @@ Save preferences to the `verification-docs-config` memory so future runs don't r
 | Ignoring `BUSINESS-CONTEXT` annotations | When an item has a business context annotation, check the displayed value against the rule and valid range — not just whether the component renders |
 | Not cross-referencing values on the same page | If a timer says 167 hours and a label says "72-hour deadline," those contradict — catch it even without an annotation |
 | Treating "it rendered" as "it's correct" for dynamic values | A timer that counts down is functional; a timer counting down from the wrong number is a data bug — verify the value, not just the behavior |
+| Ignoring frontmatter when present | If a verification doc has YAML frontmatter with `access`, `data_dependencies`, and `environment`, read it before starting — it tells you what auth, data, and services are needed upfront |
+| Trying to add frontmatter to verification docs | Frontmatter is owned by verification-writer. If it's missing, suggest running `/verification-writer` — don't add it yourself |
+| Discovering auth requirements mid-run | When frontmatter is present, read `access.auth_model` and `required_roles` before navigating — plan all login flows upfront instead of hitting the login page unexpectedly |
 
 ## Cross-Skill Integration with verification-writer
 
