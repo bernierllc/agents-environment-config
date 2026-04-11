@@ -56,3 +56,6 @@ AGENTS.md
 
 # Blog posts (local content, not part of the tool)
 blog/
+
+# Local docs (demo scripts, notes, etc.)
+docs/demo-script.md
