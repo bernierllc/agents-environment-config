@@ -99,6 +99,14 @@ def run_install(
 
     Console.success(f"Installed {name} v{item_info.get('version', '0.0.0')}")
 
+    # Quick-scan notification for global installs
+    if global_flag:
+        try:
+            from ..lib.discovery_hooks import quick_scan_notification
+            quick_scan_notification(scope)
+        except ImportError:
+            pass
+
     # Skill-specific post-install steps
     if item_type == "skill" and name == "playwright-test-generator":
         _post_install_playwright_pipeline(name, scope, yes=yes)
