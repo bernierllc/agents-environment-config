@@ -1082,6 +1082,47 @@ def setup(
                 else:
                     Console.error("Could not find repo root for Raycast script output directory.")
 
+    # --- Discovery scan ---
+    if not dry_run and not batch:
+        try:
+            resp = input(
+                "\n  Scan for files that match items in the AEC catalog? [Y/n]: "
+            ).strip().lower()
+        except EOFError:
+            resp = "n"
+
+        if resp not in ("n", "no"):
+            try:
+                from .discover_catalog import _run_scan, _present_results
+                from ..lib.scope import Scope
+                from ..lib.sources import get_source_dirs, discover_available
+                from ..lib.catalog_hashes import regenerate_if_missing
+                from ..lib.config import AEC_HOME
+
+                scope = Scope(is_global=False, repo_path=project_dir)
+                source_dirs = get_source_dirs()
+                catalog = {}
+                for item_type, src_dir in source_dirs.items():
+                    catalog[item_type] = discover_available(src_dir, item_type)
+
+                catalog_path = AEC_HOME / "catalog-hashes.json"
+                catalog_hashes = regenerate_if_missing(catalog_path, source_dirs)
+
+                results = _run_scan(
+                    scope, depth=2, catalog=catalog, catalog_hashes=catalog_hashes
+                )
+                if results:
+                    _present_results(results, scope)
+                else:
+                    Console.info("No similar items found.")
+            except ImportError:
+                Console.warning(
+                    "Discovery module not available. "
+                    "Run `aec update` to get the latest version."
+                )
+            except Exception as e:
+                Console.warning(f"Discovery scan failed: {e}")
+
     # Summary
     if not dry_run:
         Console.header("Setup Complete")
