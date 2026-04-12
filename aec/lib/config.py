@@ -51,6 +51,7 @@ AEC_README = AEC_HOME / "README.md"
 AEC_PREFERENCES = AEC_HOME / "preferences.json"
 INSTALLED_MANIFEST_V2 = AEC_HOME / "installed-manifest.json"
 AEC_PORTS_REGISTRY = AEC_HOME / "ports-registry.json"
+TRACKED_REPOS_PATH = AEC_HOME / "tracked-repos.json"
 
 # Phase 2: Test runner paths
 AEC_TESTS_DIR = AEC_HOME / "tests"
