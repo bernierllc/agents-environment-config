@@ -6,6 +6,7 @@ from typing import Optional
 
 from ..lib.console import Console
 from ..lib.config import get_repo_root
+from ..lib.installed_store import record_item_install as record_item_install_pertype
 from ..lib.manifest_v2 import (
     load_manifest,
     save_manifest,
@@ -198,6 +199,10 @@ def _upgrade_scope(
 
             content_hash = hash_skill_directory(dst_path) if dst_path.is_dir() else ""
             record_install(manifest, scope, item_type, name, avail_v, content_hash)
+
+            # Dual-write to per-type installed file (best-effort during transition)
+            record_item_install_pertype(item_type[:-1], name, avail_v, content_hash)
+
             Console.success(f"  {item_type[:-1]}  {name}  {inst_v} -> {avail_v}")
             upgraded = True
 
