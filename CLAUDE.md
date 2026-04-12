@@ -39,6 +39,10 @@ Do NOT memorize all rules - read the specific rule file when working in that are
 4. When setting up a project, read `~/.agent-tools/rules/agents-environment-config/general/architecture.md`
 5. For project-specific info, see `AGENTINFO.md`
 
+## README Guidelines
+
+- DO NOT put local project names (e.g., aihelp, barevents, EarnLearn) in the README. This is a template/tool repo — examples must use placeholder names like `my-project`, `my-app`, `my-api`.
+
 ## Regenerating This File
 
 ```bash
