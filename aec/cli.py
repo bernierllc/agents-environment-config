@@ -239,7 +239,25 @@ if HAS_TYPER:
 
     # --- existing top-level commands ---
     from .commands import discover
-    app.command("discover")(discover.discover_cmd)
+    app.command("discover-repos")(discover.discover_cmd)
+
+    @app.command("discover")
+    def discover_catalog_cmd(
+        global_flag: bool = typer.Option(False, "-g", "--global", help="Scan global scope"),
+        rediscover: bool = typer.Option(False, "--rediscover", help="Re-surface dismissed items"),
+        depth: Optional[int] = typer.Option(None, "--depth", help="Scan depth: 1=Quick, 2=Normal, 3=Deep"),
+        yes: bool = typer.Option(False, "--yes", "-y", help="Install exact matches, skip rest"),
+        dry_run: bool = typer.Option(False, "--dry-run", help="Preview without writing"),
+    ):
+        """Scan for local items similar to AEC catalog entries."""
+        from .commands.discover_catalog import run_discover
+        run_discover(
+            global_flag=global_flag,
+            rediscover=rediscover,
+            depth=depth,
+            yes=yes,
+            dry_run=dry_run,
+        )
 
     @app.command("doctor")
     def doctor_cmd():
@@ -582,10 +600,18 @@ else:
         test_report.add_argument("-g", "--global", dest="global_flag", action="store_true", help="Show global report")
         test_sub.add_parser("detect", help="Re-detect test frameworks for current project")
 
-        # discover
-        discover_parser = subparsers.add_parser("discover", help="Discover repos from Raycast scripts")
-        discover_parser.add_argument("--dry-run", action="store_true", help="Preview")
-        discover_parser.add_argument("--auto", action="store_true", help="Add without prompting")
+        # discover-repos (renamed from discover)
+        discover_repos_parser = subparsers.add_parser("discover-repos", help="Discover repos from Raycast scripts")
+        discover_repos_parser.add_argument("--dry-run", action="store_true", help="Preview")
+        discover_repos_parser.add_argument("--auto", action="store_true", help="Add without prompting")
+
+        # discover (catalog discovery)
+        discover_parser = subparsers.add_parser("discover", help="Scan for local items similar to AEC catalog")
+        discover_parser.add_argument("-g", "--global", dest="global_flag", action="store_true", help="Scan global scope")
+        discover_parser.add_argument("--rediscover", action="store_true", help="Re-surface dismissed items")
+        discover_parser.add_argument("--depth", type=int, default=None, help="Scan depth: 1=Quick, 2=Normal, 3=Deep")
+        discover_parser.add_argument("--yes", "-y", action="store_true", help="Install exact matches, skip rest")
+        discover_parser.add_argument("--dry-run", action="store_true", help="Preview without writing")
 
         # doctor
         subparsers.add_parser("doctor", help="Check installation health")
@@ -762,9 +788,19 @@ else:
             from .commands.generate import run_prune
             run_prune(yes=args.yes, dry_run=args.dry_run)
 
+        elif args.command == "discover-repos":
+            from .commands import discover as discover_repos_cmd
+            discover_repos_cmd.discover(dry_run=args.dry_run, auto=args.auto)
+
         elif args.command == "discover":
-            from .commands import discover as discover_cmd
-            discover_cmd.discover(dry_run=args.dry_run, auto=args.auto)
+            from .commands.discover_catalog import run_discover
+            run_discover(
+                global_flag=args.global_flag,
+                rediscover=args.rediscover,
+                depth=args.depth,
+                yes=args.yes,
+                dry_run=args.dry_run,
+            )
 
         elif args.command == "doctor":
             from .commands.doctor import run_doctor
