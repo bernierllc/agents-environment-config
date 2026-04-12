@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python 3.9+, Typer CLI, JSON manifests, YAML package descriptors, existing AEC infrastructure
 
+**Branch strategy:** All work from Phase 1 onward should be done in a git worktree on a feature branch (e.g., `feature/aec-packages`). Phase 0 (rule + skill only, no CLI changes) can go directly to main. The worktree isolates package system work from the stable CLI while allowing parallel development on main.
+
 ---
 
 ## North Star Vision
@@ -1584,6 +1586,20 @@ For users already running AEC (like the author):
 6. **Phase 5** specifically handles their case — ownership detection, backup, rollback, `aec register` for user-owned content
 
 No existing setup is broken. Everything is opt-in. Rollback is always available.
+
+---
+
+## Integration Constraints (Must Address in Phase 1)
+
+These are existing features that the snippet injection system must coordinate with. None are blockers, but ignoring them will cause breakage.
+
+1. **`aec validate` + pre-commit parity check** — Both compare `.cursor/rules/*.mdc` against `.agent-rules/*.md`. Injected snippet blocks (`<!-- BEGIN aec-package:... -->`) will cause mismatches. Fix: strip marker blocks before comparing, or teach validation that injected blocks are expected additions (not drift).
+
+2. **`aec generate rules`** — Regenerates `.agent-rules/` from `.cursor/rules/` by stripping frontmatter. This overwrites injected snippets. Fix: after regeneration, re-apply injected snippets using `package-partials.json` to know what was injected and where. Or: inject into `.agent-rules/` only (not `.cursor/rules/`) and have generate preserve marked blocks.
+
+3. **`aec uninstall` individual items that belong to a package** — Uninstalling `rule seed-data-management` when it's part of an installed package leaves stale package records and possibly broken integration snippets. Fix: post-uninstall check against `package-partials.json`, warn user, offer to uninstall the full package.
+
+4. **`agent_files.py` yaml import** — Already has `try: import yaml` with `HAS_YAML` fallback. Adding PyYAML as a required dependency means the guard is no longer needed but won't break anything. Clean up during Phase 1.
 
 ---
 
