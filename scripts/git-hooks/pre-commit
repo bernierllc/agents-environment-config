@@ -117,6 +117,14 @@ else
     echo -e "${YELLOW}⚠${NC} .agent-rules/ directory not found - run: python3 scripts/generate-agent-rules.py"
 fi
 
+# --- 7. Update catalog-hashes.json incrementally ---
+echo -e "\n${GREEN}Updating catalog-hashes.json...${NC}"
+if python3 "$REPO_ROOT/scripts/update-catalog-hashes.py" 2>/dev/null; then
+    echo -e "${GREEN}✓${NC} catalog-hashes.json checked"
+else
+    echo -e "${YELLOW}⚠${NC} catalog hash update skipped (non-blocking)"
+fi
+
 # --- Summary ---
 echo ""
 if [ $ERRORS -gt 0 ]; then
