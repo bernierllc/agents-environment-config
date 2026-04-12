@@ -50,6 +50,9 @@ def log_setup(project_dir: Path, dry_run: bool = False) -> None:
     """
     Log a project setup to the tracking file.
 
+    Dual-writes to both tracked-repos.json and setup-repo-locations.txt
+    during the migration transition period.
+
     Args:
         project_dir: The project directory that was set up
         dry_run: If True, report what would happen without making changes.
@@ -64,7 +67,7 @@ def log_setup(project_dir: Path, dry_run: bool = False) -> None:
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Read existing entries, filter out this path
+    # --- Write to legacy txt file ---
     entries = []
     if AEC_SETUP_LOG.exists():
         content = AEC_SETUP_LOG.read_text().strip()
@@ -79,10 +82,16 @@ def log_setup(project_dir: Path, dry_run: bool = False) -> None:
     # Write back
     AEC_SETUP_LOG.write_text("\n".join(entries) + "\n")
 
+    # --- Write to JSON store (dual-write) ---
+    from .tracked_repos import add_tracked_repo
+    add_tracked_repo(abs_path, VERSION)
+
 
 def is_logged(project_dir: Path) -> bool:
     """
     Check if a project is in the setup log.
+
+    Checks JSON store first, falls back to legacy txt file.
 
     Args:
         project_dir: The project directory to check
@@ -90,6 +99,14 @@ def is_logged(project_dir: Path) -> bool:
     Returns:
         True if the project is tracked
     """
+    # Try JSON first (only if the file already exists -- avoid triggering
+    # auto-migration which would copy txt entries into JSON and make it
+    # impossible for untrack_repo to fully remove a repo).
+    from .tracked_repos import is_tracked, _tracked_repos_path
+    if _tracked_repos_path().exists() and is_tracked(project_dir):
+        return True
+
+    # Fall back to legacy txt
     if not AEC_SETUP_LOG.exists():
         return False
 
