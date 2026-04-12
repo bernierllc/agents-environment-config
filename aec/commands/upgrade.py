@@ -99,6 +99,16 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
     if not any_upgraded and not dry_run:
         Console.print("\nEverything is up to date.")
 
+    # Quick-scan notification for global scope
+    if not dry_run:
+        try:
+            from ..lib.discovery_hooks import quick_scan_notification
+            from ..lib.scope import Scope
+            scope = Scope(is_global=True, repo_path=None)
+            quick_scan_notification(scope)
+        except ImportError:
+            pass
+
 
 def _target_base(scope: str, item_type: str) -> Path:
     """Determine the target directory for an item type in a given scope."""
