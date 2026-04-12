@@ -46,6 +46,17 @@ OPTIONAL_FEATURES: Dict[str, Dict[str, Any]] = {
         ),
         "default": False,
     },
+    "discovery_recompare": {
+        "description": "Re-compare dismissed items when they change",
+        "prompt": (
+            "If a skill, agent, or rule you previously dismissed changes or gets updated,\n"
+            "should we compare it to AEC tracked items again?\n"
+            "  1) Yes, re-compare automatically\n"
+            "  2) No, keep dismissed until I run aec discover --rediscover\n\n"
+            "Choose [1]: "
+        ),
+        "default": True,
+    },
 }
 
 
@@ -253,3 +264,11 @@ def get_pending_prompts() -> List[Dict[str, Any]]:
             })
 
     return pending
+
+
+def get_recompare_policy() -> str:
+    """Return 'auto' or 'manual' based on discovery_recompare preference."""
+    pref = get_preference("discovery_recompare")
+    if pref is None:
+        return "auto"  # default
+    return "auto" if pref else "manual"
