@@ -226,6 +226,35 @@ afterAll(async () => {
 - **Environment Variables**: Test that environment variables are correctly loaded and used
 - **Connection Testing**: Verify that services can connect to each other correctly
 
+## Data Strategy by Environment
+
+**Key principle: Tests must never depend on a pre-existing dirty environment.** If a test needs data, it creates it or declares it.
+
+### Reference Data Belongs in Migrations
+
+Reference/lookup data (roles, statuses, categories, feature flags) MUST live in database migrations, not seed scripts. This ensures every environment — test, dev, staging, production — gets reference data automatically without extra setup.
+
+### Automated Tests (CI / `npm test`)
+
+- Fresh database per test run — spin up a clean Docker instance, apply migrations (which include reference data), then run tests
+- Each test declares its own data using factory/builder patterns on top of reference data from migrations
+- Isolate between tests via transaction rollback or truncate-and-reseed — no test depends on what ran before it
+- Seed scripts are NOT used in automated tests — migrations + per-test factories are sufficient
+
+### Local Development (`npm run dev`)
+
+- Seed scripts run on demand (`make seed` or equivalent after `make db:reset`)
+- Seeds MUST be idempotent — re-running is always safe
+- Seeds include: reference data (redundant with migrations but convenient after full resets), bootstrap admin user, dev convenience data (sample users, realistic content)
+- Dirty environment is fine — seeds don't assume a clean database
+
+### Staging
+
+- Migrations deploy reference data automatically (same as production)
+- Staging-specific seed data (test users, demo accounts) is applied via a separate, explicitly-run seed target — **never automatic on deploy** — to prevent accidental test data in production if a pipeline is misconfigured
+- Testing on staging is integration/smoke testing, not re-running the full test suite — verify the deployment worked
+- Data needed is minimal: a known test user, a known workflow to exercise — curated idempotent test accounts, not a copy of the full dev seed
+
 ## Fixture Hygiene
 - Keep fixtures small and representative; remove unused fields.
 - Co-locate fixtures with tests; document provenance (e.g., captured on 2025‑10‑29).
