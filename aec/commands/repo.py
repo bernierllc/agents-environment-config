@@ -800,10 +800,9 @@ def _sync_installed_section(aec_data: dict) -> dict:
     from ..lib.aec_json import update_installed_section
 
     try:
-        from ..lib.skills_manifest import load_installed_manifest
-        from ..lib.config import AGENT_TOOLS_DIR
-        manifest_path = AGENT_TOOLS_DIR / "installed-manifest.json"
-        manifest = load_installed_manifest(manifest_path)
+        from ..lib.manifest_v2 import load_manifest
+        from ..lib.config import INSTALLED_MANIFEST_V2
+        manifest = load_manifest(INSTALLED_MANIFEST_V2)
     except (ImportError, OSError, ValueError):
         return aec_data
 
@@ -811,9 +810,9 @@ def _sync_installed_section(aec_data: dict) -> dict:
         return aec_data
 
     installed = {
-        "skills": manifest.get("skills", {}),
-        "rules": manifest.get("rules", {}),
-        "agents": manifest.get("agents", {}),
+        "skills": manifest["global"]["skills"],
+        "rules": manifest["global"]["rules"],
+        "agents": manifest["global"]["agents"],
     }
     aec_data = update_installed_section(aec_data, installed)
     return aec_data
