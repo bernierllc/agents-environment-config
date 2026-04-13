@@ -1,9 +1,8 @@
 ---
 name: "Playwright Test Engineer"
 description: ">"
-tags: ["agent"]
+tags: "["agent"]"
 ---
-
 
 # Playwright Test Engineer Agent Personality
 
