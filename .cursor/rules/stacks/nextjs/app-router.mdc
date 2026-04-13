@@ -83,6 +83,35 @@ export function UserCard({
 }
 ```
 
+### Data Testid Requirements (MANDATORY)
+
+Add `data-testid` to all interactive elements, dynamic state containers, and structural landmarks when building components. This is a build-time requirement, not a testing afterthought.
+
+**Required elements:**
+- Interactive: buttons, inputs, selects, file inputs, links that trigger behavior
+- Dynamic state: error messages, success banners, empty states, loading indicators, count badges
+- Structural landmarks: sidebar, header, main content area, modal container
+
+```typescript
+// ✅ REQUIRED: testid on interactive and dynamic elements
+export function UserCard({ user, onSelect }: UserCardProps): JSX.Element {
+  return (
+    <div data-testid="user-card" className={`border-gray-200 shadow-sm`}>
+      <h3 className="text-gray-900">{user.name}</h3>
+      <button
+        data-testid="select-user-button"
+        onClick={() => onSelect?.(user)}
+        className="bg-blue-600 text-white"
+      >
+        Select
+      </button>
+    </div>
+  );
+}
+```
+
+Static/decorative elements (headings, descriptive text, icons) do not need `data-testid`. Missing testids on required elements is a developer deficiency — fix it at the source, not in tests.
+
 ### Error Boundaries
 Use error boundaries for client components to handle errors gracefully.
 

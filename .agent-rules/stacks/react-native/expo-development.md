@@ -58,6 +58,40 @@ const badKey = Math.random().toString();
 const anotherBadKey = Date.now().toString();
 ```
 
+## Testability by Design (MANDATORY)
+
+Add `testID` to all interactive elements, dynamic state containers, and structural landmarks when building components. This is a build-time requirement, not a testing afterthought.
+
+**Required elements:**
+- Interactive: `Button`, `Pressable`, `TouchableOpacity`, `TextInput`, `Switch`, `Picker`
+- Dynamic state: error messages, success banners, empty states, loading indicators, count badges
+- Structural landmarks: screen root, modal container, list container, navigation bar
+
+```typescript
+// ✅ REQUIRED when building components
+import { View, TextInput, Pressable, Text } from 'react-native';
+
+export function LoginForm({ onSubmit }: LoginFormProps) {
+  return (
+    <View testID="login-form">
+      <TextInput
+        testID="email-input"
+        value={email}
+        onChangeText={setEmail}
+      />
+      <Pressable testID="login-button" onPress={handleLogin}>
+        <Text>Login</Text>
+      </Pressable>
+      {hasError && (
+        <Text testID="login-error">{errorMessage}</Text>
+      )}
+    </View>
+  );
+}
+```
+
+Missing `testID` on required elements is a developer deficiency — fix it at the source, not in tests. Use `randomUUID()` from `expo-crypto` for IDs, but use descriptive strings for `testID`.
+
 ## Testing Approach
 
 - **Prompt user to test** on actual device or simulator

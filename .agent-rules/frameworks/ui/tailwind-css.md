@@ -103,6 +103,35 @@ All components must use light theme only. Dark theme elements are prohibited.
 - `p-4` - Section padding
 - `p-3` - Component padding
 
+## Testability
+
+Add `data-testid` to all interactive elements, dynamic state containers, and structural landmarks when building components. This is a development standard, not a testing afterthought.
+
+**Required elements:**
+- Interactive: buttons, inputs, selects, file inputs, links that trigger behavior
+- Dynamic state: error messages, success banners, empty states, loading indicators, count badges
+- Structural landmarks: sidebar, header, main content area, modal container
+
+```typescript
+// ✅ REQUIRED alongside styling
+<Button
+  className="bg-blue-600 hover:bg-blue-700 text-white"
+  data-testid="submit-button"
+>
+  Submit
+</Button>
+
+<div className="bg-red-50 border border-red-200 p-4" data-testid="error-banner" role="alert">
+  {errorMessage}
+</div>
+
+<nav className="border-r border-gray-200" data-testid="sidebar-nav">
+  {/* navigation items */}
+</nav>
+```
+
+Static/decorative elements (headings, descriptive paragraphs, icons) do not need `data-testid`.
+
 ## Prohibited Patterns
 
 ❌ **NEVER USE:**
