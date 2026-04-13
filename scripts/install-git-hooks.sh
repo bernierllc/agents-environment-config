@@ -95,7 +95,7 @@ if [ -d "$CLAUDE_AGENTS_DIR" ] && [ -d "$CLAUDE_SKILLS_DIR" ]; then
     cd "$REPO_ROOT"
 else
     echo -e "${RED}✗ Not initialized${NC}"
-    echo "  Run: git submodule update --init --recursive"
+    echo "  Run: git submodule update --init --recursive --remote"
     ((ERRORS++))
 fi
 
@@ -161,7 +161,7 @@ echo "  • Skip sync: SKIP_SYNC=1 git push"
 echo "  • Skip all hooks: git push --no-verify"
 echo ""
 echo -e "${BLUE}Troubleshooting:${NC}"
-echo "  • Submodules not initialized: git submodule update --init --recursive"
+echo "  • Submodules not initialized: git submodule update --init --recursive --remote"
 echo "  • GitHub CLI not authenticated: gh auth login"
 echo "  • Submodule on detached HEAD: cd .claude/agents && git checkout main"
 echo ""

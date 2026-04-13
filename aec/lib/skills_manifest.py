@@ -185,7 +185,30 @@ def discover_available_skills(source_dir: Path) -> dict:
                     "path": f"{item.name}/{sub.name}",
                 }
 
+    _overlay_skill_metadata_from_skill_md(source_dir, skills)
     return skills
+
+
+def _overlay_skill_metadata_from_skill_md(source_dir: Path, skills: dict) -> None:
+    """Prefer SKILL.md frontmatter for version/description/author when the tree exists.
+
+    skills-manifest.json can lag behind SKILL.md bumps; stale manifest versions would
+    otherwise hide updates from `aec update` / `aec outdated`.
+    """
+    for name, info in list(skills.items()):
+        rel = info.get("path") or name
+        skill_dir = source_dir / rel
+        if not skill_dir.is_dir():
+            continue
+        fm = parse_skill_frontmatter(skill_dir)
+        if not fm:
+            continue
+        if "version" in fm:
+            info["version"] = fm["version"]
+        if fm.get("description"):
+            info["description"] = fm["description"]
+        if fm.get("author"):
+            info["author"] = fm["author"]
 
 
 def rebuild_manifest_from_installed(

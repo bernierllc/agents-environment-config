@@ -1048,8 +1048,10 @@ git commit -m "chore: regenerate agent rules and files"
 
 ## Updating Submodules
 
+Submodules track the latest commits on their default branches (same as `aec update` and the post-merge hook):
+
 ```bash
-git submodule update --remote --recursive
+git submodule update --init --recursive --remote
 ```
 
 ## File Purposes

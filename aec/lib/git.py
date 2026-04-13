@@ -57,7 +57,11 @@ def clone_repo(
 
 def init_submodules(repo_dir: Path, dry_run: bool = False) -> Tuple[bool, str]:
     """
-    Initialize git submodules.
+    Initialize git submodules and advance them to remote tracking branches.
+
+    Uses ``--remote`` so submodule checkouts match the latest commits on each
+    submodule's configured upstream (aligned with ``aec update`` and
+    post-merge).
 
     Args:
         repo_dir: Repository root directory
@@ -67,11 +71,18 @@ def init_submodules(repo_dir: Path, dry_run: bool = False) -> Tuple[bool, str]:
         Tuple of (success, message)
     """
     if dry_run:
-        return True, "Would initialize submodules"
+        return True, "Would initialize submodules (including --remote update)"
 
     try:
         result = subprocess.run(
-            ["git", "submodule", "update", "--init", "--recursive"],
+            [
+                "git",
+                "submodule",
+                "update",
+                "--init",
+                "--recursive",
+                "--remote",
+            ],
             cwd=repo_dir,
             capture_output=True,
             text=True,
