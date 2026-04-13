@@ -75,6 +75,34 @@ class TestManifestOperations:
         loaded = load_manifest(manifest_path)
         assert "my-skill" in loaded["global"]["skills"]
         assert loaded["global"]["skills"]["my-skill"]["version"] == "2.0.0"
+        assert "versionHashes" in loaded["global"]["skills"]["my-skill"]
+
+    def test_record_global_skill_archives_prior_version_hash(self, manifest_path):
+        from aec.lib.manifest_v2 import load_manifest, record_install, save_manifest
+
+        m = load_manifest(manifest_path)
+        record_install(
+            m,
+            scope="global",
+            item_type="skills",
+            name="my-skill",
+            version="1.0.0",
+            content_hash="sha256:aaa",
+        )
+        record_install(
+            m,
+            scope="global",
+            item_type="skills",
+            name="my-skill",
+            version="2.0.0",
+            content_hash="sha256:bbb",
+        )
+        save_manifest(m, manifest_path)
+        loaded = load_manifest(manifest_path)
+        entry = loaded["global"]["skills"]["my-skill"]
+        assert entry["version"] == "2.0.0"
+        assert entry["contentHash"] == "sha256:bbb"
+        assert entry["versionHashes"].get("1.0.0") == "sha256:aaa"
 
     def test_record_repo_install(self, manifest_path):
         from aec.lib.manifest_v2 import load_manifest, record_install, save_manifest

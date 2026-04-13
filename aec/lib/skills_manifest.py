@@ -5,7 +5,7 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 
 
 def parse_yaml_frontmatter(text: str) -> Optional[dict]:
@@ -77,6 +77,76 @@ def hash_skill_directory(path: Path) -> str:
             hasher.update(str(filepath.relative_to(path)).encode())
             hasher.update(filepath.read_bytes())
     return f"sha256:{hasher.hexdigest()}"
+
+
+def build_skill_manifest_item(
+    *,
+    version: str,
+    content_hash: str,
+    installed_at: str,
+    previous: Optional[Dict[str, Any]] = None,
+    source: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build a skill manifest entry with ``versionHashes`` history keyed by semver."""
+    prev = previous or {}
+    vhashes = dict(prev.get("versionHashes", {}))
+    pv = prev.get("version")
+    ph = prev.get("contentHash", "")
+    if pv and ph and pv != version:
+        vhashes[pv] = ph
+    rec: Dict[str, Any] = {
+        "version": version,
+        "contentHash": content_hash,
+        "installedAt": installed_at,
+        "versionHashes": vhashes,
+    }
+    if source is not None:
+        rec["source"] = source
+    return rec
+
+
+def plan_skill_directory_replace(
+    dst: Path,
+    src: Path,
+    installed_info: dict,
+    *,
+    assume_yes: bool,
+) -> str:
+    """Decide how to replace installed skill dir ``dst`` with source dir ``src``.
+
+    Compares content hashes to the canonical source tree and to the last
+    recorded install so that a stale ``contentHash`` (or an in-place copy of
+    the new release) does not get misclassified as uncommitted local edits.
+
+    Returns one of:
+        ``absent``: ``dst`` is missing (perform a normal copy).
+        ``sync_manifest``: ``dst`` already matches ``src``; refresh manifest only.
+        ``overwrite``: safe to replace without prompting.
+        ``prompt``: ask the user before overwriting.
+    """
+    if not dst.exists():
+        return "absent"
+    if not dst.is_dir() or not src.is_dir():
+        return "overwrite" if assume_yes else "prompt"
+
+    current = hash_skill_directory(dst)
+    source = hash_skill_directory(src)
+    if current == source:
+        return "sync_manifest"
+    if assume_yes:
+        return "overwrite"
+
+    recorded = installed_info.get("contentHash", "")
+    inst_v = installed_info.get("version", "0.0.0")
+    vhashes = installed_info.get("versionHashes") or {}
+
+    if recorded and current == recorded:
+        return "overwrite"
+    if inst_v in vhashes and current == vhashes[inst_v]:
+        return "overwrite"
+    if not recorded:
+        return "overwrite"
+    return "prompt"
 
 
 MANIFEST_VERSION = 1
