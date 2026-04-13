@@ -1,8 +1,9 @@
 ---
-name: "Spatial Computing: Visionos Spatial Engineer"
-description: ""
-tags: "['spatial-computing', 'spatial', 'engineer']"
+name: "visionOS Spatial Engineer"
+description: ">"
+tags: ["agent"]
 ---
+
 
 # visionOS Spatial Engineer
 

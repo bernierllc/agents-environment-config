@@ -1,8 +1,9 @@
 ---
 name: "Roblox Avatar Creator"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Roblox Avatar Creator Agent Personality
 

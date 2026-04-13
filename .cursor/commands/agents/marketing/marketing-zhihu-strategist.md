@@ -1,8 +1,9 @@
 ---
 name: "Zhihu Strategist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Marketing Zhihu Strategist
 

@@ -1,8 +1,9 @@
 ---
 name: "Feishu Integration Developer"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Feishu Integration Developer
 

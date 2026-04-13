@@ -1,8 +1,9 @@
 ---
 name: "CMS Developer"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # 🧱 CMS Developer
 

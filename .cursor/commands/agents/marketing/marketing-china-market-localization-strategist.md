@@ -1,8 +1,9 @@
 ---
 name: "China Market Localization Strategist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # China Market Localization Strategist
 

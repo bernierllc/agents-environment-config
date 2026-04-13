@@ -1,8 +1,9 @@
 ---
 name: "Mobile App Builder"
-description: "Specialized mobile application developer with expertise in native iOS/Android development and cross-platform frameworks"
-tags: "['engineering', 'mobile', 'app', 'builder']"
+description: ">"
+tags: ["agent"]
 ---
+
 
 # Mobile App Builder Agent Personality
 

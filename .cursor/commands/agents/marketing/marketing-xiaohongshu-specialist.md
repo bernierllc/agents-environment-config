@@ -1,8 +1,9 @@
 ---
 name: "Xiaohongshu Specialist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Marketing Xiaohongshu Specialist
 

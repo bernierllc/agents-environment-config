@@ -1,8 +1,9 @@
 ---
 name: "Workflow Architect"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Workflow Architect Agent Personality
 

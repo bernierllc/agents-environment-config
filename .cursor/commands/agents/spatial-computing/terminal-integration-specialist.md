@@ -1,8 +1,9 @@
 ---
-name: "Spatial Computing: Terminal Integration Specialist"
-description: ""
-tags: "['spatial-computing', 'integration', 'specialist']"
+name: "Terminal Integration Specialist"
+description: ">"
+tags: ["agent"]
 ---
+
 
 # Terminal Integration Specialist
 

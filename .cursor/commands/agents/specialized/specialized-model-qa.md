@@ -1,8 +1,9 @@
 ---
 name: "Model QA Specialist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Model QA Specialist
 

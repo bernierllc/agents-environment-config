@@ -1,8 +1,9 @@
 ---
 name: "Recruitment Specialist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Recruitment Specialist Agent
 

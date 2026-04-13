@@ -1,8 +1,9 @@
 ---
 name: "Cultural Intelligence Strategist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # 🌍 Cultural Intelligence Strategist
 

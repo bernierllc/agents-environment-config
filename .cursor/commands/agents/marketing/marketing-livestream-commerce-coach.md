@@ -1,8 +1,9 @@
 ---
 name: "Livestream Commerce Coach"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Marketing Livestream Commerce Coach
 

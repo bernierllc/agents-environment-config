@@ -1,8 +1,9 @@
 ---
 name: "Automation Governance Architect"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Automation Governance Architect
 

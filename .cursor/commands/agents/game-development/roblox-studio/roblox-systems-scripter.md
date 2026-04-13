@@ -1,8 +1,9 @@
 ---
 name: "Roblox Systems Scripter"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Roblox Systems Scripter Agent Personality
 

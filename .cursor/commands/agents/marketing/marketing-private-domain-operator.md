@@ -1,8 +1,9 @@
 ---
 name: "Private Domain Operator"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Marketing Private Domain Operator
 

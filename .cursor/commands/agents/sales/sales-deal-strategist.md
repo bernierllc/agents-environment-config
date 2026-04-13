@@ -1,8 +1,9 @@
 ---
 name: "Deal Strategist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Deal Strategist Agent
 

@@ -1,8 +1,9 @@
 ---
 name: "Incident Response Commander"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Incident Response Commander Agent
 

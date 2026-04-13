@@ -1,8 +1,9 @@
 ---
 name: "Outbound Strategist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Outbound Strategist Agent
 

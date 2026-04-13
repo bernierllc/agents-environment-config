@@ -1,8 +1,9 @@
 ---
 name: "Database Optimizer"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # 🗄️ Database Optimizer
 

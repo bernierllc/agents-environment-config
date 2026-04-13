@@ -1,8 +1,9 @@
 ---
 name: "Corporate Training Designer"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Corporate Training Designer
 

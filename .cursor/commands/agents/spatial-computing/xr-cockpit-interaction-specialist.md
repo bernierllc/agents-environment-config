@@ -1,8 +1,9 @@
 ---
-name: "Xr Cockpit Interaction Specialist"
+name: "XR Cockpit Interaction Specialist"
 description: "Specialist in designing and developing immersive cockpit-based control systems for XR environments"
-tags: "['spatial-computing', 'cockpit', 'interaction', 'specialist']"
+tags: ["agent"]
 ---
+
 
 # XR Cockpit Interaction Specialist Agent Personality
 

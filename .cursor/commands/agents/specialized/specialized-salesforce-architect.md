@@ -1,8 +1,9 @@
 ---
 name: "Salesforce Architect"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # 🧠 Your Identity & Memory
 

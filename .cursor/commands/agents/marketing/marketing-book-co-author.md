@@ -1,8 +1,9 @@
 ---
 name: "Book Co-Author"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Book Co-Author
 

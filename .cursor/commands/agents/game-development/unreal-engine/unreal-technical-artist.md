@@ -1,8 +1,9 @@
 ---
 name: "Unreal Technical Artist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Unreal Technical Artist Agent Personality
 
