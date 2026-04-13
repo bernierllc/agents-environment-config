@@ -5,6 +5,8 @@ from pathlib import Path
 
 from ..lib.console import Console
 
+from .test_detect_impl import run_test_detect
+
 
 def _print_results(result: dict) -> None:
     """Format and print test results to terminal."""
@@ -83,8 +85,25 @@ def run_test_run(global_flag: bool = False) -> None:
         Console.info(f"Report: {summary_path}")
 
 
-def run_test_schedule() -> None:
-    """Interactive schedule setup for daily test runs."""
+def run_test_schedule(global_flag: bool = False) -> None:
+    """Configure scheduled tests: repo ``.aec.json`` or global OS time with ``-g``."""
+    if global_flag:
+        _run_test_schedule_global()
+        return
+
+    from ..lib.scope import find_tracked_repo
+    from ..lib.test_schedule_repo import run_repo_schedule_interactive
+
+    repo = find_tracked_repo()
+    if repo is not None:
+        run_repo_schedule_interactive(repo)
+        return
+
+    _run_test_schedule_global()
+
+
+def _run_test_schedule_global() -> None:
+    """Interactive setup for the machine-wide daily test job (scheduler-config + OS)."""
     from ..lib.config import AEC_SCHEDULER_CONFIG
     from ..lib.preferences import get_preference, set_preference
     from ..lib.scheduler_config import (
@@ -148,12 +167,14 @@ def run_test_schedule() -> None:
     schedule["enabled"] = True
     save_scheduler_config(config, AEC_SCHEDULER_CONFIG)
 
-    # 6. Register with OS scheduler
-    from ..lib.config import AEC_RUNNER_SCRIPT
+    # 6. Ensure OS scheduler entrypoint exists, then register
+    from ..lib.runner_script_install import ensure_runner_script
     from ..lib.scheduler_config import get_schedule_time
+
+    runner_path = ensure_runner_script()
     scheduler = get_scheduler()
     hour, minute = get_schedule_time(config)
-    msg = scheduler.register(AEC_RUNNER_SCRIPT, hour, minute)
+    msg = scheduler.register(runner_path, hour, minute)
     Console.info(msg)
 
     Console.success(f"Scheduled test runs enabled at {hour:02d}:{minute:02d} daily")
@@ -235,15 +256,17 @@ def run_test_status(global_flag: bool = False) -> None:
 
 def run_test_enable() -> None:
     """Enable scheduled test runs."""
-    from ..lib.config import AEC_SCHEDULER_CONFIG, AEC_RUNNER_SCRIPT
+    from ..lib.config import AEC_SCHEDULER_CONFIG
     from ..lib.scheduler_config import load_scheduler_config, save_scheduler_config, get_schedule_time
     from ..lib.schedulers import get_scheduler
 
     config = load_scheduler_config(AEC_SCHEDULER_CONFIG)
     hour, minute = get_schedule_time(config)
 
+    from ..lib.runner_script_install import ensure_runner_script
+
+    runner_path = ensure_runner_script()
     scheduler = get_scheduler()
-    runner_path = AEC_RUNNER_SCRIPT
     msg = scheduler.register(runner_path, hour, minute)
     Console.info(msg)
 
@@ -313,85 +336,3 @@ def run_test_report(global_flag: bool = False) -> None:
             Console.print(project_file.read_text(encoding="utf-8"))
         else:
             Console.info(f"No report for {repo.name} in {latest.name}")
-
-
-def run_test_detect() -> None:
-    """Re-run test framework detection for the current project."""
-    from ..lib.scope import find_tracked_repo
-    from ..lib.test_detection import detect_test_frameworks, scan_test_scripts
-    from ..lib.aec_json import (
-        load_aec_json, save_aec_json, create_skeleton, update_test_section,
-    )
-
-    repo = find_tracked_repo()
-    if repo is None:
-        Console.error("Not inside a tracked project.")
-        return
-
-    Console.info(f"Detecting test frameworks in {repo.name}...")
-
-    frameworks = detect_test_frameworks(repo)
-    scripts = scan_test_scripts(repo)
-
-    if not frameworks and not scripts:
-        Console.info("No test frameworks or scripts detected.")
-        return
-
-    # Present findings
-    if frameworks:
-        Console.subheader("Detected frameworks")
-        for fw in frameworks:
-            Console.success(f"{fw['display_name']} ({fw['detected_by']})")
-
-    if scripts:
-        Console.subheader("Detected test scripts")
-        for script in scripts:
-            Console.print(f"  {script['name']}: {script['command']}")
-
-    # Build suites from scripts (these are the actionable items)
-    suites = {}
-    for script in scripts:
-        name = script["name"]
-        suites[name] = {
-            "command": script["command"],
-            "cleanup": None,
-        }
-
-    # Interactive selection for scheduled suites
-    scheduled = []
-    if suites:
-        Console.print()
-        Console.print("Which suites should run in scheduled (automated) test runs?")
-        suite_names = list(suites.keys())
-        for i, name in enumerate(suite_names, 1):
-            Console.print(f"  {i}) {name}: {suites[name]['command']}")
-        Console.print(f"  Type 'all' for all, 'none' to skip, or comma-separated numbers")
-        Console.print()
-
-        try:
-            choice = input("Selection [none]: ").strip().lower()
-        except EOFError:
-            choice = "none"
-
-        if choice == "all":
-            scheduled = suite_names
-        elif choice and choice != "none":
-            for part in choice.split(","):
-                try:
-                    idx = int(part.strip()) - 1
-                    if 0 <= idx < len(suite_names):
-                        scheduled.append(suite_names[idx])
-                except ValueError:
-                    pass
-
-    # Load or create .aec.json with full skeleton
-    data = load_aec_json(repo)
-    if data is None:
-        data = create_skeleton(repo.name)
-
-    update_test_section(data, suites=suites, scheduled=scheduled)
-    save_aec_json(repo, data)
-
-    Console.success("Updated test configuration")
-    if scheduled:
-        Console.info(f"Scheduled suites: {', '.join(scheduled)}")

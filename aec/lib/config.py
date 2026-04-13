@@ -56,7 +56,7 @@ INSTALLED_SKILLS = AEC_HOME / "installed-skills.json"
 AEC_PORTS_REGISTRY = AEC_HOME / "ports-registry.json"
 TRACKED_REPOS_PATH = AEC_HOME / "tracked-repos.json"
 
-# Phase 2: Test runner paths
+# Phase 2: Test runner paths (pathlib / Path.home(); correct on Windows and Unix)
 AEC_TESTS_DIR = AEC_HOME / "tests"
 AEC_PROFILES_DIR = AEC_HOME / "profiles"
 AEC_SCHEDULER_CONFIG = AEC_HOME / "scheduler-config.json"
