@@ -1,6 +1,7 @@
 """Test framework detection for AI agent repo setup."""
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -327,5 +328,64 @@ def scan_test_scripts(project_dir: Path) -> List[Dict[str, str]]:
                     "command": f"python -m pytest {paths_str}",
                     "source": "pyproject.toml",
                 })
+
+    return results
+
+
+def scan_extended_test_commands(project_dir: Path) -> List[Dict[str, str]]:
+    """Discover extra test entrypoints not covered by package.json/pyproject scans.
+
+    Heuristics only; many repos will need hand-authored suites in ``.aec.json``.
+
+    Args:
+        project_dir: Repository root.
+
+    Returns:
+        List of dicts with keys ``name``, ``command``, ``source``.
+    """
+    results: List[Dict[str, str]] = []
+
+    deno_json = project_dir / "deno.json"
+    deno_jsonc = project_dir / "deno.jsonc"
+    if deno_json.is_file() or deno_jsonc.is_file():
+        results.append({
+            "name": "deno:test",
+            "command": "deno test",
+            "source": "deno.json",
+        })
+
+    turbo_json = project_dir / "turbo.json"
+    if turbo_json.is_file():
+        results.append({
+            "name": "turbo:test",
+            "command": "npx turbo run test",
+            "source": "turbo.json",
+        })
+
+    makefile = project_dir / "Makefile"
+    if makefile.is_file():
+        try:
+            text = makefile.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            text = ""
+        if re.search(r"^test\s*:", text, re.MULTILINE):
+            results.append({
+                "name": "make:test",
+                "command": "make test",
+                "source": "Makefile",
+            })
+
+    gradle_files = (
+        project_dir / "build.gradle",
+        project_dir / "build.gradle.kts",
+    )
+    if any(p.is_file() for p in gradle_files):
+        wrapper = project_dir / "gradlew"
+        cmd = "./gradlew test" if wrapper.is_file() else "gradle test"
+        results.append({
+            "name": "gradle:test",
+            "command": cmd,
+            "source": "gradle",
+        })
 
     return results

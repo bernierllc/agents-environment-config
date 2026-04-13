@@ -317,6 +317,33 @@ You skipped 2 items. If any would be useful to others, consider contributing:
 
 ---
 
+## Installing catalog items (`aec install <type> <name>`)
+
+Install a single skill, rule, or agent from the AEC catalog into the **current tracked repo** (default) or **globally** with `-g`:
+
+```bash
+aec install skill my-skill          # local: repo/.claude/skills/ or .agent-rules/
+aec install skill my-skill -g       # global: ~/.claude/skills/ etc.
+aec install skill my-skill --yes    # non-interactive (no prompts)
+```
+
+The central manifest (`~/.agents-environment-config/installed-manifest.json`) records every install per repo path and under `global`.
+
+### Multi-repo global migration prompt
+
+If you keep installing the **same** catalog item locally in many repos, AEC can offer to consolidate to one **global** install:
+
+1. AEC counts how many **other** tracked repos already have that item in the manifest (not counting the repo you are in now, and not counting if the item is already global).
+2. When that count reaches your threshold (default **3**, meaning the **next** install would be the **4th** distinct repo), before copying files you see a prompt such as: you are about to install this in your **4th** tracked repo; convert to a global install?
+3. If you answer **yes**, AEC removes that item from each per-repo install (files and manifest entries), installs it once globally, updates the manifest, and refreshes the dual-write installed files.
+4. If you answer **no**, you can optionally choose to **stop offering** for that specific item (`skill:name`, `rule:name`, or `agent:name`). That choice is stored in `preferences.json` and the offer is skipped until you clear it.
+
+**Non-interactive installs** (`--yes` / `-y`) skip this prompt and perform a normal local install.
+
+**Configuration:** See [Catalog install preferences](#catalog-install-preferences) for `global_install_multi_repo_threshold` and `skip_global_install_prompt_for`.
+
+---
+
 ## Port Registry
 
 When you manage multiple projects on one machine, port collisions are inevitable. Project A claims port 3000, project B also claims 3000, and you discover the conflict at runtime when a dev server fails to bind.
@@ -398,7 +425,7 @@ The `test.scheduled` array in `.aec.json` controls which suites run in automated
 
 ### Extensibility
 
-Adding a new framework requires only adding a dict entry to `TEST_FRAMEWORK_HOOKS` in `aec/lib/test_detection.py`. No other code changes needed -- same pattern as `LANGUAGE_HOOKS` for lint hooks.
+Adding a new framework requires only adding a dict entry to `TEST_FRAMEWORK_HOOKS` in `aec/lib/test_detection.py`. No other code changes needed -- same pattern as `LANGUAGE_HOOKS` for lint hooks. Additional heuristics (Deno, Turbo, `make test`, Gradle) live in `scan_extended_test_commands()` in the same module and are merged when you run `aec test schedule` (merge) or `aec test detect`.
 
 ---
 
@@ -686,6 +713,15 @@ These settings are prompted during `aec install` and manageable via `aec config 
 | `profile_retention_days` | `90` | Days to keep profile data in `profiles/` (separate from report retention) |
 | `parallel_enabled` | `false` | Enable parallel lane execution (opt in after reviewing suggested lanes) |
 
+### Catalog install preferences
+
+These live under `settings` in `~/.agents-environment-config/preferences.json` (edit the file directly; AEC merges unknown keys under `settings`).
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `global_install_multi_repo_threshold` | `3` | Minimum number of *other* repos that must already record this item before the global migration prompt appears (clamped between 2 and 50). Default 3 means the prompt runs when the new install would be the **4th** distinct tracked repo. |
+| `skip_global_install_prompt_for` | `{}` | Map of `"<type>:<name>"` (for example `skill:my-skill`) to `true` when you asked AEC never to offer global migration for that item again. |
+
 ---
 
 ## The `aec` CLI
@@ -709,7 +745,7 @@ pip install -e .
 | `aec install` | Full setup (submodules, rules, agent-tools, settings, quality infra prompts, project walk) |
 | `aec update` | Fetch latest sources |
 | `aec upgrade` | Apply available upgrades |
-| `aec install <type> <name>` | Install a skill, rule, or agent |
+| `aec install <type> <name>` | Install a skill, rule, or agent (see [Installing catalog items](#installing-catalog-items-aec-install-type-name); multi-repo global offer when not using `-y`) |
 | `aec uninstall <type> <name>` | Remove an installed item |
 | `aec list` | Show installed items |
 | `aec search <term>` | Search available items |
@@ -785,7 +821,7 @@ agents-environment-config/          # THIS IS A TEMPLATE - don't add project-spe
 │   │   └── ...
 │   └── lib/                        # Shared utilities
 │       ├── similarity.py           # Three-level scan engine
-│       ├���─ dismissals.py           # Dismissal store (global + per-repo)
+│       ├── dismissals.py           # Dismissal store (global + per-repo)
 │       ├── backup.py               # Backup-before-replace manager
 │       ├── atomic_write.py         # Crash-safe JSON writer
 │       ├── catalog_hashes.py       # Pre-computed catalog hash generator
@@ -966,6 +1002,7 @@ AEC tracks which projects you've set up and your preferences in `~/.agents-envir
 `preferences.json` stores:
 - **Settings**: Projects root directory, plans directory name, git tracking preference, plan completion behavior (archive/delete)
 - **Quality infrastructure**: Port registry toggle, scheduled test toggle, report viewer, retention settings, profile retention, parallelization
+- **Catalog installs**: Multi-repo global migration threshold and per-item “do not ask again” map (see [Catalog install preferences](#catalog-install-preferences))
 - **Discovery**: Re-compare policy for dismissed items (auto vs manual)
 - **Optional rules**: Feature toggles like "Leave It Better"
 
