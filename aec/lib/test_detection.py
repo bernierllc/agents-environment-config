@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 try:
     import tomllib
@@ -154,7 +154,7 @@ def _simple_parse_pyproject(path: Path) -> Dict[str, Any]:
 def _check_package_json(
     framework_config: Dict[str, Any],
     pkg_data: Dict[str, Any],
-) -> str | None:
+) -> Optional[str]:
     """Check if a framework is detected via package.json.
 
     Args:
@@ -181,7 +181,7 @@ def _check_package_json(
 def _check_pyproject(
     framework_config: Dict[str, Any],
     pyproject_data: Dict[str, Any],
-) -> str | None:
+) -> Optional[str]:
     """Check if a framework is detected via pyproject.toml.
 
     Args:
