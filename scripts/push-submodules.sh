@@ -2,6 +2,13 @@
 # Ensure submodules are pushed to their remotes before parent push.
 # Run from repo root. Exits 0 if all submodules are pushed; 1 if any need attention.
 
+# When invoked from a git hook (pre-push) in a worktree, git exports GIT_DIR /
+# GIT_WORK_TREE pointing at the *parent* repo. Those vars override `git -C <path>`
+# repo discovery, causing submodule diff checks to evaluate the parent's repo
+# against the submodule's working tree and falsely report "uncommitted changes".
+# Unset them so path-based discovery from `-C` works normally.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_PREFIX
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
