@@ -34,6 +34,8 @@ class TestTrackingDryRun:
         assert aec_home.exists()
         assert (aec_home / "README.md").exists()
         assert (aec_home / "setup-repo-locations.txt").exists()
+        assert (aec_home / "runner.py").exists()
+        assert "run_all_projects" in (aec_home / "runner.py").read_text()
 
     def test_log_setup_dry_run_no_file_changes(self, temp_dir, monkeypatch):
         """log_setup(dry_run=True) should not write to the log file."""

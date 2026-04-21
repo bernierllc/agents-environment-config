@@ -8,6 +8,7 @@ from ..lib import Console
 from ..lib.config import get_repo_root
 from ..lib.hooks import get_verification_playwright_hook
 from ..lib.manifest_v2 import load_manifest, save_manifest, record_install
+from ..lib.global_install_prompt import prompt_multi_repo_global_or_proceed
 from ..lib.scope import resolve_scope, Scope, ScopeError
 from ..lib.sources import discover_available, get_source_dirs
 from ..lib.installed_store import record_item_install
@@ -64,6 +65,25 @@ def run_install(
     target_dir = getattr(scope, f"{plural}_dir")
     dst = target_dir / name
 
+    manifest_file = _manifest_path()
+    manifest = load_manifest(manifest_file)
+    if not scope.is_global and not yes:
+        repo_path = scope.repo_path
+        assert repo_path is not None
+        decision = prompt_multi_repo_global_or_proceed(
+            item_type=item_type,
+            plural=plural,
+            name=name,
+            manifest=manifest,
+            current_repo=repo_path,
+            item_info=item_info,
+            src=src,
+            manifest_path=manifest_file,
+            assume_yes=yes,
+        )
+        if decision == "global":
+            return
+
     scope_label = "globally" if scope.is_global else f"to {scope.repo_path}"
     Console.print(f"Installing {name} v{item_info.get('version', '?')} {scope_label}...")
 
@@ -89,7 +109,6 @@ def run_install(
         shutil.copy2(src, dst)
 
     content_hash = hash_skill_directory(dst) if dst.is_dir() else ""
-    manifest_file = _manifest_path()
     manifest = load_manifest(manifest_file)
     scope_key = "global" if scope.is_global else str(scope.repo_path.resolve())
     record_install(
@@ -104,7 +123,7 @@ def run_install(
     Console.success(f"Installed {name} v{item_info.get('version', '0.0.0')}")
 
     # Quick-scan notification for global installs
-    if global_flag:
+    if scope.is_global:
         try:
             from ..lib.discovery_hooks import quick_scan_notification
             quick_scan_notification(scope)

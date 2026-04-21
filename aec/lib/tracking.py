@@ -37,6 +37,12 @@ def init_aec_home(dry_run: bool = False) -> None:
     # Create directory
     AEC_HOME.mkdir(parents=True, exist_ok=True)
 
+    from .runner_script_install import ensure_runner_script
+
+    # Use this module's AEC_HOME so tests that patch tracking.AEC_HOME get a
+    # consistent runner path (config.AEC_RUNNER_SCRIPT may still be default).
+    ensure_runner_script((AEC_HOME / "runner.py").resolve())
+
     # Create README if missing
     if not AEC_README.exists():
         AEC_README.write_text(_get_readme_content())
