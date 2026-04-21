@@ -6,15 +6,47 @@ I/O so they can be tested in isolation — this file grows across Tasks 9a-9g.
 """
 
 import json
+import shlex
 from pathlib import Path
-from typing import List, Sequence
+from typing import Dict, List, Sequence
 
 from ..atomic_write import atomic_write_json
-from . import state as hook_state
+from . import git_blocks, state as hook_state
 from .fingerprint import fingerprint_hook
-from .schema import load_hooks_file
+from .predicates import evaluate_when
+from .schema import HooksFile, load_hooks_file
 from .translator import translate_to_agent
 from .validator import validate_hooks_file
+
+
+_RUN_SCRIPT_PREFIX = "aec run-script"
+
+
+def _resolve_script_commands(hf, item_dir: Path) -> Dict[str, str]:
+    """Rewrite `aec run-script <item> <script> [args...]` to an absolute path.
+
+    Looks for `<item_dir>/scripts/<script>`. Raises FileNotFoundError if the
+    referenced script does not exist.
+    """
+    resolved: Dict[str, str] = {}
+    for h in hf.hooks:
+        cmd = h.command
+        if cmd.startswith(_RUN_SCRIPT_PREFIX):
+            parts = shlex.split(cmd)
+            if len(parts) >= 4 and parts[:2] == ["aec", "run-script"]:
+                script_name = parts[3]
+                extra = parts[4:]
+                script_path = item_dir / "scripts" / script_name
+                if not script_path.exists():
+                    raise FileNotFoundError(
+                        f"hook {h.id!r}: script not found: {script_path}"
+                    )
+                pieces = [str(script_path), *extra]
+                cmd = shlex.join(pieces) if hasattr(shlex, "join") else " ".join(
+                    shlex.quote(p) for p in pieces
+                )
+        resolved[h.id] = cmd
+    return resolved
 
 
 def _merge_claude_entries(config: dict, entries: List[dict]) -> dict:
@@ -101,20 +133,52 @@ def install_item_hooks(
         )
         raise ValueError(f"hooks.json validation failed: {messages}")
 
-    resolved = {h.id: h.command for h in hf.hooks}
+    if any(h.when and h.when.custom_check for h in hf.hooks) and not allow_custom_check:
+        raise PermissionError(
+            "hooks.json contains when.custom_check; re-run with "
+            "allow_custom_check=True to consent to running custom shell"
+        )
+
+    resolved = _resolve_script_commands(hf, item_dir)
 
     st = hook_state.load_state(repo_root, item_type=item_type, item_key=item_key)
     st.item_version = item_version
     st.hooks_file_hash = fingerprint_hook(json.loads(hooks_json.read_text()))
     st.agents_targeted = list(agents)
     st.hooks_installed = []
+    st.hooks_skipped = []
     if allow_custom_check:
         st.allow_custom_check = True
 
+    kept: List = []
+    for h in hf.hooks:
+        result = evaluate_when(h.when, repo_root)
+        if result.applied:
+            kept.append(h)
+        else:
+            st.hooks_skipped.append({"hook_id": h.id, "reason": result.reason})
+
+    filtered = HooksFile(
+        version=hf.version,
+        hooks=kept,
+        claude=hf.claude,
+        cursor=hf.cursor,
+        gemini=hf.gemini,
+        git=hf.git,
+        schema_url=hf.schema_url,
+        source_path=hf.source_path,
+    )
+
     for agent in agents:
-        entries = translate_to_agent(hf, agent, resolved_commands=resolved)
+        entries = translate_to_agent(filtered, agent, resolved_commands=resolved)
         if agent == "claude":
             _install_claude(repo_root, entries, st, item_version)
+        elif agent == "gemini":
+            _install_gemini(repo_root, entries, st, item_version)
+        elif agent == "cursor":
+            _install_cursor(repo_root, entries, st, item_version)
+        elif agent == "git":
+            _install_git(repo_root, entries, st, item_type, item_key, item_version)
         else:
             raise NotImplementedError(f"agent {agent!r} handled in later task")
 
@@ -136,7 +200,8 @@ def remove_item_hooks(
             _remove_gemini(repo_root, event_key, fp)
         elif agent == "cursor":
             _remove_cursor(repo_root, event_key, fp)
-        # git removals handled in 9d
+        elif agent == "git":
+            _remove_git(repo_root, event_key, installed, item_type, item_key)
     hook_state.remove_state(repo_root, item_type=item_type, item_key=item_key)
 
 
@@ -167,6 +232,52 @@ def _remove_cursor(repo_root: Path, event_key: str, fp: str) -> None:
     atomic_write_json(settings_path, updated)
 
 
+def _install_git(
+    repo_root: Path,
+    entries: List[dict],
+    st,
+    item_type: str,
+    item_key: str,
+    item_version: str,
+) -> None:
+    item_ref = f"{item_type}:{item_key}"
+    hooks_dir = repo_root / ".git/hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    for entry in entries:
+        event_key = entry["event_key"]
+        payload = entry["payload"]
+        command = payload["command"]
+        hook_id = entry["source_hook_id"]
+        hook_file = hooks_dir / event_key
+        git_blocks.write_block(
+            hook_file,
+            item_key=item_ref,
+            hook_id=hook_id,
+            version=item_version,
+            command=command,
+        )
+        fp = fingerprint_hook({"command": command, "hook_name": event_key})
+        st.hooks_installed.append({
+            "hook_id": hook_id,
+            "agent": "git",
+            "target_json_pointer": f"/git/{event_key}/{hook_id}",
+            "content_fingerprint": fp,
+            "version": item_version,
+        })
+
+
+def _remove_git(
+    repo_root: Path, event_key: str, installed: dict,
+    item_type: str, item_key: str,
+) -> None:
+    hook_file = repo_root / ".git/hooks" / event_key
+    git_blocks.remove_block(
+        hook_file,
+        item_key=f"{item_type}:{item_key}",
+        hook_id=installed["hook_id"],
+    )
+
+
 def _install_claude(
     repo_root: Path, entries: List[dict], st, item_version: str
 ) -> None:
@@ -176,6 +287,36 @@ def _install_claude(
     )
     updated = _merge_claude_entries(existing, entries)
     atomic_write_json(settings_path, updated)
+    _record_entries(st, entries, updated, agent="claude", item_version=item_version)
+
+
+def _install_gemini(
+    repo_root: Path, entries: List[dict], st, item_version: str
+) -> None:
+    settings_path = repo_root / ".gemini/settings.json"
+    existing = (
+        json.loads(settings_path.read_text()) if settings_path.exists() else {}
+    )
+    updated = _merge_gemini_entries(existing, entries)
+    atomic_write_json(settings_path, updated)
+    _record_entries(st, entries, updated, agent="gemini", item_version=item_version)
+
+
+def _install_cursor(
+    repo_root: Path, entries: List[dict], st, item_version: str
+) -> None:
+    settings_path = repo_root / ".cursor/hooks.json"
+    existing = (
+        json.loads(settings_path.read_text()) if settings_path.exists() else {}
+    )
+    updated = _merge_cursor_entries(existing, entries)
+    atomic_write_json(settings_path, updated)
+    _record_entries(st, entries, updated, agent="cursor", item_version=item_version)
+
+
+def _record_entries(
+    st, entries: List[dict], updated: dict, *, agent: str, item_version: str
+) -> None:
     for entry in entries:
         fp = fingerprint_hook(entry["payload"])
         arr = updated.get("hooks", {}).get(entry["event_key"], [])
@@ -185,7 +326,7 @@ def _install_claude(
         )
         st.hooks_installed.append({
             "hook_id": entry["source_hook_id"],
-            "agent": "claude",
+            "agent": agent,
             "target_json_pointer": f"/hooks/{entry['event_key']}/{idx}",
             "content_fingerprint": fp,
             "version": item_version,

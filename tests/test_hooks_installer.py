@@ -78,3 +78,202 @@ class TestRemoveItemHooks:
         settings = json.loads((repo_root / ".claude/settings.json").read_text())
         assert settings.get("hooks", {}).get("PostToolUse", []) == []
         assert not (repo_root / ".aec/installed-hooks/skill.demo.json").exists()
+
+
+class TestWhenPartitioning:
+    def test_when_miss_records_skip_not_install(self, tmp_path):
+        from aec.lib.hooks.installer import install_item_hooks
+        item_dir = tmp_path / "item"
+        _write_item(item_dir, hooks=[{
+            "id": "lint", "event": "on_file_edit",
+            "command": "echo hi", "description": "d",
+            "when": {"repo_has_any": ["pyproject.toml"]},
+        }])
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["claude"],
+        )
+        settings_path = repo_root / ".claude/settings.json"
+        if settings_path.exists():
+            settings = json.loads(settings_path.read_text())
+            assert not settings.get("hooks", {}).get("PostToolUse")
+        state = json.loads(
+            (repo_root / ".aec/installed-hooks/skill.demo.json").read_text()
+        )
+        assert state["hooks_installed"] == []
+        assert len(state["hooks_skipped"]) == 1
+        assert state["hooks_skipped"][0]["hook_id"] == "lint"
+        assert "pyproject.toml" in state["hooks_skipped"][0]["reason"]
+
+    def test_custom_check_without_consent_raises(self, tmp_path):
+        import pytest
+        from aec.lib.hooks.installer import install_item_hooks
+        item_dir = tmp_path / "item"
+        _write_item(item_dir, hooks=[{
+            "id": "lint", "event": "on_file_edit",
+            "command": "echo hi", "description": "d",
+            "when": {"custom_check": "true"},
+        }])
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        with pytest.raises(PermissionError):
+            install_item_hooks(
+                item_dir=item_dir, item_type="skill", item_key="demo",
+                item_version="1.0.0", repo_root=repo_root, agents=["claude"],
+                allow_custom_check=False,
+            )
+
+    def test_custom_check_with_consent_succeeds(self, tmp_path):
+        from aec.lib.hooks.installer import install_item_hooks
+        item_dir = tmp_path / "item"
+        _write_item(item_dir, hooks=[{
+            "id": "lint", "event": "on_file_edit",
+            "command": "echo hi", "description": "d",
+            "when": {"custom_check": "true"},
+        }])
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["claude"],
+            allow_custom_check=True,
+        )
+        state = json.loads(
+            (repo_root / ".aec/installed-hooks/skill.demo.json").read_text()
+        )
+        assert state["allow_custom_check"] is True
+        assert len(state["hooks_installed"]) == 1
+
+
+class TestResolveScriptCommands:
+    def test_script_exists_resolves_to_absolute_path(self, tmp_path):
+        from aec.lib.hooks.installer import install_item_hooks
+        item_dir = tmp_path / "item"
+        (item_dir / "scripts").mkdir(parents=True)
+        script = item_dir / "scripts" / "check.sh"
+        script.write_text("#!/bin/sh\necho ok\n")
+        script.chmod(0o755)
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "on_file_edit",
+                "command": "aec run-script skill:demo check.sh --flag",
+                "description": "d",
+            }],
+        }))
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["claude"],
+        )
+        settings = json.loads((repo_root / ".claude/settings.json").read_text())
+        cmd = settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
+        assert str(script) in cmd
+        assert cmd.endswith("--flag")
+        assert "aec run-script" not in cmd
+
+    def test_missing_script_raises(self, tmp_path):
+        import pytest
+        from aec.lib.hooks.installer import install_item_hooks
+        item_dir = tmp_path / "item"
+        item_dir.mkdir()
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "on_file_edit",
+                "command": "aec run-script skill:demo missing.sh",
+                "description": "d",
+            }],
+        }))
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        with pytest.raises(FileNotFoundError):
+            install_item_hooks(
+                item_dir=item_dir, item_type="skill", item_key="demo",
+                item_version="1.0.0", repo_root=repo_root, agents=["claude"],
+            )
+
+
+class TestInstallGitTarget:
+    def test_install_pre_commit_writes_delimited_block(self, tmp_path):
+        from aec.lib.hooks.installer import install_item_hooks
+        repo_root = tmp_path / "repo"
+        (repo_root / ".git/hooks").mkdir(parents=True)
+        item_dir = tmp_path / "item"
+        _write_item(item_dir, hooks=[{
+            "id": "lint", "event": "pre_commit",
+            "command": "echo linting", "description": "d",
+        }])
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["git"],
+        )
+        content = (repo_root / ".git/hooks/pre-commit").read_text()
+        assert "# >>> AEC:BEGIN item=skill:demo hook_id=lint" in content
+        assert "# <<< AEC:END" in content
+        assert "echo linting" in content
+        state_path = repo_root / ".aec/installed-hooks/skill.demo.json"
+        state = json.loads(state_path.read_text())
+        assert state["hooks_installed"][0]["agent"] == "git"
+        assert state["hooks_installed"][0]["hook_id"] == "lint"
+
+    def test_reinstall_produces_byte_identical_file(self, tmp_path):
+        from aec.lib.hooks.installer import install_item_hooks
+        repo_root = tmp_path / "repo"
+        (repo_root / ".git/hooks").mkdir(parents=True)
+        item_dir = tmp_path / "item"
+        _write_item(item_dir, hooks=[{
+            "id": "lint", "event": "pre_commit",
+            "command": "echo linting", "description": "d",
+        }])
+        kwargs = dict(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["git"],
+        )
+        install_item_hooks(**kwargs)
+        first = (repo_root / ".git/hooks/pre-commit").read_text()
+        install_item_hooks(**kwargs)
+        assert (repo_root / ".git/hooks/pre-commit").read_text() == first
+
+    def test_remove_git_strips_block(self, tmp_path):
+        from aec.lib.hooks.installer import install_item_hooks, remove_item_hooks
+        repo_root = tmp_path / "repo"
+        (repo_root / ".git/hooks").mkdir(parents=True)
+        item_dir = tmp_path / "item"
+        _write_item(item_dir, hooks=[{
+            "id": "lint", "event": "pre_commit",
+            "command": "echo linting", "description": "d",
+        }])
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["git"],
+        )
+        remove_item_hooks(item_type="skill", item_key="demo", repo_root=repo_root)
+        content = (repo_root / ".git/hooks/pre-commit").read_text()
+        assert "AEC:BEGIN" not in content
+        assert "echo linting" not in content
+
+
+class TestInstallGeminiAndCursor:
+    def test_install_all_three_targets(self, tmp_path):
+        from aec.lib.hooks.installer import install_item_hooks
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        item_dir = tmp_path / "item"
+        _write_item(item_dir, hooks=[{
+            "id": "h1", "event": "on_file_edit",
+            "command": "echo hi", "description": "d",
+        }])
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root,
+            agents=["claude", "gemini", "cursor"],
+        )
+        assert (repo_root / ".claude/settings.json").exists()
+        assert (repo_root / ".gemini/settings.json").exists()
+        assert (repo_root / ".cursor/hooks.json").exists()
+        gemini = json.loads((repo_root / ".gemini/settings.json").read_text())
+        assert "hooks" in gemini
+        cursor = json.loads((repo_root / ".cursor/hooks.json").read_text())
+        assert cursor["hooks"]["afterFileEdit"][0]["command"] == "echo hi"
