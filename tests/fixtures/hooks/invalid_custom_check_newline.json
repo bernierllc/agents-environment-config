@@ -1,0 +1,13 @@
+{
+  "$schema": "x",
+  "version": "1.0.0",
+  "hooks": [
+    {
+      "id": "n",
+      "event": "on_file_edit",
+      "command": "c",
+      "description": "d",
+      "when": {"custom_check": "line1\nline2"}
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "$schema": "x",
+  "version": "1.0.0",
+  "hooks": [
+    {"id": "u", "event": "on_unicorn_moment", "command": "c", "description": "d"}
+  ]
+}

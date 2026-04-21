@@ -1,0 +1,8 @@
+{
+  "$schema": "x",
+  "version": "1.0.0",
+  "hooks": [],
+  "git": [
+    {"id": "g", "hook_name": "bogus-hook", "command": "c"}
+  ]
+}
