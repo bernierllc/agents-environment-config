@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import List, Sequence
 
 from ..atomic_write import atomic_write_json
-from . import state as hook_state
+from . import git_blocks, state as hook_state
 from .fingerprint import fingerprint_hook
 from .schema import load_hooks_file
 from .translator import translate_to_agent
@@ -119,6 +119,8 @@ def install_item_hooks(
             _install_gemini(repo_root, entries, st, item_version)
         elif agent == "cursor":
             _install_cursor(repo_root, entries, st, item_version)
+        elif agent == "git":
+            _install_git(repo_root, entries, st, item_type, item_key, item_version)
         else:
             raise NotImplementedError(f"agent {agent!r} handled in later task")
 
@@ -140,7 +142,8 @@ def remove_item_hooks(
             _remove_gemini(repo_root, event_key, fp)
         elif agent == "cursor":
             _remove_cursor(repo_root, event_key, fp)
-        # git removals handled in 9d
+        elif agent == "git":
+            _remove_git(repo_root, event_key, installed, item_type, item_key)
     hook_state.remove_state(repo_root, item_type=item_type, item_key=item_key)
 
 
@@ -169,6 +172,52 @@ def _remove_cursor(repo_root: Path, event_key: str, fp: str) -> None:
     existing = json.loads(settings_path.read_text())
     updated = _remove_from_cursor(existing, event_key, fp)
     atomic_write_json(settings_path, updated)
+
+
+def _install_git(
+    repo_root: Path,
+    entries: List[dict],
+    st,
+    item_type: str,
+    item_key: str,
+    item_version: str,
+) -> None:
+    item_ref = f"{item_type}:{item_key}"
+    hooks_dir = repo_root / ".git/hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    for entry in entries:
+        event_key = entry["event_key"]
+        payload = entry["payload"]
+        command = payload["command"]
+        hook_id = entry["source_hook_id"]
+        hook_file = hooks_dir / event_key
+        git_blocks.write_block(
+            hook_file,
+            item_key=item_ref,
+            hook_id=hook_id,
+            version=item_version,
+            command=command,
+        )
+        fp = fingerprint_hook({"command": command, "hook_name": event_key})
+        st.hooks_installed.append({
+            "hook_id": hook_id,
+            "agent": "git",
+            "target_json_pointer": f"/git/{event_key}/{hook_id}",
+            "content_fingerprint": fp,
+            "version": item_version,
+        })
+
+
+def _remove_git(
+    repo_root: Path, event_key: str, installed: dict,
+    item_type: str, item_key: str,
+) -> None:
+    hook_file = repo_root / ".git/hooks" / event_key
+    git_blocks.remove_block(
+        hook_file,
+        item_key=f"{item_type}:{item_key}",
+        hook_id=installed["hook_id"],
+    )
 
 
 def _install_claude(

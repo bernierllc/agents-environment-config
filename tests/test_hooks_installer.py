@@ -80,6 +80,66 @@ class TestRemoveItemHooks:
         assert not (repo_root / ".aec/installed-hooks/skill.demo.json").exists()
 
 
+class TestInstallGitTarget:
+    def test_install_pre_commit_writes_delimited_block(self, tmp_path):
+        from aec.lib.hooks.installer import install_item_hooks
+        repo_root = tmp_path / "repo"
+        (repo_root / ".git/hooks").mkdir(parents=True)
+        item_dir = tmp_path / "item"
+        _write_item(item_dir, hooks=[{
+            "id": "lint", "event": "pre_commit",
+            "command": "echo linting", "description": "d",
+        }])
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["git"],
+        )
+        content = (repo_root / ".git/hooks/pre-commit").read_text()
+        assert "# >>> AEC:BEGIN item=skill:demo hook_id=lint" in content
+        assert "# <<< AEC:END" in content
+        assert "echo linting" in content
+        state_path = repo_root / ".aec/installed-hooks/skill.demo.json"
+        state = json.loads(state_path.read_text())
+        assert state["hooks_installed"][0]["agent"] == "git"
+        assert state["hooks_installed"][0]["hook_id"] == "lint"
+
+    def test_reinstall_produces_byte_identical_file(self, tmp_path):
+        from aec.lib.hooks.installer import install_item_hooks
+        repo_root = tmp_path / "repo"
+        (repo_root / ".git/hooks").mkdir(parents=True)
+        item_dir = tmp_path / "item"
+        _write_item(item_dir, hooks=[{
+            "id": "lint", "event": "pre_commit",
+            "command": "echo linting", "description": "d",
+        }])
+        kwargs = dict(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["git"],
+        )
+        install_item_hooks(**kwargs)
+        first = (repo_root / ".git/hooks/pre-commit").read_text()
+        install_item_hooks(**kwargs)
+        assert (repo_root / ".git/hooks/pre-commit").read_text() == first
+
+    def test_remove_git_strips_block(self, tmp_path):
+        from aec.lib.hooks.installer import install_item_hooks, remove_item_hooks
+        repo_root = tmp_path / "repo"
+        (repo_root / ".git/hooks").mkdir(parents=True)
+        item_dir = tmp_path / "item"
+        _write_item(item_dir, hooks=[{
+            "id": "lint", "event": "pre_commit",
+            "command": "echo linting", "description": "d",
+        }])
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["git"],
+        )
+        remove_item_hooks(item_type="skill", item_key="demo", repo_root=repo_root)
+        content = (repo_root / ".git/hooks/pre-commit").read_text()
+        assert "AEC:BEGIN" not in content
+        assert "echo linting" not in content
+
+
 class TestInstallGeminiAndCursor:
     def test_install_all_three_targets(self, tmp_path):
         from aec.lib.hooks.installer import install_item_hooks
