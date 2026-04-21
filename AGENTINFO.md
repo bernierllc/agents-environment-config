@@ -47,6 +47,23 @@ Add project-specific testing notes here:
 - Test fixtures location
 - CI/CD test configuration
 
+## Seed Data Awareness
+
+Database work MUST classify data correctly before it ships. Misclassification leaks test fixtures into production migrations and corrupts shared environments.
+
+- **Three-tier data model at a glance:**
+  - `reference` — canonical lookup data required in every environment (statuses, enums, roles, country codes). Owned by migrations.
+  - `seed` — baseline rows needed for the app to function or demo (default org, admin user, starter plans). Owned by seed scripts, environment-aware.
+  - `fixture` — disposable data for tests and local experiments. Never shipped; lives under `tests/` or local-only scripts.
+- **Invoke the `seed-data` skill** (`.claude/skills/seed-data/SKILL.md`) whenever you are adding, modifying, or migrating database rows. The skill walks the classification and picks the right home for each row.
+- **Read the rule before writing migrations or seed scripts:** `.agent-rules/frameworks/database/seed-data.md` (installed path: `~/.agent-tools/rules/agents-environment-config/frameworks/database/seed-data.md`).
+- **When this applies:**
+  - Adding a new table or column with default/lookup rows
+  - Writing a migration that inserts or updates data
+  - Authoring or editing seed scripts
+  - Creating test fixtures that touch the database
+- **Anti-pattern:** Do not commit test fixtures to migrations — migrations run in production.
+
 ## Commits and PRs
 
 - Conventional commits: `feat:`, `fix:`, `docs:`, `chore:`
