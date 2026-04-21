@@ -57,18 +57,18 @@ if HAS_TYPER:
 
     @app.command("install")
     def install_cmd(
-        item_type: str = typer.Argument(..., help="Type: skill, rule, or agent"),
+        item_type: str = typer.Argument(..., help="Type: skill, rule, agent, or mcp"),
         name: str = typer.Argument(..., help="Name of the item to install"),
         global_flag: bool = typer.Option(False, "-g", "--global", help="Install globally"),
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
     ):
-        """Install a skill, rule, or agent."""
+        """Install a skill, rule, agent, or MCP server."""
         from .commands.install_cmd import run_install
         run_install(item_type=item_type, name=name, global_flag=global_flag, yes=yes)
 
     @app.command("uninstall")
     def uninstall_cmd(
-        item_type: str = typer.Argument(..., help="Type: skill, rule, or agent"),
+        item_type: str = typer.Argument(..., help="Type: skill, rule, agent, or mcp"),
         name: str = typer.Argument(..., help="Name of the item to uninstall"),
         global_flag: bool = typer.Option(False, "-g", "--global", help="Uninstall globally"),
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),

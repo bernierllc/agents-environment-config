@@ -14,7 +14,7 @@ from .atomic_write import atomic_write_json
 from .config import AEC_HOME, INSTALLED_MANIFEST_V2
 
 SCHEMA_VERSION = 1
-VALID_TYPES = ("agent", "rule", "skill")
+VALID_TYPES = ("agent", "mcp", "rule", "skill")
 
 
 def _now_iso() -> str:

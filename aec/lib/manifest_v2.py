@@ -8,7 +8,7 @@ from typing import Optional
 from .skills_manifest import build_skill_manifest_item
 
 MANIFEST_VERSION = 2
-ITEM_TYPES = ("skills", "rules", "agents")
+ITEM_TYPES = ("skills", "rules", "agents", "mcps")
 
 
 def _now_iso() -> str:
@@ -16,7 +16,7 @@ def _now_iso() -> str:
 
 
 def _empty_scope() -> dict:
-    return {"skills": {}, "rules": {}, "agents": {}}
+    return {"skills": {}, "rules": {}, "agents": {}, "mcps": {}}
 
 
 def _empty_manifest() -> dict:
@@ -86,6 +86,22 @@ def record_install(
         "version": version,
         "contentHash": content_hash or "",
         "installedAt": _now_iso(),
+    }
+
+
+def record_mcp_install(
+    manifest: dict,
+    scope: str,
+    name: str,
+    version: str,
+    package: str = "",
+) -> None:
+    """Record an MCP server install, including the pip/npm package name."""
+    scope_dict = _get_scope_dict(manifest, scope)
+    scope_dict["mcps"][name] = {
+        "version": version,
+        "installedAt": _now_iso(),
+        "package": package,
     }
 
 
