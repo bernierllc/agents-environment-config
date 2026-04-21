@@ -4,18 +4,20 @@ import json
 import shutil
 from pathlib import Path
 
+import subprocess
+
 from ..lib import Console
 from ..lib.config import get_repo_root
 from ..lib.hooks import get_verification_playwright_hook
-from ..lib.manifest_v2 import load_manifest, save_manifest, record_install
+from ..lib.manifest_v2 import load_manifest, save_manifest, record_install, record_mcp_install
 from ..lib.global_install_prompt import prompt_multi_repo_global_or_proceed
 from ..lib.scope import resolve_scope, Scope, ScopeError
 from ..lib.sources import discover_available, get_source_dirs
 from ..lib.installed_store import record_item_install
 from ..lib.skills_manifest import hash_skill_directory
 
-VALID_TYPES = ("skill", "rule", "agent")
-TYPE_TO_PLURAL = {"skill": "skills", "rule": "rules", "agent": "agents"}
+VALID_TYPES = ("skill", "rule", "agent", "mcp")
+TYPE_TO_PLURAL = {"skill": "skills", "rule": "rules", "agent": "agents", "mcp": "mcps"}
 
 
 def _manifest_path() -> Path:
@@ -29,10 +31,14 @@ def run_install(
     global_flag: bool = False,
     yes: bool = False,
 ) -> None:
-    """Install a skill, rule, or agent to local or global scope."""
+    """Install a skill, rule, agent, or MCP server to local or global scope."""
     if item_type not in VALID_TYPES:
         Console.error(f"Unknown type: {item_type}. Must be one of: {', '.join(VALID_TYPES)}")
         raise SystemExit(1)
+
+    if item_type == "mcp":
+        _install_mcp(name, global_flag, yes)
+        return
 
     plural = TYPE_TO_PLURAL[item_type]
 
@@ -133,6 +139,89 @@ def run_install(
     # Skill-specific post-install steps
     if item_type == "skill" and name == "playwright-test-generator":
         _post_install_playwright_pipeline(name, scope, yes=yes)
+
+
+def _install_mcp(name: str, global_flag: bool, yes: bool) -> None:
+    """Install an MCP server: run the package manager, write mcpServers to settings.json."""
+    try:
+        scope = resolve_scope(global_flag)
+    except ScopeError as e:
+        Console.error(str(e))
+        raise SystemExit(1)
+
+    repo = get_repo_root()
+    if repo is None:
+        Console.error("AEC repo not found. Run `aec setup` first.")
+        raise SystemExit(1)
+
+    source_dirs = get_source_dirs()
+    source_dir = source_dirs.get("mcps")
+    if not source_dir or not source_dir.exists():
+        Console.error("No mcp-servers source found.")
+        raise SystemExit(1)
+
+    available = discover_available(source_dir, "mcps")
+    if name not in available:
+        Console.error(f"MCP server not found: {name}")
+        if available:
+            Console.print(f"Available: {', '.join(sorted(available.keys()))}")
+        raise SystemExit(1)
+
+    item_info = available[name]
+    mcp_file = source_dir / item_info["path"] / "mcp.json"
+    mcp_def = json.loads(mcp_file.read_text(encoding="utf-8"))
+
+    manifest_file = _manifest_path()
+    manifest = load_manifest(manifest_file)
+    scope_key = "global" if scope.is_global else str(scope.repo_path.resolve())
+
+    # Warn if already installed
+    from ..lib.manifest_v2 import get_installed
+    existing = get_installed(manifest, scope_key, "mcps")
+    if name in existing and not yes:
+        try:
+            resp = input(f"  {name} already installed. Reinstall? [y/N]: ").strip().lower()
+        except EOFError:
+            resp = "n"
+        if resp != "y":
+            Console.info("Skipped.")
+            return
+
+    # Install the package
+    install_block = mcp_def.get("install", {})
+    pip_package = install_block.get("pip", "")
+    if pip_package:
+        if not yes:
+            try:
+                resp = input(f"  pip install {pip_package}? [Y/n]: ").strip().lower()
+            except EOFError:
+                resp = ""
+            if resp == "n":
+                Console.info("Skipped package install. Add mcpServers entry manually if needed.")
+                return
+        result = subprocess.run(["pip", "install", pip_package])
+        if result.returncode != 0:
+            Console.error(f"pip install {pip_package} failed.")
+            raise SystemExit(1)
+
+    # Write mcpServers entries to settings.json
+    from ..lib.mcp_settings import get_settings_path, write_mcp_server
+    settings_path = get_settings_path(scope)
+    mcp_servers_config = mcp_def.get("mcpServers", {})
+    for server_name, server_entry in mcp_servers_config.items():
+        write_mcp_server(settings_path, server_name, server_entry)
+
+    # Record in manifest (with pip package name for future uninstall)
+    record_mcp_install(manifest, scope_key, name, item_info.get("version", "0.0.0"), pip_package)
+    save_manifest(manifest, manifest_file)
+
+    # Dual-write to per-type installed file
+    record_item_install("mcp", name, item_info.get("version", "0.0.0"))
+
+    scope_label = "globally" if scope.is_global else f"to {scope.repo_path}"
+    Console.success(f"Installed MCP server: {name} v{item_info.get('version', '?')} {scope_label}")
+    Console.print(f"  mcpServers entry written to {settings_path}")
+    Console.print("  Restart Claude Code for the MCP server to take effect.")
 
 
 def _post_install_playwright_pipeline(name: str, scope: Scope, yes: bool = False) -> None:

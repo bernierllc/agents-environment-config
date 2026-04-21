@@ -1,0 +1,13 @@
+{
+  "name": "jcodemunch",
+  "description": "Token-efficient code exploration via tree-sitter AST parsing. Provides semantic code search, file summarization, and codebase indexing.",
+  "version": "0.1.0",
+  "install": {
+    "pip": "jcodemunch-mcp"
+  },
+  "mcpServers": {
+    "jcodemunch": {
+      "command": "jcodemunch-mcp"
+    }
+  }
+}

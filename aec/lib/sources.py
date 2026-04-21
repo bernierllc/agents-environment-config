@@ -1,5 +1,6 @@
 """Source management: discover items, check staleness, fetch updates."""
 
+import json
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -14,7 +15,7 @@ def discover_available(source_dir: Path, item_type: str) -> dict:
 
     Args:
         source_dir: Root of the source (e.g., repo/.claude/skills/)
-        item_type: One of 'skills', 'rules', 'agents'
+        item_type: One of 'skills', 'rules', 'agents', 'mcps'
 
     Returns:
         Dict of name -> {version, description, path, ...}
@@ -27,6 +28,8 @@ def discover_available(source_dir: Path, item_type: str) -> dict:
         return _discover_available_rules(source_dir)
     elif item_type == "agents":
         return _discover_available_agents(source_dir)
+    elif item_type == "mcps":
+        return _discover_available_mcps(source_dir)
     return {}
 
 
@@ -83,6 +86,36 @@ def _discover_available_agents(source_dir: Path) -> dict:
     return agents
 
 
+def _discover_available_mcps(source_dir: Path) -> dict:
+    """Discover available MCP servers from the mcp-servers source directory.
+
+    Each MCP server is a subdirectory containing an mcp.json file with at
+    minimum 'name' and 'version' fields.
+    """
+    mcps = {}
+    if not source_dir.exists():
+        return mcps
+    for mcp_dir in sorted(source_dir.iterdir()):
+        if not mcp_dir.is_dir() or mcp_dir.name.startswith("."):
+            continue
+        mcp_file = mcp_dir / "mcp.json"
+        if not mcp_file.exists():
+            continue
+        try:
+            data = json.loads(mcp_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if "name" not in data or "version" not in data:
+            continue
+        name = data["name"]
+        mcps[name] = {
+            "version": data["version"],
+            "description": data.get("description", ""),
+            "path": mcp_dir.name,
+        }
+    return mcps
+
+
 def get_source_dirs() -> dict:
     """Get source directories for each item type from the AEC repo.
 
@@ -98,6 +131,7 @@ def get_source_dirs() -> dict:
         "skills": repo / ".claude" / "skills",
         "rules": repo / ".agent-rules",
         "agents": repo / ".claude" / "agents",
+        "mcps": repo / "mcp-servers",
     }
 
 

@@ -1,0 +1,7 @@
+{
+  "$schema": "x",
+  "version": "1.0.0",
+  "hooks": [
+    {"id": "e", "event": "on_file_edit", "command": "", "description": "d"}
+  ]
+}

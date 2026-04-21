@@ -1,0 +1,5 @@
+{
+  "$schema": "https://bernierllc.io/schemas/aec-hooks-v1.json",
+  "version": "1.0.0",
+  "hooks": []
+}
