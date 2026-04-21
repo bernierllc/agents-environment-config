@@ -330,6 +330,10 @@ if HAS_TYPER:
         """Show version information."""
         Console.print(f"aec version {__version__}")
 
+    # --- hooks ---
+    from .commands.hooks_cmd import hooks_app
+    app.add_typer(hooks_app, name="hooks")
+
     # ------------------------------------------------------------------ #
     #  Deprecated command groups (kept as shims)                          #
     # ------------------------------------------------------------------ #
