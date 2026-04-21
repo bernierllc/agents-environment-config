@@ -121,6 +121,52 @@ def install_item_hooks(
     hook_state.save_state(repo_root, st)
 
 
+def remove_item_hooks(
+    *, item_type: str, item_key: str, repo_root: Path,
+) -> None:
+    """Remove an item's hooks from all recorded agents, then drop state."""
+    st = hook_state.load_state(repo_root, item_type=item_type, item_key=item_key)
+    for installed in st.hooks_installed:
+        agent = installed["agent"]
+        event_key = installed["target_json_pointer"].split("/")[2]
+        fp = installed["content_fingerprint"]
+        if agent == "claude":
+            _remove_claude(repo_root, event_key, fp)
+        elif agent == "gemini":
+            _remove_gemini(repo_root, event_key, fp)
+        elif agent == "cursor":
+            _remove_cursor(repo_root, event_key, fp)
+        # git removals handled in 9d
+    hook_state.remove_state(repo_root, item_type=item_type, item_key=item_key)
+
+
+def _remove_claude(repo_root: Path, event_key: str, fp: str) -> None:
+    settings_path = repo_root / ".claude/settings.json"
+    if not settings_path.exists():
+        return
+    existing = json.loads(settings_path.read_text())
+    updated = _remove_from_claude(existing, event_key, fp)
+    atomic_write_json(settings_path, updated)
+
+
+def _remove_gemini(repo_root: Path, event_key: str, fp: str) -> None:
+    settings_path = repo_root / ".gemini/settings.json"
+    if not settings_path.exists():
+        return
+    existing = json.loads(settings_path.read_text())
+    updated = _remove_from_gemini(existing, event_key, fp)
+    atomic_write_json(settings_path, updated)
+
+
+def _remove_cursor(repo_root: Path, event_key: str, fp: str) -> None:
+    settings_path = repo_root / ".cursor/hooks.json"
+    if not settings_path.exists():
+        return
+    existing = json.loads(settings_path.read_text())
+    updated = _remove_from_cursor(existing, event_key, fp)
+    atomic_write_json(settings_path, updated)
+
+
 def _install_claude(
     repo_root: Path, entries: List[dict], st, item_version: str
 ) -> None:
