@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Optional, Protocol, runtime_checkable
 
 from .aec_json import load_aec_json, save_aec_json
 from .config import AEC_HOME
@@ -20,7 +20,7 @@ class ScopeLike(Protocol):
     def is_global(self) -> bool: ...
 
     @property
-    def repo_path(self) -> Path | None: ...
+    def repo_path(self) -> Optional[Path]: ...
 
 
 def _global_dismissed_path(item_type: str) -> Path:
