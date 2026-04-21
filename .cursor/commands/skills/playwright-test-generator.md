@@ -91,7 +91,7 @@ Complete these in order:
 4. **Create/update metadata docs** — for each page needing metadata, read verification doc frontmatter, evaluate auth requirements, create derivative metadata doc (see "Derivative Metadata Docs" below)
 5. **Evaluate auth readiness** — for each metadata doc, check if `helpers/auth.ts` (or equivalent) has a working auth flow for the required user types. Set `ready: true/false` accordingly
 6. **Generate tests** — for each ready page, generate Playwright test code with proper auth `beforeEach` blocks. For not-ready pages, generate `.skip()` stubs with clear skip reasons
-7. **Handle missing testids** — generate `.skip()` stubs, update `testid-gaps.md`
+7. **Handle missing testids** — generate `.skip()` stubs, update `testid-gaps.md`. See "Testid Gap Philosophy" below
 8. **Update manifest** — write changes atomically with lockfile
 9. **Rebuild import index** — trace routes to source files, update `manifest/import-index.json`
 10. **Patch test headers** — for `header-missing` items, add `@source` and `@metadata` comments to existing test files
@@ -317,12 +317,20 @@ Each verification item becomes one Playwright test function. Read `references/te
 
 ### Missing data-testid handling
 
-On initial runs, many testids will be missing. This is expected and welcomed — the skill surfaces this as a work list.
+#### Testid Gap Philosophy
 
-- Items with missing testids get a test stub with `.skip()` and a TODO comment
+Testids are a **development artifact**, not a testing artifact. They belong in the component at build time — same category as accessible labels and error handling. When this skill encounters missing testids, treat the gap as a developer deficiency, not a test generation limitation.
+
+**For new features:** A `testid-gaps.md` report is a signal that the developer shipped a component without meeting the testid standard. It is NOT normal output for new features — it is a retrofit backlog. When you report gaps, be explicit: "These testids are missing from components that should have them. Add them at the source."
+
+**For existing/legacy code:** `testid-gaps.md` is the expected retrofit backlog. Work through it incrementally. The `.skip()` stubs are placeholders — not permanent.
+
+**Behavior:**
+- Items with missing testids get a test stub with `.skip()` and a TODO comment pointing to the expected testid
 - All gaps are logged to `testid-gaps.md` (read `references/test-generation-patterns.md` for format)
 - The first run walks through each verification page doc section by section, reporting progress
 - On subsequent runs, check if previously-missing testids have been added and un-skip those tests
+- Do NOT fall back to fragile CSS/text selectors as a substitute — the `.skip()` stub is correct; the fix belongs in the component source
 
 ### Test pinning
 

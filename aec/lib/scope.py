@@ -100,7 +100,22 @@ def _setup_log_path() -> Path:
 
 
 def _load_tracked_paths() -> set[Path]:
-    """Load tracked repo paths from the setup log.
+    """Load tracked repo paths, preferring JSON store with txt fallback.
+
+    Delegates to tracked_repos.load_tracked_repos() for the JSON path,
+    falling back to the legacy txt file if JSON doesn't exist.
+    """
+    from .tracked_repos import load_tracked_repos, _tracked_repos_path
+
+    json_path = _tracked_repos_path()
+    if json_path.exists():
+        data = load_tracked_repos()
+        return {Path(p).resolve() for p in data["repos"]}
+    return _load_tracked_paths_from_txt()
+
+
+def _load_tracked_paths_from_txt() -> set[Path]:
+    """Load tracked paths from legacy setup-repo-locations.txt.
 
     Each line has format: timestamp|version|absolute_path
     """

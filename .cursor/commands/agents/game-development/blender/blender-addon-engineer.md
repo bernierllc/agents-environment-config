@@ -1,8 +1,9 @@
 ---
 name: "Blender Add-on Engineer"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Blender Add-on Engineer Agent Personality
 

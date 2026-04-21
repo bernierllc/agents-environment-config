@@ -1,4 +1,4 @@
-"""Source management: discover available items, check staleness, fetch updates."""
+"""Source management: discover items, check staleness, fetch updates."""
 
 import subprocess
 from pathlib import Path
@@ -107,7 +107,12 @@ def check_staleness(manifest: dict, max_age_hours: int = 24) -> bool:
 
 
 def fetch_latest(repo_path: Optional[Path] = None) -> bool:
-    """Pull latest AEC repo and update submodules. Returns True on success."""
+    """Pull latest AEC repo and update submodules to remote branch tips.
+
+    Uses ``git submodule update --remote`` so skills/agents track the latest
+    commits on their default branches (same as the post-merge hook), not only
+    the superproject's recorded gitlinks.
+    """
     if repo_path is None:
         repo_path = get_repo_root()
     if repo_path is None:
@@ -118,7 +123,14 @@ def fetch_latest(repo_path: Optional[Path] = None) -> bool:
             cwd=repo_path, capture_output=True, check=True,
         )
         subprocess.run(
-            ["git", "submodule", "update", "--init", "--recursive"],
+            [
+                "git",
+                "submodule",
+                "update",
+                "--init",
+                "--recursive",
+                "--remote",
+            ],
             cwd=repo_path, capture_output=True, check=True,
         )
         return True

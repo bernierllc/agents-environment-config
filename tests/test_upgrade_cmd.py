@@ -189,3 +189,35 @@ class TestUpgradeCommand:
         m = json.loads(upgrade_env["manifest_path"].read_text())
         assert m["global"]["skills"]["test-skill"]["version"] == "2.0.0"
         assert m["global"]["skills"]["test-skill"]["contentHash"] != ""
+
+    @patch("aec.commands.upgrade.is_stale", return_value=False)
+    @patch("aec.commands.upgrade.find_tracked_repo", return_value=None)
+    @patch("aec.commands.upgrade.get_all_tracked_repos", return_value=[])
+    @patch("aec.commands.upgrade.get_source_dirs")
+    @patch("aec.commands.upgrade.get_repo_root")
+    @patch("aec.commands.upgrade._manifest_path")
+    def test_syncs_manifest_when_disk_already_matches_source(
+        self, mock_mp, mock_root, mock_sd, mock_all, mock_find, _stale, upgrade_env, capsys
+    ):
+        """Stale manifest + tree already at new release should not prompt."""
+        from aec.commands.upgrade import run_upgrade
+
+        mock_root.return_value = upgrade_env["repo"]
+        mock_mp.return_value = upgrade_env["manifest_path"]
+        mock_sd.return_value = _source_dirs(upgrade_env["repo"])
+
+        src = upgrade_env["repo"] / ".claude" / "skills" / "test-skill"
+        dst = upgrade_env["installed"]
+        shutil.rmtree(dst)
+        shutil.copytree(src, dst)
+
+        m = json.loads(upgrade_env["manifest_path"].read_text())
+        m["global"]["skills"]["test-skill"]["version"] = "1.0.0"
+        upgrade_env["manifest_path"].write_text(json.dumps(m))
+
+        run_upgrade(yes=False)
+
+        m2 = json.loads(upgrade_env["manifest_path"].read_text())
+        assert m2["global"]["skills"]["test-skill"]["version"] == "2.0.0"
+        out = capsys.readouterr().out
+        assert "manifest updated" in out.lower() or "matched source" in out.lower()

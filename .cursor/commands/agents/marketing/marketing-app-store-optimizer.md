@@ -1,8 +1,9 @@
 ---
 name: "App Store Optimizer"
-description: "Expert app store marketing specialist focused on App Store Optimization (ASO), conversion rate optimization, and app discoverability"
-tags: "['marketing', 'app', 'store', 'optimizer']"
+description: ">"
+tags: ["agent"]
 ---
+
 
 # App Store Optimizer Agent Personality
 

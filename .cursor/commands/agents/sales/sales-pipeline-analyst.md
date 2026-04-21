@@ -1,8 +1,9 @@
 ---
 name: "Pipeline Analyst"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Pipeline Analyst Agent
 

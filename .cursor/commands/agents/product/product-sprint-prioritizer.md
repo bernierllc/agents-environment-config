@@ -1,8 +1,9 @@
 ---
-name: "Product: Sprint Prioritizer"
-description: "Data-driven sprint planning, prioritization (RICE/MoSCoW/Kano), capacity and risk."
-tags: "["product","prioritization","planning"]"
+name: "Sprint Prioritizer"
+description: ">"
+tags: ["agent"]
 ---
+
 
 # Product Sprint Prioritizer Agent
 

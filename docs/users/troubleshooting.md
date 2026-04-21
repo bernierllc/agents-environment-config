@@ -59,7 +59,7 @@ Never edit `.agent-rules/` directly -- always edit in `.cursor/rules/` and regen
 **Fix submodule state:**
 
 ```bash
-git submodule update --init --recursive
+git submodule update --init --recursive --remote
 
 # If detached HEAD:
 cd .claude/agents && git checkout main && cd ../..

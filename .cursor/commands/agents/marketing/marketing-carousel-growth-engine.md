@@ -1,8 +1,9 @@
 ---
 name: "Carousel Growth Engine"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Marketing Carousel Growth Engine
 

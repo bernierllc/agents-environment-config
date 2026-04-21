@@ -237,6 +237,100 @@ class TestDiscoverAvailableSkills:
         result = discover_available_skills(source)
         assert result["my-skill"]["version"] == "2.0.0"
 
+    def test_skill_md_overrides_stale_manifest_version(self, temp_dir: Path):
+        """SKILL.md frontmatter wins over skills-manifest.json for the same skill."""
+        source = temp_dir / "skills-source"
+        source.mkdir()
+        my_skill = source / "my-skill"
+        my_skill.mkdir()
+        (my_skill / "SKILL.md").write_text(
+            "---\nname: my-skill\ndescription: From file\nversion: 3.0.0\nauthor: File\n---\n"
+        )
+        manifest = {
+            "manifestVersion": 1,
+            "generatedAt": "2026-03-30T12:00:00Z",
+            "skills": {
+                "my-skill": {
+                    "version": "1.0.0",
+                    "description": "Stale manifest",
+                    "author": "Manifest",
+                    "path": "my-skill",
+                }
+            },
+        }
+        (source / "skills-manifest.json").write_text(json.dumps(manifest))
+        from aec.lib.skills_manifest import discover_available_skills
+
+        result = discover_available_skills(source)
+        assert result["my-skill"]["version"] == "3.0.0"
+        assert result["my-skill"]["description"] == "From file"
+        assert result["my-skill"]["author"] == "File"
+
+
+class TestPlanSkillDirectoryReplace:
+    """Tests for upgrade copy vs manifest-only decisions."""
+
+    def test_sync_manifest_when_trees_match(self, temp_dir: Path):
+        from aec.lib.skills_manifest import plan_skill_directory_replace
+
+        src = temp_dir / "src" / "s"
+        dst = temp_dir / "dst" / "s"
+        for d in (src, dst):
+            d.mkdir(parents=True)
+            (d / "SKILL.md").write_text(
+                "---\nname: s\nversion: 2.0.0\ndescription: X\n---\nBody"
+            )
+        plan = plan_skill_directory_replace(
+            dst, src, {"version": "1.0.0", "contentHash": "sha256:old"}, assume_yes=False
+        )
+        assert plan == "sync_manifest"
+
+    def test_overwrite_when_matches_recorded_baseline(self, temp_dir: Path):
+        from aec.lib.skills_manifest import (
+            hash_skill_directory,
+            plan_skill_directory_replace,
+        )
+
+        src = temp_dir / "src" / "s"
+        dst = temp_dir / "dst" / "s"
+        src.mkdir(parents=True)
+        dst.mkdir(parents=True)
+        (dst / "SKILL.md").write_text(
+            "---\nname: s\nversion: 1.0.0\ndescription: X\n---\nOld"
+        )
+        (src / "SKILL.md").write_text(
+            "---\nname: s\nversion: 2.0.0\ndescription: X\n---\nNew"
+        )
+        rec = hash_skill_directory(dst)
+        plan = plan_skill_directory_replace(
+            dst,
+            src,
+            {"version": "1.0.0", "contentHash": rec},
+            assume_yes=False,
+        )
+        assert plan == "overwrite"
+
+    def test_prompt_when_differs_from_recorded_and_source(self, temp_dir: Path):
+        from aec.lib.skills_manifest import plan_skill_directory_replace
+
+        src = temp_dir / "src" / "s"
+        dst = temp_dir / "dst" / "s"
+        src.mkdir(parents=True)
+        dst.mkdir(parents=True)
+        (dst / "SKILL.md").write_text(
+            "---\nname: s\nversion: 1.0.0\ndescription: X\n---\nEdited"
+        )
+        (src / "SKILL.md").write_text(
+            "---\nname: s\nversion: 2.0.0\ndescription: X\n---\nUpstream"
+        )
+        plan = plan_skill_directory_replace(
+            dst,
+            src,
+            {"version": "1.0.0", "contentHash": "sha256:fake"},
+            assume_yes=False,
+        )
+        assert plan == "prompt"
+
 
 class TestManifestRecovery:
     """Test manifest rebuild from installed skills."""

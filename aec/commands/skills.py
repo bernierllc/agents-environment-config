@@ -1,6 +1,7 @@
 """Skills commands: aec skills {list|install|uninstall|update}"""
 
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -19,6 +20,8 @@ from ..lib.skills_manifest import (
     hash_skill_directory,
     version_is_newer,
     parse_skill_frontmatter,
+    plan_skill_directory_replace,
+    build_skill_manifest_item,
 )
 
 if HAS_TYPER:
@@ -191,15 +194,15 @@ def install_skills(
         shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".*"))
 
         content_hash = hash_skill_directory(dst)
-        from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
 
-        manifest["skills"][name] = {
-            "version": skill_info.get("version", "0.0.0"),
-            "contentHash": content_hash,
-            "installedAt": now,
-            "source": "agents-environment-config",
-        }
+        manifest["skills"][name] = build_skill_manifest_item(
+            version=skill_info.get("version", "0.0.0"),
+            content_hash=content_hash,
+            installed_at=now,
+            previous=manifest["skills"].get(name),
+            source="agents-environment-config",
+        )
 
         Console.success(f"Installed: {name} ({skill_info.get('version', '0.0.0')})")
 
@@ -301,34 +304,51 @@ def update_skills(
         skill_dir = installed_dir / name
         skill_info = available[name]
         src = source_dir / skill_info.get("path", name)
+        prev = dict(manifest["skills"].get(name, {}))
+        plan = plan_skill_directory_replace(
+            skill_dir, src, prev, assume_yes=yes
+        )
 
-        # Check for local modifications
-        if skill_dir.exists():
-            current_hash = hash_skill_directory(skill_dir)
-            recorded_hash = installed.get(name, {}).get("contentHash", "")
-            if current_hash != recorded_hash and not yes:
-                try:
-                    resp = input(f"  {name} has local modifications. Overwrite? [y/N]: ").strip().lower()
-                except EOFError:
-                    resp = "n"
-                if resp != "y":
-                    Console.info(f"Skipped: {name}")
-                    continue
+        now = datetime.now(timezone.utc).isoformat()
+
+        if plan == "sync_manifest":
+            content_hash = hash_skill_directory(skill_dir)
+            manifest["skills"][name] = build_skill_manifest_item(
+                version=new_v,
+                content_hash=content_hash,
+                installed_at=now,
+                previous=prev,
+                source="agents-environment-config",
+            )
+            Console.success(
+                f"Updated: {name} ({old_v} \u2192 {new_v}) (manifest only)"
+            )
+            continue
+
+        if plan == "prompt" and not yes:
+            try:
+                resp = input(
+                    f"  {name} differs from install baseline and source; "
+                    f"overwrite (lose local edits)? [y/N]: "
+                ).strip().lower()
+            except EOFError:
+                resp = "n"
+            if resp != "y":
+                Console.info(f"Skipped: {name}")
+                continue
 
         if skill_dir.exists():
             shutil.rmtree(skill_dir)
         shutil.copytree(src, skill_dir, ignore=shutil.ignore_patterns(".*"))
 
         content_hash = hash_skill_directory(skill_dir)
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc).isoformat()
-
-        manifest["skills"][name] = {
-            "version": new_v,
-            "contentHash": content_hash,
-            "installedAt": now,
-            "source": "agents-environment-config",
-        }
+        manifest["skills"][name] = build_skill_manifest_item(
+            version=new_v,
+            content_hash=content_hash,
+            installed_at=now,
+            previous=prev,
+            source="agents-environment-config",
+        )
         Console.success(f"Updated: {name} ({old_v} \u2192 {new_v})")
 
     save_installed_manifest(manifest, manifest_path)

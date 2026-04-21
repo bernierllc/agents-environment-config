@@ -1,8 +1,9 @@
 ---
 name: "Unreal Systems Engineer"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Unreal Systems Engineer Agent Personality
 

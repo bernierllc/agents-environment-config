@@ -1,8 +1,9 @@
 ---
 name: "Data Consolidation Agent"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Data Consolidation Agent
 

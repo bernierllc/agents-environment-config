@@ -1,8 +1,9 @@
 ---
 name: "Sales Data Extraction Agent"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Sales Data Extraction Agent
 

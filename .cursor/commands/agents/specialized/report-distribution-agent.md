@@ -1,8 +1,9 @@
 ---
 name: "Report Distribution Agent"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Report Distribution Agent
 

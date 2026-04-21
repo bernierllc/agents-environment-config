@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 from ..lib.console import Console
+from ..lib.installed_store import remove_item_install
 from ..lib.manifest_v2 import load_manifest, save_manifest, remove_install
 from ..lib.scope import resolve_scope, ScopeError
 
@@ -64,5 +65,8 @@ def run_uninstall(
     scope_key = "global" if scope.is_global else str(scope.repo_path.resolve())
     remove_install(manifest, scope_key, plural, name)
     save_manifest(manifest, mp)
+
+    # Dual-write to per-type installed file (best-effort during transition)
+    remove_item_install(item_type, name)
 
     Console.success(f"Uninstalled {name}")

@@ -1,8 +1,9 @@
 ---
 name: "Bilibili Content Strategist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Marketing Bilibili Content Strategist
 

@@ -1,8 +1,9 @@
 ---
 name: "Tracking & Measurement Specialist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Paid Media Tracking & Measurement Specialist Agent
 

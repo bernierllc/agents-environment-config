@@ -65,6 +65,11 @@ Mocking internal systems creates tests that pass when the mock is correct but fa
    - Tests must pass against the real UI as it actually works
    - Adjust tests if UI behavior differs from assumptions
    - Never write tests without first verifying against the actual UI
+4. **Testid Audit**: When discovering the UI, check for missing `data-testid` attributes on interactive elements, dynamic state containers, and structural landmarks
+   - Missing testids are a **developer deficiency** — the fix belongs in the source component, not in the test
+   - Log a `testid-gaps.md` retrofit backlog listing each missing testid with the component file and suggested attribute value
+   - Write test stubs with `.skip()` for any element missing a required testid; add a comment linking to the gap entry
+   - Do NOT use fragile fallback selectors (class names, element types, text content) as substitutes — require the testid to be added
 
 ## When To Mock
 - **NEVER**: Database, Prisma, internal APIs, internal services, repositories, models

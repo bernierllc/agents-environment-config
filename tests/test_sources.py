@@ -1,7 +1,9 @@
 """Tests for source management (fetch, discover available items)."""
 
-import pytest
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 
 @pytest.fixture
@@ -111,3 +113,45 @@ class TestStalenessCheck:
         from aec.lib.sources import check_staleness
         from datetime import datetime, timezone
         assert check_staleness({"lastUpdateCheck": datetime.now(timezone.utc).isoformat()}) is False
+
+
+class TestFetchLatest:
+    """Test fetch_latest git invocations."""
+
+    def test_fetch_latest_pulls_then_submodule_update_remote(self, tmp_path):
+        from aec.lib.sources import fetch_latest
+
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(list(cmd))
+
+            class _Result:
+                returncode = 0
+
+            return _Result()
+
+        with patch("aec.lib.sources.subprocess.run", fake_run):
+            assert fetch_latest(tmp_path) is True
+
+        assert len(calls) == 2
+        assert calls[0] == ["git", "pull", "--ff-only"]
+        assert calls[1] == [
+            "git",
+            "submodule",
+            "update",
+            "--init",
+            "--recursive",
+            "--remote",
+        ]
+
+    def test_fetch_latest_returns_false_on_git_failure(self, tmp_path):
+        import subprocess as sp
+
+        from aec.lib.sources import fetch_latest
+
+        def fake_run(cmd, **kwargs):
+            raise sp.CalledProcessError(1, cmd)
+
+        with patch("aec.lib.sources.subprocess.run", fake_run):
+            assert fetch_latest(tmp_path) is False

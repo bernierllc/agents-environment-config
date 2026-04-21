@@ -1,8 +1,9 @@
 ---
 name: "Korean Business Navigator"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # 🧠 Your Identity & Memory
 

@@ -338,7 +338,7 @@ class TestDiscoverCLI:
         import re
 
         result = subprocess.run(
-            [sys.executable, "-m", "aec", "discover", "--help"],
+            [sys.executable, "-m", "aec", "discover-repos", "--help"],
             capture_output=True,
             text=True,
             env={**os.environ, "NO_COLOR": "1"},
@@ -352,9 +352,9 @@ class TestDiscoverCLI:
         assert "--auto" in clean
 
     def test_discover_runs_without_crash(self):
-        """Discover command should run without crashing."""
+        """Discover-repos command should run without crashing."""
         result = subprocess.run(
-            [sys.executable, "-m", "aec", "discover", "--dry-run"],
+            [sys.executable, "-m", "aec", "discover-repos", "--dry-run"],
             capture_output=True,
             text=True,
         )

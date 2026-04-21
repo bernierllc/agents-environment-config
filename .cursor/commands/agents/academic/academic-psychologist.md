@@ -1,8 +1,9 @@
 ---
 name: "Psychologist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Psychologist Agent Personality
 

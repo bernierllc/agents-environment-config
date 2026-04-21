@@ -800,10 +800,9 @@ def _sync_installed_section(aec_data: dict) -> dict:
     from ..lib.aec_json import update_installed_section
 
     try:
-        from ..lib.skills_manifest import load_installed_manifest
-        from ..lib.config import AGENT_TOOLS_DIR
-        manifest_path = AGENT_TOOLS_DIR / "installed-manifest.json"
-        manifest = load_installed_manifest(manifest_path)
+        from ..lib.manifest_v2 import load_manifest
+        from ..lib.config import INSTALLED_MANIFEST_V2
+        manifest = load_manifest(INSTALLED_MANIFEST_V2)
     except (ImportError, OSError, ValueError):
         return aec_data
 
@@ -811,9 +810,9 @@ def _sync_installed_section(aec_data: dict) -> dict:
         return aec_data
 
     installed = {
-        "skills": manifest.get("skills", {}),
-        "rules": manifest.get("rules", {}),
-        "agents": manifest.get("agents", {}),
+        "skills": manifest["global"]["skills"],
+        "rules": manifest["global"]["rules"],
+        "agents": manifest["global"]["agents"],
     }
     aec_data = update_installed_section(aec_data, installed)
     return aec_data
@@ -1081,6 +1080,47 @@ def setup(
                     _generate_raycast_scripts(project_dir, project_name, repo_root_path)
                 else:
                     Console.error("Could not find repo root for Raycast script output directory.")
+
+    # --- Discovery scan ---
+    if not dry_run and not batch:
+        try:
+            resp = input(
+                "\n  Scan for files that match items in the AEC catalog? [Y/n]: "
+            ).strip().lower()
+        except EOFError:
+            resp = "n"
+
+        if resp not in ("n", "no"):
+            try:
+                from .discover_catalog import _run_scan, _present_results
+                from ..lib.scope import Scope
+                from ..lib.sources import get_source_dirs, discover_available
+                from ..lib.catalog_hashes import regenerate_if_missing
+                from ..lib.config import AEC_HOME
+
+                scope = Scope(is_global=False, repo_path=project_dir)
+                source_dirs = get_source_dirs()
+                catalog = {}
+                for item_type, src_dir in source_dirs.items():
+                    catalog[item_type] = discover_available(src_dir, item_type)
+
+                catalog_path = AEC_HOME / "catalog-hashes.json"
+                catalog_hashes = regenerate_if_missing(catalog_path, source_dirs)
+
+                results = _run_scan(
+                    scope, depth=2, catalog=catalog, catalog_hashes=catalog_hashes
+                )
+                if results:
+                    _present_results(results, scope)
+                else:
+                    Console.info("No similar items found.")
+            except ImportError:
+                Console.warning(
+                    "Discovery module not available. "
+                    "Run `aec update` to get the latest version."
+                )
+            except Exception as e:
+                Console.warning(f"Discovery scan failed: {e}")
 
     # Summary
     if not dry_run:

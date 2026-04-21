@@ -1,8 +1,9 @@
 ---
-name: "Product Trend Researcher"
-description: "Expert market intelligence analyst specializing in identifying emerging trends, competitive analysis, and opportunity assessment. Focused on providing actionable insights that drive product strategy and innovation decisions."
-tags: "['product', 'trend', 'researcher']"
+name: "Trend Researcher"
+description: ">"
+tags: ["agent"]
 ---
+
 
 # Product Trend Researcher Agent
 

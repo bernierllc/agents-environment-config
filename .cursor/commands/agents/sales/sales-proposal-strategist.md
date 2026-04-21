@@ -1,8 +1,9 @@
 ---
 name: "Proposal Strategist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Proposal Strategist Agent
 

@@ -1,8 +1,9 @@
 ---
 name: "PPC Campaign Strategist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Paid Media PPC Campaign Strategist Agent
 

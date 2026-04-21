@@ -1,8 +1,9 @@
 ---
 name: "Cross-Border E-Commerce Specialist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Marketing Cross-Border E-Commerce Specialist
 

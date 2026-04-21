@@ -1,8 +1,9 @@
 ---
 name: "SEO Specialist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Marketing SEO Specialist
 

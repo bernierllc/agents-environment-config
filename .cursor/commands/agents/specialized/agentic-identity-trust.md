@@ -1,8 +1,9 @@
 ---
 name: "Agentic Identity & Trust Architect"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Agentic Identity & Trust Architect
 

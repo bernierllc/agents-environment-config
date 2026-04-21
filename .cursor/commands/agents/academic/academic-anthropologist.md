@@ -1,8 +1,9 @@
 ---
 name: "Anthropologist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Anthropologist Agent Personality
 

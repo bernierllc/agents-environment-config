@@ -1,8 +1,9 @@
 ---
 name: "Search Query Analyst"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Paid Media Search Query Analyst Agent
 

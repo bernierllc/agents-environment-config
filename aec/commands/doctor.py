@@ -182,19 +182,20 @@ def run_doctor() -> Tuple[bool, List[str]]:
     # Check: Skills installation
     Console.subheader("Skills")
 
-    from ..lib.skills_manifest import load_installed_manifest
+    from ..lib.manifest_v2 import load_manifest
+    from ..lib.config import INSTALLED_MANIFEST_V2
 
-    manifest_path = AEC_HOME / "installed-skills.json"
     checks_total += 1
-    if manifest_path.exists():
+    if INSTALLED_MANIFEST_V2.exists():
         try:
-            manifest = load_installed_manifest(manifest_path)
-            skill_count = len(manifest.get("skills", {}))
-            Console.success(f"installed-skills.json valid ({skill_count} skills tracked)")
+            manifest = load_manifest(INSTALLED_MANIFEST_V2)
+            global_skills = manifest["global"]["skills"]
+            skill_count = len(global_skills)
+            Console.success(f"installed-manifest.json valid ({skill_count} skills tracked)")
             checks_passed += 1
 
             # Verify each tracked skill exists on disk
-            for name, info in manifest.get("skills", {}).items():
+            for name, info in global_skills.items():
                 skill_dir = CLAUDE_DIR / "skills" / name
                 checks_total += 1
                 if skill_dir.exists():
@@ -204,10 +205,10 @@ def run_doctor() -> Tuple[bool, List[str]]:
                     Console.error(f"  {name} tracked but directory missing")
                     issues.append(f"Skill '{name}' in manifest but missing from ~/.claude/skills/")
         except Exception as e:
-            Console.error(f"installed-skills.json: {e}")
-            issues.append("installed-skills.json is corrupt")
+            Console.error(f"installed-manifest.json: {e}")
+            issues.append("installed-manifest.json is corrupt")
     else:
-        Console.info("installed-skills.json not found (run: aec skills install)")
+        Console.info("installed-manifest.json not found (run: aec install)")
         checks_passed += 1  # OK on first run
 
     # Check for stale AEC symlinks

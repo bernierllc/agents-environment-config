@@ -1,8 +1,9 @@
 ---
 name: "Unity Multiplayer Engineer"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Unity Multiplayer Engineer Agent Personality
 

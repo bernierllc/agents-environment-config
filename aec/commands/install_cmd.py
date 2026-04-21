@@ -10,6 +10,7 @@ from ..lib.hooks import get_verification_playwright_hook
 from ..lib.manifest_v2 import load_manifest, save_manifest, record_install
 from ..lib.scope import resolve_scope, Scope, ScopeError
 from ..lib.sources import discover_available, get_source_dirs
+from ..lib.installed_store import record_item_install
 from ..lib.skills_manifest import hash_skill_directory
 
 VALID_TYPES = ("skill", "rule", "agent")
@@ -97,7 +98,18 @@ def run_install(
     )
     save_manifest(manifest, manifest_file)
 
+    # Dual-write to per-type installed file (best-effort during transition)
+    record_item_install(item_type, name, item_info.get("version", "0.0.0"), content_hash)
+
     Console.success(f"Installed {name} v{item_info.get('version', '0.0.0')}")
+
+    # Quick-scan notification for global installs
+    if global_flag:
+        try:
+            from ..lib.discovery_hooks import quick_scan_notification
+            quick_scan_notification(scope)
+        except ImportError:
+            pass
 
     # Skill-specific post-install steps
     if item_type == "skill" and name == "playwright-test-generator":

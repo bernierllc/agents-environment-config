@@ -1,8 +1,9 @@
 ---
 name: "BrainGrid Integration Orchestrator"
 description: "Interface between autonomous workflow and BrainGrid API/CLI for requirement and task management"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # BrainGrid Integration Orchestrator Personality
 

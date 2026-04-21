@@ -1,8 +1,9 @@
 ---
 name: "Unreal World Builder"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Unreal World Builder Agent Personality
 

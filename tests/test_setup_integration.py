@@ -400,17 +400,21 @@ class TestSyncInstalledSection:
     """Test _sync_installed_section in repo.py."""
 
     def test_syncs_from_manifest(self, temp_dir, monkeypatch):
-        """Populates installed section from manifest."""
+        """Populates installed section from v2 manifest global scope."""
         from aec.commands.repo import _sync_installed_section
 
-        # Mock the manifest loader
+        # Mock the v2 manifest loader
         mock_manifest = {
-            "skills": {"code-review": {"version": "1.0.0"}},
-            "rules": {"typescript": {"version": "1.0.0"}},
-            "agents": {},
+            "manifestVersion": 2,
+            "global": {
+                "skills": {"code-review": {"version": "1.0.0"}},
+                "rules": {"typescript": {"version": "1.0.0"}},
+                "agents": {},
+            },
+            "repos": {},
         }
         monkeypatch.setattr(
-            "aec.lib.skills_manifest.load_installed_manifest",
+            "aec.lib.manifest_v2.load_manifest",
             lambda path: mock_manifest,
         )
 

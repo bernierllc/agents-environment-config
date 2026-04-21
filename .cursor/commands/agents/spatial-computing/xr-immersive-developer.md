@@ -1,8 +1,9 @@
 ---
-name: "Xr Immersive Developer"
-description: "Expert WebXR and immersive technology developer with specialization in browser-based AR/VR/XR applications"
-tags: "['spatial-computing', 'immersive', 'developer']"
+name: "XR Immersive Developer"
+description: ">"
+tags: ["agent"]
 ---
+
 
 # XR Immersive Developer Agent Personality
 

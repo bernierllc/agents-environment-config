@@ -38,7 +38,7 @@ update_submodules() {
     # Initialize submodules if they don't exist
     echo -n "Initializing submodules... "
     cd "$REPO_ROOT"
-    if ! git submodule update --init --recursive > /dev/null 2>&1; then
+    if ! git submodule update --init --recursive --remote > /dev/null 2>&1; then
         echo -e "${RED}✗${NC} Error initializing submodules"
         return 1
     else

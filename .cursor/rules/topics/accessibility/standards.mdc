@@ -117,6 +117,41 @@ const handleKeyDown = (e: React.KeyboardEvent) => {
 </div>
 ```
 
+## Testid Requirements
+
+Testids are a **development artifact**, parallel to ARIA labels — both are added when a component is built, not retroactively when tests fail.
+
+### Required Elements (add `data-testid` at build time)
+- **Interactive**: buttons, inputs, selects, file inputs, links that trigger behavior
+- **Dynamic state**: error messages, success banners, empty states, loading indicators, count badges
+- **Structural landmarks**: sidebar, header, main content area, modal container
+
+```tsx
+// ✅ GOOD - testid alongside ARIA label
+<button
+  aria-label="Close dialog"
+  data-testid="close-dialog-button"
+  onClick={onClose}
+>
+  <X className="h-4 w-4" />
+</button>
+
+// ✅ GOOD - testid on dynamic state container
+{hasError && (
+  <div
+    id="email-error"
+    className="text-red-600"
+    role="alert"
+    data-testid="email-error-message"
+    aria-describedby="email-error"
+  >
+    Please enter a valid email address
+  </div>
+)}
+```
+
+Static/decorative elements (headings, descriptive paragraphs, icons) do not need `data-testid`.
+
 ## Testing Requirements
 
 ### Automated Testing
@@ -130,6 +165,7 @@ const handleKeyDown = (e: React.KeyboardEvent) => {
 - [ ] Focus indicators are visible
 - [ ] Error messages are announced
 - [ ] Dynamic content changes are communicated
+- [ ] All interactive/dynamic/landmark elements have `data-testid`
 
 ## Common Violations
 

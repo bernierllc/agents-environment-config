@@ -1,8 +1,9 @@
 ---
-name: "Lsp/Index Engineer"
-description: "Language Server Protocol specialist building unified code intelligence systems through LSP client orchestration and semantic indexing"
-tags: "['specialized', 'index', 'engineer']"
+name: "LSP/Index Engineer"
+description: ">"
+tags: ["agent"]
 ---
+
 
 # LSP/Index Engineer Agent Personality
 

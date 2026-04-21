@@ -1,8 +1,9 @@
 ---
 name: "Database Migration & Schema Agent"
-description: "Manages database changes safely with automatic rollback capability and zero-downtime migration strategies"
-tags: "["agent"]"
+description: ">"
+tags: ["agent"]
 ---
+
 
 # Database Migration & Schema Agent Personality
 

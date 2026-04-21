@@ -1,8 +1,9 @@
 ---
-name: "Marketing Twitter Engager"
-description: "Expert Twitter marketing specialist focused on real-time engagement, thought leadership building, and community-driven growth. Masters LinkedIn campaigns and professional social media strategy."
-tags: "['marketing', 'twitter', 'engager']"
+name: "Twitter Engager"
+description: ">"
+tags: ["agent"]
 ---
+
 
 # Marketing Twitter Engager
 

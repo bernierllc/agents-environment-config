@@ -6,6 +6,7 @@ from typing import Optional
 
 from ..lib.console import Console
 from ..lib.config import get_repo_root
+from ..lib.installed_store import record_item_install as record_item_install_pertype
 from ..lib.manifest_v2 import (
     load_manifest,
     save_manifest,
@@ -15,7 +16,11 @@ from ..lib.manifest_v2 import (
 )
 from ..lib.sources import discover_available, get_source_dirs
 from ..lib.scope import find_tracked_repo, get_all_tracked_repos
-from ..lib.skills_manifest import version_is_newer, hash_skill_directory
+from ..lib.skills_manifest import (
+    version_is_newer,
+    hash_skill_directory,
+    plan_skill_directory_replace,
+)
 
 
 def _manifest_path() -> Path:
@@ -99,6 +104,16 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
     if not any_upgraded and not dry_run:
         Console.print("\nEverything is up to date.")
 
+    # Quick-scan notification for global scope
+    if not dry_run:
+        try:
+            from ..lib.discovery_hooks import quick_scan_notification
+            from ..lib.scope import Scope
+            scope = Scope(is_global=True, repo_path=None)
+            quick_scan_notification(scope)
+        except ImportError:
+            pass
+
 
 def _target_base(scope: str, item_type: str) -> Path:
     """Determine the target directory for an item type in a given scope."""
@@ -153,26 +168,53 @@ def _upgrade_scope(
                 upgraded = True
                 continue
 
-            # Check for local modifications
-            if dst_path.exists() and not yes:
+            do_prompt = False
+            if item_type == "skills" and src_path.is_dir() and dst_path.exists():
+                plan = plan_skill_directory_replace(
+                    dst_path, src_path, info, assume_yes=yes
+                )
+                if plan == "sync_manifest":
+                    sh = hash_skill_directory(src_path)
+                    record_install(
+                        manifest, scope, item_type, name, avail_v, sh
+                    )
+                    record_item_install_pertype(
+                        item_type[:-1], name, avail_v, sh
+                    )
+                    Console.info(
+                        f"  {item_type[:-1]}  {name}  {inst_v} -> {avail_v}  "
+                        "(tree matched source; manifest updated)"
+                    )
+                    upgraded = True
+                    continue
+                do_prompt = plan == "prompt"
+            elif dst_path.exists() and not yes:
                 current_hash = (
                     hash_skill_directory(dst_path) if dst_path.is_dir() else ""
                 )
                 recorded_hash = info.get("contentHash", "")
-                if current_hash and recorded_hash and current_hash != recorded_hash:
-                    try:
-                        resp = (
-                            input(
-                                f"  {name} has local modifications. Overwrite? [y/N]: "
-                            )
-                            .strip()
-                            .lower()
+                if (
+                    current_hash
+                    and recorded_hash
+                    and current_hash != recorded_hash
+                ):
+                    do_prompt = True
+
+            if do_prompt:
+                try:
+                    resp = (
+                        input(
+                            f"  {name} differs from install baseline and source; "
+                            f"overwrite (lose local edits)? [y/N]: "
                         )
-                    except EOFError:
-                        resp = "n"
-                    if resp != "y":
-                        Console.info(f"  Skipped: {name}")
-                        continue
+                        .strip()
+                        .lower()
+                    )
+                except EOFError:
+                    resp = "n"
+                if resp != "y":
+                    Console.info(f"  Skipped: {name}")
+                    continue
 
             if dst_path.exists():
                 if dst_path.is_dir():
@@ -188,6 +230,10 @@ def _upgrade_scope(
 
             content_hash = hash_skill_directory(dst_path) if dst_path.is_dir() else ""
             record_install(manifest, scope, item_type, name, avail_v, content_hash)
+
+            # Dual-write to per-type installed file (best-effort during transition)
+            record_item_install_pertype(item_type[:-1], name, avail_v, content_hash)
+
             Console.success(f"  {item_type[:-1]}  {name}  {inst_v} -> {avail_v}")
             upgraded = True
 

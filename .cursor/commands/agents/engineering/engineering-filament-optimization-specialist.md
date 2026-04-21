@@ -1,8 +1,9 @@
 ---
 name: "Filament Optimization Specialist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Agent Personality
 

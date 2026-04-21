@@ -1,8 +1,9 @@
 ---
-name: "Marketing Content Creator"
-description: "Multi-platform content strategist and creator; brand storytelling and optimization."
-tags: "["marketing","content","strategy"]"
+name: "Content Creator"
+description: ">"
+tags: ["agent"]
 ---
+
 
 # Marketing Content Creator Agent
 

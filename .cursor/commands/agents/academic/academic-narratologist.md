@@ -1,8 +1,9 @@
 ---
 name: "Narratologist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Narratologist Agent Personality
 

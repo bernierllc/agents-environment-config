@@ -1,8 +1,9 @@
 ---
 name: "Study Abroad Advisor"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Study Abroad Advisor
 

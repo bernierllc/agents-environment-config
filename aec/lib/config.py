@@ -50,7 +50,11 @@ AEC_SETUP_LOG = AEC_HOME / "setup-repo-locations.txt"
 AEC_README = AEC_HOME / "README.md"
 AEC_PREFERENCES = AEC_HOME / "preferences.json"
 INSTALLED_MANIFEST_V2 = AEC_HOME / "installed-manifest.json"
+INSTALLED_AGENTS = AEC_HOME / "installed-agents.json"
+INSTALLED_RULES = AEC_HOME / "installed-rules.json"
+INSTALLED_SKILLS = AEC_HOME / "installed-skills.json"
 AEC_PORTS_REGISTRY = AEC_HOME / "ports-registry.json"
+TRACKED_REPOS_PATH = AEC_HOME / "tracked-repos.json"
 
 # Phase 2: Test runner paths
 AEC_TESTS_DIR = AEC_HOME / "tests"

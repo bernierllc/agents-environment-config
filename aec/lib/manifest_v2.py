@@ -1,9 +1,11 @@
-"""V2 manifest: tracks global and per-repo installs for skills, rules, agents."""
+"""V2 manifest: global and per-repo installs for skills, rules, and agents."""
 
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+from .skills_manifest import build_skill_manifest_item
 
 MANIFEST_VERSION = 2
 ITEM_TYPES = ("skills", "rules", "agents")
@@ -71,6 +73,15 @@ def record_install(
 ) -> None:
     """Record an install of a skill, rule, or agent."""
     scope_dict = _get_scope_dict(manifest, scope)
+    prev = scope_dict[item_type].get(name)
+    if item_type == "skills":
+        scope_dict[item_type][name] = build_skill_manifest_item(
+            version=version,
+            content_hash=content_hash or "",
+            installed_at=_now_iso(),
+            previous=prev if isinstance(prev, dict) else None,
+        )
+        return
     scope_dict[item_type][name] = {
         "version": version,
         "contentHash": content_hash or "",

@@ -1,8 +1,9 @@
 ---
 name: "Historian"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Historian Agent Personality
 

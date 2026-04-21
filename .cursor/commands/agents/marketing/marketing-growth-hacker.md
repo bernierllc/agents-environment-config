@@ -1,8 +1,9 @@
 ---
-name: "Marketing Growth Hacker"
-description: "Expert growth strategist specializing in rapid user acquisition through data-driven experimentation. Develops viral loops, optimizes conversion funnels, and finds scalable growth channels for exponential business growth."
-tags: "['marketing', 'growth', 'hacker']"
+name: "Growth Hacker"
+description: ">"
+tags: ["agent"]
 ---
+
 
 # Marketing Growth Hacker Agent
 

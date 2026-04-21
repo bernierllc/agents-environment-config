@@ -1,8 +1,9 @@
 ---
 name: "Podcast Strategist"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Marketing Podcast Strategist
 

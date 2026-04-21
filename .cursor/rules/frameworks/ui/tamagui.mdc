@@ -110,6 +110,40 @@ DEBUG=tamagui pnpm build
 DEBUG=tamagui pnpm dev
 ```
 
+## Testability by Design (MANDATORY)
+
+Add `testID` to all interactive elements, dynamic state containers, and structural landmarks when building components. React Native uses `testID` (not `data-testid`).
+
+**Required elements:**
+- Interactive: `Button`, `Pressable`, `TouchableOpacity`, `TextInput`, `Switch`, `Picker`
+- Dynamic state: error messages, success banners, empty states, loading indicators, count badges
+- Structural landmarks: screen root, modal container, list container, navigation bar
+
+```tsx
+// ✅ REQUIRED when building components
+<Button testID="submit-button" onPress={handleSubmit}>
+  Submit
+</Button>
+
+<TextInput
+  testID="email-input"
+  value={email}
+  onChangeText={setEmail}
+/>
+
+{hasError && (
+  <Text testID="error-message" col="$red10">
+    {errorMessage}
+  </Text>
+)}
+
+<YStack testID="main-screen" flex={1}>
+  {/* screen content */}
+</YStack>
+```
+
+Static/decorative elements (labels, icons, descriptive text) do not need `testID`. Missing `testID` on required elements is a developer deficiency that must be fixed at the source — do not work around it in tests.
+
 ## Component Development Standards
 
 ### Component Structure

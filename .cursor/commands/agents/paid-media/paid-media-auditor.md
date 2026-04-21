@@ -1,8 +1,9 @@
 ---
 name: "Paid Media Auditor"
 description: ">"
-tags: "["agent"]"
+tags: ["agent"]
 ---
+
 
 # Paid Media Auditor Agent
 
