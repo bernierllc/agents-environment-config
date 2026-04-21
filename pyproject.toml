@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aec"
-version = "2.31.0"
+version = "2.32.0"
 description = "Agents Environment Configuration - Cross-platform AI agent setup CLI"
 readme = "README.md"
 license = {text = "MIT"}
