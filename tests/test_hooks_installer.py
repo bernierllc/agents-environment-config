@@ -80,6 +80,54 @@ class TestRemoveItemHooks:
         assert not (repo_root / ".aec/installed-hooks/skill.demo.json").exists()
 
 
+class TestResolveScriptCommands:
+    def test_script_exists_resolves_to_absolute_path(self, tmp_path):
+        from aec.lib.hooks.installer import install_item_hooks
+        item_dir = tmp_path / "item"
+        (item_dir / "scripts").mkdir(parents=True)
+        script = item_dir / "scripts" / "check.sh"
+        script.write_text("#!/bin/sh\necho ok\n")
+        script.chmod(0o755)
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "on_file_edit",
+                "command": "aec run-script skill:demo check.sh --flag",
+                "description": "d",
+            }],
+        }))
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["claude"],
+        )
+        settings = json.loads((repo_root / ".claude/settings.json").read_text())
+        cmd = settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
+        assert str(script) in cmd
+        assert cmd.endswith("--flag")
+        assert "aec run-script" not in cmd
+
+    def test_missing_script_raises(self, tmp_path):
+        import pytest
+        from aec.lib.hooks.installer import install_item_hooks
+        item_dir = tmp_path / "item"
+        item_dir.mkdir()
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "on_file_edit",
+                "command": "aec run-script skill:demo missing.sh",
+                "description": "d",
+            }],
+        }))
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        with pytest.raises(FileNotFoundError):
+            install_item_hooks(
+                item_dir=item_dir, item_type="skill", item_key="demo",
+                item_version="1.0.0", repo_root=repo_root, agents=["claude"],
+            )
+
+
 class TestInstallGitTarget:
     def test_install_pre_commit_writes_delimited_block(self, tmp_path):
         from aec.lib.hooks.installer import install_item_hooks

@@ -6,8 +6,9 @@ I/O so they can be tested in isolation — this file grows across Tasks 9a-9g.
 """
 
 import json
+import shlex
 from pathlib import Path
-from typing import List, Sequence
+from typing import Dict, List, Sequence
 
 from ..atomic_write import atomic_write_json
 from . import git_blocks, state as hook_state
@@ -15,6 +16,36 @@ from .fingerprint import fingerprint_hook
 from .schema import load_hooks_file
 from .translator import translate_to_agent
 from .validator import validate_hooks_file
+
+
+_RUN_SCRIPT_PREFIX = "aec run-script"
+
+
+def _resolve_script_commands(hf, item_dir: Path) -> Dict[str, str]:
+    """Rewrite `aec run-script <item> <script> [args...]` to an absolute path.
+
+    Looks for `<item_dir>/scripts/<script>`. Raises FileNotFoundError if the
+    referenced script does not exist.
+    """
+    resolved: Dict[str, str] = {}
+    for h in hf.hooks:
+        cmd = h.command
+        if cmd.startswith(_RUN_SCRIPT_PREFIX):
+            parts = shlex.split(cmd)
+            if len(parts) >= 4 and parts[:2] == ["aec", "run-script"]:
+                script_name = parts[3]
+                extra = parts[4:]
+                script_path = item_dir / "scripts" / script_name
+                if not script_path.exists():
+                    raise FileNotFoundError(
+                        f"hook {h.id!r}: script not found: {script_path}"
+                    )
+                pieces = [str(script_path), *extra]
+                cmd = shlex.join(pieces) if hasattr(shlex, "join") else " ".join(
+                    shlex.quote(p) for p in pieces
+                )
+        resolved[h.id] = cmd
+    return resolved
 
 
 def _merge_claude_entries(config: dict, entries: List[dict]) -> dict:
@@ -101,7 +132,7 @@ def install_item_hooks(
         )
         raise ValueError(f"hooks.json validation failed: {messages}")
 
-    resolved = {h.id: h.command for h in hf.hooks}
+    resolved = _resolve_script_commands(hf, item_dir)
 
     st = hook_state.load_state(repo_root, item_type=item_type, item_key=item_key)
     st.item_version = item_version
