@@ -4,9 +4,11 @@
 
 **Goal:** Transform AEC from a CLI-driven configuration tool into a package-aware, agent-native platform where the agent does the reasoning and the CLI does the coordination — with seed data management as the first proof-of-concept package.
 
-**Architecture:** AEC gains a package system (bundles of rules + skills + integration snippets), an agent-friendly CLI output mode (JSON, non-interactive), and a redesigned onboarding flow where agents drive setup while humans answer policy questions. The CLI becomes the package manager; the agent becomes the intelligence layer.
+**Architecture:** AEC gains a package system (bundles of rules + skills + handlebars templates for cross-item coordination), a tracked file writer with hash-based modification detection, an agent-friendly CLI output mode (JSON, non-interactive), and a redesigned onboarding flow where agents drive setup while humans answer policy questions. The CLI becomes the package manager; the agent becomes the intelligence layer.
 
 **Tech Stack:** Python 3.9+, Typer CLI, JSON manifests, YAML package descriptors, existing AEC infrastructure
+
+**Branch strategy:** All work is done in a git worktree on branch `feature/aec-packages`, created 2026-04-12. Worktree location: `.claude/worktrees/aec-packages/`. Plan and spec files live in the worktree — main branch is clean. The worktree isolates package system work from the stable CLI while allowing parallel development on main.
 
 ---
 
@@ -29,10 +31,10 @@ without clobbering anything, with rollback available.
 ## Phased Approach
 
 ### Phase 0: Seed Data Rule + Skill (Foundation Content)
-*Ship the seed data rule and skill immediately — no CLI changes needed. Cross-rule nudges deferred to Phase 1 when the snippet injection engine exists (avoids doing manual edits that Phase 1 replaces).*
+*Ship the seed data rule and skill immediately — no CLI changes needed. Cross-rule enhancements deferred to Phase 1 when the template system exists.*
 
-### Phase 1: Package System (Bundle, Install, Integrate)
-*AEC learns what a "package" is and can install/uninstall them with integration point management.*
+### Phase 1: Package System (Bundle, Install, Template)
+*AEC learns what a "package" is — template-based coordination over existing install commands, with tracked file writes and hash-based modification detection.*
 
 ### Phase 2: Agent-Friendly CLI (JSON Output, Non-Interactive Mode)
 *Every AEC command gains `--format json` output and `--non-interactive` mode so agents can drive the CLI programmatically.*
@@ -45,6 +47,9 @@ without clobbering anything, with rollback available.
 
 ### Phase 5: Established Environment Integration (Retrofit Without Clobbering)
 *For users who already have AEC set up with existing skills/rules/agents, integrate packages gracefully with rollback support.*
+
+### Phase 6: Rules as Packages (Convention Packages)
+*Repackage existing AEC rules from "Matt's opinionated rules" into installable convention packages that users choose during onboarding. Base package is universal; everything else is opt-in.*
 
 ---
 
@@ -330,29 +335,89 @@ git commit -m "feat(docs): add seed data rule and awareness to AGENTINFO templat
 
 ## Phase 1: Package System
 
-**Goal:** AEC learns what a "package" is — a higher-order bundle that **composes existing install commands** (`aec install rule`, `aec install skill`, `aec install agent`) and adds a coordination layer on top: integration snippets that keep installed items consistent with each other.
+**Goal:** AEC learns what a "package" is — a higher-order bundle that **composes existing install commands** (`aec install rule`, `aec install skill`, `aec install agent`) and adds a coordination layer on top: template-based file rendering that keeps installed items consistent with each other.
 
-**Key principle:** `aec install package seed-data` internally runs `aec install rule seed-data-management` + `aec install skill seed-data` via the existing infrastructure. The manifest tracks individual items the same way it does today. The package adds: (1) the knowledge that these items belong together, and (2) integration snippets that adjust other installed items for consistency.
+**Key principle:** `aec install package seed-data` internally runs `aec install rule seed-data-management` + `aec install skill seed-data` via the existing infrastructure. The manifest tracks individual items the same way it does today. The package adds: (1) the knowledge that these items belong together, (2) template files that modify other installed items for consistency, and (3) hash tracking so user modifications are never silently overwritten.
+
+### Template System Architecture
+
+Instead of injecting snippet blocks into files after installation, packages define **template versions** of files they need to modify. Templates use handlebars syntax for tag resolution and conditional logic.
+
+**How it works:**
+1. AEC maintains source files (rules, skills, agents) — unchanged from today
+2. Packages provide **template overrides** — alternative versions of specific files with `{{package:name:tag}}` template tags
+3. On install, AEC checks if any installed package has a template for the file being installed
+4. If yes: resolve the template with all installed packages' vars, write the rendered result
+5. If no: straight copy (zero overhead, same as today)
+6. Hash every written file. Before future writes, compare hash to detect user modifications.
+
+**Why templates, not snippet injection:**
+- No marker comments cluttering output files
+- Files regenerated from a single source of truth
+- Package interactions handled at template resolution time via handlebars conditionals
+- Aligns with how `aec generate rules` already works (generate from source → output)
 
 ### Package Structure
 
 ```
 packages/
   seed-data/
-    package.yaml          # Manifest: what to install, what to integrate
+    package.yaml          # Manifest: what to install, template vars, ordering
     rules/
       seed-data.md        # Source for: aec install rule seed-data-management
     skills/
       seed-data/
         SKILL.md           # Source for: aec install skill seed-data
-    integrations/
-      plans-checklists.snippet.md      # Injected into plans-checklists.md
-      deployment-environments.snippet.md
-      quality-gates.snippet.md
-      supabase.snippet.md
-      alembic.snippet.md
-      prisma.snippet.md
-      development-workflow.snippet.md
+    templates/             # Template overrides for OTHER items (mirrors file paths)
+      rules/
+        general/
+          plans-checklists.md        # Template version of plans-checklists.md
+        topics/
+          deployment/
+            environments.md          # Template version of environments.md
+          quality/
+            gates.md                 # Template version of gates.md
+        frameworks/
+          database/
+            supabase.md              # Template version (optional, only if supabase installed)
+            alembic.md
+            prisma.md
+        general/
+          development-workflow.md
+```
+
+Each template file has frontmatter tracking its source:
+
+```markdown
+---
+based_on:
+  item: rules/general/plans-checklists.md
+  version: 1.2.0
+package: seed-data
+package_version: 1.0.0
+---
+
+# Plans and Checklists Rules
+
+## Planning Workflow
+... (original content) ...
+
+{{#if package:seed-data}}
+### Data Requirements Check
+If a plan introduces new database tables, status fields, enums, roles, permissions, or lookup data:
+- Classify each data item as Reference Data, Seed Data, or Fixture Data
+- See `.agent-rules/frameworks/database/seed-data.md` for classification criteria
+- Invoke the `seed-data` skill for guided classification and file generation
+- Include explicit tasks in the plan for data migrations, seed scripts, or test factories
+{{/if}}
+
+{{#if package:observability}}
+### Observability Check
+... (content from observability package) ...
+{{#if package:seed-data}}
+- [ ] Data migration monitoring configured
+{{/if}}
+{{/if}}
 ```
 
 ### package.yaml Schema
@@ -366,7 +431,7 @@ description: >
   with environment-targeting rules and agent workflow integration.
 author: AEC
 
-# What this package installs
+# What this package installs (uses existing aec install infrastructure)
 contents:
   rules:
     - source: rules/seed-data.md
@@ -374,41 +439,40 @@ contents:
   skills:
     - source: skills/seed-data/
       target: seed-data/
+      agents: [claude]  # Only installed for Claude (skill format is agent-specific)
 
-# Optional integrations with other installed items
-# Only applied if the target rule/skill is already installed
-integrations:
-  - target: rules/general/plans-checklists.md
-    snippet: integrations/plans-checklists.snippet.md
+# Template overrides for other installed items
+# Only processed if the target item is installed
+templates:
+  - source: templates/rules/general/plans-checklists.md
+    target: rules/general/plans-checklists.md
     description: "Adds data classification checkpoint to plan writing"
-    position: append  # append | prepend | after:<heading>
-  - target: rules/topics/deployment/environments.md
-    snippet: integrations/deployment-environments.snippet.md
+  - source: templates/rules/topics/deployment/environments.md
+    target: rules/topics/deployment/environments.md
     description: "Adds data deployment rules per environment"
-    position: append
-  - target: rules/topics/quality/gates.md
-    snippet: integrations/quality-gates.snippet.md
+  - source: templates/rules/topics/quality/gates.md
+    target: rules/topics/quality/gates.md
     description: "Adds seed data verification to pre-commit gates"
-    position: "after:### Testing Requirements"
-  - target: rules/frameworks/database/supabase.md
-    snippet: integrations/supabase.snippet.md
-    description: "Adds Supabase-specific seed data conventions"
-    position: append
-    optional: true  # Only if supabase.md is installed
-  - target: rules/frameworks/database/alembic.md
-    snippet: integrations/alembic.snippet.md
-    description: "Adds Alembic-specific seed data conventions"
-    position: append
-    optional: true
-  - target: rules/frameworks/database/prisma.md
-    snippet: integrations/prisma.snippet.md
-    description: "Adds Prisma-specific seed data conventions"
-    position: append
-    optional: true
-  - target: rules/general/development-workflow.md
-    snippet: integrations/development-workflow.snippet.md
+  - source: templates/rules/general/development-workflow.md
+    target: rules/general/development-workflow.md
     description: "Adds seed data awareness to the dev loop"
-    position: append
+  - source: templates/rules/frameworks/database/supabase.md
+    target: rules/frameworks/database/supabase.md
+    description: "Adds Supabase-specific seed data conventions"
+    optional: true  # Only if supabase rule is installed
+  - source: templates/rules/frameworks/database/alembic.md
+    target: rules/frameworks/database/alembic.md
+    description: "Adds Alembic-specific seed data conventions"
+    optional: true
+  - source: templates/rules/frameworks/database/prisma.md
+    target: rules/frameworks/database/prisma.md
+    description: "Adds Prisma-specific seed data conventions"
+    optional: true
+
+# Template resolution ordering
+# If this package's templates reference another package's tags, list it here
+install_after: []   # e.g., ["observability"] — resolve observability tags first
+install_before: []  # e.g., ["testing-standards"] — this package's tags resolved before testing
 
 # Dependencies (packages that must be installed first)
 depends_on: []
@@ -420,100 +484,179 @@ tags: [database, testing, deployment, data-management]
 ### Task 1.1: Design package.yaml Schema and Loader
 
 **Files:**
-- Modify: `pyproject.toml` (add PyYAML dependency)
+- Modify: `pyproject.toml` (add PyYAML and pybars3 dependencies)
 - Create: `aec/lib/packages.py`
 - Create: `tests/test_packages.py`
 
-- [ ] **Step 0: Add PyYAML dependency**
+- [ ] **Step 0: Add dependencies**
 
-Add `PyYAML>=6.0` to `pyproject.toml` dependencies. The codebase currently uses JSON exclusively; YAML is needed for package manifests. Verify with `pip install -e .` and `python -c "import yaml"`.
+Add `PyYAML>=6.0` and `pybars3>=0.9` (Python handlebars implementation) to `pyproject.toml` dependencies. The codebase currently uses JSON exclusively; YAML is needed for package manifests, pybars3 for template rendering. Verify with `pip install -e .` and `python -c "import yaml; import pybars"`.
+
+Note: evaluate pybars3 vs chevron vs a minimal custom implementation. The template logic needed is limited (`{{#if}}`, `{{variable}}`) — a heavyweight dependency may not be worth it. Decision should be made during implementation.
 
 - [ ] **Step 1: Write failing test for package manifest parsing**
 
 ```python
 def test_parse_package_manifest_valid():
     """Parse a valid package.yaml and return structured metadata."""
-    yaml_content = "name: seed-data\nversion: 1.0.0\n..."
     result = parse_package_manifest(yaml_content)
     assert result["name"] == "seed-data"
     assert result["version"] == "1.0.0"
     assert "contents" in result
-    assert "integrations" in result
+    assert "templates" in result
+
+def test_parse_package_manifest_with_ordering():
+    """Package with install_after/install_before parsed correctly."""
+
+def test_parse_template_frontmatter():
+    """Template files have based_on with item path and version."""
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 - [ ] **Step 3: Implement `parse_package_manifest()`**
 - [ ] **Step 4: Run test to verify it passes**
-- [ ] **Step 5: Write failing tests for integration resolution**
+- [ ] **Step 5: Write failing tests for template resolution**
 
 ```python
-def test_resolve_integrations_skips_missing_targets():
-    """Integrations targeting uninstalled items are skipped."""
+def test_resolve_templates_skips_uninstalled_targets():
+    """Templates targeting uninstalled items are skipped."""
 
-def test_resolve_integrations_includes_installed_targets():
-    """Integrations targeting installed items are included."""
+def test_resolve_templates_includes_installed_targets():
+    """Templates targeting installed items are included in resolution."""
 
-def test_resolve_integrations_optional_skipped_silently():
-    """Optional integrations for missing targets produce no warning."""
+def test_resolve_templates_optional_skipped_silently():
+    """Optional templates for missing targets produce no warning."""
+
+def test_resolve_ordering_respects_install_after():
+    """Packages with install_after have their tags resolved in correct order."""
 ```
 
-- [ ] **Step 6: Implement integration resolution**
+- [ ] **Step 6: Implement template resolution logic**
 - [ ] **Step 7: Run all tests, commit**
 
 ```bash
-git commit -m "feat(packages): add package manifest parser and integration resolver"
+git commit -m "feat(packages): add package manifest parser and template resolver"
 ```
 
-### Task 1.2: Implement Snippet Injection Engine
+### Task 1.2: Implement Template Engine and Tracked File Writer
 
 **Files:**
-- Create: `aec/lib/snippet_injection.py`
-- Create: `tests/test_snippet_injection.py`
+- Create: `aec/lib/template_engine.py`
+- Create: `aec/lib/tracked_writer.py`
+- Create: `tests/test_template_engine.py`
+- Create: `tests/test_tracked_writer.py`
 
-The injection engine adds/removes snippet blocks to target files using marker comments for clean uninstall.
+Two components: (1) the template engine that processes handlebars tags based on installed packages, and (2) the tracked writer that ALL AEC file writes must go through — hashes before writing, records after, and checks for user modifications before overwriting.
 
-- [ ] **Step 1: Write failing tests**
+**Template Engine:**
+
+- [ ] **Step 1: Write failing tests for template rendering**
 
 ```python
-def test_inject_snippet_append():
-    """Snippet appended to end of file with markers."""
+def test_render_with_package_installed():
+    """{{#if package:seed-data}} block is included when seed-data is installed."""
 
-def test_inject_snippet_after_heading():
-    """Snippet inserted after specified heading."""
+def test_render_without_package_installed():
+    """{{#if package:seed-data}} block is removed when seed-data is not installed."""
 
-def test_remove_snippet():
-    """Snippet removed cleanly, markers removed."""
+def test_render_nested_conditionals():
+    """{{#if package:seed-data}}...{{#if package:observability}}...{{/if}}{{/if}} works."""
 
-def test_inject_idempotent():
-    """Injecting same snippet twice does not duplicate."""
+def test_render_variable_substitution():
+    """{{package:seed-data:description}} resolves to package's description value."""
 
-def test_marker_format():
-    """Markers identify the source package for clean removal."""
-    # <!-- BEGIN aec-package:seed-data -->
-    # ...snippet content...
-    # <!-- END aec-package:seed-data -->
+def test_render_preserves_non_template_content():
+    """Content without template tags passes through unchanged."""
 
-def test_inject_into_empty_file():
-    """Injecting into an empty file works without error."""
+def test_render_strips_template_frontmatter():
+    """based_on frontmatter is stripped from rendered output."""
 
-def test_inject_after_missing_heading():
-    """If after:<heading> doesn't exist, falls back to append with warning."""
+def test_render_unicode_content():
+    """Templates with unicode content render correctly."""
 
-def test_multiple_packages_same_target():
-    """Two packages injecting into same file produce separate marked blocks."""
-
-def test_malformed_markers_detected():
-    """BEGIN without matching END is detected and reported as error."""
-
-def test_inject_unicode_content():
-    """Snippets with unicode characters are injected correctly."""
+def test_render_multiple_packages():
+    """Multiple packages' tags in one template all resolve correctly."""
 ```
 
-- [ ] **Step 2: Implement injection engine**
+- [ ] **Step 2: Implement template engine**
+
+```python
+def render_template(
+    template_content: str,
+    installed_packages: dict[str, dict],  # {name: {version, vars, ...}}
+) -> str:
+    """Render a template file with handlebars tags resolved.
+    
+    1. Parse template frontmatter (based_on metadata)
+    2. Build context: {package: {name: True/False for each known package}}
+    3. Process handlebars tags
+    4. Return rendered content (frontmatter stripped)
+    """
+```
+
 - [ ] **Step 3: Run tests, commit**
 
+**Tracked Writer:**
+
+- [ ] **Step 4: Write failing tests for tracked writer**
+
+```python
+def test_write_and_track_stores_hash():
+    """After writing, hash is recorded in manifest."""
+
+def test_write_detects_user_modification():
+    """If file hash doesn't match stored hash, return modification warning."""
+
+def test_write_own_writes_dont_trigger_warning():
+    """AEC's own writes update the stored hash, so subsequent checks pass."""
+
+def test_hash_file_vs_directory():
+    """File items hashed as file, directory items hashed as directory."""
+
+def test_hash_type_from_frontmatter():
+    """Item's hash_type determined from frontmatter or inferred from filesystem."""
+
+def test_write_to_nonexistent_destination():
+    """First write to a new destination works without hash check."""
+```
+
+- [ ] **Step 5: Implement tracked writer**
+
+```python
+def write_tracked(
+    content: str | Path,
+    destination: Path,
+    manifest: dict,
+    scope: str,
+    item_type: str,
+    name: str,
+) -> WriteResult:
+    """Single function for ALL AEC file writes.
+    
+    1. If destination exists, hash current file and compare to stored hash
+    2. If mismatch → return WriteResult with modification_detected=True
+       (caller decides whether to warn user and proceed)
+    3. Hash the new content BEFORE writing
+    4. Write to destination
+    5. Record new hash in manifest
+    """
+
+def check_modification(
+    destination: Path,
+    manifest: dict,
+    scope: str,
+    item_type: str,
+    name: str,
+) -> ModificationCheck:
+    """Check if a file has been modified since AEC last wrote it.
+    Returns: unmodified | modified | new_file (no previous hash)
+    """
+```
+
+- [ ] **Step 6: Run tests, commit**
+
 ```bash
-git commit -m "feat(packages): add snippet injection engine with markers"
+git commit -m "feat(packages): add template engine and tracked file writer"
 ```
 
 ### Task 1.3: Implement `aec install package <name>`
@@ -523,7 +666,7 @@ git commit -m "feat(packages): add snippet injection engine with markers"
 - Modify: `aec/cli.py`
 - Create: `tests/test_install_package.py`
 
-Package install is a **composition layer** — it calls existing `run_install()` for each item in the package, then applies integration snippets. Individual items are tracked in the manifest the same way they would be if installed directly. The package itself is recorded separately so AEC knows these items were installed as a group.
+Package install is a **composition layer** — it calls existing `run_install()` for each item in the package, then resolves templates for any files that have template overrides. Individual items are tracked in the manifest the same way they would be if installed directly. The package itself is recorded separately so AEC knows these items were installed as a group.
 
 - [ ] **Step 1: Write failing tests for package install flow**
 
@@ -537,23 +680,26 @@ def test_install_package_items_tracked_individually():
 def test_install_package_recorded_as_group():
     """Package itself recorded in manifest 'packages' section with list of member items."""
 
-def test_install_package_applies_integrations():
-    """Available integrations are applied with user confirmation."""
+def test_install_package_renders_templates():
+    """Template files are rendered with all installed packages' context and written via tracked writer."""
 
-def test_install_package_skips_missing_integration_targets():
-    """Integrations for uninstalled items are skipped."""
+def test_install_package_skips_templates_for_uninstalled_targets():
+    """Templates targeting uninstalled items are skipped."""
 
 def test_install_package_shows_summary():
-    """Install prints summary of what was installed and integrated."""
+    """Install prints summary of what was installed and which templates were rendered."""
 
 def test_install_package_agent_specific_content():
     """Agent-specific content only installed for detected agents (e.g., skip .cursor/ if Cursor not installed)."""
 
 def test_install_package_json_output():
-    """--format json returns structured result with installed items and applied integrations."""
+    """--format json returns structured result with installed items and rendered templates."""
 
 def test_install_package_skips_already_installed_items():
     """If a rule/skill from the package is already installed, skip it and note it."""
+
+def test_install_package_checks_modification_before_template_render():
+    """If a target file was user-modified, warn before replacing with rendered template."""
 ```
 
 - [ ] **Step 2: Extend `run_install()` to handle `item_type="package"`**
@@ -561,17 +707,23 @@ def test_install_package_skips_already_installed_items():
 The implementation should:
 1. Parse `package.yaml`
 2. For each item in `contents`, call `run_install(item_type, name, ...)` — reusing existing infrastructure
-3. Record the package in a `packages` section of the manifest: `{name, version, items: [...], integrations: [...]}`
-4. Resolve and apply integration snippets
+3. Record the package in a `packages` section of the manifest: `{name, version, items: [...], templates: [...]}`
+4. For each template in `templates`:
+   a. Check if target item is installed — skip if not (skip silently if `optional: true`)
+   b. Check modification status of target file via `check_modification()`
+   c. If modified → warn user with diff + options (yes/no/ignore from now on)
+   d. Gather context from ALL installed packages
+   e. Render template via `render_template()`
+   f. Write via `write_tracked()` — single atomic write with hash recording
 
-- [ ] **Step 3: Add integration confirmation UX**
+- [ ] **Step 3: Add template confirmation UX**
 
 ```
 Installing package: seed-data v1.0.0...
   ✓ Installed rule: seed-data-management (via aec install rule)
   ✓ Installed skill: seed-data (via aec install skill)
 
-This package has integrations with 7 of your installed items:
+This package enhances 7 of your installed items with template overrides:
 
   Required:
   1) plans-checklists.md — Adds data classification checkpoint to plan writing
@@ -581,13 +733,13 @@ This package has integrations with 7 of your installed items:
 
   Optional (framework-specific):
   5) supabase.md — Adds Supabase-specific seed data conventions
-  6) alembic.md — Adds Alembic-specific seed data conventions
-  7) prisma.md — Adds Prisma-specific seed data conventions
+  6) alembic.md — Adds Alembic-specific seed data conventions  [not installed, skipping]
+  7) prisma.md — Adds Prisma-specific seed data conventions    [not installed, skipping]
 
-How would you like to handle integrations?
-  1) Install all that apply to my project
-  2) Review one by one
-  3) Skip integrations — just install the core items
+Apply template enhancements?
+  1) Apply all that match my installed items
+  2) Review one by one (show diffs)
+  3) Skip templates — just install the core items
 ```
 
 - [ ] **Step 4: Run tests, commit**
@@ -602,13 +754,13 @@ git commit -m "feat(packages): implement package install as composition over exi
 - Modify: `aec/commands/install_cmd.py`
 - Create: `tests/test_uninstall_package.py`
 
-Package uninstall reverses the composition: removes integration snippets, then calls existing `run_uninstall()` for each constituent item.
+Package uninstall reverses the composition: re-renders templates WITHOUT this package's context (removing its content from affected files), then optionally calls existing `run_uninstall()` for each constituent item.
 
 - [ ] **Step 1: Write failing tests**
 
 ```python
-def test_uninstall_package_removes_snippets_first():
-    """Integration snippets removed before individual items."""
+def test_uninstall_package_rerenders_templates():
+    """Affected files re-rendered without this package's context — its content disappears."""
 
 def test_uninstall_package_calls_existing_uninstall():
     """Each constituent item uninstalled via existing run_uninstall()."""
@@ -616,11 +768,14 @@ def test_uninstall_package_calls_existing_uninstall():
 def test_uninstall_package_removes_package_record():
     """Package record removed from manifest 'packages' section."""
 
-def test_uninstall_package_leaves_user_content_intact():
-    """Content outside markers is never touched."""
+def test_uninstall_package_preserves_other_package_content():
+    """If another package also has template content in the same file, it's preserved."""
 
 def test_uninstall_package_keeps_items_if_requested():
-    """User can choose to remove only integrations, keeping individual items."""
+    """User can choose to remove only template enhancements, keeping individual items."""
+
+def test_uninstall_checks_modification_before_rerender():
+    """If a template-rendered file was user-modified, warn before re-rendering."""
 ```
 
 - [ ] **Step 2: Implement package uninstall with option to keep individual items**
@@ -628,16 +783,16 @@ def test_uninstall_package_keeps_items_if_requested():
 ```
 Uninstalling package: seed-data...
 
-This will remove:
-  • Integration snippets from 7 files
-  • Rule: seed-data-management
-  • Skill: seed-data
+This will:
+  • Re-render 5 template-enhanced files without seed-data content
+  • Remove rule: seed-data-management
+  • Remove skill: seed-data
 
 Keep the individual rule and skill installed? [y/N]:
 ```
 
-If yes: remove snippets and package record only, items stay installed individually.
-If no: remove everything.
+If yes: re-render templates and remove package record only, items stay installed individually.
+If no: re-render templates, then uninstall all constituent items.
 
 - [ ] **Step 3: Run tests, commit**
 
@@ -852,8 +1007,8 @@ def test_update_cascades_to_package_siblings():
 def test_update_detects_new_package_items():
     """If package v1.1.0 added a new agent, offer to install it."""
 
-def test_update_refreshes_integration_snippets():
-    """If integration snippets changed in new package version, re-apply them."""
+def test_update_rerenders_templates():
+    """If template files changed in new package version, re-render affected files."""
 
 def test_update_partials_version_tracking():
     """package-partials.json updated with new package version and item versions."""
@@ -875,7 +1030,7 @@ Updating rule: seed-data-management v1.0.0 → v1.1.0...
      Update remaining items? [Y/n]:
      
      ✓ Updated skill: seed-data
-     ✓ Updated 3 integration snippets
+     ✓ Re-rendered 3 template-enhanced files
 ```
 
 - [ ] **Step 3: Run tests, commit**
@@ -1584,6 +1739,96 @@ For users already running AEC (like the author):
 6. **Phase 5** specifically handles their case — ownership detection, backup, rollback, `aec register` for user-owned content
 
 No existing setup is broken. Everything is opt-in. Rollback is always available.
+
+---
+
+## Phase 6: Rules as Packages (Convention Packages)
+
+**Goal:** Repackage the existing 38 AEC rules from a monolithic "install everything" model into opt-in convention packages. Users choose which conventions match their workflow during onboarding. The current rules are opinionated (created by one person) — other users should get to pick which opinions they share.
+
+### Package Tiers
+
+**Base (installed automatically — truly universal, non-opinionated):**
+- Security basics (secrets management, no credentials in code)
+- Git fundamentals (conventional commits, branch naming)
+- Error handling essentials
+
+**Convention packages (offered during onboarding — user chooses):**
+
+| Package | Current Rules Included | Description |
+|---------|----------------------|-------------|
+| `quality-gates` | quality/gates.md, quality/error-handling.md, quality/logging.md | Strict pre-commit/pre-push quality checks |
+| `testing-standards` | testing/standards.md, testing/organization.md, testing/tools.md | TDD, fixture patterns, coverage requirements |
+| `typescript-conventions` | typescript/typing-standards.md | TypeScript typing and style conventions |
+| `python-conventions` | python/style.md | Python style conventions |
+| `database-conventions` | database/connection-management.md, database/supabase.md, database/alembic.md, database/prisma.md, database/sqlalchemy.md | DB patterns, connection management, ORM conventions |
+| `api-standards` | api/design-standards.md | API design conventions |
+| `deployment-standards` | deployment/environments.md | Environment management, CI/CD |
+| `accessibility` | accessibility/standards.md | Accessibility standards |
+| `observability` | observability/monitoring.md | Monitoring, logging |
+| `seed-data` | (new from Phase 0) | Reference data, seed data, fixture data conventions |
+
+**Cross-cutting packages with templates:**
+The `seed-data` package is the model — it has its own rule + skill, plus templates that enhance `quality-gates`, `deployment-standards`, `database-conventions`, and `testing-standards` if those are also installed. Other packages can follow the same pattern.
+
+### Task 6.1: Audit Current Rules for Package Boundaries
+
+**Files:**
+- Read: all 38 rules in `.agent-rules/`
+- Create: `docs/superpowers/specs/rules-as-packages-mapping.md`
+
+- [ ] **Step 1: Map every rule to a proposed package**
+- [ ] **Step 2: Identify cross-package dependencies (which rules reference each other)**
+- [ ] **Step 3: Identify which rules are truly universal vs opinionated**
+- [ ] **Step 4: Document the mapping and get user approval**
+- [ ] **Step 5: Commit**
+
+### Task 6.2: Create Base Package
+
+- [ ] **Step 1: Extract universal rules into `packages/base/`**
+- [ ] **Step 2: Write package.yaml with no dependencies**
+- [ ] **Step 3: Test install from scratch**
+- [ ] **Step 4: Commit**
+
+### Task 6.3: Create Convention Packages
+
+- [ ] **Step 1: For each convention package, create `packages/<name>/` with package.yaml, rules, and templates**
+- [ ] **Step 2: Write templates for cross-package interactions (e.g., seed-data enhancing quality-gates)**
+- [ ] **Step 3: Test install combinations**
+- [ ] **Step 4: Commit**
+
+### Task 6.4: Update Onboarding to Offer Convention Packages
+
+- [ ] **Step 1: Update the onboarding skill (Task 3.2) to present convention packages**
+- [ ] **Step 2: Update `aec setup` to install base package automatically, offer conventions**
+- [ ] **Step 3: Test onboarding flow end-to-end**
+- [ ] **Step 4: Commit**
+
+### Task 6.5: Migration for Existing Users
+
+- [ ] **Step 1: `aec doctor` detects existing monolithic rule installation**
+- [ ] **Step 2: Offer to convert to package-based installation**
+  - Maps installed rules to convention packages
+  - Shows which packages would cover their current setup
+  - Offers to convert (with rollback)
+- [ ] **Step 3: Test migration flow**
+- [ ] **Step 4: Commit**
+
+---
+
+## Integration Constraints (Must Address in Phase 1)
+
+The template system resolves most of the snippet injection constraints, but these still need attention:
+
+1. **`aec validate` + pre-commit parity check** — Compares `.cursor/rules/*.mdc` against `.agent-rules/*.md`. Template-rendered files will have additional content from packages. Fix: validation should compare the rendered output against the expected rendering (template + installed packages), not against the raw `.cursor/rules/` source. Alternatively, `.cursor/rules/` sources could also use the same templates, keeping parity.
+
+2. **`aec generate rules`** — Regenerates `.agent-rules/` from `.cursor/rules/`. After generation, the template engine must re-render any files that have template overrides from installed packages. The `package-partials.json` tracking knows which files were template-rendered, so the generation pipeline becomes: strip frontmatter → write base file → check for template overrides → re-render if needed → hash and track.
+
+3. **`aec uninstall` individual items that belong to a package** — Uninstalling `rule seed-data-management` when it's part of an installed package leaves stale package records. Fix: post-uninstall check against `package-partials.json`, warn user, offer to uninstall the full package or re-render templates without the missing item.
+
+4. **`agent_files.py` yaml import** — Already has `try: import yaml` with `HAS_YAML` fallback. Adding PyYAML as a required dependency means the guard is no longer needed. Clean up during Phase 1.
+
+5. **ALL existing file writes must migrate to `write_tracked()`** — Every place in AEC that writes a file (install, generate, setup, etc.) must go through the tracked writer so hash tracking is consistent. This is a cross-cutting change that touches multiple commands. Audit all `write_text()`, `shutil.copy2()`, `shutil.copytree()` calls.
 
 ---
 
