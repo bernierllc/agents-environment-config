@@ -237,6 +237,61 @@ if HAS_TYPER:
         from .commands.ports import run_ports_validate
         run_ports_validate()
 
+    # --- test (parity with argparse `aec test …`) ---
+    test_app = typer.Typer(help="Manage test suites, scheduling, and reports")
+    app.add_typer(test_app, name="test")
+
+    @test_app.command("run")
+    def test_run_cmd(
+        global_flag: bool = typer.Option(
+            False, "-g", "--global",
+            help="Run scheduled suites across all tracked projects",
+        ),
+    ):
+        """Run test suites for the current project (or all with -g)."""
+        from .commands.test_cmd import run_test_run
+        run_test_run(global_flag=global_flag)
+
+    @test_app.command("schedule")
+    def test_schedule_cmd():
+        """Set up or update the daily test schedule."""
+        from .commands.test_cmd import run_test_schedule
+        run_test_schedule()
+
+    @test_app.command("status")
+    def test_status_cmd(
+        global_flag: bool = typer.Option(False, "-g", "--global", help="Global schedule status"),
+    ):
+        """Show test configuration or global schedule status."""
+        from .commands.test_cmd import run_test_status
+        run_test_status(global_flag=global_flag)
+
+    @test_app.command("enable")
+    def test_enable_cmd():
+        """Re-enable scheduled runs with the OS scheduler."""
+        from .commands.test_cmd import run_test_enable
+        run_test_enable()
+
+    @test_app.command("disable")
+    def test_disable_cmd():
+        """Disable scheduled runs (keeps config)."""
+        from .commands.test_cmd import run_test_disable
+        run_test_disable()
+
+    @test_app.command("report")
+    def test_report_cmd(
+        global_flag: bool = typer.Option(False, "-g", "--global", help="Full cross-project summary"),
+    ):
+        """View latest test results."""
+        from .commands.test_cmd import run_test_report
+        run_test_report(global_flag=global_flag)
+
+    @test_app.command("detect")
+    def test_detect_cmd():
+        """Re-detect test frameworks and update .aec.json."""
+        from .commands.test_cmd import run_test_detect
+        run_test_detect()
+
     # --- existing top-level commands ---
     from .commands import discover
     app.command("discover-repos")(discover.discover_cmd)

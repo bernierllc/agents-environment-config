@@ -1,6 +1,13 @@
 #!/bin/bash
 # Pre-push git hook: ensure submodules are pushed, then sync agents/skills to cursor commands
 
+# When git invokes pre-push from inside a worktree, it exports GIT_DIR /
+# GIT_WORK_TREE pointing at the *parent* repo's worktree gitdir. Those vars
+# override path-based repo discovery (including `git -C <submodule>`), causing
+# downstream submodule diff checks and parent-repo git operations to target the
+# wrong repository. Clear them so ordinary cwd-/-C-based discovery works.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_PREFIX
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'

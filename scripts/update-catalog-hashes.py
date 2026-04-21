@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 # Allow imports from aec/ regardless of how the script is invoked
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -14,7 +15,7 @@ from aec.lib.catalog_hashes import generate_catalog_hashes, load_catalog_hashes
 from aec.lib.sources import get_source_dirs
 
 
-def incremental_update(catalog_path: Path, source_dirs: dict | None = None) -> bool:
+def incremental_update(catalog_path: Path, source_dirs: Optional[dict] = None) -> bool:
     """Incrementally update catalog-hashes.json, recomputing only changed items.
 
     Args:
