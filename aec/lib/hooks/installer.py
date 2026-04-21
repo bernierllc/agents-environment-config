@@ -5,9 +5,16 @@ Pure merge helpers live here alongside the `install_item_hooks` /
 I/O so they can be tested in isolation — this file grows across Tasks 9a-9g.
 """
 
-from typing import List
+import json
+from pathlib import Path
+from typing import List, Sequence
 
+from ..atomic_write import atomic_write_json
+from . import state as hook_state
 from .fingerprint import fingerprint_hook
+from .schema import load_hooks_file
+from .translator import translate_to_agent
+from .validator import validate_hooks_file
 
 
 def _merge_claude_entries(config: dict, entries: List[dict]) -> dict:
@@ -67,3 +74,73 @@ def _remove_from_gemini(config: dict, event_key: str, fingerprint: str) -> dict:
 
 def _remove_from_cursor(config: dict, event_key: str, fingerprint: str) -> dict:
     return _remove_from_claude(config, event_key, fingerprint)
+
+
+def install_item_hooks(
+    *,
+    item_type: str,
+    item_key: str,
+    item_version: str,
+    item_dir: Path,
+    repo_root: Path,
+    agents: Sequence[str],
+    allow_custom_check: bool = False,
+) -> None:
+    """End-to-end install: load → validate → translate → merge → record state.
+
+    Only `claude` is handled in this slice; other agents land in later tasks.
+    """
+    hooks_json = item_dir / "hooks.json"
+    if not hooks_json.exists():
+        return
+    hf = load_hooks_file(hooks_json)
+    errs, _warns = validate_hooks_file(hf, expected_version=item_version)
+    if errs:
+        messages = "; ".join(
+            f"{e.hook_id + ': ' if e.hook_id else ''}{e.message}" for e in errs
+        )
+        raise ValueError(f"hooks.json validation failed: {messages}")
+
+    resolved = {h.id: h.command for h in hf.hooks}
+
+    st = hook_state.load_state(repo_root, item_type=item_type, item_key=item_key)
+    st.item_version = item_version
+    st.hooks_file_hash = fingerprint_hook(json.loads(hooks_json.read_text()))
+    st.agents_targeted = list(agents)
+    st.hooks_installed = []
+    if allow_custom_check:
+        st.allow_custom_check = True
+
+    for agent in agents:
+        entries = translate_to_agent(hf, agent, resolved_commands=resolved)
+        if agent == "claude":
+            _install_claude(repo_root, entries, st, item_version)
+        else:
+            raise NotImplementedError(f"agent {agent!r} handled in later task")
+
+    hook_state.save_state(repo_root, st)
+
+
+def _install_claude(
+    repo_root: Path, entries: List[dict], st, item_version: str
+) -> None:
+    settings_path = repo_root / ".claude/settings.json"
+    existing = (
+        json.loads(settings_path.read_text()) if settings_path.exists() else {}
+    )
+    updated = _merge_claude_entries(existing, entries)
+    atomic_write_json(settings_path, updated)
+    for entry in entries:
+        fp = fingerprint_hook(entry["payload"])
+        arr = updated.get("hooks", {}).get(entry["event_key"], [])
+        idx = next(
+            (i for i, e in enumerate(arr) if fingerprint_hook(e) == fp),
+            -1,
+        )
+        st.hooks_installed.append({
+            "hook_id": entry["source_hook_id"],
+            "agent": "claude",
+            "target_json_pointer": f"/hooks/{entry['event_key']}/{idx}",
+            "content_fingerprint": fp,
+            "version": item_version,
+        })
