@@ -115,6 +115,10 @@ def install_item_hooks(
         entries = translate_to_agent(hf, agent, resolved_commands=resolved)
         if agent == "claude":
             _install_claude(repo_root, entries, st, item_version)
+        elif agent == "gemini":
+            _install_gemini(repo_root, entries, st, item_version)
+        elif agent == "cursor":
+            _install_cursor(repo_root, entries, st, item_version)
         else:
             raise NotImplementedError(f"agent {agent!r} handled in later task")
 
@@ -176,6 +180,36 @@ def _install_claude(
     )
     updated = _merge_claude_entries(existing, entries)
     atomic_write_json(settings_path, updated)
+    _record_entries(st, entries, updated, agent="claude", item_version=item_version)
+
+
+def _install_gemini(
+    repo_root: Path, entries: List[dict], st, item_version: str
+) -> None:
+    settings_path = repo_root / ".gemini/settings.json"
+    existing = (
+        json.loads(settings_path.read_text()) if settings_path.exists() else {}
+    )
+    updated = _merge_gemini_entries(existing, entries)
+    atomic_write_json(settings_path, updated)
+    _record_entries(st, entries, updated, agent="gemini", item_version=item_version)
+
+
+def _install_cursor(
+    repo_root: Path, entries: List[dict], st, item_version: str
+) -> None:
+    settings_path = repo_root / ".cursor/hooks.json"
+    existing = (
+        json.loads(settings_path.read_text()) if settings_path.exists() else {}
+    )
+    updated = _merge_cursor_entries(existing, entries)
+    atomic_write_json(settings_path, updated)
+    _record_entries(st, entries, updated, agent="cursor", item_version=item_version)
+
+
+def _record_entries(
+    st, entries: List[dict], updated: dict, *, agent: str, item_version: str
+) -> None:
     for entry in entries:
         fp = fingerprint_hook(entry["payload"])
         arr = updated.get("hooks", {}).get(entry["event_key"], [])
@@ -185,7 +219,7 @@ def _install_claude(
         )
         st.hooks_installed.append({
             "hook_id": entry["source_hook_id"],
-            "agent": "claude",
+            "agent": agent,
             "target_json_pointer": f"/hooks/{entry['event_key']}/{idx}",
             "content_fingerprint": fp,
             "version": item_version,

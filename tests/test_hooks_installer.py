@@ -78,3 +78,27 @@ class TestRemoveItemHooks:
         settings = json.loads((repo_root / ".claude/settings.json").read_text())
         assert settings.get("hooks", {}).get("PostToolUse", []) == []
         assert not (repo_root / ".aec/installed-hooks/skill.demo.json").exists()
+
+
+class TestInstallGeminiAndCursor:
+    def test_install_all_three_targets(self, tmp_path):
+        from aec.lib.hooks.installer import install_item_hooks
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        item_dir = tmp_path / "item"
+        _write_item(item_dir, hooks=[{
+            "id": "h1", "event": "on_file_edit",
+            "command": "echo hi", "description": "d",
+        }])
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root,
+            agents=["claude", "gemini", "cursor"],
+        )
+        assert (repo_root / ".claude/settings.json").exists()
+        assert (repo_root / ".gemini/settings.json").exists()
+        assert (repo_root / ".cursor/hooks.json").exists()
+        gemini = json.loads((repo_root / ".gemini/settings.json").read_text())
+        assert "hooks" in gemini
+        cursor = json.loads((repo_root / ".cursor/hooks.json").read_text())
+        assert cursor["hooks"]["afterFileEdit"][0]["command"] == "echo hi"
