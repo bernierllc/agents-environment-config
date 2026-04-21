@@ -13,7 +13,8 @@ from typing import Dict, List, Sequence
 from ..atomic_write import atomic_write_json
 from . import git_blocks, state as hook_state
 from .fingerprint import fingerprint_hook
-from .schema import load_hooks_file
+from .predicates import evaluate_when
+from .schema import HooksFile, load_hooks_file
 from .translator import translate_to_agent
 from .validator import validate_hooks_file
 
@@ -132,6 +133,12 @@ def install_item_hooks(
         )
         raise ValueError(f"hooks.json validation failed: {messages}")
 
+    if any(h.when and h.when.custom_check for h in hf.hooks) and not allow_custom_check:
+        raise PermissionError(
+            "hooks.json contains when.custom_check; re-run with "
+            "allow_custom_check=True to consent to running custom shell"
+        )
+
     resolved = _resolve_script_commands(hf, item_dir)
 
     st = hook_state.load_state(repo_root, item_type=item_type, item_key=item_key)
@@ -139,11 +146,31 @@ def install_item_hooks(
     st.hooks_file_hash = fingerprint_hook(json.loads(hooks_json.read_text()))
     st.agents_targeted = list(agents)
     st.hooks_installed = []
+    st.hooks_skipped = []
     if allow_custom_check:
         st.allow_custom_check = True
 
+    kept: List = []
+    for h in hf.hooks:
+        result = evaluate_when(h.when, repo_root)
+        if result.applied:
+            kept.append(h)
+        else:
+            st.hooks_skipped.append({"hook_id": h.id, "reason": result.reason})
+
+    filtered = HooksFile(
+        version=hf.version,
+        hooks=kept,
+        claude=hf.claude,
+        cursor=hf.cursor,
+        gemini=hf.gemini,
+        git=hf.git,
+        schema_url=hf.schema_url,
+        source_path=hf.source_path,
+    )
+
     for agent in agents:
-        entries = translate_to_agent(hf, agent, resolved_commands=resolved)
+        entries = translate_to_agent(filtered, agent, resolved_commands=resolved)
         if agent == "claude":
             _install_claude(repo_root, entries, st, item_version)
         elif agent == "gemini":

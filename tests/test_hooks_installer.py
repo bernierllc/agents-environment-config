@@ -80,6 +80,73 @@ class TestRemoveItemHooks:
         assert not (repo_root / ".aec/installed-hooks/skill.demo.json").exists()
 
 
+class TestWhenPartitioning:
+    def test_when_miss_records_skip_not_install(self, tmp_path):
+        from aec.lib.hooks.installer import install_item_hooks
+        item_dir = tmp_path / "item"
+        _write_item(item_dir, hooks=[{
+            "id": "lint", "event": "on_file_edit",
+            "command": "echo hi", "description": "d",
+            "when": {"repo_has_any": ["pyproject.toml"]},
+        }])
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["claude"],
+        )
+        settings_path = repo_root / ".claude/settings.json"
+        if settings_path.exists():
+            settings = json.loads(settings_path.read_text())
+            assert not settings.get("hooks", {}).get("PostToolUse")
+        state = json.loads(
+            (repo_root / ".aec/installed-hooks/skill.demo.json").read_text()
+        )
+        assert state["hooks_installed"] == []
+        assert len(state["hooks_skipped"]) == 1
+        assert state["hooks_skipped"][0]["hook_id"] == "lint"
+        assert "pyproject.toml" in state["hooks_skipped"][0]["reason"]
+
+    def test_custom_check_without_consent_raises(self, tmp_path):
+        import pytest
+        from aec.lib.hooks.installer import install_item_hooks
+        item_dir = tmp_path / "item"
+        _write_item(item_dir, hooks=[{
+            "id": "lint", "event": "on_file_edit",
+            "command": "echo hi", "description": "d",
+            "when": {"custom_check": "true"},
+        }])
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        with pytest.raises(PermissionError):
+            install_item_hooks(
+                item_dir=item_dir, item_type="skill", item_key="demo",
+                item_version="1.0.0", repo_root=repo_root, agents=["claude"],
+                allow_custom_check=False,
+            )
+
+    def test_custom_check_with_consent_succeeds(self, tmp_path):
+        from aec.lib.hooks.installer import install_item_hooks
+        item_dir = tmp_path / "item"
+        _write_item(item_dir, hooks=[{
+            "id": "lint", "event": "on_file_edit",
+            "command": "echo hi", "description": "d",
+            "when": {"custom_check": "true"},
+        }])
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["claude"],
+            allow_custom_check=True,
+        )
+        state = json.loads(
+            (repo_root / ".aec/installed-hooks/skill.demo.json").read_text()
+        )
+        assert state["allow_custom_check"] is True
+        assert len(state["hooks_installed"]) == 1
+
+
 class TestResolveScriptCommands:
     def test_script_exists_resolves_to_absolute_path(self, tmp_path):
         from aec.lib.hooks.installer import install_item_hooks
