@@ -1,6 +1,6 @@
 #!/bin/bash
 # Claude Code Status Line
-# Displays: Model Name | Progress Bar | Token % | Git Branch | Project Name
+# Displays: Model Name | Progress Bar | Token % | Rate Limits | Git Branch | Project Name
 
 # Exit on pipeline failures
 set -o pipefail
@@ -102,13 +102,66 @@ PROGRESS_SECTION="${TOKEN_COLOR}${PROGRESS_BAR}${RESET}"
 # 3. Token Percentage
 TOKEN_SECTION="${TOKEN_COLOR}${PERCENTAGE}%${RESET}"
 
-# 4. Git Branch
+# 4. Rate Limits (5-hour and 7-day, only shown when available)
+RATE_SECTION=""
+FIVE_HOUR_PCT=$(echo "$INPUT" | jq -r '.rate_limits.five_hour.used_percentage // empty' 2>/dev/null)
+SEVEN_DAY_PCT=$(echo "$INPUT" | jq -r '.rate_limits.seven_day.used_percentage // empty' 2>/dev/null)
+
+rate_color() {
+	local pct="${1:-0}"
+	local int_pct
+	int_pct=$(printf "%.0f" "$pct" 2>/dev/null || echo "0")
+	if [ "$int_pct" -ge 80 ]; then
+		echo "$RED"
+	elif [ "$int_pct" -ge 50 ]; then
+		echo "$YELLOW"
+	else
+		echo "$GREEN"
+	fi
+}
+
+if [ -n "$FIVE_HOUR_PCT" ] || [ -n "$SEVEN_DAY_PCT" ]; then
+	RATE_PARTS=""
+	if [ -n "$FIVE_HOUR_PCT" ]; then
+		PCT_INT=$(printf "%.0f" "$FIVE_HOUR_PCT" 2>/dev/null || echo "0")
+		COLOR=$(rate_color "$FIVE_HOUR_PCT")
+		FIVE_HOUR_RESETS=$(echo "$INPUT" | jq -r '.rate_limits.five_hour.resets_at // empty' 2>/dev/null)
+		FIVE_HOUR_LABEL="5h:${PCT_INT}%"
+		if [ -n "$FIVE_HOUR_RESETS" ]; then
+			NOW=$(date +%s)
+			DIFF=$(( FIVE_HOUR_RESETS - NOW ))
+			if [ "$DIFF" -gt 0 ]; then
+				HRS=$(( DIFF / 3600 ))
+				MINS=$(( (DIFF % 3600) / 60 ))
+				if [ "$HRS" -gt 0 ]; then
+					FIVE_HOUR_LABEL="${FIVE_HOUR_LABEL} (resets in ${HRS}h ${MINS}m)"
+				else
+					FIVE_HOUR_LABEL="${FIVE_HOUR_LABEL} (resets in ${MINS}m)"
+				fi
+			fi
+		fi
+		RATE_PARTS="${COLOR}${FIVE_HOUR_LABEL}${RESET}"
+	fi
+	if [ -n "$SEVEN_DAY_PCT" ]; then
+		PCT_INT=$(printf "%.0f" "$SEVEN_DAY_PCT" 2>/dev/null || echo "0")
+		COLOR=$(rate_color "$SEVEN_DAY_PCT")
+		PART="${COLOR}7d:${PCT_INT}%${RESET}"
+		if [ -n "$RATE_PARTS" ]; then
+			RATE_PARTS="${RATE_PARTS} ${PART}"
+		else
+			RATE_PARTS="${PART}"
+		fi
+	fi
+	RATE_SECTION="${RATE_PARTS}"
+fi
+
+# 5. Git Branch
 BRANCH_SECTION=""
 if [ -n "$BRANCH" ]; then
 	BRANCH_SECTION="${GREEN}${BRANCH}${RESET}"
 fi
 
-# 5. Project Name
+# 6. Project Name
 PROJECT_SECTION=""
 if [ -n "$PROJECT_NAME" ]; then
 	PROJECT_SECTION="${MAGENTA}${PROJECT_NAME}${RESET}"
@@ -132,6 +185,11 @@ if [ -n "$TOKEN_SECTION" ]; then
 	STATUS_LINE="${STATUS_LINE}${TOKEN_SECTION}"
 fi
 
+if [ -n "$RATE_SECTION" ]; then
+	if [ -n "$STATUS_LINE" ]; then STATUS_LINE="${STATUS_LINE}${SEP}"; fi
+	STATUS_LINE="${STATUS_LINE}${RATE_SECTION}"
+fi
+
 if [ -n "$BRANCH_SECTION" ]; then
 	if [ -n "$STATUS_LINE" ]; then STATUS_LINE="${STATUS_LINE}${SEP}"; fi
 	STATUS_LINE="${STATUS_LINE}${BRANCH_SECTION}"
@@ -144,4 +202,3 @@ fi
 
 # Output the status line
 printf "%b\n" "$STATUS_LINE"
-

@@ -1,3 +1,4 @@
+
 #!/bin/bash
 
 # Read JSON input from stdin
@@ -173,4 +174,3 @@ if [ -d "$FLOW_DIR" ]; then
 fi
 
 echo
-
