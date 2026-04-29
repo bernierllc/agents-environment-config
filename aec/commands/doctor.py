@@ -260,6 +260,30 @@ def run_doctor() -> Tuple[bool, List[str]]:
         else:
             Console.success("All hook configs use correct PascalCase keys")
             checks_passed += 1
+
+        # Check 5b: malformed hook entry structure (flat shape)
+        from ..lib.hooks import detect_hook_structure_issues
+
+        repos_with_bad_structure: list = []
+        for repo in tracked:
+            if not repo.exists:
+                continue
+            structure_issues = detect_hook_structure_issues(repo.path)
+            for agent_key, problems in structure_issues.items():
+                repos_with_bad_structure.append((repo.path, agent_key, problems))
+
+        checks_total += 1
+        if repos_with_bad_structure:
+            for path, agent, problems in repos_with_bad_structure:
+                for problem in problems:
+                    Console.error(f"Malformed hook in {path} ({agent}): {problem}")
+            issues.append(
+                f"{len(repos_with_bad_structure)} repo(s) have malformed hook "
+                f"entry shapes (fix with: aec repo update --all)"
+            )
+        else:
+            Console.success("All hook entries use correct nested structure")
+            checks_passed += 1
     else:
         Console.info("No tracked repos to check")
 

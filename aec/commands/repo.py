@@ -1298,6 +1298,40 @@ def _repair_hook_keys(project_dir: Path, dry_run: bool = False) -> None:
             Console.warning(f"Could not check {agent_key} hooks: {status[6:]}")
 
 
+def _repair_hook_structure(project_dir: Path, dry_run: bool = False) -> None:
+    """Fix malformed Claude hook entry shapes.
+
+    Some .claude/settings.json files have entries with a top-level
+    'command' instead of a nested 'hooks' array. Claude Code refuses to
+    load those files entirely. aec never produced this shape, but Claude
+    (the assistant) has hand-authored it in the past — repairing it on
+    update means users don't lose their hooks silently.
+    """
+    from ..lib.hooks import repair_hook_structure, AGENT_HOOK_CONFIGS
+
+    if dry_run:
+        results = repair_hook_structure(project_dir)
+        for agent_key, status in results.items():
+            if status == "fixed":
+                config_path = AGENT_HOOK_CONFIGS[agent_key]["config_path"]
+                Console.warning(
+                    f"Would fix malformed hook entry shape in {config_path}"
+                )
+        return
+
+    results = repair_hook_structure(project_dir)
+    for agent_key, status in results.items():
+        if status == "fixed":
+            config_path = AGENT_HOOK_CONFIGS[agent_key]["config_path"]
+            Console.success(
+                f"Fixed malformed hook entry shape in {config_path}"
+            )
+        elif status.startswith("error:"):
+            Console.warning(
+                f"Could not check {agent_key} hook structure: {status[6:]}"
+            )
+
+
 def _update_single_repo(project_dir: Path, dry_run: bool = False) -> None:
     """Update a single repository."""
     if not project_dir.exists():
@@ -1314,6 +1348,9 @@ def _update_single_repo(project_dir: Path, dry_run: bool = False) -> None:
 
     # Fix hook key casing (postToolUse -> PostToolUse)
     _repair_hook_keys(project_dir, dry_run)
+
+    # Fix flat-shape hook entries (top-level command instead of nested hooks[])
+    _repair_hook_structure(project_dir, dry_run)
 
     # Apply configurable instruction preferences
     _apply_configurable_instructions(project_dir, dry_run)

@@ -168,6 +168,185 @@ def repair_hook_keys(project_dir: Path) -> Dict[str, str]:
     return results
 
 
+# Claude Code hook events that use the matcher + hooks[] entry shape.
+# (Notification/Stop/SubagentStop/SessionStart/etc. don't use matchers, so we
+# leave them alone.)
+_CLAUDE_MATCHER_EVENTS = frozenset({
+    "PreToolUse",
+    "PostToolUse",
+    "PostToolUseFailure",
+    "UserPromptSubmit",
+})
+
+
+def _normalize_claude_hook_entries(entries: Any) -> tuple[Any, bool]:
+    """Normalize a list of hook entries under a Claude matcher event.
+
+    Detects the legacy flat shape — an entry with a top-level ``command``
+    (and/or ``type``) but no ``hooks`` array — and rewrites it into the
+    nested shape Claude Code expects:
+
+        {"matcher": "...", "hooks": [{"type": "command", "command": "..."}]}
+
+    Standalone normalization: each entry is rewritten independently. Entries
+    that share a matcher are NOT merged — Claude Code accepts duplicate
+    matchers, and merging would be harder to make idempotent.
+
+    Args:
+        entries: The value at e.g. ``hooks.PostToolUse`` — expected to be a
+            list of dicts. Anything else is returned unchanged.
+
+    Returns:
+        ``(new_entries, changed)``. ``changed`` is True iff at least one
+        entry was rewritten.
+    """
+    if not isinstance(entries, list):
+        return entries, False
+
+    changed = False
+    new_entries: List[Any] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            new_entries.append(entry)
+            continue
+
+        # Already valid: has a hooks array (even if empty list).
+        if isinstance(entry.get("hooks"), list):
+            new_entries.append(entry)
+            continue
+
+        # Flat shape: a top-level command (with or without type) at the
+        # matcher-entry level.
+        if "command" in entry:
+            matcher = entry.get("matcher", "")
+            inner: Dict[str, Any] = {
+                "type": entry.get("type", "command"),
+                "command": entry["command"],
+            }
+            # Preserve any other keys that look like inner-hook fields
+            # (e.g. "name", "timeout") so we don't silently drop config.
+            for k, v in entry.items():
+                if k in ("matcher", "command", "type", "hooks"):
+                    continue
+                inner[k] = v
+            new_entries.append({"matcher": matcher, "hooks": [inner]})
+            changed = True
+            continue
+
+        # No command and no hooks array — leave it alone; the validator
+        # in Claude Code will surface it, and we don't want to invent
+        # content.
+        new_entries.append(entry)
+
+    return new_entries, changed
+
+
+def repair_hook_structure(project_dir: Path) -> Dict[str, str]:
+    """Fix malformed hook entry shapes in agent config files.
+
+    Detects the legacy flat shape under Claude Code matcher events
+    (``PostToolUse``, ``PreToolUse``, etc.) where an entry has a top-level
+    ``command`` instead of a nested ``hooks`` array, and rewrites it into
+    the correct nested form. This shape was never produced by aec, but
+    Claude (the assistant) has hand-authored it in the past, and Claude
+    Code refuses to load any settings file that contains it.
+
+    Args:
+        project_dir: Path to the project root directory.
+
+    Returns:
+        Dict mapping agent_key to status:
+        ``"fixed"``, ``"ok"``, ``"no_file"``, or ``"error:<message>"``.
+    """
+    results: Dict[str, str] = {}
+
+    # Only Claude has the matcher + hooks[] shape we're repairing.
+    agent_key = "claude"
+    if agent_key not in AGENT_HOOK_CONFIGS:
+        return results
+
+    config_path = project_dir / AGENT_HOOK_CONFIGS[agent_key]["config_path"]
+
+    if not config_path.exists():
+        results[agent_key] = "no_file"
+        return results
+
+    try:
+        data = json.loads(config_path.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        results[agent_key] = f"error:{e}"
+        return results
+
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        results[agent_key] = "ok"
+        return results
+
+    changed = False
+    for event_key, entries in list(hooks.items()):
+        if event_key not in _CLAUDE_MATCHER_EVENTS:
+            continue
+        new_entries, event_changed = _normalize_claude_hook_entries(entries)
+        if event_changed:
+            hooks[event_key] = new_entries
+            changed = True
+
+    if changed:
+        config_path.write_text(json.dumps(data, indent=2) + "\n")
+        results[agent_key] = "fixed"
+    else:
+        results[agent_key] = "ok"
+
+    return results
+
+
+def detect_hook_structure_issues(project_dir: Path) -> Dict[str, List[str]]:
+    """Report malformed Claude hook entries without modifying the file.
+
+    Returns a dict mapping agent_key → list of human-readable issue
+    descriptions. Empty dict means no issues. Used by ``aec doctor`` to
+    surface problems without auto-repairing.
+    """
+    issues: Dict[str, List[str]] = {}
+    agent_key = "claude"
+    if agent_key not in AGENT_HOOK_CONFIGS:
+        return issues
+
+    config_path = project_dir / AGENT_HOOK_CONFIGS[agent_key]["config_path"]
+    if not config_path.exists():
+        return issues
+
+    try:
+        data = json.loads(config_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return issues
+
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        return issues
+
+    found: List[str] = []
+    for event_key, entries in hooks.items():
+        if event_key not in _CLAUDE_MATCHER_EVENTS:
+            continue
+        if not isinstance(entries, list):
+            continue
+        for i, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                continue
+            if isinstance(entry.get("hooks"), list):
+                continue
+            if "command" in entry:
+                found.append(
+                    f"{event_key}[{i}] uses flat shape "
+                    f"(top-level 'command' instead of nested 'hooks' array)"
+                )
+
+    if found:
+        issues[agent_key] = found
+    return issues
+
+
 def generate_hook_config(agent_key: str, commands: List[str]) -> Dict[str, Any]:
     """Generate hook configuration for a specific agent.
 
