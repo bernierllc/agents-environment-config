@@ -79,6 +79,19 @@ def _create_directories(project_dir: Path, dry_run: bool = False) -> None:
     ]
 
     for d in dirs:
+        # Check if any ancestor is a file (not a directory)
+        for ancestor in d.parents:
+            if ancestor == project_dir:
+                break
+            if ancestor.exists() and not ancestor.is_dir():
+                rel = ancestor.relative_to(project_dir)
+                Console.error(
+                    f"Cannot create {d.relative_to(project_dir)}: "
+                    f"'{rel}' exists as a file, not a directory.\n"
+                    f"Remove or rename it first, then re-run 'aec setup'."
+                )
+                raise SystemExit(1)
+
         if dry_run:
             if not d.exists():
                 Console.info(f"Would create: {d}")
