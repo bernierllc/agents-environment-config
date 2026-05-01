@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 from ..lib.console import Console
+from ..lib.filesystem import resolve_installed_path
 from ..lib.installed_store import remove_item_install
 from ..lib.manifest_v2 import load_manifest, save_manifest, remove_install, get_installed
 from ..lib.scope import resolve_scope, ScopeError
@@ -97,7 +98,7 @@ def run_uninstall(
         raise SystemExit(1)
 
     target_dir = getattr(scope, f"{plural}_dir")
-    item_path = target_dir / name
+    item_path = resolve_installed_path(target_dir, name)
 
     if not item_path.exists():
         Console.warning(f"{item_type.title()} not found: {name}")

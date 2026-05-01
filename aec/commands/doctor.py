@@ -151,6 +151,27 @@ def run_doctor() -> Tuple[bool, List[str]]:
         else:
             Console.info(f"  └─ agents/agents-environment-config not linked")
 
+        # Check for extensionless agent files (Claude Code ignores them)
+        agents_dir = CLAUDE_DIR / "agents"
+        if agents_dir.exists():
+            bare_agents = [
+                f.name
+                for f in agents_dir.iterdir()
+                if f.is_file() and f.suffix != ".md"
+            ]
+            if bare_agents:
+                Console.error(
+                    f"  └─ {len(bare_agents)} agent file(s) missing .md extension "
+                    f"(Claude Code will not load them)"
+                )
+                for ba in bare_agents:
+                    Console.info(f"       {ba}")
+                Console.info(f"       Fix with: aec upgrade")
+                issues.append(
+                    f"{len(bare_agents)} agent file(s) in ~/.claude/agents/ lack .md extension "
+                    f"(run: aec upgrade)"
+                )
+
         # Check skills (now managed by aec skills, not symlinks)
         skills_link = CLAUDE_DIR / "skills" / "agents-environment-config"
         if skills_link.is_symlink():

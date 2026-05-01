@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .console import Console
+from .filesystem import installed_dst_path, resolve_installed_path
 from .installed_store import record_item_install
 from .manifest_v2 import get_installed, record_install, remove_install, save_manifest
 from .preferences import load_preferences, save_preferences
@@ -104,7 +105,7 @@ def _delete_item_at_scope(
     scope: Scope,
 ) -> None:
     """Remove files for ``name`` under ``scope`` (skill dir, agent dir, or rule file)."""
-    target = getattr(scope, f"{plural}_dir") / name
+    target = resolve_installed_path(getattr(scope, f"{plural}_dir"), name)
     if target.is_dir():
         shutil.rmtree(target)
     elif target.exists():
@@ -131,12 +132,13 @@ def migrate_item_to_global(
 
     scope_g = Scope(is_global=True, repo_path=None)
     gdir = getattr(scope_g, f"{plural}_dir")
-    gdst = gdir / name
-    if gdst.exists():
-        if gdst.is_dir():
-            shutil.rmtree(gdst)
+    gdst = installed_dst_path(gdir, name, src)
+    existing_gdst = resolve_installed_path(gdir, name)
+    if existing_gdst.exists():
+        if existing_gdst.is_dir():
+            shutil.rmtree(existing_gdst)
         else:
-            gdst.unlink()
+            existing_gdst.unlink()
     gdir.mkdir(parents=True, exist_ok=True)
     if src.is_dir():
         shutil.copytree(src, gdst, ignore=shutil.ignore_patterns(".*"))

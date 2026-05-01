@@ -6,6 +6,7 @@ from typing import Optional
 
 from ..lib.console import Console
 from ..lib.config import get_repo_root
+from ..lib.filesystem import installed_dst_path, resolve_installed_path
 from ..lib.installed_store import record_item_install as record_item_install_pertype
 from ..lib.manifest_v2 import (
     load_manifest,
@@ -134,6 +135,28 @@ def _target_base(scope: str, item_type: str) -> Path:
             return repo_path / ".agent-rules"
 
 
+def _repair_extensionless_agents(
+    manifest: dict,
+    scope: str,
+    target: Path,
+    dry_run: bool,
+) -> int:
+    """Rename bare agent files (missing .md) to .md. Returns count of repairs."""
+    repaired = 0
+    installed = get_installed(manifest, scope, "agents")
+    for name in installed:
+        bare = target / name
+        md_path = target / (name + ".md")
+        if bare.exists() and bare.is_file() and not md_path.exists():
+            if dry_run:
+                Console.print(f"  would rename agent  {name}  (missing .md extension)")
+            else:
+                bare.rename(md_path)
+                Console.info(f"  repaired agent  {name}  (renamed to {name}.md)")
+            repaired += 1
+    return repaired
+
+
 def _upgrade_scope(
     manifest: dict,
     scope: str,
@@ -150,6 +173,11 @@ def _upgrade_scope(
         installed = get_installed(manifest, scope, item_type)
         target = _target_base(scope, item_type)
 
+        if item_type == "agents" and target.exists():
+            repaired = _repair_extensionless_agents(manifest, scope, target, dry_run)
+            if repaired and not dry_run:
+                upgraded = True
+
         for name, info in installed.items():
             if name not in available:
                 continue
@@ -159,7 +187,8 @@ def _upgrade_scope(
                 continue
 
             src_path = source_dir / available[name].get("path", name)
-            dst_path = target / name
+            dst_path = installed_dst_path(target, name, src_path)
+            existing_path = resolve_installed_path(target, name)
 
             if dry_run:
                 Console.print(
@@ -169,9 +198,9 @@ def _upgrade_scope(
                 continue
 
             do_prompt = False
-            if item_type == "skills" and src_path.is_dir() and dst_path.exists():
+            if item_type == "skills" and src_path.is_dir() and existing_path.exists():
                 plan = plan_skill_directory_replace(
-                    dst_path, src_path, info, assume_yes=yes
+                    existing_path, src_path, info, assume_yes=yes
                 )
                 if plan == "sync_manifest":
                     sh = hash_skill_directory(src_path)
@@ -188,9 +217,9 @@ def _upgrade_scope(
                     upgraded = True
                     continue
                 do_prompt = plan == "prompt"
-            elif dst_path.exists() and not yes:
+            elif existing_path.exists() and not yes:
                 current_hash = (
-                    hash_skill_directory(dst_path) if dst_path.is_dir() else ""
+                    hash_skill_directory(existing_path) if existing_path.is_dir() else ""
                 )
                 recorded_hash = info.get("contentHash", "")
                 if (
@@ -216,11 +245,11 @@ def _upgrade_scope(
                     Console.info(f"  Skipped: {name}")
                     continue
 
-            if dst_path.exists():
-                if dst_path.is_dir():
-                    shutil.rmtree(dst_path)
+            if existing_path.exists():
+                if existing_path.is_dir():
+                    shutil.rmtree(existing_path)
                 else:
-                    dst_path.unlink()
+                    existing_path.unlink()
 
             target.mkdir(parents=True, exist_ok=True)
             if src_path.is_dir():

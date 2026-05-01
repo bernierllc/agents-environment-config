@@ -8,6 +8,7 @@ import subprocess
 
 from ..lib import Console
 from ..lib.config import get_repo_root
+from ..lib.filesystem import installed_dst_path
 from ..lib.hooks import get_verification_playwright_hook
 from ..lib.manifest_v2 import load_manifest, save_manifest, record_install, record_mcp_install
 from ..lib.global_install_prompt import prompt_multi_repo_global_or_proceed
@@ -69,7 +70,7 @@ def run_install(
     item_info = available[name]
     src = source_dir / item_info.get("path", name)
     target_dir = getattr(scope, f"{plural}_dir")
-    dst = target_dir / name
+    dst = installed_dst_path(target_dir, name, src)
 
     manifest_file = _manifest_path()
     manifest = load_manifest(manifest_file)

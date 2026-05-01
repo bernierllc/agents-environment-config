@@ -13,6 +13,8 @@ from aec.lib.filesystem import (
     is_symlink,
     get_symlink_target,
     copy_file,
+    resolve_installed_path,
+    installed_dst_path,
 )
 
 
@@ -173,3 +175,47 @@ class TestWindowsJunctions:
         assert target.is_dir()
         # But os.path.islink returns False for junctions
         # (junctions are not symlinks in the traditional sense)
+
+
+class TestResolveInstalledPath:
+    def test_returns_direct_when_exists(self, temp_dir):
+        f = temp_dir / "my-agent"
+        f.write_text("content")
+        assert resolve_installed_path(temp_dir, "my-agent") == f
+
+    def test_returns_md_when_only_md_exists(self, temp_dir):
+        f = temp_dir / "my-agent.md"
+        f.write_text("content")
+        assert resolve_installed_path(temp_dir, "my-agent") == f
+
+    def test_prefers_direct_over_md(self, temp_dir):
+        direct = temp_dir / "my-agent"
+        direct.write_text("old")
+        md = temp_dir / "my-agent.md"
+        md.write_text("new")
+        assert resolve_installed_path(temp_dir, "my-agent") == direct
+
+    def test_returns_direct_when_neither_exists(self, temp_dir):
+        result = resolve_installed_path(temp_dir, "missing")
+        assert result == temp_dir / "missing"
+        assert not result.exists()
+
+
+class TestInstalledDstPath:
+    def test_file_src_appends_extension(self, temp_dir):
+        src = temp_dir / "my-agent.md"
+        src.write_text("")
+        result = installed_dst_path(temp_dir / "dst", "my-agent", src)
+        assert result == temp_dir / "dst" / "my-agent.md"
+
+    def test_dir_src_uses_bare_name(self, temp_dir):
+        src = temp_dir / "my-skill"
+        src.mkdir()
+        result = installed_dst_path(temp_dir / "dst", "my-skill", src)
+        assert result == temp_dir / "dst" / "my-skill"
+
+    def test_non_md_extension_preserved(self, temp_dir):
+        src = temp_dir / "my-rule.txt"
+        src.write_text("")
+        result = installed_dst_path(temp_dir / "dst", "my-rule", src)
+        assert result == temp_dir / "dst" / "my-rule.txt"

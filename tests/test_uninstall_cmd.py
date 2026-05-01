@@ -64,3 +64,35 @@ class TestUninstall:
 
         with pytest.raises(SystemExit):
             run_uninstall(item_type="widget", name="x", global_flag=True, yes=True)
+
+    def test_removes_agent_with_md_extension(self, uninstall_env):
+        """Agent files installed with .md extension should be removed correctly."""
+        from aec.commands.uninstall import run_uninstall
+
+        agents_dir = uninstall_env["aec_home"].parent / ".claude" / "agents"
+        agents_dir.mkdir(parents=True, exist_ok=True)
+        agent_file = agents_dir / "my-agent.md"
+        agent_file.write_text("---\nname: my-agent\nversion: 1.0.0\n---\n")
+
+        m = json.loads((uninstall_env["aec_home"] / "installed-manifest.json").read_text())
+        m["global"]["agents"] = {"my-agent": {"version": "1.0.0", "contentHash": "", "installedAt": ""}}
+        (uninstall_env["aec_home"] / "installed-manifest.json").write_text(json.dumps(m))
+
+        run_uninstall(item_type="agent", name="my-agent", global_flag=True, yes=True)
+        assert not agent_file.exists()
+
+    def test_removes_legacy_agent_without_md_extension(self, uninstall_env):
+        """Legacy agent files installed without .md extension should also be removed."""
+        from aec.commands.uninstall import run_uninstall
+
+        agents_dir = uninstall_env["aec_home"].parent / ".claude" / "agents"
+        agents_dir.mkdir(parents=True, exist_ok=True)
+        agent_file = agents_dir / "my-agent"
+        agent_file.write_text("---\nname: my-agent\nversion: 1.0.0\n---\n")
+
+        m = json.loads((uninstall_env["aec_home"] / "installed-manifest.json").read_text())
+        m["global"]["agents"] = {"my-agent": {"version": "1.0.0", "contentHash": "", "installedAt": ""}}
+        (uninstall_env["aec_home"] / "installed-manifest.json").write_text(json.dumps(m))
+
+        run_uninstall(item_type="agent", name="my-agent", global_flag=True, yes=True)
+        assert not agent_file.exists()

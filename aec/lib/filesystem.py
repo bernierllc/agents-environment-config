@@ -273,3 +273,46 @@ def safe_path_str(path: Path) -> str:
         String representation with correct separators
     """
     return str(Path(path))
+
+
+def resolve_installed_path(target_dir: Path, name: str) -> Path:
+    """Find the actual on-disk path for an installed item.
+
+    Checks for both the bare name and name.md to handle files installed
+    before extension preservation was added.
+
+    Args:
+        target_dir: Directory containing installed items.
+        name: The manifest key (stem without extension).
+
+    Returns:
+        The existing path if found; otherwise ``target_dir / name``.
+    """
+    direct = target_dir / name
+    if direct.exists():
+        return direct
+    md_path = target_dir / (name + ".md")
+    if md_path.exists():
+        return md_path
+    return direct
+
+
+def installed_dst_path(target_dir: Path, name: str, src: Path) -> Path:
+    """Compute the destination path for an item being installed.
+
+    For file items (agents, rules) the source extension is preserved so that
+    Claude Code can discover the file. For directory items (skills) the bare
+    name is used unchanged.
+
+    Args:
+        target_dir: Directory to install into.
+        name: The manifest key (stem without extension).
+        src: The source path being installed from.
+
+    Returns:
+        ``target_dir / name`` for directories, ``target_dir / (name + src.suffix)``
+        for files.
+    """
+    if src.is_dir():
+        return target_dir / name
+    return target_dir / (name + src.suffix)
