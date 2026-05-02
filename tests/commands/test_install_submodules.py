@@ -1,11 +1,8 @@
 """Tests that install.py submodule loop is driven by sync-config.json."""
-import inspect
 import json
 import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 SYNC_CONFIG_PATH = Path(__file__).parent.parent.parent / "scripts" / "sync-config.json"
 INSTALL_PY_PATH = Path(__file__).parent.parent.parent / "aec" / "commands" / "install.py"
@@ -30,11 +27,14 @@ class TestSyncConfigDriven:
     def test_install_does_not_hardcode_submodule_paths(self):
         """install.py must not hardcode the agents or skills submodule paths."""
         source = INSTALL_PY_PATH.read_text()
-        # Strip comment-only lines before checking (comments are allowed to mention paths for documentation)
-        code_lines = [
-            line for line in source.splitlines()
-            if not re.match(r"^\s*#", line)
-        ]
+        # Strip comment-only lines and inline comments before checking (comments are allowed to mention paths for documentation)
+        code_lines = []
+        for line in source.splitlines():
+            if re.match(r"^\s*#", line):
+                continue  # skip full comment lines
+            # Strip inline comments
+            stripped = re.sub(r"\s*#.*$", "", line)
+            code_lines.append(stripped)
         code_only = "\n".join(code_lines)
         assert '".claude/agents"' not in code_only, "Hardcoded .claude/agents path found in non-comment code"
         assert '".claude/skills"' not in code_only, "Hardcoded .claude/skills path found in non-comment code"
@@ -49,13 +49,14 @@ class TestSyncConfigDriven:
             assert cursor_target is None or isinstance(cursor_target, str), \
                 f"{key} cursor_target must be null or string, got {type(cursor_target)}"
 
-    def test_missing_sync_config_prints_warning(self):
+    def test_missing_sync_config_prints_warning(self, tmp_path, capsys):
         """When sync-config.json does not exist, install must warn and not crash."""
-        # The key invariant: the code handles missing config gracefully (warning, no exception)
-        # Verified by reading install.py: the else branch calls Console.warning(...)
-        # This structural test ensures the else branch exists in the source
-        source = INSTALL_PY_PATH.read_text()
-        assert "sync-config.json not found" in source, \
-            "install.py must warn when sync-config.json is missing"
-        assert "Console.warning" in source, \
-            "Warning must use Console.warning"
+        from aec.commands.install import _update_submodules_from_config
+
+        # tmp_path has no scripts/sync-config.json
+        _update_submodules_from_config(tmp_path)
+        captured = capsys.readouterr()
+
+        # Console.warning uses print(), so output should be in stdout
+        assert "sync-config.json not found" in captured.out, \
+            "Expected warning about missing sync-config.json"

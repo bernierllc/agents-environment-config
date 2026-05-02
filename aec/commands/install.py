@@ -15,6 +15,37 @@ from ..lib.git import is_git_repo, has_gitmodules, init_submodules, update_submo
 from . import agent_tools, rules
 
 
+def _update_submodules_from_config(repo_root: Path, dry_run: bool = False) -> None:
+    """Update submodules listed in scripts/sync-config.json.
+
+    Args:
+        repo_root: Path to the repository root.
+        dry_run: If True, report what would happen without making changes.
+    """
+    sync_config_path = repo_root / "scripts" / "sync-config.json"
+    if not sync_config_path.exists():
+        Console.warning("scripts/sync-config.json not found — skipping submodule updates")
+        return
+    try:
+        sync_config = json.loads(sync_config_path.read_text())
+    except json.JSONDecodeError:
+        Console.warning("scripts/sync-config.json is malformed — skipping submodule updates")
+        return
+    for key, entry in sync_config.get("submodules", {}).items():
+        sub_path = entry.get("path")
+        if not sub_path:
+            Console.warning(f"Submodule '{key}' has no 'path' — skipping")
+            continue
+        display = entry.get("display_name", key)
+        if (repo_root / sub_path).exists():
+            Console.print(f"  Updating {display}...")
+            success, result = update_submodule(repo_root, sub_path, dry_run)
+            if success:
+                Console.success(f"{display.capitalize()} updated to {result}")
+            else:
+                Console.warning(f"{display}: {result}")
+
+
 def _cleanup_legacy_symlinks(
     claude_skills_dir: Optional[Path] = None,
     agent_tools_skills_dir: Optional[Path] = None,
@@ -487,21 +518,7 @@ def install(dry_run: bool = False) -> None:
                 Console.warning(f"Submodule init: {message}")
 
             # Update each submodule defined in sync-config.json
-            sync_config_path = repo_root / "scripts" / "sync-config.json"
-            if sync_config_path.exists():
-                sync_config = json.loads(sync_config_path.read_text())
-                for key, entry in sync_config.get("submodules", {}).items():
-                    sub_path = entry["path"]
-                    display = entry.get("display_name", key)
-                    if (repo_root / sub_path).exists():
-                        Console.print(f"  Updating {display}...")
-                        success, result = update_submodule(repo_root, sub_path, dry_run)
-                        if success:
-                            Console.success(f"{display.capitalize()} updated to {result}")
-                        else:
-                            Console.warning(f"{display}: {result}")
-            else:
-                Console.warning("scripts/sync-config.json not found — skipping submodule updates")
+            _update_submodules_from_config(repo_root, dry_run)
     else:
         Console.info("Not a git repository or no submodules - skipping submodule update")
 
