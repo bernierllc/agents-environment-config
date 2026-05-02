@@ -17,7 +17,21 @@ NC='\033[0m'
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-SUBMODULES=(".claude/agents" ".claude/skills")
+# Require jq for JSON parsing
+if ! command -v jq >/dev/null 2>&1; then
+  echo "jq is required for submodule management."
+  echo "Install with: brew install jq (macOS) / apt install jq (Linux)"
+  exit 1
+fi
+
+# Read submodule paths from sync-config.json
+SYNC_CONFIG="$REPO_ROOT/scripts/sync-config.json"
+if [ ! -f "$SYNC_CONFIG" ]; then
+  echo "scripts/sync-config.json not found — cannot determine submodules"
+  exit 1
+fi
+
+mapfile -t SUBMODULES < <(jq -r '.submodules | to_entries[].value.path' "$SYNC_CONFIG")
 FAILED=0
 
 for sub in "${SUBMODULES[@]}"; do
@@ -70,6 +84,6 @@ for sub in "${SUBMODULES[@]}"; do
 done
 if [ $PARENT_REF_CHANGED -eq 1 ]; then
   echo -e "${YELLOW}Submodule refs changed; staging for parent commit.${NC}"
-  git add .claude/agents .claude/skills 2>/dev/null || true
+  git add "${SUBMODULES[@]}" 2>/dev/null || true
 fi
 exit 0
