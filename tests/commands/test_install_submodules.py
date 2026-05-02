@@ -39,12 +39,23 @@ class TestSyncConfigDriven:
         assert '".claude/agents"' not in code_only, "Hardcoded .claude/agents path found in non-comment code"
         assert '".claude/skills"' not in code_only, "Hardcoded .claude/skills path found in non-comment code"
 
-    def test_null_cursor_target_does_not_raise(self, tmp_path):
-        """Submodule entries with cursor_target: null must not raise exceptions during install."""
+    def test_null_cursor_target_does_not_raise(self):
+        """Submodule entries with cursor_target: null must not raise exceptions."""
         config = json.loads(SYNC_CONFIG_PATH.read_text())
         for key, entry in config["submodules"].items():
-            # cursor_target is allowed to be null — verify the field exists and can be null
-            assert "cursor_target" in entry or entry.get("cursor_target") is None or True
-            # The important thing: null cursor_target is a valid value
-            cursor_target = entry.get("cursor_target")
-            assert cursor_target is None or isinstance(cursor_target, str)
+            # cursor_target must be present and must be either null or a string
+            assert "cursor_target" in entry, f"{key} missing 'cursor_target' field"
+            cursor_target = entry["cursor_target"]
+            assert cursor_target is None or isinstance(cursor_target, str), \
+                f"{key} cursor_target must be null or string, got {type(cursor_target)}"
+
+    def test_missing_sync_config_prints_warning(self):
+        """When sync-config.json does not exist, install must warn and not crash."""
+        # The key invariant: the code handles missing config gracefully (warning, no exception)
+        # Verified by reading install.py: the else branch calls Console.warning(...)
+        # This structural test ensures the else branch exists in the source
+        source = INSTALL_PY_PATH.read_text()
+        assert "sync-config.json not found" in source, \
+            "install.py must warn when sync-config.json is missing"
+        assert "Console.warning" in source, \
+            "Warning must use Console.warning"
