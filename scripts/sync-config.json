@@ -2,14 +2,22 @@
   "submodules": {
     "agents": {
       "path": ".claude/agents",
+      "display_name": "agents",
       "repo": "bernierllc/agency-agents",
       "cursor_target": ".cursor/commands/agents"
     },
     "skills": {
       "path": ".claude/skills",
+      "display_name": "skills",
       "repo": "bernierllc/skills",
       "cursor_target": ".cursor/commands/skills",
       "skill_file_pattern": ["Skill.md", "SKILL.md"]
+    },
+    "gitignore": {
+      "path": "aec/templates/gitignore",
+      "display_name": "gitignore templates",
+      "repo": "toptal/gitignore",
+      "cursor_target": null
     }
   },
   "pr_settings": {
