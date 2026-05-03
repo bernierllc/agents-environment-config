@@ -413,3 +413,40 @@ class TestInstallWithDeps:
         m = load_manifest(install_env["manifest_path"])
         assert "main-skill" in m["global"]["skills"]
         assert "dep-skill" in m["global"]["skills"]
+
+    def test_explicit_install_records_installed_as_explicit(self, install_env):
+        """A skill installed directly gets installedAs='explicit'."""
+        from aec.commands.install_cmd import run_install
+        from aec.lib.manifest_v2 import load_manifest
+
+        patches = self._patch_repo_with_skills(install_env)
+        with patches[0], patches[1]:
+            run_install(item_type="skill", name="my-skill", global_flag=True, yes=True)
+
+        m = load_manifest(install_env["manifest_path"])
+        assert m["global"]["skills"]["my-skill"]["installedAs"] == "explicit"
+
+    def test_dep_install_records_installed_as_dependency(self, install_env, monkeypatch):
+        """A skill installed as a dependency gets installedAs='dependency'."""
+        from aec.commands.install_cmd import run_install
+        from aec.lib.manifest_v2 import load_manifest
+
+        repo = install_env["repo"]
+        skills_src = repo / ".claude" / "skills"
+
+        _make_skill_with_deps(skills_src, "dep-skill", "2.0.0")
+        _make_skill_with_deps(
+            skills_src,
+            "main-skill",
+            "1.0.0",
+            deps=[{"name": "dep-skill", "min_version": "2.0.0", "reason": "Needs dep"}],
+        )
+
+        monkeypatch.setattr("builtins.input", lambda _: "y")
+        patches = self._patch_repo_with_skills(install_env)
+        with patches[0], patches[1]:
+            run_install(item_type="skill", name="main-skill", global_flag=True, yes=False)
+
+        m = load_manifest(install_env["manifest_path"])
+        assert m["global"]["skills"]["main-skill"]["installedAs"] == "explicit"
+        assert m["global"]["skills"]["dep-skill"]["installedAs"] == "dependency"

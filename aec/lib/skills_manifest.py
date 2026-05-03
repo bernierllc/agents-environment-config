@@ -240,6 +240,7 @@ def build_skill_manifest_item(
     installed_at: str,
     previous: Optional[Dict[str, Any]] = None,
     source: Optional[str] = None,
+    installed_as: str = "explicit",
 ) -> Dict[str, Any]:
     """Build a skill manifest entry with ``versionHashes`` history keyed by semver."""
     prev = previous or {}
@@ -253,6 +254,7 @@ def build_skill_manifest_item(
         "contentHash": content_hash,
         "installedAt": installed_at,
         "versionHashes": vhashes,
+        "installedAs": installed_as,
     }
     if source is not None:
         rec["source"] = source

@@ -238,7 +238,7 @@ def _check_and_upgrade_dep_conflicts(
 
         dep_hash = hash_skill_directory(dep_dst) if dep_dst.is_dir() else ""
         dep_ver = dep_avail.get("version", "0.0.0")
-        record_install(manifest, scope, "skills", vc.name, dep_ver, dep_hash)
+        record_install(manifest, scope, "skills", vc.name, dep_ver, dep_hash, installed_as="dependency")
         record_item_install_pertype("skill", vc.name, dep_ver, dep_hash)
         Console.success(f"  Upgraded dep: {vc.name}  {vc.installed_ver} -> {dep_ver}")
 
@@ -277,7 +277,7 @@ def _check_and_upgrade_dep_conflicts(
 
             dep_hash = hash_skill_directory(dep_dst) if dep_dst.is_dir() else ""
             dep_ver = dep_avail.get("version", "0.0.0")
-            record_install(manifest, scope, "skills", d.name, dep_ver, dep_hash)
+            record_install(manifest, scope, "skills", d.name, dep_ver, dep_hash, installed_as="dependency")
             record_item_install_pertype("skill", d.name, dep_ver, dep_hash)
             Console.success(f"  Installed new dep: {d.name} {dep_ver}")
 
@@ -345,7 +345,8 @@ def _upgrade_scope(
                 if plan == "sync_manifest":
                     sh = hash_skill_directory(src_path)
                     record_install(
-                        manifest, scope, item_type, name, avail_v, sh
+                        manifest, scope, item_type, name, avail_v, sh,
+                        installed_as=info.get("installedAs", "explicit"),
                     )
                     record_item_install_pertype(
                         item_type[:-1], name, avail_v, sh
@@ -398,7 +399,10 @@ def _upgrade_scope(
                 shutil.copy2(src_path, dst_path)
 
             content_hash = hash_skill_directory(dst_path) if dst_path.is_dir() else ""
-            record_install(manifest, scope, item_type, name, avail_v, content_hash)
+            record_install(
+                manifest, scope, item_type, name, avail_v, content_hash,
+                installed_as=info.get("installedAs", "explicit"),
+            )
 
             # Dual-write to per-type installed file (best-effort during transition)
             record_item_install_pertype(item_type[:-1], name, avail_v, content_hash)

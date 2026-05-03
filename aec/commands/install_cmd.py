@@ -157,6 +157,7 @@ def _install_single_item(
     scope_key: str,
     manifest_file: Path,
     item_info: dict,
+    installed_as: str = "explicit",
 ) -> None:
     """Copy ``src`` to ``dst`` and record the install in the manifest.
 
@@ -180,6 +181,7 @@ def _install_single_item(
     record_install(
         manifest, scope_key, plural, name,
         item_info.get("version", "0.0.0"), content_hash,
+        installed_as=installed_as,
     )
     save_manifest(manifest, manifest_file)
 
@@ -268,6 +270,7 @@ def _resolve_and_prompt_deps(
             scope_key=scope_key,
             manifest_file=manifest_file,
             item_info=dep_info,
+            installed_as="dependency",
         )
         Console.success(f"Installed dependency: {d.name} v{dep_info.get('version', '0.0.0')}")
 
