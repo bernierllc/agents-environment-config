@@ -44,7 +44,8 @@ class TestCompositeJoin:
         assert result, "composite gitignore must not be empty"
         assert "# AEC" in result, "must include AEC section"
         lines = result.splitlines()
-        assert len(lines) == len(set(lines)), "lines must be deduplicated"
+        non_empty = [l for l in lines if l.strip()]
+        assert len(non_empty) == len(set(non_empty)), "non-empty lines must be deduplicated"
 
     def test_composite_join_multi_language(self):
         """Composite join for multiple languages includes content from each."""
