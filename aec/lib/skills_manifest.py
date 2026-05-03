@@ -41,6 +41,11 @@ def parse_dependencies_block(text: str) -> List[SkillDep]:
 
     Design note: we use a targeted line-by-line parser so we don't need PyYAML.
     All other frontmatter fields remain parsed by the existing regex scalar parser.
+
+    Indentation requirement: this parser requires exact 2/4/6-space indentation —
+    ``dependencies:`` at column 0, ``skills:`` at 2 spaces, list items (``- name:``)
+    at 4 spaces, and continuation keys (``min_version:``, ``reason:``) at 6 spaces.
+    This is the canonical format defined by the AEC SKILL.md spec.
     """
     # Extract the raw frontmatter block.
     fm_match = re.match(r"^---\s*\n(.*?)\n---", text, re.DOTALL)
@@ -99,7 +104,12 @@ def parse_dependencies_block(text: str) -> List[SkillDep]:
                 f"dependencies.skills entry '{entry.get('name', '?')}' "
                 "is missing required field 'reason'"
             )
-        min_ver = entry.get("min_version", "")
+        if "min_version" not in entry:
+            raise ValueError(
+                f"dependencies.skills entry '{entry['name']}' "
+                "is missing required field 'min_version'"
+            )
+        min_ver = entry["min_version"]
         if not _is_valid_semver(min_ver):
             raise ValueError(
                 f"dependencies.skills entry '{entry['name']}' has invalid "
@@ -119,7 +129,9 @@ def parse_dependencies_block(text: str) -> List[SkillDep]:
                 deps.append(_flush_entry(current))
                 current = {}
             key = item_match.group(1)
-            value = item_match.group(2).strip().strip('"').strip("'")
+            value = item_match.group(2).strip()
+            if len(value) >= 2 and value[0] in ('"', "'") and value[-1] == value[0]:
+                value = value[1:-1]
             current[key] = value
             continue
 
@@ -127,7 +139,9 @@ def parse_dependencies_block(text: str) -> List[SkillDep]:
         cont_match = re.match(r"^\s{6}(\w+)\s*:\s*(.*)", line)
         if cont_match:
             key = cont_match.group(1)
-            value = cont_match.group(2).strip().strip('"').strip("'")
+            value = cont_match.group(2).strip()
+            if len(value) >= 2 and value[0] in ('"', "'") and value[-1] == value[0]:
+                value = value[1:-1]
             current[key] = value
             continue
 

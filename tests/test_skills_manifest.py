@@ -486,3 +486,21 @@ class TestParseDependencies:
 
         result = parse_skill_frontmatter(skill_dir)
         assert result is None
+
+    def test_malformed_missing_min_version_returns_none(self, temp_dir: Path):
+        content = (
+            "---\n"
+            "name: broken-skill\n"
+            "version: 1.0.0\n"
+            "dependencies:\n"
+            "  skills:\n"
+            "    - name: some-dep\n"
+            '      reason: "Has no min_version field."\n'
+            "---\n"
+            "# Broken (no min_version)\n"
+        )
+        skill_dir = self._make_skill(temp_dir, "broken-skill4", content)
+        from aec.lib.skills_manifest import parse_skill_frontmatter
+
+        result = parse_skill_frontmatter(skill_dir)
+        assert result is None
