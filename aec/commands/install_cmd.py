@@ -94,7 +94,7 @@ def run_install(
             return
 
     scope_label = "globally" if scope.is_global else f"to {scope.repo_path}"
-    Console.print(f"Installing {name} v{item_info.get('version', '?')} {scope_label}...")
+    Console.print(f"Installing {name} v{item_info.get('version', '0.0.0')} {scope_label}...")
 
     scope_key = "global" if scope.is_global else str(scope.repo_path.resolve())
 
@@ -351,7 +351,7 @@ def _install_mcp(name: str, global_flag: bool, yes: bool) -> None:
     record_item_install("mcp", name, item_info.get("version", "0.0.0"))
 
     scope_label = "globally" if scope.is_global else f"to {scope.repo_path}"
-    Console.success(f"Installed MCP server: {name} v{item_info.get('version', '?')} {scope_label}")
+    Console.success(f"Installed MCP server: {name} v{item_info.get('version', '0.0.0')} {scope_label}")
     Console.print(f"  mcpServers entry written to {settings_path}")
     Console.print("  Restart Claude Code for the MCP server to take effect.")
 
