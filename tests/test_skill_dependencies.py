@@ -74,7 +74,7 @@ class TestDirectDepCases:
 
         result = resolve_install_graph("target-skill", available, installed, temp_dir)
 
-        assert "dep-skill" in result.to_install
+        assert any(d.name == "dep-skill" for d in result.to_install)
         assert result.already_satisfied == []
         assert result.missing == []
         assert result.version_conflicts == []
@@ -216,9 +216,10 @@ class TestTransitiveDeps:
         assert result.version_conflicts == []
         assert result.cycles == []
         # C must appear before B (deps before dependents)
-        assert "skill-c" in result.to_install
-        assert "skill-b" in result.to_install
-        assert result.to_install.index("skill-c") < result.to_install.index("skill-b")
+        to_install_names = [d.name for d in result.to_install]
+        assert "skill-c" in to_install_names
+        assert "skill-b" in to_install_names
+        assert to_install_names.index("skill-c") < to_install_names.index("skill-b")
 
     def test_transitive_dep_already_satisfied_not_in_to_install(self, temp_dir):
         """If C is already installed, A→B→C chain only requires B in to_install."""
@@ -250,8 +251,9 @@ class TestTransitiveDeps:
         result = resolve_install_graph("skill-a", available, installed, temp_dir)
 
         assert "skill-c" in result.already_satisfied
-        assert "skill-b" in result.to_install
-        assert "skill-c" not in result.to_install
+        to_install_names = [d.name for d in result.to_install]
+        assert "skill-b" in to_install_names
+        assert "skill-c" not in to_install_names
 
 
 class TestCycleDetection:

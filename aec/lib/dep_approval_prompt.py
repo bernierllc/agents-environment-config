@@ -40,7 +40,7 @@ def prompt_dep_install(
     Returns:
         True if the install should proceed, False to abort.
     """
-    if assume_yes:
+    if assume_yes or not deps_to_install:
         return True
 
     Console.print(f"\nInstalling {target}@{target_version} will also install:\n")
@@ -65,7 +65,7 @@ def prompt_dep_install(
             except EOFError:
                 each_resp = "n"
             if each_resp != "y":
-                Console.info(f"Skipped {dep['name']}. Aborting install.")
+                Console.info(f"Rejected {dep['name']}. Aborting full install.")
                 return False
         return True
 

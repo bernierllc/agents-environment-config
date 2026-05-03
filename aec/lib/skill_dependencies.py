@@ -8,11 +8,17 @@ and what has version conflicts.  No side effects — easy to unit-test.
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional
 
+from .console import Console
 from .skills_manifest import parse_skill_frontmatter, parse_version
 
 
+class DepToInstall(NamedTuple):
+    name: str
+    reason: str     # from the declaring skill's SkillDep.reason
+
+
 class ResolvedGraph(NamedTuple):
-    to_install: List[str]           # ordered: deps before dependents, excluding already-satisfied
+    to_install: List[DepToInstall]  # ordered: deps before dependents, excluding already-satisfied
     already_satisfied: List[str]    # dep names already at satisfying version
     missing: List[str]              # dep names not found in catalog at all
     version_conflicts: List[str]    # dep names in catalog but version too old
@@ -37,7 +43,7 @@ def resolve_install_graph(
     Returns:
         A :class:`ResolvedGraph` describing what the installer should do.
     """
-    to_install: List[str] = []
+    to_install: List[DepToInstall] = []
     already_satisfied: List[str] = []
     missing: List[str] = []
     version_conflicts: List[str] = []
@@ -73,8 +79,13 @@ def resolve_install_graph(
 
         # Read this skill's own deps
         skill_path = source_dir / available[name]["path"]
-        fm = parse_skill_frontmatter(skill_path)
-        deps = fm.get("dependencies", []) if fm else []
+        if not skill_path.exists():
+            # Warn but don't fail — catalog may lag disk state
+            Console.warning(f"  Dependency resolution: {name} not found at {skill_path}, skipping its transitive deps")
+            deps = []
+        else:
+            fm = parse_skill_frontmatter(skill_path)
+            deps = fm.get("dependencies", []) if fm else []
 
         for dep in deps:
             dep_name = dep.name
@@ -106,13 +117,14 @@ def resolve_install_graph(
             _visit(dep_name, path)
 
             # After recursion, if not already accounted for, queue for install
+            installed_names = [d.name for d in to_install]
             if (
-                dep_name not in to_install
+                dep_name not in installed_names
                 and dep_name not in already_satisfied
                 and dep_name not in version_conflicts
                 and dep_name not in missing
             ):
-                to_install.append(dep_name)
+                to_install.append(DepToInstall(name=dep_name, reason=dep.reason))
                 visited[dep_name] = "done"
 
         path.pop()

@@ -96,9 +96,10 @@ def run_install(
     scope_label = "globally" if scope.is_global else f"to {scope.repo_path}"
     Console.print(f"Installing {name} v{item_info.get('version', '?')} {scope_label}...")
 
+    scope_key = "global" if scope.is_global else str(scope.repo_path.resolve())
+
     # Resolve and install skill dependencies before the main install
     if item_type == "skill":
-        scope_key = "global" if scope.is_global else str(scope.repo_path.resolve())
         if scope.is_global:
             installed_skills = manifest["global"]["skills"]
         else:
@@ -119,7 +120,6 @@ def run_install(
             Console.info("Skipped.")
             return
 
-    scope_key = "global" if scope.is_global else str(scope.repo_path.resolve())
     _install_single_item(
         item_type=item_type,
         plural=plural,
@@ -240,31 +240,13 @@ def _resolve_and_prompt_deps(
     if not graph.to_install:
         return
 
-    # Build the list of dep dicts for the prompt
-    deps_to_prompt = []
-    for dep_name in graph.to_install:
-        dep_info = available.get(dep_name, {})
-        # Find the reason from the skill's deps declaration
-        dep_version = dep_info.get("version", "?")
-        reason = ""
-        # Look up reason from target's (or any ancestor's) declared deps
-        # Walk available skills to find who declares this dep and why
-        for skill_name, skill_info in available.items():
-            if skill_name == dep_name:
-                continue
-            skill_path = source_dir / skill_info.get("path", skill_name)
-            from ..lib.skills_manifest import parse_skill_frontmatter as _psf
-            fm = _psf(skill_path)
-            if fm:
-                for sdep in fm.get("dependencies", []):
-                    if sdep.name == dep_name:
-                        reason = sdep.reason
-                        break
-            if reason:
-                break
-        deps_to_prompt.append({"name": dep_name, "version": dep_version, "reason": reason})
+    # Build the list of dep dicts for the prompt — reason comes from DepToInstall, no re-scan
+    deps_to_prompt = [
+        {"name": d.name, "version": available[d.name].get("version", "0.0.0"), "reason": d.reason}
+        for d in graph.to_install
+    ]
 
-    target_version = available.get(name, {}).get("version", "?")
+    target_version = available.get(name, {}).get("version", "0.0.0")
     approved = prompt_dep_install(name, target_version, deps_to_prompt, assume_yes=yes)
     if not approved:
         Console.info("Install aborted.")
@@ -272,15 +254,15 @@ def _resolve_and_prompt_deps(
 
     # Install each dep in topological order
     target_dir = getattr(scope, "skills_dir")
-    for dep_name in graph.to_install:
-        dep_info = available[dep_name]
-        dep_src = source_dir / dep_info.get("path", dep_name)
-        dep_dst = target_dir / dep_name
-        Console.print(f"  Installing dependency: {dep_name} v{dep_info.get('version', '?')}...")
+    for d in graph.to_install:
+        dep_info = available[d.name]
+        dep_src = source_dir / dep_info.get("path", d.name)
+        dep_dst = target_dir / d.name
+        Console.print(f"  Installing dependency: {d.name} v{dep_info.get('version', '0.0.0')}...")
         _install_single_item(
             item_type="skill",
             plural="skills",
-            name=dep_name,
+            name=d.name,
             src=dep_src,
             dst=dep_dst,
             target_dir=target_dir,
@@ -288,7 +270,7 @@ def _resolve_and_prompt_deps(
             manifest_file=manifest_file,
             item_info=dep_info,
         )
-        Console.success(f"Installed dependency: {dep_name} v{dep_info.get('version', '0.0.0')}")
+        Console.success(f"Installed dependency: {d.name} v{dep_info.get('version', '0.0.0')}")
 
 
 def _install_mcp(name: str, global_flag: bool, yes: bool) -> None:
