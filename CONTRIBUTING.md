@@ -75,6 +75,38 @@ The Python CLI lives in `aec/`. When adding or changing CLI commands:
 - Shared utilities go in `aec/lib/`
 - Keep feature parity with the shell scripts in `scripts/`
 
+#### Skill dependencies
+
+Skills can declare `min_version` constraints on other skills via a `dependencies` block in `SKILL.md` frontmatter. AEC resolves the full dependency graph at install and upgrade time.
+
+**Key files:**
+
+| File | Purpose |
+|------|---------|
+| `aec/lib/skills_manifest.py` | `parse_dependencies_block()` — reads `dependencies.skills` from frontmatter |
+| `aec/lib/skill_dependencies.py` | `resolve_install_graph()` — DFS topological sort, returns `ResolvedGraph` |
+| `aec/lib/dep_approval_prompt.py` | `prompt_dep_install()`, `prompt_dep_upgrade_conflict()` — user-facing prompts |
+| `aec/commands/install_cmd.py` | `_resolve_and_prompt_deps()` — wires resolver into install flow |
+| `aec/commands/upgrade.py` | `_check_and_upgrade_dep_conflicts()` — wires resolver into upgrade flow |
+
+**`ResolvedGraph` fields:**
+
+- `to_install` — deps that need to be installed (topologically ordered, leaves first)
+- `already_satisfied` — deps already installed at a sufficient version
+- `version_conflicts` — deps installed below the required `min_version` (each is a `VersionConflict` with `name`, `required_min`, `installed_ver`)
+- `missing` — deps not found in the catalog
+- `cycles` — any dependency cycles detected
+
+**`installedAs` field:**
+
+Every skill manifest record carries `installedAs: "explicit" | "dependency"`. Skills installed directly by the user get `"explicit"`; skills installed to satisfy a dep get `"dependency"`. Existing records without this field are backfilled with `"explicit"` on first load.
+
+**Adding a new skill with dependencies:**
+
+1. Add the `dependencies` block to the skill's `SKILL.md` (see README for the exact YAML shape).
+2. Run `python -m pytest tests/test_skill_dependencies.py` to verify the resolver handles the new graph.
+3. `parse_dependencies_block` raises `ValueError` on malformed frontmatter — treat this as a hard error; fix the SKILL.md rather than catching it in callers.
+
 ### Shell Scripts (`scripts/`)
 
 Shell scripts provide macOS/Linux support and must stay in sync with the Python CLI. If you change behavior in one, update the other.
