@@ -81,3 +81,8 @@ def test_new_agent_config(self):
     result = generate_hook_config("new-agent", ["my-lint-cmd"])
     assert "hooks" in result
 ```
+
+## Related Guides
+
+- [Adding a Git Provider](adding-git-provider-support.md) — add GitLab, Bitbucket, or other providers to the git essentials checklist
+- [Adding a Test Framework](adding-test-framework-support.md) — add new test framework detection

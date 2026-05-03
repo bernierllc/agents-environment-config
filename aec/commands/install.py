@@ -1,5 +1,6 @@
 """Install command: aec install - Full setup of agents-environment-config."""
 
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -12,6 +13,37 @@ except ImportError:
 from ..lib import Console, get_repo_root, init_aec_home
 from ..lib.git import is_git_repo, has_gitmodules, init_submodules, update_submodule
 from . import agent_tools, rules
+
+
+def _update_submodules_from_config(repo_root: Path, dry_run: bool = False) -> None:
+    """Update submodules listed in scripts/sync-config.json.
+
+    Args:
+        repo_root: Path to the repository root.
+        dry_run: If True, report what would happen without making changes.
+    """
+    sync_config_path = repo_root / "scripts" / "sync-config.json"
+    if not sync_config_path.exists():
+        Console.warning("scripts/sync-config.json not found — skipping submodule updates")
+        return
+    try:
+        sync_config = json.loads(sync_config_path.read_text())
+    except json.JSONDecodeError:
+        Console.warning("scripts/sync-config.json is malformed — skipping submodule updates")
+        return
+    for key, entry in sync_config.get("submodules", {}).items():
+        sub_path = entry.get("path")
+        if not sub_path:
+            Console.warning(f"Submodule '{key}' has no 'path' — skipping")
+            continue
+        display = entry.get("display_name", key)
+        if (repo_root / sub_path).exists():
+            Console.print(f"  Updating {display}...")
+            success, result = update_submodule(repo_root, sub_path, dry_run)
+            if success:
+                Console.success(f"{display.capitalize()} updated to {result}")
+            else:
+                Console.warning(f"{display}: {result}")
 
 
 def _cleanup_legacy_symlinks(
@@ -485,25 +517,8 @@ def install(dry_run: bool = False) -> None:
             else:
                 Console.warning(f"Submodule init: {message}")
 
-            # Update agents submodule
-            agents_path = ".claude/agents"
-            if (repo_root / agents_path).exists():
-                Console.print("  Updating agents...")
-                success, result = update_submodule(repo_root, agents_path, dry_run)
-                if success:
-                    Console.success(f"Agents updated to {result}")
-                else:
-                    Console.warning(f"Agents: {result}")
-
-            # Update skills submodule
-            skills_path = ".claude/skills"
-            if (repo_root / skills_path).exists():
-                Console.print("  Updating skills...")
-                success, result = update_submodule(repo_root, skills_path, dry_run)
-                if success:
-                    Console.success(f"Skills updated to {result}")
-                else:
-                    Console.warning(f"Skills: {result}")
+            # Update each submodule defined in sync-config.json
+            _update_submodules_from_config(repo_root, dry_run)
     else:
         Console.info("Not a git repository or no submodules - skipping submodule update")
 

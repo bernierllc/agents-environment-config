@@ -1,0 +1,14 @@
+{
+  "languages": {
+    "typescript": ["Node.gitignore"],
+    "python": ["Python.gitignore"],
+    "rust": ["Rust.gitignore"],
+    "go": ["Go.gitignore"],
+    "ruby": ["Ruby.gitignore"]
+  },
+  "frameworks": {
+    "nextjs": ["Nextjs.gitignore", "Node.gitignore"],
+    "jest": ["Node.gitignore"],
+    "pytest": ["Python.gitignore"]
+  }
+}

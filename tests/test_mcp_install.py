@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
+from typing import Optional
 
 from aec.lib.mcp_settings import (
     get_settings_path,
@@ -308,7 +309,7 @@ class TestInstallMcp:
 # ---------------------------------------------------------------------------
 
 class TestUninstallMcp:
-    def _write_installed_mcp(self, home: Path, settings_data: dict | None = None) -> None:
+    def _write_installed_mcp(self, home: Path, settings_data: Optional[dict] = None) -> None:
         aec_home = home / ".agents-environment-config"
         aec_home.mkdir(parents=True, exist_ok=True)
 
