@@ -349,3 +349,140 @@ class TestManifestRecovery:
         assert "my-skill" in manifest["skills"]
         assert manifest["skills"]["my-skill"]["version"] == "1.5.0"
         assert manifest["skills"]["my-skill"]["contentHash"].startswith("sha256:")
+
+
+class TestParseDependencies:
+    """Test parsing of dependencies.skills frontmatter block."""
+
+    PLAYWRIGHT_SKILL_MD = (
+        "---\n"
+        "name: playwright-test-generator\n"
+        "version: 3.5.0\n"
+        "dependencies:\n"
+        "  skills:\n"
+        "    - name: verification-writer\n"
+        '      min_version: "3.3.0"\n'
+        '      reason: "Reads verification page docs from docs/verification/pages/,'
+        " including affected_paths globs and generated_by version stamps in"
+        ' frontmatter."\n'
+        "---\n"
+        "# Playwright Test Generator\n"
+    )
+
+    def _make_skill(self, temp_dir: Path, name: str, content: str) -> Path:
+        skill_dir = temp_dir / name
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(content)
+        return skill_dir
+
+    def test_no_dependencies_returns_empty_list(self, temp_dir: Path):
+        skill_dir = self._make_skill(
+            temp_dir,
+            "simple-skill",
+            "---\nname: simple-skill\nversion: 1.0.0\n---\n# Simple\n",
+        )
+        from aec.lib.skills_manifest import parse_skill_frontmatter
+
+        result = parse_skill_frontmatter(skill_dir)
+        assert result is not None
+        assert result["dependencies"] == []
+
+    def test_single_dependency_parsed(self, temp_dir: Path):
+        skill_dir = self._make_skill(
+            temp_dir, "playwright-test-generator", self.PLAYWRIGHT_SKILL_MD
+        )
+        from aec.lib.skills_manifest import SkillDep, parse_skill_frontmatter
+
+        result = parse_skill_frontmatter(skill_dir)
+        assert result is not None
+        deps = result["dependencies"]
+        assert len(deps) == 1
+        dep = deps[0]
+        assert isinstance(dep, SkillDep)
+        assert dep.name == "verification-writer"
+        assert dep.min_version == "3.3.0"
+        assert dep.reason.startswith("Reads verification page docs")
+
+    def test_multiple_dependencies_parsed(self, temp_dir: Path):
+        content = (
+            "---\n"
+            "name: multi-dep-skill\n"
+            "version: 1.0.0\n"
+            "dependencies:\n"
+            "  skills:\n"
+            "    - name: skill-one\n"
+            '      min_version: "1.0.0"\n'
+            '      reason: "First dependency reason."\n'
+            "    - name: skill-two\n"
+            '      min_version: "2.1.0"\n'
+            '      reason: "Second dependency reason."\n'
+            "---\n"
+            "# Multi Dep Skill\n"
+        )
+        skill_dir = self._make_skill(temp_dir, "multi-dep-skill", content)
+        from aec.lib.skills_manifest import SkillDep, parse_skill_frontmatter
+
+        result = parse_skill_frontmatter(skill_dir)
+        assert result is not None
+        deps = result["dependencies"]
+        assert len(deps) == 2
+        assert isinstance(deps[0], SkillDep)
+        assert deps[0].name == "skill-one"
+        assert deps[0].min_version == "1.0.0"
+        assert deps[1].name == "skill-two"
+        assert deps[1].min_version == "2.1.0"
+
+    def test_malformed_missing_reason_returns_none(self, temp_dir: Path):
+        content = (
+            "---\n"
+            "name: broken-skill\n"
+            "version: 1.0.0\n"
+            "dependencies:\n"
+            "  skills:\n"
+            "    - name: some-dep\n"
+            '      min_version: "1.0.0"\n'
+            "---\n"
+            "# Broken (no reason)\n"
+        )
+        skill_dir = self._make_skill(temp_dir, "broken-skill", content)
+        from aec.lib.skills_manifest import parse_skill_frontmatter
+
+        result = parse_skill_frontmatter(skill_dir)
+        assert result is None
+
+    def test_malformed_missing_name_returns_none(self, temp_dir: Path):
+        content = (
+            "---\n"
+            "name: broken-skill\n"
+            "version: 1.0.0\n"
+            "dependencies:\n"
+            "  skills:\n"
+            "    - min_version: \"1.0.0\"\n"
+            '      reason: "Has no name field."\n'
+            "---\n"
+            "# Broken (no name)\n"
+        )
+        skill_dir = self._make_skill(temp_dir, "broken-skill2", content)
+        from aec.lib.skills_manifest import parse_skill_frontmatter
+
+        result = parse_skill_frontmatter(skill_dir)
+        assert result is None
+
+    def test_malformed_bad_semver_returns_none(self, temp_dir: Path):
+        content = (
+            "---\n"
+            "name: broken-skill\n"
+            "version: 1.0.0\n"
+            "dependencies:\n"
+            "  skills:\n"
+            "    - name: some-dep\n"
+            '      min_version: "not-semver"\n'
+            '      reason: "Bad version string."\n'
+            "---\n"
+            "# Broken (bad semver)\n"
+        )
+        skill_dir = self._make_skill(temp_dir, "broken-skill3", content)
+        from aec.lib.skills_manifest import parse_skill_frontmatter
+
+        result = parse_skill_frontmatter(skill_dir)
+        assert result is None
