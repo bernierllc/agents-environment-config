@@ -4,3 +4,9 @@
 [submodule ".claude/skills"]
 	path = .claude/skills
 	url = https://github.com/bernierllc/claude-skills.git
+[submodule "aec/templates/gitignore"]
+	path = aec/templates/gitignore
+	url = https://github.com/github/gitignore.git
+[submodule "aec_templates_gitignore"]
+	path = aec/templates/gitignore
+	url = https://github.com/github/gitignore.git
