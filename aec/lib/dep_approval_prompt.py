@@ -71,3 +71,31 @@ def prompt_dep_install(
 
     # "n" or anything else → abort
     return False
+
+
+def prompt_dep_upgrade_conflict(
+    target: str,
+    target_new_version: str,
+    dep_name: str,
+    required_min: str,
+    installed_ver: str,
+    assume_yes: bool = False,
+) -> bool:
+    """Prompt to upgrade a dep whose installed version no longer satisfies the updated target's constraint.
+
+    Returns True if the dep should be upgraded (proceed with target upgrade),
+    False to abort the target upgrade entirely.
+    """
+    if assume_yes:
+        return True
+
+    try:
+        resp = input(
+            f"Updating {target} to {target_new_version} requires {dep_name} "
+            f">={required_min} (currently {installed_ver}). "
+            f"Update {dep_name} too? [y/n/cancel]: "
+        ).strip().lower()
+    except EOFError:
+        resp = "n"
+
+    return resp == "y"

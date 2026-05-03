@@ -230,11 +230,10 @@ def _resolve_and_prompt_deps(
         raise SystemExit(1)
 
     # Soft warning for version conflicts
-    for dep_name in graph.version_conflicts:
-        dep_info = available.get(dep_name, {})
+    for vc in graph.version_conflicts:
         Console.warning(
-            f"  Warning: '{dep_name}' is installed but below the required version. "
-            f"Update it manually with `aec update skill {dep_name}`."
+            f"  Warning: '{vc.name}' is installed at {vc.installed_ver} but "
+            f">={vc.required_min} is required. Update it with `aec upgrade`."
         )
 
     if not graph.to_install:
