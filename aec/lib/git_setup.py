@@ -35,7 +35,8 @@ def build_composite_gitignore(
     lines, and appends AEC-specific patterns. Falls back to AEC patterns only if
     the submodule is not initialized.
     """
-    supported_json = templates_dir / "gitignore" / "supported.json"
+    # supported.json lives in our repo (one level up from the submodule), not inside it
+    supported_json = templates_dir / "gitignore_supported.json"
     # Templates are at submodule root (github/gitignore), NOT in a 'templates/' subdirectory
     gitignore_templates_dir = templates_dir / "gitignore"
 

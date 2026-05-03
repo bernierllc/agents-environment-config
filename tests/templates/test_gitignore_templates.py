@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent.parent
-SUPPORTED_JSON = REPO_ROOT / "aec" / "templates" / "gitignore" / "supported.json"
+SUPPORTED_JSON = REPO_ROOT / "aec" / "templates" / "gitignore_supported.json"
 TEMPLATES_DIR = REPO_ROOT / "aec" / "templates" / "gitignore"
 
 
