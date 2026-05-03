@@ -22,6 +22,8 @@ from ..lib.skills_manifest import (
     hash_skill_directory,
     plan_skill_directory_replace,
 )
+from ..lib.skill_dependencies import resolve_install_graph
+from ..lib.dep_approval_prompt import prompt_dep_upgrade_conflict, prompt_dep_install
 
 
 def _manifest_path() -> Path:
@@ -157,6 +159,131 @@ def _repair_extensionless_agents(
     return repaired
 
 
+def _check_and_upgrade_dep_conflicts(
+    target: str,
+    new_version: str,
+    manifest: dict,
+    scope: str,
+    available: dict,
+    source_dir: Path,
+    target_dir: Path,
+    yes: bool,
+    dry_run: bool,
+) -> bool:
+    """Check dep constraints of the new skill version and resolve any conflicts.
+
+    Reads the NEW skill's SKILL.md (from source_dir) and compares each declared
+    dependency's min_version against the currently installed version.  For each
+    conflict the user is prompted to upgrade the dep first; declining aborts the
+    target skill upgrade.
+
+    Returns True if the upgrade should proceed, False to skip this skill.
+    """
+    installed_skills = get_installed(manifest, scope, "skills")
+    graph = resolve_install_graph(target, available, installed_skills, source_dir)
+
+    if not graph.version_conflicts and not graph.to_install and not graph.missing and not graph.cycles:
+        return True
+
+    if graph.missing:
+        Console.warning(
+            f"  Skipping upgrade of {target}: required deps not in catalog: "
+            + ", ".join(graph.missing)
+        )
+        return False
+
+    if graph.cycles:
+        for cycle in graph.cycles:
+            Console.warning(f"  Dependency cycle: {' → '.join(cycle)}")
+        Console.warning(f"  Skipping upgrade of {target} due to dependency cycle.")
+        return False
+
+    # Version conflicts: installed dep is below the new target's min_version
+    for vc in graph.version_conflicts:
+        if dry_run:
+            Console.print(
+                f"  would upgrade dep  {vc.name}  {vc.installed_ver} -> "
+                f">={vc.required_min}  (required by {target} {new_version})"
+            )
+            continue
+
+        approved = prompt_dep_upgrade_conflict(
+            target, new_version, vc.name, vc.required_min, vc.installed_ver,
+            assume_yes=yes,
+        )
+        if not approved:
+            Console.info(f"  Skipped upgrade of {target} (dep constraint not met).")
+            return False
+
+        if vc.name not in available:
+            Console.warning(f"  Cannot upgrade {vc.name}: not found in catalog.")
+            return False
+
+        dep_avail = available[vc.name]
+        dep_src = source_dir / dep_avail.get("path", vc.name)
+        dep_existing = resolve_installed_path(target_dir, vc.name)
+        dep_dst = installed_dst_path(target_dir, vc.name, dep_src)
+
+        if dep_existing.exists():
+            if dep_existing.is_dir():
+                shutil.rmtree(dep_existing)
+            else:
+                dep_existing.unlink()
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+        if dep_src.is_dir():
+            shutil.copytree(dep_src, dep_dst, ignore=shutil.ignore_patterns(".*"))
+        else:
+            shutil.copy2(dep_src, dep_dst)
+
+        dep_hash = hash_skill_directory(dep_dst) if dep_dst.is_dir() else ""
+        dep_ver = dep_avail.get("version", "0.0.0")
+        record_install(manifest, scope, "skills", vc.name, dep_ver, dep_hash, installed_as="dependency")
+        record_item_install_pertype("skill", vc.name, dep_ver, dep_hash)
+        Console.success(f"  Upgraded dep: {vc.name}  {vc.installed_ver} -> {dep_ver}")
+
+    # New deps introduced by the upgraded version (not previously required)
+    if graph.to_install and not dry_run:
+        deps_to_prompt = [
+            {
+                "name": d.name,
+                "version": available[d.name].get("version", "0.0.0"),
+                "reason": d.reason,
+            }
+            for d in graph.to_install
+        ]
+        approved = prompt_dep_install(target, new_version, deps_to_prompt, assume_yes=yes)
+        if not approved:
+            Console.info(f"  Skipped upgrade of {target} (new dep install declined).")
+            return False
+
+        for d in graph.to_install:
+            dep_avail = available[d.name]
+            dep_src = source_dir / dep_avail.get("path", d.name)
+            dep_existing = resolve_installed_path(target_dir, d.name)
+            dep_dst = installed_dst_path(target_dir, d.name, dep_src)
+
+            if dep_existing.exists():
+                if dep_existing.is_dir():
+                    shutil.rmtree(dep_existing)
+                else:
+                    dep_existing.unlink()
+
+            target_dir.mkdir(parents=True, exist_ok=True)
+            if dep_src.is_dir():
+                shutil.copytree(dep_src, dep_dst, ignore=shutil.ignore_patterns(".*"))
+            else:
+                shutil.copy2(dep_src, dep_dst)
+
+            dep_hash = hash_skill_directory(dep_dst) if dep_dst.is_dir() else ""
+            dep_ver = dep_avail.get("version", "0.0.0")
+            record_install(manifest, scope, "skills", d.name, dep_ver, dep_hash, installed_as="dependency")
+            record_item_install_pertype("skill", d.name, dep_ver, dep_hash)
+            Console.success(f"  Installed new dep: {d.name} {dep_ver}")
+
+    return True
+
+
 def _upgrade_scope(
     manifest: dict,
     scope: str,
@@ -194,8 +321,21 @@ def _upgrade_scope(
                 Console.print(
                     f"  would upgrade {item_type[:-1]}  {name}  {inst_v} -> {avail_v}"
                 )
+                if item_type == "skills":
+                    _check_and_upgrade_dep_conflicts(
+                        name, avail_v, manifest, scope, available,
+                        source_dir, target, yes, dry_run=True,
+                    )
                 upgraded = True
                 continue
+
+            # For skills, resolve dep constraints of the new version before upgrading
+            if item_type == "skills":
+                if not _check_and_upgrade_dep_conflicts(
+                    name, avail_v, manifest, scope, available,
+                    source_dir, target, yes, dry_run=False,
+                ):
+                    continue
 
             do_prompt = False
             if item_type == "skills" and src_path.is_dir() and existing_path.exists():
@@ -205,7 +345,8 @@ def _upgrade_scope(
                 if plan == "sync_manifest":
                     sh = hash_skill_directory(src_path)
                     record_install(
-                        manifest, scope, item_type, name, avail_v, sh
+                        manifest, scope, item_type, name, avail_v, sh,
+                        installed_as=info.get("installedAs", "explicit"),
                     )
                     record_item_install_pertype(
                         item_type[:-1], name, avail_v, sh
@@ -258,7 +399,10 @@ def _upgrade_scope(
                 shutil.copy2(src_path, dst_path)
 
             content_hash = hash_skill_directory(dst_path) if dst_path.is_dir() else ""
-            record_install(manifest, scope, item_type, name, avail_v, content_hash)
+            record_install(
+                manifest, scope, item_type, name, avail_v, content_hash,
+                installed_as=info.get("installedAs", "explicit"),
+            )
 
             # Dual-write to per-type installed file (best-effort during transition)
             record_item_install_pertype(item_type[:-1], name, avail_v, content_hash)

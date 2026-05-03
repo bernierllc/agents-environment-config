@@ -125,6 +125,49 @@ class TestManifestOperations:
         loaded = load_manifest(manifest_path)
         assert "my-skill" not in loaded["global"]["skills"]
 
+    def test_record_install_skill_defaults_to_explicit(self, manifest_path):
+        from aec.lib.manifest_v2 import load_manifest, record_install
+        m = load_manifest(manifest_path)
+        record_install(m, scope="global", item_type="skills", name="my-skill",
+                       version="1.0.0", content_hash="sha256:abc")
+        assert m["global"]["skills"]["my-skill"]["installedAs"] == "explicit"
+
+    def test_record_install_skill_as_dependency(self, manifest_path):
+        from aec.lib.manifest_v2 import load_manifest, record_install
+        m = load_manifest(manifest_path)
+        record_install(m, scope="global", item_type="skills", name="dep-skill",
+                       version="1.0.0", content_hash="sha256:abc", installed_as="dependency")
+        assert m["global"]["skills"]["dep-skill"]["installedAs"] == "dependency"
+
+    def test_load_manifest_backfills_missing_installed_as(self, manifest_path):
+        from aec.lib.manifest_v2 import load_manifest, save_manifest
+        m = load_manifest(manifest_path)
+        m["global"]["skills"]["old-skill"] = {
+            "version": "1.0.0",
+            "contentHash": "sha256:abc",
+            "installedAt": "2026-01-01T00:00:00Z",
+        }
+        save_manifest(m, manifest_path)
+        loaded = load_manifest(manifest_path)
+        assert loaded["global"]["skills"]["old-skill"]["installedAs"] == "explicit"
+
+    def test_load_manifest_backfills_repo_scope_installed_as(self, manifest_path):
+        from aec.lib.manifest_v2 import load_manifest, save_manifest
+        m = load_manifest(manifest_path)
+        m["repos"]["/some/repo"] = {
+            "skills": {
+                "repo-skill": {
+                    "version": "2.0.0",
+                    "contentHash": "sha256:xyz",
+                    "installedAt": "2026-01-01T00:00:00Z",
+                }
+            },
+            "rules": {}, "agents": {}, "mcps": {},
+        }
+        save_manifest(m, manifest_path)
+        loaded = load_manifest(manifest_path)
+        assert loaded["repos"]["/some/repo"]["skills"]["repo-skill"]["installedAs"] == "explicit"
+
     def test_get_installed_items(self, manifest_path):
         from aec.lib.manifest_v2 import load_manifest, record_install, get_installed
         m = load_manifest(manifest_path)

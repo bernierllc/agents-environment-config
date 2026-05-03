@@ -16,6 +16,8 @@ from ..lib.scope import resolve_scope, Scope, ScopeError
 from ..lib.sources import discover_available, get_source_dirs
 from ..lib.installed_store import record_item_install
 from ..lib.skills_manifest import hash_skill_directory
+from ..lib.skill_dependencies import resolve_install_graph
+from ..lib.dep_approval_prompt import prompt_dep_install
 
 VALID_TYPES = ("skill", "rule", "agent", "mcp")
 TYPE_TO_PLURAL = {"skill": "skills", "rule": "rules", "agent": "agents", "mcp": "mcps"}
@@ -92,7 +94,22 @@ def run_install(
             return
 
     scope_label = "globally" if scope.is_global else f"to {scope.repo_path}"
-    Console.print(f"Installing {name} v{item_info.get('version', '?')} {scope_label}...")
+    Console.print(f"Installing {name} v{item_info.get('version', '0.0.0')} {scope_label}...")
+
+    scope_key = "global" if scope.is_global else str(scope.repo_path.resolve())
+
+    # Resolve and install skill dependencies before the main install
+    if item_type == "skill":
+        if scope.is_global:
+            installed_skills = manifest["global"]["skills"]
+        else:
+            installed_skills = manifest.get("repos", {}).get(
+                str(scope.repo_path.resolve()), {}
+            ).get("skills", {})
+        _resolve_and_prompt_deps(
+            name, available, installed_skills, source_dir,
+            scope, scope_key, manifest, manifest_file, yes,
+        )
 
     if dst.exists() and not yes:
         try:
@@ -103,6 +120,50 @@ def run_install(
             Console.info("Skipped.")
             return
 
+    _install_single_item(
+        item_type=item_type,
+        plural=plural,
+        name=name,
+        src=src,
+        dst=dst,
+        target_dir=target_dir,
+        scope_key=scope_key,
+        manifest_file=manifest_file,
+        item_info=item_info,
+    )
+    Console.success(f"Installed {name} v{item_info.get('version', '0.0.0')}")
+
+    # Quick-scan notification for global installs
+    if scope.is_global:
+        try:
+            from ..lib.discovery_hooks import quick_scan_notification
+            quick_scan_notification(scope)
+        except ImportError:
+            pass
+
+    # Skill-specific post-install steps
+    if item_type == "skill" and name == "playwright-test-generator":
+        _post_install_playwright_pipeline(name, scope, yes=yes)
+
+
+def _install_single_item(
+    *,
+    item_type: str,
+    plural: str,
+    name: str,
+    src: Path,
+    dst: Path,
+    target_dir: Path,
+    scope_key: str,
+    manifest_file: Path,
+    item_info: dict,
+    installed_as: str = "explicit",
+) -> None:
+    """Copy ``src`` to ``dst`` and record the install in the manifest.
+
+    Non-interactive: callers are responsible for any overwrite prompts before
+    calling this function.
+    """
     if dst.exists():
         if dst.is_dir():
             shutil.rmtree(dst)
@@ -117,29 +178,101 @@ def run_install(
 
     content_hash = hash_skill_directory(dst) if dst.is_dir() else ""
     manifest = load_manifest(manifest_file)
-    scope_key = "global" if scope.is_global else str(scope.repo_path.resolve())
     record_install(
         manifest, scope_key, plural, name,
         item_info.get("version", "0.0.0"), content_hash,
+        installed_as=installed_as,
     )
     save_manifest(manifest, manifest_file)
 
     # Dual-write to per-type installed file (best-effort during transition)
     record_item_install(item_type, name, item_info.get("version", "0.0.0"), content_hash)
 
-    Console.success(f"Installed {name} v{item_info.get('version', '0.0.0')}")
 
-    # Quick-scan notification for global installs
-    if scope.is_global:
-        try:
-            from ..lib.discovery_hooks import quick_scan_notification
-            quick_scan_notification(scope)
-        except ImportError:
-            pass
+def _resolve_and_prompt_deps(
+    name: str,
+    available: dict,
+    installed_skills: dict,
+    source_dir: Path,
+    scope: "Scope",
+    scope_key: str,
+    manifest: dict,
+    manifest_file: Path,
+    yes: bool,
+) -> None:
+    """Resolve skill dependencies and prompt the user for approval.
 
-    # Skill-specific post-install steps
-    if item_type == "skill" and name == "playwright-test-generator":
-        _post_install_playwright_pipeline(name, scope, yes=yes)
+    Modifies *manifest* in place as deps are installed.  Aborts via
+    ``SystemExit(1)`` on missing deps, cycles, or user rejection.
+
+    Args:
+        name: The skill being installed (not a dep itself).
+        available: Full catalog dict returned by ``discover_available``.
+        installed_skills: Installed skills for the target scope.
+        source_dir: Root of the skills source tree.
+        scope: Resolved install scope.
+        scope_key: Manifest scope key (``"global"`` or repo path string).
+        manifest: Loaded v2 manifest dict.
+        manifest_file: Path to the manifest file for reloading after each dep.
+        yes: Whether ``-y`` was passed (skip all prompts).
+    """
+    graph = resolve_install_graph(name, available, installed_skills, source_dir)
+
+    # Hard failures
+    if graph.missing:
+        Console.error(
+            f"Cannot install '{name}': missing required dependencies not in catalog: "
+            + ", ".join(graph.missing)
+        )
+        raise SystemExit(1)
+
+    if graph.cycles:
+        for cycle in graph.cycles:
+            Console.error(f"Dependency cycle detected: {' → '.join(cycle)}")
+        raise SystemExit(1)
+
+    # Soft warning for version conflicts
+    for vc in graph.version_conflicts:
+        Console.warning(
+            f"  Warning: '{vc.name}' is installed at {vc.installed_ver} but "
+            f">={vc.required_min} is required. Update it with `aec upgrade`."
+        )
+
+    if not graph.to_install:
+        return
+
+    # Build the list of dep dicts for the prompt — reason comes from DepToInstall, no re-scan
+    deps_to_prompt = [
+        {"name": d.name, "version": available[d.name].get("version", "0.0.0"), "reason": d.reason}
+        for d in graph.to_install
+    ]
+
+    target_version = available.get(name, {}).get("version", "0.0.0")
+    approved = prompt_dep_install(name, target_version, deps_to_prompt, assume_yes=yes)
+    if not approved:
+        Console.info("Install aborted.")
+        raise SystemExit(1)
+
+    # Install each dep in topological order
+    target_dir = getattr(scope, "skills_dir")
+    for d in graph.to_install:
+        dep_info = available[d.name]
+        dep_src = source_dir / dep_info.get("path", d.name)
+        dep_dst = target_dir / d.name
+        Console.print(f"  Installing dependency: {d.name} v{dep_info.get('version', '0.0.0')}...")
+        _install_single_item(
+            item_type="skill",
+            plural="skills",
+            name=d.name,
+            src=dep_src,
+            dst=dep_dst,
+            target_dir=target_dir,
+            scope_key=scope_key,
+            manifest_file=manifest_file,
+            item_info=dep_info,
+            installed_as="dependency",
+        )
+        Console.success(f"Installed dependency: {d.name} v{dep_info.get('version', '0.0.0')}")
 
 
 def _install_mcp(name: str, global_flag: bool, yes: bool) -> None:
@@ -220,7 +353,7 @@ def _install_mcp(name: str, global_flag: bool, yes: bool) -> None:
     record_item_install("mcp", name, item_info.get("version", "0.0.0"))
 
     scope_label = "globally" if scope.is_global else f"to {scope.repo_path}"
-    Console.success(f"Installed MCP server: {name} v{item_info.get('version', '?')} {scope_label}")
+    Console.success(f"Installed MCP server: {name} v{item_info.get('version', '0.0.0')} {scope_label}")
     Console.print(f"  mcpServers entry written to {settings_path}")
     Console.print("  Restart Claude Code for the MCP server to take effect.")
 

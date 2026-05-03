@@ -5,7 +5,150 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import List, NamedTuple, Optional, Dict, Any
+
+
+class SkillDep(NamedTuple):
+    """A declared skill dependency from SKILL.md frontmatter."""
+
+    name: str
+    min_version: str
+    reason: str
+
+
+# Semver pattern: x.y.z where x, y, z are non-negative integers.
+_SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
+
+
+def _is_valid_semver(value: str) -> bool:
+    return bool(_SEMVER_RE.match(value))
+
+
+def parse_dependencies_block(text: str) -> List[SkillDep]:
+    """Parse the ``dependencies.skills`` block from raw YAML frontmatter text.
+
+    Handles only the exact shape:
+        dependencies:
+          skills:
+            - name: <str>
+              min_version: "<semver>"
+              reason: "<str>"
+
+    Returns an empty list if no ``dependencies`` block is present.
+
+    Raises ValueError with a descriptive message if the block is present but
+    malformed (missing required field, or min_version is not valid semver).
+
+    Design note: we use a targeted line-by-line parser so we don't need PyYAML.
+    All other frontmatter fields remain parsed by the existing regex scalar parser.
+
+    Indentation requirement: this parser requires exact 2/4/6-space indentation —
+    ``dependencies:`` at column 0, ``skills:`` at 2 spaces, list items (``- name:``)
+    at 4 spaces, and continuation keys (``min_version:``, ``reason:``) at 6 spaces.
+    This is the canonical format defined by the AEC SKILL.md spec.
+    """
+    # Extract the raw frontmatter block.
+    fm_match = re.match(r"^---\s*\n(.*?)\n---", text, re.DOTALL)
+    if not fm_match:
+        return []
+
+    fm_text = fm_match.group(1)
+    lines = fm_text.split("\n")
+
+    # Find the ``dependencies:`` key (unindented).
+    dep_start = None
+    for i, line in enumerate(lines):
+        if re.match(r"^dependencies\s*:", line):
+            dep_start = i
+            break
+
+    if dep_start is None:
+        return []
+
+    # Collect all lines that belong to the dependencies block (indented lines
+    # after the ``dependencies:`` key, until we hit an unindented non-empty line).
+    dep_lines = []
+    for line in lines[dep_start + 1:]:
+        if line == "" or line[0] == " " or line[0] == "\t":
+            dep_lines.append(line)
+        else:
+            break  # Back at top-level key — dependencies block ended.
+
+    # Find ``skills:`` within the block (indented by exactly 2 spaces).
+    skills_start = None
+    for i, line in enumerate(dep_lines):
+        if re.match(r"^\s{2}skills\s*:", line):
+            skills_start = i
+            break
+
+    if skills_start is None:
+        # ``dependencies`` block exists but has no ``skills`` key — not an error,
+        # just no skill deps.
+        return []
+
+    # Parse each ``- name: ...`` entry that follows ``skills:``.
+    # Entries are indented by 4 spaces; item keys by 6 spaces.
+    skill_lines = dep_lines[skills_start + 1:]
+
+    deps: List[SkillDep] = []
+    current: Dict[str, str] = {}
+
+    def _flush_entry(entry: Dict[str, str]) -> SkillDep:
+        """Validate and build a SkillDep from a parsed entry dict."""
+        if "name" not in entry:
+            raise ValueError(
+                "dependencies.skills entry is missing required field 'name'"
+            )
+        if "reason" not in entry:
+            raise ValueError(
+                f"dependencies.skills entry '{entry.get('name', '?')}' "
+                "is missing required field 'reason'"
+            )
+        if "min_version" not in entry:
+            raise ValueError(
+                f"dependencies.skills entry '{entry['name']}' "
+                "is missing required field 'min_version'"
+            )
+        min_ver = entry["min_version"]
+        if not _is_valid_semver(min_ver):
+            raise ValueError(
+                f"dependencies.skills entry '{entry['name']}' has invalid "
+                f"min_version '{min_ver}' — expected semver x.y.z"
+            )
+        return SkillDep(
+            name=entry["name"],
+            min_version=min_ver,
+            reason=entry["reason"],
+        )
+
+    for line in skill_lines:
+        # New list item (indented 4 spaces, starts with ``-``).
+        item_match = re.match(r"^\s{4}-\s+(\w+)\s*:\s*(.*)", line)
+        if item_match:
+            if current:
+                deps.append(_flush_entry(current))
+                current = {}
+            key = item_match.group(1)
+            value = item_match.group(2).strip()
+            if len(value) >= 2 and value[0] in ('"', "'") and value[-1] == value[0]:
+                value = value[1:-1]
+            current[key] = value
+            continue
+
+        # Continuation key within the current item (indented 6 spaces).
+        cont_match = re.match(r"^\s{6}(\w+)\s*:\s*(.*)", line)
+        if cont_match:
+            key = cont_match.group(1)
+            value = cont_match.group(2).strip()
+            if len(value) >= 2 and value[0] in ('"', "'") and value[-1] == value[0]:
+                value = value[1:-1]
+            current[key] = value
+            continue
+
+    if current:
+        deps.append(_flush_entry(current))
+
+    return deps
 
 
 def parse_yaml_frontmatter(text: str) -> Optional[dict]:
@@ -38,8 +181,13 @@ def parse_yaml_frontmatter(text: str) -> Optional[dict]:
 def parse_skill_frontmatter(skill_dir: Path) -> Optional[dict]:
     """Parse SKILL.md frontmatter from a skill directory.
 
-    Returns dict with name, description, version, author, or None if
-    SKILL.md is missing or has no valid frontmatter.
+    Returns dict with name, description, version, author, dependencies, or None
+    if SKILL.md is missing or has no valid frontmatter.
+
+    Failure mode: if the ``dependencies`` block is present but malformed,
+    ``parse_dependencies_block`` raises ``ValueError``. We catch it here and
+    return ``None`` — a skill with corrupt metadata is treated as uninstallable,
+    the same as missing frontmatter.
     """
     skill_md = skill_dir / "SKILL.md"
     if not skill_md.exists():
@@ -53,6 +201,12 @@ def parse_skill_frontmatter(skill_dir: Path) -> Optional[dict]:
     # Default version to 0.0.0 if missing
     if "version" not in fm:
         fm["version"] = "0.0.0"
+
+    # Parse dependencies block — ValueError means malformed metadata → uninstallable.
+    try:
+        fm["dependencies"] = parse_dependencies_block(text)
+    except ValueError:
+        return None
 
     return fm
 
@@ -86,6 +240,7 @@ def build_skill_manifest_item(
     installed_at: str,
     previous: Optional[Dict[str, Any]] = None,
     source: Optional[str] = None,
+    installed_as: str = "explicit",
 ) -> Dict[str, Any]:
     """Build a skill manifest entry with ``versionHashes`` history keyed by semver."""
     prev = previous or {}
@@ -99,6 +254,7 @@ def build_skill_manifest_item(
         "contentHash": content_hash,
         "installedAt": installed_at,
         "versionHashes": vhashes,
+        "installedAs": installed_as,
     }
     if source is not None:
         rec["source"] = source
