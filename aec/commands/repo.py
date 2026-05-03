@@ -35,8 +35,11 @@ from ..lib import (
     get_migration_files,
     AGENT_TOOLS_DIR,
 )
+import subprocess
 from ..lib.config import load_env_file
 from ..lib.git import clone_repo
+from ..lib.git_providers import detect_git_provider, scan_git_essentials, GIT_PROVIDERS
+from ..lib.git_setup import build_composite_gitignore, write_git_essential, execute_commit_strategy, get_templates_root
 
 if HAS_TYPER:
     app = typer.Typer(help="Manage project repositories")
@@ -903,6 +906,172 @@ project's current port assignments.
     Console.success("Added Port Registry section to AGENTINFO.md")
 
 
+def _run_git_phase(project_dir: Path) -> dict:
+    """Run early git detection and essentials checklist.
+
+    Returns git_config dict with keys:
+        git_enabled: bool
+        provider: str | None
+        items_to_create: list[str]
+    """
+    def _agent_name() -> str:
+        agents = detect_agents()
+        return next(iter(agents.keys()), "your AI agent") if agents else "your AI agent"
+
+    provider = detect_git_provider(project_dir)
+
+    if provider is None:
+        # No git detected
+        Console.print("\n  Git not detected in this project.")
+        try:
+            response = input("  Do you intend to use GitHub? (Y/n): ").strip().lower()
+        except EOFError:
+            response = "n"
+
+        if response in ("", "y", "yes"):
+            try:
+                use_init = input("  Want AEC to run git init? (Y/n): ").strip().lower()
+            except EOFError:
+                use_init = "y"
+
+            if use_init in ("", "y", "yes"):
+                result = subprocess.run(
+                    ["git", "init"], cwd=project_dir, capture_output=True, text=True
+                )
+                if result.returncode == 0:
+                    Console.success("git init completed.")
+                    provider = "github"
+                else:
+                    Console.warning(f"git init failed: {result.stderr.strip()}")
+                    Console.print(
+                        "  Make sure git is installed: brew install git (macOS) / apt install git (Linux)"
+                    )
+                    Console.print(f"  Ask {_agent_name()} to help troubleshoot if this doesn't help.")
+                    return {"git_enabled": False, "provider": None, "items_to_create": []}
+        else:
+            return {"git_enabled": False, "provider": None, "items_to_create": []}
+
+    if provider == "unknown":
+        Console.warning(
+            "Git detected but provider not identified — skipping git essentials.\n"
+            "  To add support for your provider, see:\n"
+            "  docs/contributors/adding-git-provider-support.md"
+        )
+        return {"git_enabled": False, "provider": "unknown", "items_to_create": []}
+
+    # Provider known — scan and show checklist
+    Console.print(f"\n  Git detected: {GIT_PROVIDERS[provider]['display_name']}")
+    scan = scan_git_essentials(project_dir, provider)
+
+    found = [k for k, v in scan.items() if v == "found"]
+    missing = [k for k, v in scan.items() if v == "missing"]
+
+    if found:
+        Console.print("\n  Already present:")
+        for key in found:
+            display = GIT_PROVIDERS[provider]["essentials"][key]["display"]
+            Console.print(f"    ✓ {display}")
+
+    if not missing:
+        Console.success("All git essentials are present.")
+        return {"git_enabled": True, "provider": provider, "items_to_create": []}
+
+    Console.print("\n  Missing git essentials:")
+    for i, key in enumerate(missing, 1):
+        display = GIT_PROVIDERS[provider]["essentials"][key]["display"]
+        Console.print(f"    [{i}] {display}")
+
+    try:
+        response = input(
+            "\n  Select items for AEC to create\n"
+            "  (comma-separated numbers, 'all', or 'none') [all]: "
+        ).strip().lower()
+    except EOFError:
+        response = "all"
+
+    if response in ("", "all"):
+        items_to_create = missing
+    elif response == "none":
+        items_to_create = []
+    else:
+        selected = []
+        for part in response.split(","):
+            try:
+                idx = int(part.strip()) - 1
+                if 0 <= idx < len(missing):
+                    selected.append(missing[idx])
+            except ValueError:
+                pass
+        items_to_create = selected
+
+    return {"git_enabled": True, "provider": provider, "items_to_create": items_to_create}
+
+
+def _create_git_essentials(
+    project_dir: Path,
+    git_config: dict,
+    detected_languages: List[str],
+    detected_frameworks: List[str],
+    dry_run: bool,
+) -> None:
+    """Create selected git essentials and execute the commit strategy."""
+    if not git_config.get("git_enabled") or not git_config.get("items_to_create"):
+        return
+
+    templates_dir = get_templates_root()
+    provider = git_config["provider"]
+    items = git_config["items_to_create"]
+    agent_name = next(iter(detect_agents().keys()), "your AI agent")
+
+    created_files: List[str] = []
+    if ".gitignore" in items:
+        if not dry_run:
+            content = build_composite_gitignore(detected_languages, detected_frameworks, templates_dir)
+            gitignore_path = project_dir / ".gitignore"
+            if gitignore_path.exists():
+                existing = gitignore_path.read_text()
+                if "# AEC" not in existing:
+                    gitignore_path.write_text(existing + "\n" + content)
+                    Console.success(".gitignore updated with language patterns and AEC section")
+                    created_files.append(".gitignore")
+            else:
+                gitignore_path.write_text(content)
+                Console.success(".gitignore created")
+                created_files.append(".gitignore")
+        else:
+            Console.info("Would create/update .gitignore with language-aware patterns")
+
+    other_items = [i for i in items if i != ".gitignore"]
+    for key in other_items:
+        if dry_run:
+            display = GIT_PROVIDERS[provider]["essentials"][key]["display"]
+            Console.info(f"Would create: {display}")
+            continue
+        written = write_git_essential(project_dir, key, provider, templates_dir)
+        if written:
+            tpl = GIT_PROVIDERS[provider]["essentials"][key]["template"]
+            rel = tpl[len(f"{provider}/"):] if tpl else key
+            Console.success(f"Created: {rel}")
+            created_files.append(rel)
+
+    if dry_run or not created_files:
+        return
+
+    Console.print("\n  How should AEC handle git commits for files it created?")
+    Console.print("    1. One commit at the end [default]")
+    Console.print("    2. Incremental commits per file")
+    Console.print("    3. Stage only (git add, you commit)")
+    Console.print("    4. No git operations")
+    try:
+        choice = input("  Choice [1]: ").strip()
+    except EOFError:
+        choice = "1"
+
+    strategy_map = {"1": "one_commit", "2": "incremental", "3": "stage_only", "4": "none", "": "one_commit"}
+    strategy = strategy_map.get(choice, "one_commit")
+    execute_commit_strategy(project_dir, created_files, strategy, agent_name)
+
+
 def setup(
     path: Optional[str] = None,
     skip_raycast: bool = False,
@@ -1027,6 +1196,9 @@ def setup(
                 Console.error("Aborted")
                 return
 
+    # Run git setup phase (early — gates all later git-aware behavior)
+    git_config = _run_git_phase(project_dir)
+
     # Create directories
     _create_directories(project_dir, dry_run)
 
@@ -1042,9 +1214,6 @@ def setup(
     # Setup lint hooks
     if not dry_run:
         _setup_lint_hooks(project_dir, batch=batch)
-
-    # Update .gitignore
-    _update_gitignore(project_dir, dry_run)
 
     # Create or load .aec.json
     aec_data = _create_or_update_aec_json(project_dir, dry_run)
@@ -1062,6 +1231,23 @@ def setup(
     if not dry_run:
         from ..lib.aec_json import save_aec_json
         save_aec_json(project_dir, aec_data)
+
+    # Git essentials creation (runs after test suite detection so language data is available)
+    if not dry_run:
+        from ..lib import detect_languages as _detect_languages
+        from ..lib.test_detection import detect_test_frameworks as _detect_test_frameworks
+        _detected_languages = [lang for lang in (_detect_languages(project_dir) or [])]
+        _detected_frameworks = [fw["name"] for fw in (_detect_test_frameworks(project_dir) or [])]
+    else:
+        _detected_languages = []
+        _detected_frameworks = []
+    _create_git_essentials(
+        project_dir,
+        git_config,
+        detected_languages=_detected_languages,
+        detected_frameworks=_detected_frameworks,
+        dry_run=dry_run,
+    )
 
     # Manage .aec.json gitignore
     _manage_aec_json_gitignore_step(project_dir, dry_run)
