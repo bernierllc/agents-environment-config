@@ -54,7 +54,7 @@ class TestDetectGitProvider:
     def test_returns_unknown_when_git_but_no_signals(self, tmp_path):
         (tmp_path / ".git").mkdir()
         from aec.lib.git_providers import detect_git_provider
-        with patch("shutil.which", return_value=None):
+        with patch("aec.lib.git_providers.shutil.which", return_value=None):
             with patch.dict(os.environ, {}, clear=True):
                 result = detect_git_provider(tmp_path)
         assert result == "unknown"
@@ -63,7 +63,7 @@ class TestDetectGitProvider:
         (tmp_path / ".git").mkdir()
         (tmp_path / ".github").mkdir()
         from aec.lib.git_providers import detect_git_provider
-        with patch("shutil.which", return_value=None):
+        with patch("aec.lib.git_providers.shutil.which", return_value=None):
             with patch.dict(os.environ, {}, clear=True):
                 result = detect_git_provider(tmp_path)
         assert result == "github"
@@ -71,7 +71,7 @@ class TestDetectGitProvider:
     def test_detects_github_via_gh_command(self, tmp_path):
         (tmp_path / ".git").mkdir()
         from aec.lib.git_providers import detect_git_provider
-        with patch("shutil.which", side_effect=lambda cmd: "/usr/bin/gh" if cmd == "gh" else None):
+        with patch("aec.lib.git_providers.shutil.which", side_effect=lambda cmd: "/usr/bin/gh" if cmd == "gh" else None):
             with patch.dict(os.environ, {}, clear=True):
                 result = detect_git_provider(tmp_path)
         assert result == "github"
@@ -79,7 +79,7 @@ class TestDetectGitProvider:
     def test_detects_github_via_env_var(self, tmp_path):
         (tmp_path / ".git").mkdir()
         from aec.lib.git_providers import detect_git_provider
-        with patch("shutil.which", return_value=None):
+        with patch("aec.lib.git_providers.shutil.which", return_value=None):
             with patch.dict(os.environ, {"GITHUB_TOKEN": "ghp_test"}, clear=False):
                 result = detect_git_provider(tmp_path)
         assert result == "github"
