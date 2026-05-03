@@ -30,6 +30,18 @@ def _empty_manifest() -> dict:
     }
 
 
+def _backfill_installed_as(manifest: dict) -> None:
+    """Backfill installedAs='explicit' for skill records that predate this field."""
+    def _backfill_scope(scope_dict: dict) -> None:
+        for rec in scope_dict.get("skills", {}).values():
+            if isinstance(rec, dict) and "installedAs" not in rec:
+                rec["installedAs"] = "explicit"
+
+    _backfill_scope(manifest.get("global", {}))
+    for scope_dict in manifest.get("repos", {}).values():
+        _backfill_scope(scope_dict)
+
+
 def load_manifest(path: Path) -> dict:
     """Load a v2 manifest from disk, or return an empty v2 structure."""
     if path.exists():
@@ -41,6 +53,7 @@ def load_manifest(path: Path) -> dict:
                 data.setdefault("lastUpdateCheck", None)
                 for key in ITEM_TYPES:
                     data["global"].setdefault(key, {})
+                _backfill_installed_as(data)
                 return data
         except (json.JSONDecodeError, OSError):
             pass
@@ -70,6 +83,7 @@ def record_install(
     name: str,
     version: str,
     content_hash: Optional[str] = None,
+    installed_as: str = "explicit",
 ) -> None:
     """Record an install of a skill, rule, or agent."""
     scope_dict = _get_scope_dict(manifest, scope)
@@ -80,6 +94,7 @@ def record_install(
             content_hash=content_hash or "",
             installed_at=_now_iso(),
             previous=prev if isinstance(prev, dict) else None,
+            installed_as=installed_as,
         )
         return
     scope_dict[item_type][name] = {
