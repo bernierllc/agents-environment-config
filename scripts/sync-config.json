@@ -16,7 +16,7 @@
     "gitignore": {
       "path": "aec/templates/gitignore",
       "display_name": "gitignore templates",
-      "repo": "toptal/gitignore",
+      "repo": "github/gitignore",
       "cursor_target": null
     }
   },
