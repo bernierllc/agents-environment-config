@@ -154,9 +154,38 @@ class TestDirectDepCases:
         result = resolve_install_graph("target-skill", available, installed, temp_dir)
 
         assert result.to_install == []
-        assert "dep-skill" in result.version_conflicts
+        assert any(vc.name == "dep-skill" for vc in result.version_conflicts)
         assert result.missing == []
         assert result.already_satisfied == []
+
+    def test_version_conflict_carries_version_info(self, temp_dir):
+        """VersionConflict entries expose required_min and installed_ver for upgrade prompts."""
+        from aec.lib.skill_dependencies import resolve_install_graph, VersionConflict
+
+        _create_skill_in(temp_dir, "dep-skill", "3.4.0")
+        _create_skill_in(
+            temp_dir,
+            "target-skill",
+            "2.0.0",
+            deps=[{"name": "dep-skill", "min_version": "3.4.0", "reason": "Needs 3.4"}],
+        )
+
+        available = {
+            "target-skill": {"version": "2.0.0", "path": "target-skill"},
+            "dep-skill": {"version": "3.4.0", "path": "dep-skill"},
+        }
+        installed = {
+            "dep-skill": {"version": "3.3.0", "contentHash": "", "installedAt": "2026-01-01"},
+        }
+
+        result = resolve_install_graph("target-skill", available, installed, temp_dir)
+
+        assert len(result.version_conflicts) == 1
+        vc = result.version_conflicts[0]
+        assert isinstance(vc, VersionConflict)
+        assert vc.name == "dep-skill"
+        assert vc.required_min == "3.4.0"
+        assert vc.installed_ver == "3.3.0"
 
     def test_dep_not_in_catalog_in_missing(self, temp_dir):
         """A dep that is unknown to the catalog goes to missing."""

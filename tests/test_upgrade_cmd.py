@@ -415,3 +415,178 @@ class TestRepairExtensionlessAgents:
 
         output = capsys.readouterr().out
         assert "test-agent" in output
+
+
+def _skill_md(name: str, version: str, deps=None) -> str:
+    """Build minimal SKILL.md content with optional dependencies block."""
+    lines = ["---", f"name: {name}", f"version: {version}", "author: Test", "description: x"]
+    if deps:
+        lines += ["dependencies:", "  skills:"]
+        for d in deps:
+            lines += [
+                f'    - name: {d["name"]}',
+                f'      min_version: "{d["min_version"]}"',
+                f'      reason: "{d["reason"]}"',
+            ]
+    lines += ["---", f"# {name}"]
+    return "\n".join(lines) + "\n"
+
+
+@pytest.fixture
+def dep_upgrade_env(temp_dir, monkeypatch):
+    """Environment: main-skill v1→v2 (v2 now requires dep-skill >=2.0.0), dep-skill installed at 1.5.0."""
+    monkeypatch.setattr(Path, "home", lambda: temp_dir)
+
+    aec_home = temp_dir / ".agents-environment-config"
+    aec_home.mkdir()
+    (aec_home / "setup-repo-locations.txt").write_text("")
+
+    repo = temp_dir / "aec-repo"
+    skills_src = repo / ".claude" / "skills"
+
+    # Source: main-skill v2.0.0 with dep on dep-skill >=2.0.0
+    main_src = skills_src / "main-skill"
+    main_src.mkdir(parents=True)
+    (main_src / "SKILL.md").write_text(
+        _skill_md("main-skill", "2.0.0", [{"name": "dep-skill", "min_version": "2.0.0", "reason": "Needs v2"}])
+    )
+
+    # Source: dep-skill v2.0.0
+    dep_src = skills_src / "dep-skill"
+    dep_src.mkdir(parents=True)
+    (dep_src / "SKILL.md").write_text(_skill_md("dep-skill", "2.0.0"))
+
+    (repo / ".git").mkdir()
+    (repo / "aec").mkdir()
+    (repo / ".agent-rules").mkdir()
+    (repo / ".claude" / "agents").mkdir(parents=True)
+
+    # Installed: main-skill v1.0.0 (no deps declared), dep-skill v1.5.0
+    installed_skills = temp_dir / ".claude" / "skills"
+
+    main_installed = installed_skills / "main-skill"
+    main_installed.mkdir(parents=True)
+    (main_installed / "SKILL.md").write_text(_skill_md("main-skill", "1.0.0"))
+
+    dep_installed = installed_skills / "dep-skill"
+    dep_installed.mkdir(parents=True)
+    (dep_installed / "SKILL.md").write_text(_skill_md("dep-skill", "1.5.0"))
+
+    from aec.lib.skills_manifest import hash_skill_directory
+    main_hash = hash_skill_directory(main_installed)
+    dep_hash = hash_skill_directory(dep_installed)
+
+    manifest = {
+        "manifestVersion": 2,
+        "updatedAt": "2026-05-01T00:00:00Z",
+        "lastUpdateCheck": "2026-05-01T00:00:00Z",
+        "global": {
+            "skills": {
+                "main-skill": {"version": "1.0.0", "contentHash": main_hash, "installedAt": ""},
+                "dep-skill": {"version": "1.5.0", "contentHash": dep_hash, "installedAt": ""},
+            },
+            "rules": {},
+            "agents": {},
+        },
+        "repos": {},
+    }
+    manifest_path = aec_home / "installed-manifest.json"
+    manifest_path.write_text(json.dumps(manifest))
+
+    return {
+        "repo": repo,
+        "aec_home": aec_home,
+        "manifest_path": manifest_path,
+        "installed_skills": installed_skills,
+        "dep_installed": dep_installed,
+    }
+
+
+class TestUpgradeWithDepConflicts:
+    def _patches(self, env):
+        from unittest.mock import patch
+        return [
+            patch("aec.commands.upgrade.get_repo_root", return_value=env["repo"]),
+            patch("aec.commands.upgrade._manifest_path", return_value=env["manifest_path"]),
+            patch("aec.commands.upgrade.get_source_dirs", return_value=_source_dirs(env["repo"])),
+            patch("aec.commands.upgrade.find_tracked_repo", return_value=None),
+            patch("aec.commands.upgrade.get_all_tracked_repos", return_value=[]),
+        ]
+
+    def test_conflict_prompts_user_to_upgrade_dep(self, dep_upgrade_env, monkeypatch):
+        """When new version tightens a dep constraint, user is prompted to upgrade the dep."""
+        from aec.commands.upgrade import run_upgrade
+
+        prompts_seen = []
+        def capture(msg):
+            prompts_seen.append(msg)
+            return "y"
+        monkeypatch.setattr("builtins.input", capture)
+
+        with self._patches(dep_upgrade_env)[0], self._patches(dep_upgrade_env)[1], \
+             self._patches(dep_upgrade_env)[2], self._patches(dep_upgrade_env)[3], \
+             self._patches(dep_upgrade_env)[4]:
+            run_upgrade(yes=False)
+
+        assert any("dep-skill" in p for p in prompts_seen), "Should prompt about dep-skill"
+
+    def test_conflict_declined_skips_main_skill_upgrade(self, dep_upgrade_env, monkeypatch, capsys):
+        """When user declines dep upgrade, the main skill is not upgraded."""
+        from aec.commands.upgrade import run_upgrade
+
+        monkeypatch.setattr("builtins.input", lambda _: "n")
+
+        with self._patches(dep_upgrade_env)[0], self._patches(dep_upgrade_env)[1], \
+             self._patches(dep_upgrade_env)[2], self._patches(dep_upgrade_env)[3], \
+             self._patches(dep_upgrade_env)[4]:
+            run_upgrade(yes=False)
+
+        # main-skill should still be at v1.0.0
+        installed = dep_upgrade_env["installed_skills"] / "main-skill" / "SKILL.md"
+        assert "1.0.0" in installed.read_text()
+
+    def test_conflict_approved_upgrades_dep_and_main_skill(self, dep_upgrade_env, monkeypatch):
+        """When user approves dep upgrade, both dep and main skill are upgraded."""
+        from aec.commands.upgrade import run_upgrade
+
+        monkeypatch.setattr("builtins.input", lambda _: "y")
+
+        with self._patches(dep_upgrade_env)[0], self._patches(dep_upgrade_env)[1], \
+             self._patches(dep_upgrade_env)[2], self._patches(dep_upgrade_env)[3], \
+             self._patches(dep_upgrade_env)[4]:
+            run_upgrade(yes=False)
+
+        dep_md = dep_upgrade_env["dep_installed"] / "SKILL.md"
+        main_md = dep_upgrade_env["installed_skills"] / "main-skill" / "SKILL.md"
+        assert "2.0.0" in dep_md.read_text(), "dep-skill should be upgraded to 2.0.0"
+        assert "2.0.0" in main_md.read_text(), "main-skill should be upgraded to 2.0.0"
+
+    def test_assume_yes_upgrades_dep_and_main_skill_silently(self, dep_upgrade_env):
+        """With -y flag, dep and main skill are both upgraded without any prompts."""
+        from aec.commands.upgrade import run_upgrade
+
+        with self._patches(dep_upgrade_env)[0], self._patches(dep_upgrade_env)[1], \
+             self._patches(dep_upgrade_env)[2], self._patches(dep_upgrade_env)[3], \
+             self._patches(dep_upgrade_env)[4]:
+            run_upgrade(yes=True)
+
+        dep_md = dep_upgrade_env["dep_installed"] / "SKILL.md"
+        main_md = dep_upgrade_env["installed_skills"] / "main-skill" / "SKILL.md"
+        assert "2.0.0" in dep_md.read_text()
+        assert "2.0.0" in main_md.read_text()
+
+    def test_dry_run_reports_dep_conflict_without_upgrading(self, dep_upgrade_env, capsys):
+        """Dry run reports both the skill upgrade and the dep constraint change."""
+        from aec.commands.upgrade import run_upgrade
+
+        with self._patches(dep_upgrade_env)[0], self._patches(dep_upgrade_env)[1], \
+             self._patches(dep_upgrade_env)[2], self._patches(dep_upgrade_env)[3], \
+             self._patches(dep_upgrade_env)[4]:
+            run_upgrade(dry_run=True)
+
+        output = capsys.readouterr().out
+        assert "dep-skill" in output
+
+        # Nothing should be modified
+        dep_md = dep_upgrade_env["dep_installed"] / "SKILL.md"
+        assert "1.5.0" in dep_md.read_text()

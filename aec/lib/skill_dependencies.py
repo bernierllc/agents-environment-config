@@ -17,12 +17,18 @@ class DepToInstall(NamedTuple):
     reason: str     # from the declaring skill's SkillDep.reason
 
 
+class VersionConflict(NamedTuple):
+    name: str           # dep skill name
+    required_min: str   # min_version declared by the dependant skill
+    installed_ver: str  # currently installed version of the dep
+
+
 class ResolvedGraph(NamedTuple):
-    to_install: List[DepToInstall]  # ordered: deps before dependents, excluding already-satisfied
-    already_satisfied: List[str]    # dep names already at satisfying version
-    missing: List[str]              # dep names not found in catalog at all
-    version_conflicts: List[str]    # dep names in catalog but version too old
-    cycles: List[List[str]]         # non-empty = unresolvable graph
+    to_install: List[DepToInstall]        # ordered: deps before dependents, excluding already-satisfied
+    already_satisfied: List[str]          # dep names already at satisfying version
+    missing: List[str]                    # dep names not found in catalog at all
+    version_conflicts: List[VersionConflict]  # deps installed but below required min_version
+    cycles: List[List[str]]               # non-empty = unresolvable graph
 
 
 def resolve_install_graph(
@@ -46,7 +52,7 @@ def resolve_install_graph(
     to_install: List[DepToInstall] = []
     already_satisfied: List[str] = []
     missing: List[str] = []
-    version_conflicts: List[str] = []
+    version_conflicts: List[VersionConflict] = []
     cycles: List[List[str]] = []
 
     # DFS state
@@ -108,8 +114,14 @@ def resolve_install_graph(
                     visited[dep_name] = "done"
                     continue
                 else:
-                    if dep_name not in version_conflicts:
-                        version_conflicts.append(dep_name)
+                    if not any(vc.name == dep_name for vc in version_conflicts):
+                        version_conflicts.append(
+                            VersionConflict(
+                                name=dep_name,
+                                required_min=dep_min,
+                                installed_ver=installed_ver,
+                            )
+                        )
                     visited[dep_name] = "done"
                     continue
 
@@ -118,10 +130,11 @@ def resolve_install_graph(
 
             # After recursion, if not already accounted for, queue for install
             installed_names = [d.name for d in to_install]
+            conflict_names = [vc.name for vc in version_conflicts]
             if (
                 dep_name not in installed_names
                 and dep_name not in already_satisfied
-                and dep_name not in version_conflicts
+                and dep_name not in conflict_names
                 and dep_name not in missing
             ):
                 to_install.append(DepToInstall(name=dep_name, reason=dep.reason))
