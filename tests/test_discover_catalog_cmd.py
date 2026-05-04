@@ -332,6 +332,107 @@ class TestRunScan:
         # Should have results (3 types scanned, each returns [fake_result])
         assert len(results) >= 1
 
+    def test_run_scan_flattens_catalog_hashes_to_strings(self, discover_env):
+        """_run_scan must flatten persisted {name: {contentHash}} entries to
+        flat {name: hash_string} before passing to similarity.scan().
+
+        Regression: the persisted catalog-hashes.json schema stores nested
+        objects per item ({"version": ..., "contentHash": ...}). The scan
+        engine expects flat string hashes, so passing the raw schema through
+        produced ``TypeError: unhashable type: 'dict'`` at depth >= 2.
+        """
+        from aec.lib.scope import Scope
+
+        scope = Scope(is_global=False, repo_path=discover_env["project"])
+
+        local_item = {"name": "x.md", "path": "/fake/x.md", "is_dir": False}
+        catalog = {"agents": {"some-agent": {"version": "1.0.0"}},
+                   "skills": {}, "rules": {}}
+        catalog_hashes = {
+            "agents": {
+                "some-agent": {"version": "1.0.0", "contentHash": "sha256:deadbeef"}
+            },
+            "skills": {},
+            "rules": {},
+        }
+
+        with ExitStack() as stack:
+            mocks = _apply_patches(stack, scan_results=[], local_items=[local_item])
+
+            from aec.commands.discover_catalog import _run_scan
+            _run_scan(scope, depth=3, rediscover=False,
+                      catalog=catalog, catalog_hashes=catalog_hashes)
+
+        # Verify scan() was invoked with flat string hashes, not nested dicts.
+        scan_mock = mocks["scan"]
+        assert scan_mock.called
+        for call in scan_mock.call_args_list:
+            passed_hashes = call.kwargs["catalog_hashes"]
+            for name, value in passed_hashes.items():
+                assert isinstance(value, str), (
+                    f"catalog_hashes[{name!r}] must be a hash string for "
+                    f"similarity.scan(), got {type(value).__name__}"
+                )
+
+    def test_run_scan_at_depth_3_with_real_scan_does_not_crash(self, discover_env, tmp_path):
+        """End-to-end: _run_scan with the real similarity.scan engine and a
+        realistic persisted catalog-hashes shape must not raise.
+
+        Regression for the reported ``unhashable type: 'dict'`` crash on
+        ``aec discover -g`` at depth 3.
+        """
+        from aec.lib.scope import Scope
+
+        scope = Scope(is_global=False, repo_path=discover_env["project"])
+
+        agent_file = tmp_path / "my-agent.md"
+        agent_file.write_text("# My agent\nbody\n")
+        local_item = {
+            "name": "my-agent.md",
+            "path": str(agent_file),
+            "is_dir": False,
+        }
+
+        catalog = {
+            "agents": {"catalog-agent": {"version": "1.0.0"}},
+            "skills": {},
+            "rules": {},
+        }
+        # Nested schema as written by generate_catalog_hashes / persisted on disk.
+        catalog_hashes = {
+            "agents": {
+                "catalog-agent": {
+                    "version": "1.0.0",
+                    "contentHash": "sha256:0" * 8,
+                },
+            },
+            "skills": {},
+            "rules": {},
+        }
+
+        with ExitStack() as stack:
+            # Patch only the surrounding plumbing; let similarity.scan run for real.
+            stack.enter_context(patch(f"{P}.get_source_dirs", return_value={
+                "skills": Path("/fake/skills"),
+                "rules": Path("/fake/rules"),
+                "agents": Path("/fake/agents"),
+            }))
+            stack.enter_context(patch(f"{P}.discover_available", return_value={}))
+            stack.enter_context(patch(f"{P}.load_catalog_hashes", return_value=catalog_hashes))
+            stack.enter_context(patch(f"{P}.regenerate_if_missing", return_value=catalog_hashes))
+            stack.enter_context(patch(f"{P}.scan_local_items", return_value=[local_item]))
+            stack.enter_context(patch(f"{P}.is_dismissed", return_value=False))
+            stack.enter_context(patch(f"{P}.prune_stale"))
+            stack.enter_context(patch(
+                "aec.commands.discover_catalog.load_aec_json",
+                return_value={"installed": {"agents": {}, "skills": {}, "rules": {}}},
+            ))
+
+            from aec.commands.discover_catalog import _run_scan
+            # Must not raise TypeError: unhashable type: 'dict'
+            _run_scan(scope, depth=3, rediscover=False,
+                      catalog=catalog, catalog_hashes=catalog_hashes)
+
 
 class TestPresentResults:
     """Unit tests for the _present_results helper."""
