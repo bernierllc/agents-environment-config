@@ -568,6 +568,15 @@ A second short subsection in the existing setup flow links: *"If your organizati
 
 - **Users without org configs:** zero impact. Behavior unchanged when `~/.aec/orgs/` is empty and no `--org-config` is passed.
 - **Existing `.aec.json` per-project files:** untouched. Per-project `.aec.json` always wins over org overlays for any field they both touch (project local truth is more specific).
+
+  Worked example — precedence order for a project under `~/work/acme/backend-api`:
+  1. AEC defaults load first.
+  2. Org `acme` org-level config applies (e.g., `hook_policy: auto`).
+  3. Org `acme` `projects[]` profile whose `match.git_remote` matches `github.com:acme-corp/backend-api` overlays on top (e.g., adds `security-review` skill as required).
+  4. Project's local `.aec.json` (if present) overrides any field from steps 1–3 (e.g., the project sets `hook_policy: manual` — that wins over the org's `auto`).
+  5. The user's interactive choices during `aec setup` apply last.
+
+  Effective rule: **AEC defaults → org-level → org project profile → project `.aec.json` → user.** Most-specific source wins.
 - **Existing `~/.aec/prefs.json`:** untouched. Org `install.preferences` apply only on first enrollment if a key is unset, or in `install.mode: managed` (where org has authority by user opt-in).
 - **Schema versioning:** `schema_version: "1.0"` required from day one. AEC refuses to load configs declaring an unknown future schema version with an "upgrade aec" message.
 - **Old `aec` versions encountering org configs:** without org-config support, `aec` simply ignores `~/.aec/orgs/`. `aec install --org-config <url>` errors cleanly with "this version of aec doesn't support org configs; upgrade with `pip install -U aec[org-configs]`."
@@ -583,12 +592,15 @@ Each phase ships a useful slice. No phase blocks individual users.
 - Trust mode: `unsigned` only, with loud warning
 - Commands: `aec org enroll`, `list`, `status`, `show`, `remove`
 - Docs: `docs/users/org-configs.md`, `docs/orgs/authoring-org-configs.md`
+- Resolve allow-lists for `install.preferences` keys and `install.prompts` IDs (see Open Questions #1, #2) — required now to avoid breaking changes when these blocks are activated in Phase 4
+- On-disk layout (`~/.aec/orgs/<id>.yaml` + `<id>.state.json`, plus reserved `conflict-resolutions.json` path) is already multi-org-shaped, so Phase 3 adds detection logic without filesystem migration
 - Ships behind `pip install aec[org-configs-preview]`
 
 **Phase 2 — Signing & trust modes**
 - `pinned_key` and `dns_anchor` modes via `pynacl`
 - Pubkey rotation flow + `aec org trust-rotate`
 - Well-known endpoint discovery
+- `aec org sync` — re-fetch URL-sourced configs and re-verify trust on demand (paired with trust modes since it's the natural refresh primitive once configs can be remotely hosted)
 - Docs: `docs/orgs/signing-keys.md`, `docs/orgs/hosting-and-distribution.md`
 - Promote to `pip install aec[org-configs]`
 
@@ -614,10 +626,67 @@ Each phase ships a useful slice. No phase blocks individual users.
 
 None blocking. Items the implementation plan should call out:
 
-1. Exact subset of AEC preference keys allowed in `install.preferences` (audit existing keys; some may not be safe to org-set).
-2. Exact subset of named prompts allowed in `install.prompts` (need stable IDs per prompt).
+1. **(Must resolve in Phase 1 planning.)** Exact subset of AEC preference keys allowed in `install.preferences` (audit existing keys; some may not be safe to org-set). Locking this allow-list now prevents breaking changes when `install.preferences` activates in Phase 4.
+2. **(Must resolve in Phase 1 planning.)** Exact subset of named prompts allowed in `install.prompts` (need stable IDs per prompt). Same rationale as #1 — the IDs must be stable before any org config in the wild references them.
 3. Whether `aec org sync` should be on a default cron via `aec daemon-check` or always opt-in (defer to Phase 5 user feedback).
 4. Specific glob semantics for `git_remote` patterns: do we normalize SSH vs HTTPS forms? (Likely yes — match against canonical `host:owner/repo` form.)
+
+## Appendix: `enrollment_script` Actions Reference
+
+Closed set of declarative actions. Adding a new action requires a `schema_version` bump. Each action is a YAML mapping with an `action` key plus action-specific parameters. AEC executes actions in declared order. Any action failure halts the script and surfaces in `aec doctor`.
+
+### `add_source`
+
+Registers a custom source (must already be declared in `sources.custom[]`) with AEC's source machinery, cloning it if not already present.
+
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `source_id` | string | yes | ID of an entry in `sources.custom[]`. Unknown ID → schema error. |
+
+Idempotent: if the source is already cloned at the declared `ref`, no-op.
+
+### `install_items`
+
+Applies the org's `items` policy: installs everything declared `required` or `pinned`, removes anything declared `blocked`, leaves `recommended` and `silent` items to user discretion.
+
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `types` | array of strings | no | Subset of `["rules", "skills", "agents", "mcps"]`. Default: all four. |
+| `sources` | array of strings | no | Restrict to specific source IDs (reserved or custom). Default: all sources referenced by `items`. |
+
+If both `types` and `sources` are omitted, applies the entire `items` block.
+
+### `set_hooks`
+
+Configures AEC hook policy according to `install.preferences.hook_policy`.
+
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `policy` | string | no | One of `auto`, `manual`, `off`. Default: value of `install.preferences.hook_policy`. Explicit value overrides the preference for this script step only. |
+
+### `run_doctor`
+
+Runs `aec doctor` and surfaces its output as part of the enrollment summary. Non-fatal: doctor warnings do not halt enrollment, but doctor errors do.
+
+| Param | Type | Required | Description |
+|---|---|---|---|
+| (none) | | | |
+
+### `set_pref`
+
+Writes a single key into `~/.aec/prefs.json`. The key must be on the Phase 1 allow-list (see Open Questions #1).
+
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `key` | string | yes | Allow-listed preference key. Unknown key → schema error. |
+| `value` | scalar / array / object | yes | Type must match the key's declared type. |
+| `if_unset` | bool | no | Default `false` in `install.mode: managed`, `true` in `install.mode: guided`. When `true`, only writes if the key is not already set. |
+
+### Common rules
+
+- All actions are idempotent — re-running the enrollment script must converge to the same state.
+- No action may shell out, fetch arbitrary URLs not declared in the config, or write outside `~/.aec/`, `~/.agent-tools/`, or paths AEC already manages.
+- Any action that would require user input (e.g., `set_pref` clobbering a user value in `guided` mode) prompts the user; in `managed` mode it applies silently per the user's enrollment-time consent.
 
 ## Appendix: Schema Validation Errors (selected)
 
