@@ -450,3 +450,45 @@ class TestInstallWithDeps:
         m = load_manifest(install_env["manifest_path"])
         assert m["global"]["skills"]["main-skill"]["installedAs"] == "explicit"
         assert m["global"]["skills"]["dep-skill"]["installedAs"] == "dependency"
+
+    def test_repo_install_skips_dep_already_satisfied_globally(self, install_env, monkeypatch):
+        """A dep installed globally satisfies the requirement for a repo-scoped install."""
+        from aec.commands.install_cmd import run_install
+        from aec.lib.manifest_v2 import load_manifest, record_install, save_manifest
+
+        repo = install_env["repo"]
+        skills_src = repo / ".claude" / "skills"
+
+        _make_skill_with_deps(skills_src, "dep-skill", "2.0.0")
+        _make_skill_with_deps(
+            skills_src,
+            "main-skill",
+            "1.0.0",
+            deps=[{"name": "dep-skill", "min_version": "2.0.0", "reason": "Needs dep"}],
+        )
+
+        # Pre-install dep-skill globally in the manifest
+        manifest_path = install_env["manifest_path"]
+        m = load_manifest(manifest_path)
+        record_install(m, scope="global", item_type="skills", name="dep-skill",
+                       version="2.0.0", content_hash="sha256:abc")
+        save_manifest(m, manifest_path)
+
+        monkeypatch.chdir(install_env["project"])
+
+        # input() must NOT be called — dep is already globally satisfied
+        monkeypatch.setattr("builtins.input", lambda _: (_ for _ in ()).throw(
+            AssertionError("prompt shown for already-satisfied dep")
+        ))
+
+        patches = self._patch_repo_with_skills(install_env)
+        with patches[0], patches[1]:
+            run_install(item_type="skill", name="main-skill", global_flag=False, yes=False)
+
+        # main-skill installed in repo scope; dep-skill NOT re-installed to repo scope
+        m = load_manifest(manifest_path)
+        repo_key = str(install_env["project"].resolve())
+        assert "main-skill" in m["repos"][repo_key]["skills"]
+        assert "dep-skill" not in m["repos"][repo_key]["skills"]
+        # dep-skill remains only globally
+        assert "dep-skill" in m["global"]["skills"]

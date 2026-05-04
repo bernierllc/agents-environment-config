@@ -100,12 +100,15 @@ def run_install(
 
     # Resolve and install skill dependencies before the main install
     if item_type == "skill":
+        global_skills = manifest["global"]["skills"]
         if scope.is_global:
-            installed_skills = manifest["global"]["skills"]
+            installed_skills = global_skills
         else:
-            installed_skills = manifest.get("repos", {}).get(
+            repo_skills = manifest.get("repos", {}).get(
                 str(scope.repo_path.resolve()), {}
             ).get("skills", {})
+            # Merge global into repo so globally-installed deps satisfy requirements
+            installed_skills = {**global_skills, **repo_skills}
         _resolve_and_prompt_deps(
             name, available, installed_skills, source_dir,
             scope, scope_key, manifest, manifest_file, yes,
