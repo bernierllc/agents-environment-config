@@ -192,7 +192,11 @@ def _run_scan(
             continue
 
         type_catalog = catalog.get(item_type, {})
-        type_hashes = catalog_hashes.get(item_type, {})
+        type_hashes_raw = catalog_hashes.get(item_type, {})
+        type_hashes = {
+            name: (entry.get("contentHash", "") if isinstance(entry, dict) else entry)
+            for name, entry in type_hashes_raw.items()
+        }
 
         results = scan(
             local_items=local_items,
