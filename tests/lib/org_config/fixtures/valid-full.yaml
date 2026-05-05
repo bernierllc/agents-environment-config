@@ -1,0 +1,66 @@
+---
+# Identity & versioning
+schema_version: "1.0"
+org_id: "acme"
+org_name: "Acme Corp"
+config_version: "3.2.0"
+description: "Standard AEC configuration for Acme engineering"
+
+trust:
+  mode: "unsigned"
+---
+
+sources:
+  default:
+    skills:  keep
+    rules:   keep
+    agents:  replace
+    mcps:    keep
+  custom:
+    - id: "acme-skills"
+      url: "https://github.com/acme-corp/aec-skills.git"
+      ref: "v1.4.0"
+      contributes: ["skills"]
+    - id: "acme-rules"
+      url: "git@github.com:acme-corp/aec-rules.git"
+      ref: "main"
+      contributes: ["rules"]
+
+items:
+  skills:
+    "secure-coding-v2":
+      source: "aec.default.skills"
+      stance: required
+      version: ">=2.0.0"
+    "experimental-foo":
+      source: "aec.default.skills"
+      stance: blocked
+    "company-onboarding":
+      source: "acme-skills"
+      stance: required
+  rules:
+    "general/architecture":
+      source: "aec.default.rules"
+      stance: pinned
+      version: "1.2.0"
+  agents: {}
+  mcps: {}
+
+install:
+  mode: "guided"
+  agents:
+    enabled:  ["claude", "cursor"]
+    disabled: ["qwen", "gemini", "codex"]
+  preferences:
+    projects_dir: "~/work/acme"
+    completion_behavior: "verify-with-tests"
+    hook_policy: "auto"
+  prompts:
+    quality_infra_port_registry: true
+    quality_infra_scheduled_tests: true
+    git_essentials_dependabot: true
+
+branding:
+  display_name: "Acme Engineering Standard"
+  welcome_message: "AEC is configured per Acme's standards. Questions: #aec-help on Slack"
+  doctor_footer: "Acme org config v3.2.0"
