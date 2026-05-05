@@ -143,6 +143,26 @@ def map_skill_path(source_path: Path) -> Path:
     return CURSOR_SKILLS_DIR / f"{relative_path}.md"
 
 
+def _parse_frontmatter_value(raw: str):
+    """Parse a single frontmatter value.
+
+    Supports bracketed inline lists (``["a", "b"]``) and quoted/unquoted
+    scalars. Returns a list for bracketed values, str otherwise.
+    """
+    raw = raw.strip()
+    if raw.startswith("[") and raw.endswith("]"):
+        inner = raw[1:-1].strip()
+        if not inner:
+            return []
+        items = []
+        for part in inner.split(","):
+            part = part.strip().strip('"').strip("'")
+            if part:
+                items.append(part)
+        return items
+    return raw.strip('"').strip("'")
+
+
 def parse_frontmatter(content: str) -> Tuple[Optional[Dict], str]:
     """
     Parse frontmatter from markdown content.
@@ -150,19 +170,19 @@ def parse_frontmatter(content: str) -> Tuple[Optional[Dict], str]:
     """
     if not content.startswith("---"):
         return None, content
-    
+
     try:
         parts = content.split("---", 2)
         if len(parts) < 3:
             return None, content
-        
+
         # Parse YAML-like frontmatter (simple key: value pairs)
         frontmatter = {}
         for line in parts[1].strip().split("\n"):
             if ":" in line:
                 key, value = line.split(":", 1)
-                frontmatter[key.strip()] = value.strip().strip('"').strip("'")
-        
+                frontmatter[key.strip()] = _parse_frontmatter_value(value)
+
         return frontmatter, parts[2]
     except Exception as e:
         print(f"Warning: Could not parse frontmatter: {e}")
