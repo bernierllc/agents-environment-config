@@ -1,0 +1,60 @@
+---
+# Identity & versioning
+schema_version: "1.0"
+org_id: "example"
+org_name: "Example Org"
+config_version: "1.0.0"
+description: "Phase 1 example org config — copy and adapt"
+
+# Phase 1 supports unsigned trust only. Phase 2 will add pinned_key and dns_anchor.
+trust:
+  mode: "unsigned"
+---
+
+sources:
+  # `keep` = your `items` block layers on top of AEC's built-in catalog.
+  # Other options per item type: `replace` (org overrides catalog) or `deny`.
+  default:
+    skills:  keep
+    rules:   keep
+    agents:  keep
+    mcps:    keep
+
+  # Custom Git sources for org-internal items. Uncomment to use.
+  custom: []
+  # custom:
+  #   - id: "example-skills"
+  #     url: "https://github.com/example-org/aec-skills.git"
+  #     ref: "v1.0.0"
+  #     contributes: ["skills"]
+
+items:
+  skills:
+    # Stance: required | recommended | blocked | pinned | silent
+    "secure-coding-v2":
+      source: "aec.default.skills"
+      stance: recommended
+
+  rules:
+    "general/architecture":
+      source: "aec.default.rules"
+      stance: pinned
+      version: "1.2.0"
+
+  agents: {}
+  mcps: {}
+
+install:
+  # Restrict which agent surfaces AEC configures for users in this org.
+  agents:
+    enabled:  ["claude", "cursor"]
+    disabled: ["qwen", "gemini", "codex"]
+
+  # Pre-answer AEC settings. Keys must be in PREFERENCES_ALLOW_LIST.
+  preferences:
+    plans_completion: "archive"
+    hook_mode: "auto"
+
+  # Pre-answer interactive prompts. IDs must be in PROMPTS_ALLOW_LIST.
+  prompts:
+    setup.track_current_repo: true
