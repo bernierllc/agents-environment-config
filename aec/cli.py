@@ -504,6 +504,10 @@ if HAS_TYPER:
         from .commands.generate import run_generate_files
         run_generate_files()
 
+    # --- org (phase 1) ---
+    from .commands.org import org_app
+    app.add_typer(org_app, name="org", help="Manage organization configurations")
+
     # --- preferences (deprecated) ---
     prefs_app = typer.Typer(
         help="[DEPRECATED] Use `aec config` instead",
