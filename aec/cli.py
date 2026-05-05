@@ -25,8 +25,18 @@ if HAS_TYPER:
     )
 
     @app.callback(invoke_without_command=True)
-    def _cli_callback(ctx: typer.Context):
+    def _cli_callback(
+        ctx: typer.Context,
+        debug: bool = typer.Option(
+            False,
+            "--debug",
+            help="Capture errors to ~/.agents-environment-config/logs/aec-debug.log and print the traceback.",
+        ),
+    ):
         """Pre-command hook: check for unanswered preferences and register update check."""
+        if debug:
+            from .lib.debug import enable_debug
+            enable_debug()
         if ctx.invoked_subcommand is None:
             return
         from .lib.preferences import check_pending_preferences
@@ -552,6 +562,11 @@ else:
             action="version",
             version=f"aec {__version__}",
         )
+        parser.add_argument(
+            "--debug",
+            action="store_true",
+            help="Capture errors to ~/.agents-environment-config/logs/aec-debug.log and print the traceback.",
+        )
 
         subparsers = parser.add_subparsers(dest="command", help="Commands")
 
@@ -762,6 +777,10 @@ else:
         # ---------------------------------------------------------- #
 
         args = parser.parse_args()
+
+        if getattr(args, "debug", False):
+            from .lib.debug import enable_debug
+            enable_debug()
 
         if args.command is None:
             parser.print_help()
@@ -1012,11 +1031,45 @@ else:
 
 
 def main():
-    """Entry point."""
-    if HAS_TYPER:
-        app()
-    else:
-        app()
+    """Entry point with global error capture.
+
+    Without --debug: print a friendly message and exit 1, no traceback.
+    With --debug or AEC_DEBUG=1: write a redacted report to the debug log
+    and re-print the traceback so it can be copied into a GitHub issue.
+    """
+    from .lib import debug as _debug
+
+    if _debug.debug_from_env_or_argv():
+        _debug.enable_debug()
+        # Strip --debug so it can appear before OR after the subcommand
+        # without confusing typer/argparse subparsers.
+        sys.argv = [a for a in sys.argv if a != "--debug"]
+
+    try:
+        if HAS_TYPER:
+            app()
+        else:
+            app()
+    except SystemExit:
+        raise
+    except KeyboardInterrupt:
+        Console.print("\nAborted.")
+        sys.exit(130)
+    except BaseException as exc:
+        try:
+            log_path = _debug.log_exception(exc)
+        except Exception:
+            log_path = None
+        if _debug.is_debug():
+            import traceback as _tb
+            _tb.print_exception(type(exc), exc, exc.__traceback__)
+            if log_path is not None:
+                Console.print("")
+                Console.print(_debug.debug_error_message(log_path))
+        else:
+            Console.print("")
+            Console.print(_debug.friendly_error_message(log_path))
+        sys.exit(1)
 
 
 if __name__ == "__main__":

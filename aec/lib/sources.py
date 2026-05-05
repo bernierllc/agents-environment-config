@@ -151,10 +151,11 @@ def fetch_latest(repo_path: Optional[Path] = None) -> bool:
         repo_path = get_repo_root()
     if repo_path is None:
         return False
+    from . import debug as _debug
     try:
         subprocess.run(
             ["git", "pull", "--ff-only"],
-            cwd=repo_path, capture_output=True, check=True,
+            cwd=repo_path, capture_output=True, check=True, text=True,
         )
         subprocess.run(
             [
@@ -165,8 +166,15 @@ def fetch_latest(repo_path: Optional[Path] = None) -> bool:
                 "--recursive",
                 "--remote",
             ],
-            cwd=repo_path, capture_output=True, check=True,
+            cwd=repo_path, capture_output=True, check=True, text=True,
         )
         return True
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as exc:
+        _debug.log_subprocess_failure(
+            cmd=list(exc.cmd) if isinstance(exc.cmd, (list, tuple)) else str(exc.cmd),
+            returncode=exc.returncode,
+            stdout=exc.stdout if isinstance(exc.stdout, str) else None,
+            stderr=exc.stderr if isinstance(exc.stderr, str) else None,
+            note=f"fetch_latest in {repo_path}",
+        )
         return False
