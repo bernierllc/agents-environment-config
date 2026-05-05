@@ -1,0 +1,16 @@
+---
+schema_version: "9.9"
+org_id: "x"
+org_name: "X"
+config_version: "1.0.0"
+trust:
+  mode: "unsigned"
+---
+sources:
+  default: { skills: keep, rules: keep, agents: keep, mcps: keep }
+  custom: []
+items:
+  skills: {}
+  rules: {}
+  agents: {}
+  mcps: {}

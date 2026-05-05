@@ -1,0 +1,19 @@
+---
+schema_version: "1.0"
+org_id: "x"
+org_name: "X"
+config_version: "1.0.0"
+trust:
+  mode: "unsigned"
+---
+sources:
+  default: { skills: keep, rules: keep, agents: keep, mcps: keep }
+  custom: []
+items:
+  skills:
+    "foo":
+      source: "aec.default.skills"
+      stance: "kinda-required"
+  rules: {}
+  agents: {}
+  mcps: {}

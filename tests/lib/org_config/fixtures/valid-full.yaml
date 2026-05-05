@@ -53,12 +53,12 @@ install:
     disabled: ["qwen", "gemini", "codex"]
   preferences:
     projects_dir: "~/work/acme"
-    completion_behavior: "verify-with-tests"
-    hook_policy: "auto"
+    plans_completion: "archive"
+    hook_mode: "auto"
   prompts:
-    quality_infra_port_registry: true
-    quality_infra_scheduled_tests: true
-    git_essentials_dependabot: true
+    install.batch_project_setup.start: true
+    install.quality.report_retention_mode: "auto"
+    setup.track_current_repo: true
 
 branding:
   display_name: "Acme Engineering Standard"

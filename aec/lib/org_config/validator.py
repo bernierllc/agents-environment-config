@@ -1,0 +1,160 @@
+"""Schema validator for org-config overlays (Phase 1)."""
+from __future__ import annotations
+
+from typing import Any
+
+from .allow_lists import (
+    PREFERENCES_ALLOW_LIST,
+    PREFERENCES_DYNAMIC_NAMESPACES,
+    PROMPTS_ALLOW_LIST,
+    PROMPTS_DYNAMIC_PREFIXES,
+)
+from .errors import OrgConfigUnknownSchemaError, OrgConfigValidationError
+from .schema import (
+    ITEM_TYPES,
+    RESERVED_SOURCE_IDS,
+    SCHEMA_VERSION_SUPPORTED,
+    CustomSource,
+    ItemPolicy,
+    OrgConfig,
+    Stance,
+)
+
+
+_STANCE_VALUES = {s.value for s in Stance}
+
+
+def _require(d: dict, key: str, field_path: str) -> Any:
+    if key not in d or d[key] is None:
+        raise OrgConfigValidationError(f"{key} is required", field_path=field_path)
+    return d[key]
+
+
+def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
+    schema_version = frontmatter.get("schema_version")
+    if schema_version not in SCHEMA_VERSION_SUPPORTED:
+        raise OrgConfigUnknownSchemaError(
+            f"unsupported schema_version: {schema_version}"
+        )
+
+    org_id = _require(frontmatter, "org_id", "org_id")
+    org_name = _require(frontmatter, "org_name", "org_name")
+    config_version = _require(frontmatter, "config_version", "config_version")
+    description = frontmatter.get("description")
+
+    trust = frontmatter.get("trust") or {}
+    trust_mode = trust.get("mode")
+    if trust_mode is None:
+        raise OrgConfigValidationError("trust.mode is required", field_path="trust.mode")
+    if trust_mode != "unsigned":
+        raise OrgConfigValidationError(
+            f"trust.mode '{trust_mode}' is not supported in Phase 1 (only 'unsigned')",
+            field_path="trust.mode",
+        )
+
+    if body.get("projects"):
+        raise OrgConfigValidationError(
+            "projects block is a Phase 4 feature, not supported in Phase 1",
+            field_path="projects",
+        )
+    install_block = body.get("install") or {}
+    if install_block.get("enrollment_script"):
+        raise OrgConfigValidationError(
+            "enrollment_script is a Phase 2+ feature, not supported in Phase 1",
+            field_path="install.enrollment_script",
+        )
+
+    sources_block = body.get("sources") or {}
+    default_sources = dict(sources_block.get("default") or {})
+
+    custom_sources_raw = sources_block.get("custom") or []
+    custom_sources: list[CustomSource] = []
+    for s in custom_sources_raw:
+        custom_sources.append(
+            CustomSource(
+                id=s["id"],
+                url=s["url"],
+                ref=s["ref"],
+                contributes=tuple(s["contributes"]),
+            )
+        )
+
+    valid_source_ids = set(RESERVED_SOURCE_IDS) | {cs.id for cs in custom_sources}
+
+    items_block = body.get("items") or {}
+    items: dict[str, dict[str, ItemPolicy]] = {}
+    for type_name in ITEM_TYPES:
+        type_items = items_block.get(type_name) or {}
+        validated: dict[str, ItemPolicy] = {}
+        for item_name, policy_dict in type_items.items():
+            base_path = f"items.{type_name}.{item_name}"
+            if not isinstance(policy_dict, dict):
+                raise OrgConfigValidationError(
+                    "item policy must be a mapping", field_path=base_path
+                )
+            source = policy_dict.get("source")
+            if source is None:
+                raise OrgConfigValidationError(
+                    "source field is required",
+                    field_path=f"{base_path}.source",
+                )
+            if source not in valid_source_ids:
+                raise OrgConfigValidationError(
+                    f"unknown source '{source}' (not declared in sources.custom and not reserved)",
+                    field_path=f"{base_path}.source",
+                )
+            stance_raw = policy_dict.get("stance")
+            if stance_raw not in _STANCE_VALUES:
+                raise OrgConfigValidationError(
+                    f"unknown stance: {stance_raw!r}",
+                    field_path=f"{base_path}.stance",
+                )
+            version = policy_dict.get("version")
+            validated[item_name] = ItemPolicy(
+                source=source,
+                stance=Stance(stance_raw),
+                version=version,
+            )
+        items[type_name] = validated
+
+    install_preferences = dict((install_block.get("preferences") or {}))
+    for k in install_preferences:
+        if k in PREFERENCES_ALLOW_LIST:
+            continue
+        if any(k.startswith(f"{ns}.") for ns in PREFERENCES_DYNAMIC_NAMESPACES):
+            continue
+        raise OrgConfigValidationError(
+            f"key '{k}' is not allow-listed",
+            field_path=f"install.preferences.{k}",
+        )
+
+    install_prompts = dict((install_block.get("prompts") or {}))
+    for k in install_prompts:
+        if k in PROMPTS_ALLOW_LIST:
+            continue
+        if any(k.startswith(f"{prefix}.") for prefix in PROMPTS_DYNAMIC_PREFIXES):
+            continue
+        raise OrgConfigValidationError(
+            f"key '{k}' is not allow-listed",
+            field_path=f"install.prompts.{k}",
+        )
+
+    install_agents = install_block.get("agents") or {}
+    install_agents_enabled = list(install_agents.get("enabled") or [])
+    install_agents_disabled = list(install_agents.get("disabled") or [])
+
+    return OrgConfig(
+        schema_version=schema_version,
+        org_id=org_id,
+        org_name=org_name,
+        config_version=config_version,
+        description=description,
+        trust_mode=trust_mode,
+        default_sources=default_sources,
+        custom_sources=custom_sources,
+        items=items,
+        install_preferences=install_preferences,
+        install_prompts=install_prompts,
+        install_agents_enabled=install_agents_enabled,
+        install_agents_disabled=install_agents_disabled,
+    )
