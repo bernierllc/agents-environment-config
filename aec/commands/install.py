@@ -12,6 +12,20 @@ except ImportError:
 
 from ..lib import Console, get_repo_root, init_aec_home
 from ..lib.git import is_git_repo, has_gitmodules, init_submodules, update_submodule
+from ..lib.prompt_ids import (
+    INSTALL_BATCH_PROJECT_SETUP_SCAN_MODE,
+    INSTALL_BATCH_PROJECT_SETUP_START,
+    INSTALL_QUALITY_REPORT_RETENTION_DAYS,
+    INSTALL_QUALITY_REPORT_RETENTION_MODE,
+    INSTALL_QUALITY_REPORT_VIEWER,
+    INSTALL_SETTINGS_PLANS_COMPLETION,
+    INSTALL_SETTINGS_PLANS_DIR,
+    INSTALL_SETTINGS_PLANS_DIR_CUSTOM,
+    INSTALL_SETTINGS_PLANS_GITIGNORED,
+    INSTALL_SETTINGS_PROJECTS_DIR,
+    configurable_instruction_prompt_id,
+)
+from ..lib.prompts import prompt as _prompt
 from . import agent_tools, rules
 
 
@@ -129,10 +143,12 @@ def _batch_project_setup(dry_run: bool = False) -> None:
             Console.info(f"  Would setup: {project.name}")
         return
 
-    try:
-        response = input("\nWould you like to setup your project directories now? (Y/n): ").strip().lower()
-    except EOFError:
-        response = "n"
+    response = _prompt(
+        INSTALL_BATCH_PROJECT_SETUP_START,
+        "\nWould you like to setup your project directories now? (Y/n): ",
+        type="yes_no",
+        default=True,
+    ).strip().lower()
 
     if response == "n":
         return
@@ -140,10 +156,12 @@ def _batch_project_setup(dry_run: bool = False) -> None:
     Console.print("\nScan for projects:")
     Console.print("  1) Only git repositories (recommended)")
     Console.print("  2) All directories")
-    try:
-        scan_choice = input("Choice [1]: ").strip() or "1"
-    except EOFError:
-        scan_choice = "1"
+    scan_choice = _prompt(
+        INSTALL_BATCH_PROJECT_SETUP_SCAN_MODE,
+        "Choice [1]: ",
+        type="enum",
+        default="1",
+    ).strip() or "1"
 
     git_only = scan_choice != "2"
     projects = _find_projects(projects_path, git_only=git_only)
@@ -221,10 +239,12 @@ def _prompt_settings(dry_run: bool = False, show_header: bool = True) -> None:
             Console.success(f"projects_dir = {current}")
     else:
         default_dir = str(get_projects_dir())
-        try:
-            response = input(f"Where is your projects root directory? [{default_dir}]: ").strip()
-        except EOFError:
-            response = ""
+        response = _prompt(
+            INSTALL_SETTINGS_PROJECTS_DIR,
+            f"Where is your projects root directory? [{default_dir}]: ",
+            type="path",
+            default=default_dir,
+        ).strip()
         projects_dir = response or default_dir
         _save("projects_dir", str(Path(projects_dir).expanduser().resolve()))
 
@@ -238,10 +258,12 @@ def _prompt_settings(dry_run: bool = False, show_header: bool = True) -> None:
         Console.print("  1) .plans/ (recommended)")
         Console.print("  2) plans/")
         Console.print("  3) Other (type your own)")
-        try:
-            response = input("Choice [1]: ").strip() or "1"
-        except EOFError:
-            response = "1"
+        response = _prompt(
+            INSTALL_SETTINGS_PLANS_DIR,
+            "Choice [1]: ",
+            type="enum",
+            default="1",
+        ).strip() or "1"
 
         if response == "1":
             _save("plans_dir", ".plans")
@@ -249,10 +271,12 @@ def _prompt_settings(dry_run: bool = False, show_header: bool = True) -> None:
             _save("plans_dir", "plans")
         else:
             if response == "3":
-                try:
-                    custom = input("Plans directory name: ").strip() or ".plans"
-                except EOFError:
-                    custom = ".plans"
+                custom = _prompt(
+                    INSTALL_SETTINGS_PLANS_DIR_CUSTOM,
+                    "Plans directory name: ",
+                    type="bare-dirname",
+                    default=".plans",
+                ).strip() or ".plans"
             else:
                 custom = response  # user typed the name directly
             _save("plans_dir", custom)
@@ -264,10 +288,12 @@ def _prompt_settings(dry_run: bool = False, show_header: bool = True) -> None:
             Console.success(f"plans_gitignored = {current}")
     else:
         plans_dir = _get("plans_dir")
-        try:
-            response = input(f"Should {plans_dir}/ be tracked in git? (y/N): ").strip().lower()
-        except EOFError:
-            response = "n"
+        response = _prompt(
+            INSTALL_SETTINGS_PLANS_GITIGNORED,
+            f"Should {plans_dir}/ be tracked in git? (y/N): ",
+            type="yes_no",
+            default=False,
+        ).strip().lower()
         tracked = response in ("y", "yes")
         _save("plans_gitignored", not tracked)
 
@@ -281,10 +307,12 @@ def _prompt_settings(dry_run: bool = False, show_header: bool = True) -> None:
         Console.print(f"\nWhen a plan is completed, should the agent:")
         Console.print(f"  1) Archive to {plans_dir}/archive/ (recommended)")
         Console.print(f"  2) Delete the plan file")
-        try:
-            response = input("Choice [1]: ").strip() or "1"
-        except EOFError:
-            response = "1"
+        response = _prompt(
+            INSTALL_SETTINGS_PLANS_COMPLETION,
+            "Choice [1]: ",
+            type="enum",
+            default="1",
+        ).strip() or "1"
         _save("plans_completion", "archive" if response == "1" else "delete")
 
 
@@ -337,12 +365,12 @@ def _prompt_configurable_instructions(dry_run: bool = False) -> None:
             else:
                 hint = ""
 
-            try:
-                response = input(
-                    f"  Keep for {display}?{hint} ({default}/{'n' if default == 'Y' else 'Y'}): "
-                ).strip().lower()
-            except EOFError:
-                response = ""
+            response = _prompt(
+                configurable_instruction_prompt_id(key, agent_key),
+                f"  Keep for {display}?{hint} ({default}/{'n' if default == 'Y' else 'Y'}): ",
+                type="yes_no",
+                default=instruction["default_enabled"],
+            ).strip().lower()
 
             if response == "":
                 enabled = instruction["default_enabled"]
@@ -423,10 +451,12 @@ def _prompt_quality_settings(dry_run: bool = False) -> None:
             for i, viewer in enumerate(viewers, 1):
                 Console.print(f"  {i}) {viewer['display_name']}")
             Console.print(f"  {len(viewers) + 1}) None")
-            try:
-                choice = input("Choose a viewer [1]: ").strip() or "1"
-            except EOFError:
-                choice = "1"
+            choice = _prompt(
+                INSTALL_QUALITY_REPORT_VIEWER,
+                "Choose a viewer [1]: ",
+                type="enum",
+                default="1",
+            ).strip() or "1"
             try:
                 idx = int(choice) - 1
             except ValueError:
@@ -455,17 +485,21 @@ def _prompt_quality_settings(dry_run: bool = False) -> None:
         "  1. Automatically prune after N days (default: 30)\n"
         "  2. Manage manually"
     )
-    try:
-        retention_choice = input("Choice (1/2): ").strip() or "1"
-    except EOFError:
-        retention_choice = "1"
+    retention_choice = _prompt(
+        INSTALL_QUALITY_REPORT_RETENTION_MODE,
+        "Choice (1/2): ",
+        type="enum",
+        default="1",
+    ).strip() or "1"
 
     if retention_choice == "1":
         _save("report_retention_mode", "auto")
-        try:
-            days_str = input("Prune reports after how many days? [30]: ").strip() or "30"
-        except EOFError:
-            days_str = "30"
+        days_str = _prompt(
+            INSTALL_QUALITY_REPORT_RETENTION_DAYS,
+            "Prune reports after how many days? [30]: ",
+            type="int",
+            default=30,
+        ).strip() or "30"
         try:
             days = int(days_str)
         except ValueError:

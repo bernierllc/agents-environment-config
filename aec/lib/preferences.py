@@ -60,6 +60,39 @@ OPTIONAL_FEATURES: Dict[str, Dict[str, Any]] = {
 }
 
 
+# Canonical set of keys a writer is permitted to set under any of the
+# top-level sections of ``prefs.json``. Used by the org-config overlay
+# allow-list (see ``aec/lib/org_config/allow_lists.py``) and as a sanity
+# check when adding new preference writers.
+#
+# When you add a new preference writer, add the key here too. The unit
+# test ``tests/lib/org_config/test_allow_lists.py`` will fail if a key
+# appears in the org-overlay allow-list but is missing from this set.
+KNOWN_PREFERENCE_KEYS: frozenset[str] = frozenset({
+    # optional_rules.* (sourced from OPTIONAL_FEATURES; kept explicit here
+    # so the overlay allow-list has a stable contract even if the registry
+    # is temporarily empty during a refactor)
+    "leave-it-better",
+    "update_check",
+    "port_registry_enabled",
+    "scheduled_tests_enabled",
+    "discovery_recompare",
+    # settings.* (audited writers across install.py, repo.py,
+    # global_install_prompt.py — see addendum §1.1.2)
+    "projects_dir",
+    "plans_dir",
+    "plans_gitignored",
+    "plans_completion",
+    "hook_mode",
+    "aec_json_gitignored",
+    "report_viewer",
+    "report_retention_mode",
+    "report_retention_days",
+    "global_install_multi_repo_threshold",
+    "skip_global_install_prompt_for",
+})
+
+
 def _default_preferences() -> Dict[str, Any]:
     """Return the default (empty) preferences structure."""
     return {
@@ -176,16 +209,20 @@ def check_pending_preferences() -> None:
         return
 
     from .console import Console
+    from .prompts import prompt as _prompt
+    from .prompt_ids import optional_rule_prompt_id
 
     Console.print()
     Console.subheader("Optional Features")
     Console.print("AEC has optional rules you can enable for your AI agents.\n")
 
     for feature in pending:
-        try:
-            response = input(feature["prompt"]).strip().lower()
-        except EOFError:
-            response = ""
+        response = _prompt(
+            optional_rule_prompt_id(feature["key"]),
+            feature["prompt"],
+            type="yes_no",
+            default=feature["default"],
+        ).strip().lower()
 
         if response == "":
             enabled = feature["default"]
