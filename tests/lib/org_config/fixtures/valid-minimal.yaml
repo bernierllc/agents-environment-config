@@ -1,0 +1,18 @@
+---
+schema_version: "1.0"
+org_id: "minimal"
+org_name: "Minimal Org"
+config_version: "1.0.0"
+trust:
+  mode: "unsigned"
+---
+
+sources:
+  default: { skills: keep, rules: keep, agents: keep, mcps: keep }
+  custom: []
+
+items:
+  skills: {}
+  rules: {}
+  agents: {}
+  mcps: {}

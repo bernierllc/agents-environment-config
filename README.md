@@ -6,6 +6,14 @@ This repo eliminates that. Define your development standards once, and `aec` dis
 
 > **Note:** This is a template repository. It provides shared configurations that get copied to your projects. Do not add project-specific content here -- that goes in each project's `AGENTINFO.md`.
 
+## AEC for Individuals, Teams, and Organizations
+
+**Individuals.** AEC works out of the box for solo developers. Clone the repo, run `aec install`, and your projects pick up a coherent set of rules, agents, skills, and MCP servers across every AI agent you use.
+
+**Teams.** Small teams can share the same `.agent-rules/` and `.cursor/rules/` folders to keep development standards consistent across everyone's machines. AEC's parity checks make sure no rule format drifts away from another.
+
+**Organizations.** IT/admin teams can publish an **org config** — a single YAML file describing required, recommended, blocked, and pinned items for everyone in the org, plus default preferences. Users enroll with `aec org enroll <path>` (Phase 1, behind `pip install aec[org-configs-preview]`). AEC never hosts org configurations; each organization publishes their own. See [Org configs for users](docs/users/org-configs.md) and [Authoring org configs](docs/orgs/authoring-org-configs.md).
+
 ## What's Inside
 
 - **Shared Cursor rules** (`.cursor/rules/`) - Development standards in Cursor format (with YAML frontmatter)

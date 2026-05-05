@@ -37,6 +37,51 @@ def _check(name: str, condition: bool, success_msg: str, failure_msg: str) -> bo
         return False
 
 
+def _check_org_configurations() -> None:
+    """Render the 'Org configurations' section.
+
+    Doctor reports, it does not gate: errors discovering enrolled orgs
+    surface as a red line but do not flip the overall pass/fail state.
+    The section is omitted entirely when no orgs are enrolled, to avoid
+    padding output with empty noise.
+    """
+    try:
+        from ..lib.org_config import (
+            OrgConfigError,
+            OrgPaths,
+            discover_enrolled_orgs,
+        )
+        from ..lib.org_config.state import read_state
+    except ImportError:
+        # PyYAML extra not installed — silently skip.
+        return
+
+    paths = OrgPaths.default()
+    try:
+        orgs = discover_enrolled_orgs(paths)
+    except OrgConfigError as exc:
+        Console.header("Org configurations")
+        Console.error(f"Failed to load enrolled org: {exc}")
+        return
+
+    if not orgs:
+        return
+
+    Console.header("Org configurations")
+    for enrolled in orgs:
+        cfg = enrolled.config
+        Console.print(f"  org_id: {cfg.org_id}")
+        Console.print(f"  config_version: {cfg.config_version}")
+        if cfg.trust_mode == "unsigned":
+            Console.warning(f"  trust_mode: {cfg.trust_mode} (no cryptographic verification)")
+        else:
+            Console.print(f"  trust_mode: {cfg.trust_mode}")
+        state = read_state(paths, cfg.org_id)
+        if state is not None:
+            Console.print(f"  last_verified_at: {state.last_verified_at}")
+            Console.print(f"  last_applied_at: {state.last_applied_at}")
+
+
 def run_doctor() -> Tuple[bool, List[str]]:
     """
     Check installation health.
@@ -351,6 +396,9 @@ def run_doctor() -> Tuple[bool, List[str]]:
                 Console.info(f"Latest known: v{cache_data.get('latest_version', 'unknown')}")
             except Exception:
                 pass
+
+    # Org configurations (Phase 1: 0 or 1 enrolled org)
+    _check_org_configurations()
 
     # Summary
     Console.header("Summary")

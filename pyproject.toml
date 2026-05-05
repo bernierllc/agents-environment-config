@@ -33,6 +33,9 @@ dev = [
     "pytest-cov>=4.0.0",
     "pytest-timeout>=2.0.0",
 ]
+org-configs-preview = [
+    "PyYAML>=6.0",
+]
 
 [project.scripts]
 aec = "aec.cli:main"

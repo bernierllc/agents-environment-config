@@ -4,6 +4,8 @@ from pathlib import Path
 
 from ..lib import Console
 from ..lib.config import AEC_HOME
+from ..lib.prompt_ids import SETUP_TRACK_CURRENT_REPO
+from ..lib.prompts import prompt as _prompt
 from ..lib.tracking import log_setup, init_aec_home, is_logged
 from ..lib.scope import find_tracked_repo
 
@@ -25,10 +27,12 @@ def run_setup(skip_raycast: bool = False, dry_run: bool = False) -> None:
         cwd = Path.cwd()
         if (cwd / ".git").exists() and not is_logged(cwd):
             Console.print(f"AEC is already installed. Track {cwd} as a repo?")
-            try:
-                resp = input("[Y/n]: ").strip().lower()
-            except EOFError:
-                resp = "n"
+            resp = _prompt(
+                SETUP_TRACK_CURRENT_REPO,
+                "[Y/n]: ",
+                type="yes_no",
+                default=True,
+            ).strip().lower()
             if resp != "n":
                 run_setup_path(str(cwd), skip_raycast=skip_raycast, dry_run=dry_run)
                 return
