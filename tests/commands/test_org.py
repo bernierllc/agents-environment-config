@@ -70,3 +70,20 @@ def test_org_enroll_url_not_supported_in_phase_1(tmp_path: Path):
     result = _run(["org", "enroll", "https://example.com/config.yaml", "--allow-unsigned", "--yes"], tmp_path)
     assert result.exit_code != 0
     assert "phase 2" in result.stdout.lower() or "phase 2" in result.stderr.lower()
+
+
+def test_doctor_shows_org_section_when_org_enrolled(tmp_path: Path):
+    cfg = FIXTURES / "valid-minimal.yaml"
+    _run(["org", "enroll", str(cfg), "--allow-unsigned", "--yes"], tmp_path)
+    result = _run(["doctor"], tmp_path)
+    assert result.exit_code == 0
+    assert "org configuration" in result.stdout.lower()
+    assert "minimal" in result.stdout
+    assert "unsigned" in result.stdout.lower()
+
+
+def test_doctor_omits_org_section_when_no_orgs(tmp_path: Path):
+    result = _run(["doctor"], tmp_path)
+    assert result.exit_code == 0
+    out_low = result.stdout.lower()
+    assert "no orgs enrolled" in out_low or "org configurations" not in out_low
