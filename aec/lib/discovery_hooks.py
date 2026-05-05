@@ -33,17 +33,22 @@ def _normalize_name(name: str) -> str:
 
 
 def _scan_local_items(base_dir: Path) -> list[str]:
-    """List item names in a directory (files and subdirectories).
+    """List item *stems* in a directory (files and subdirectories).
 
-    Returns basenames of immediate children, skipping hidden files.
+    Returns the canonical name used by the installed manifest: directory
+    name as-is, file name with its extension stripped. Skips hidden files.
+    Manifest keys never include the ``.md`` extension, so comparing raw
+    filenames here would always miss — see scan_local_items() in
+    similarity.py for the same convention.
     """
     if not base_dir.is_dir():
         return []
-    return [
-        item.name
-        for item in base_dir.iterdir()
-        if not item.name.startswith(".")
-    ]
+    items: list[str] = []
+    for entry in base_dir.iterdir():
+        if entry.name.startswith("."):
+            continue
+        items.append(entry.stem if entry.is_file() else entry.name)
+    return items
 
 
 def _is_dismissed(item_name: str, item_type: str) -> bool:

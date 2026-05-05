@@ -20,7 +20,9 @@ from ..lib.dismissals import (
     prune_stale,
 )
 from ..lib.backup import backup_item, ensure_backup_gitignore
+from ..lib.installed_store import get_all_installed
 ITEM_TYPES = ("agents", "skills", "rules")
+_PLURAL_TO_SINGULAR = {"agents": "agent", "skills": "skill", "rules": "rule"}
 
 CONTRIBUTING_URLS = {
     "agents": "https://github.com/bernierllc/agency-agents/blob/main/CONTRIBUTING.md",
@@ -159,9 +161,19 @@ def _run_scan(
     if catalog_hashes is None:
         catalog_hashes = {}
 
-    # Build installed manifest from .aec.json for scan_local_items
-    aec_json = load_aec_json(scope.repo_path) if scope.repo_path else None
-    installed_manifest = (aec_json or {}).get("installed", {})
+    # Build installed manifest for scan_local_items.
+    # Local scope reads the per-repo .aec.json; global scope has no repo_path,
+    # so read the global per-type installed stores. Without this, every globally
+    # installed item is treated as untracked and `aec discover -g` re-finds and
+    # re-installs the same items every run.
+    if scope.is_global:
+        installed_manifest = {
+            plural: get_all_installed(_PLURAL_TO_SINGULAR[plural])
+            for plural in ITEM_TYPES
+        }
+    else:
+        aec_json = load_aec_json(scope.repo_path) if scope.repo_path else None
+        installed_manifest = (aec_json or {}).get("installed", {})
 
     all_results = []
 
