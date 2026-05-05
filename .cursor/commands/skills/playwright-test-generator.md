@@ -62,6 +62,7 @@ A JS script at `scripts/verification-playwright/check-versions.js` handles all m
 | `header-missing` | Test file exists but has no `@source` / `@metadata` header comments | Yes — add header comments to existing test |
 | `skill-version-mismatch` | Verification doc's `generated_by` (live verification-writer version) is newer than the metadata doc's `source_generated_by` (the version this manifest was synced against) | Yes — user MUST run `--resync` before any other generation work; the skill STOPS otherwise |
 | `stamp-missing` | Verification doc has frontmatter but no `generated_by` stamp (pre-v3.1.0 verification-writer output) | Yes — tell user to run verification-writer to add the stamp; proceed cautiously if user overrides |
+| `affected-path-missing-on-disk` | Verification doc lists a path or glob in `affected_paths` that expands to zero files in the working tree | Yes — flag to user; the source file moved or was deleted. Tests for this page may now be testing nothing. Do not generate or update tests for this page until verification-writer is re-run to re-verify the mapping |
 
 **This script replaces the full-scan approach.** Instead of the agent parsing every verification doc and test file to figure out what changed, the script does the comparison in milliseconds and hands the agent a precise task list. The agent only processes items that need work.
 
@@ -94,6 +95,7 @@ The hook runs `sync-tests.js` first. If the script detects items needing LLM int
 
 Complete these in order:
 
+0. **Preflight** — run `bash scripts/preflight.sh` from the skill directory. If exit code is 0, continue. If non-zero, print its stdout verbatim to the user and STOP. Do not attempt to recover, retry, or work around the failure. The script verifies that `docs/verification/pages/*.md` exists; without that, this skill has nothing to translate.
 1. **Run version check script** — execute `check-versions.js`, read the task list output
 2. **Check for `skill-version-mismatch` entries FIRST** — if any item has this status, STOP. Report the gap to the user and direct them to re-run with `--resync`. Do not proceed to step 3 until either every mismatch is resolved by a `--resync` pass OR the user explicitly overrides. Silent adoption of a newer verification-writer version corrupts downstream anchors (see "Skill Version Compatibility")
 3. **Triage the remaining task list** — separate into: frontmatter-missing (blocked), stamp-missing (blocked, direct user to verification-writer), metadata-missing (create), source-updated (re-evaluate), test-missing (generate), header-missing (patch), up-to-date (skip)
@@ -104,6 +106,8 @@ Complete these in order:
    - **7a. Before writing each test:** classify the verification item by interaction type (see `references/test-generation-patterns.md`), confirm the planned test will contain all must-have elements for that type, then write the test (Checkpoint A — see Test Completeness Standards)
    - **7b. Pre-flight ID validation (before writing each spec file):** After generating the full text of a spec file, before writing to disk, extract every `@begin:ID` from the generated text and cross-check against the ID set from `parseVerificationItems()`. If any `@begin:ID` is not in that set, refuse to write and report the specific invalid IDs. This is a hard stop — do not write the file.
 8. **Handle missing testids** — exhaust stable alternative selectors first (`getByRole` → `getByLabel` → `getByText` for static copy → `getByPlaceholder` for static copy); generate `.skip()` stub only if all fail and only for types that require DOM selectors (not `api-response` or `auth-boundary`); document alternatives tried in stub comment (see stub template in `references/test-generation-patterns.md`); update `testid-gaps.md`
+   - **8a. Selector verification (Checkpoint A.5 — gates every live test):** Before emitting any live (non-`.skip()`) test that depends on a DOM selector, the selector MUST be verified against actual component source. Open the component file (use `import-index.json` to locate it) and confirm the exact `data-testid`, label, role+name, or static text exists. **Best-guess selectors are forbidden in live tests.** If you cannot read the component source, or the component does not expose the expected hook, the test MUST be a `.skip()` stub citing skip reason 3 with "selector unverified" and a `testid-gaps.md` entry. See "Selector Verification" below.
+   - **8b. Data dependency classification:** If a verification item asserts the presence of dynamic content (cards, list items, feed entries, table rows, counts > 0), classify as data-dependent. Set the page's metadata `data_setup.ready` accordingly. If `data_setup.ready = false`, generate a `.skip()` stub citing skip reason 2 — do not paper over with `hasCards || hasEmptyState` fallbacks unless the verification item is explicitly typed as `graceful empty state`. See "Live Data Dependencies" below.
 9. **Update manifest** — write changes atomically with lockfile
 10. **Rebuild import index** — trace routes to source files, update `manifest/import-index.json`
 11. **Patch test headers** — for `header-missing` items, add `@source`, `@source-generated-by`, `@metadata`, and `@generated-by` comments to existing test files
@@ -344,6 +348,67 @@ Before claiming a testid is missing and no alternative exists, attempt these in 
 4. `getByPlaceholder` — **only for static placeholder text**, not programmatically-set values
 
 Only if all applicable options are exhausted is the element untargetable without a testid. See `references/test-generation-patterns.md` for the required stub comment format.
+
+### Selector Verification
+
+**Live tests must use verified selectors. Best-guess selectors are forbidden.**
+
+A selector is *verified* when one of the following is true:
+
+1. **`data-testid` confirmed in source** — grep the component file (located via `import-index.json` route → source mapping) for the exact `data-testid` value the test will use. Match found = verified.
+2. **`getByRole` + accessible name confirmed in source** — the component's JSX shows the exact role-bearing element with the exact accessible name (visible text, `aria-label`, or label association). Verified.
+3. **`getByLabel` confirmed in source** — the component renders a `<label>` with matching text bound to the input. Verified.
+4. **`getByText` for static copy confirmed in source** — the literal string is present in the JSX as static markup, not interpolated from data. Verified.
+5. **`getByPlaceholder` for static copy confirmed in source** — placeholder is a literal string in JSX. Verified.
+
+Anything else — including `[data-testid*="activity"]`, `locator('form').first()`, `nav a` filters, multi-fallback OR-chains like `[data-testid*="article-card"], article, .article-card`, or any selector composed by analogy from the verification doc's natural-language description — is **unverified**.
+
+**Required workflow before writing a live test:**
+
+1. Locate the page's component source via `import-index.json`.
+2. Read the component(s) actually rendered for the route.
+3. For each selector the test will use, confirm it matches by one of the five criteria above.
+4. If all selectors verify → emit a live test.
+5. If any selector is unverified after a reasonable attempt to read the source → emit a `.skip()` stub with skip reason 3, add a row to `testid-gaps.md` with the `Status` column set to either `confirmed-missing` (source was read; testid not present) or `unverified` (source could not be confidently located; testid may or may not exist). Propose the testid that should be added in the suggested-testid column. See the `testid-gaps.md` schema in `references/test-generation-patterns.md` — every skip-reason-3 stub is required to have a matching row.
+
+Note that **skip-reason-2 (data-setup) stubs do NOT go in `testid-gaps.md`** — they go in a separate `data-setup-gaps.md` report (or a clearly labeled section). Component-testid gaps and seed-data gaps are owned by different people and must not be conflated.
+
+**Sample-and-confirm rule for repeated patterns:** When generating tests across many similar items on a page (e.g., 10 form fields, 20 list items), read at least 3 representative components to confirm the selector pattern holds before generating tests for the rest. If the sample shows the pattern is inconsistent, treat each item individually rather than projecting the pattern.
+
+**The anti-pattern this section prevents:** generating live tests with optimistic CSS like `[data-testid*="article-card"], article, .article-card` and shipping them — they fail with `Expected: true, Received: false` and waste the developer's time on triage. The correct outcome is a `.skip()` stub plus a `testid-gaps.md` entry that surfaces the missing hook to the component owner.
+
+### Live Data Dependencies
+
+A verification item is **data-dependent** when its assertion requires content that does not exist by virtue of the page rendering — e.g., "recent activity is visible", "article cards appear", "feed shows posts", "X count is > 0", "table contains at least one row of type Y".
+
+These items cannot be tested reliably against an empty dev database. The skill must distinguish them from items that assert structure (which is data-independent) and handle them explicitly.
+
+**Classification:**
+
+When generating tests for the page, identify every data-dependent item. For each such item:
+
+1. **Record it in the metadata doc** under a `data_dependencies` block (extend the existing `data_setup` section). List the specific data shape required (e.g., "≥1 published article with image and title").
+2. **Check `data_setup.ready`** in the metadata doc:
+   - If `true` and a seed helper exists → the test's `beforeEach` calls the seed helper to create the required data, then the assertion runs against known-present data.
+   - If `false` → emit a `.skip()` stub with skip reason 2 (`data_setup.ready = false`). Do not generate a live test that assumes the dev database has the right data.
+3. **Do not paper over with empty-state fallbacks.** Assertions like `expect(hasCards || hasEmptyState).toBe(true)` are an anti-pattern when the verification item asserts the populated state. The empty-state branch is only valid when the verification item itself is typed `graceful empty state` (see Expectation Type Mapping in patterns ref).
+
+**Metadata frontmatter extension:**
+
+```yaml
+data_setup:
+  strategy: api-seed       # api-seed | db-fixture | manual | none | null
+  helper: helpers/seed.ts#seedArticles
+  ready: true
+  required_shape:
+    - "≥1 published article with title and image"
+    - "≥1 activity event in last 7 days"
+  skip_reason: null
+```
+
+When `ready: false`, list the required shape so the seed-helper author has a precise spec to implement against. The `required_shape` field is a contract between this skill and whoever implements `helpers/seed.ts` — vague entries ("some data") force re-discovery later.
+
+**Reporting:** Step 12's report must include a `data_setup_blocked` count: tests that are stubbed because the required seed isn't implemented. This makes the seed gap visible alongside the testid gap.
 
 ### Two completeness checkpoints
 
@@ -632,6 +697,9 @@ Browser-verification findings feed back to verification-writer, which updates do
 | Skipping API response items as "backend-only" | Classify as `api-response` and use `page.request` — API response assertions are Playwright tests |
 | Stubbing `multi-step-workflow` items | `multi-step-workflow` is an interaction type, not a skip reason — execute each step in sequence, assert intermediate and final states |
 | Generating a testid-missing stub without trying stable alternatives | Try `getByRole`, `getByLabel`, `getByText` (static copy only), `getByPlaceholder` (static copy only) before generating a stub; document what was tried |
+| Emitting a live test with a guessed/unverified selector (e.g., `[data-testid*="article-card"], article, .article-card`, `locator('form').first()`, `nav a` filters constructed from the verification doc's natural language) | Live tests require selector verification against component source — read the component via `import-index.json` and confirm the testid/role/label/static text exists. If unverified, emit a `.skip()` stub with skip reason 3 and a `testid-gaps.md` entry. Best-guess selectors are forbidden in live tests. |
+| Asserting presence of dynamic content (cards, feed entries, list rows) without checking `data_setup.ready` | Data-dependent items must check the metadata doc's `data_setup.ready`. If false, stub with skip reason 2; if true, seed required data in `beforeEach`. Do not assume the dev database is populated. |
+| Papering over data-dependence with `expect(hasContent || hasEmptyState).toBe(true)` | This is only valid when the verification item is explicitly typed `graceful empty state`. Otherwise it masks the actual assertion and silently passes against an empty database — classify the item correctly and either seed data or stub with skip reason 2. |
 | Claiming "missing testid" for `api-response` or `auth-boundary` items | These types use `page.request` or URL/navigation assertions — they do not need DOM selectors; this is a misclassification |
 | Declaring generation complete while stubs with invalid skip reasons exist | Checkpoint B (step 11a) must pass before reporting — every stub must have a valid skip reason from the four-item list |
 | Silently regenerating tests when verification-writer has been upgraded | `check-versions.js` reports `skill-version-mismatch` for this exact case — STOP and require `--resync`; never auto-update the `source_generated_by` field |
@@ -653,6 +721,8 @@ Browser-verification findings feed back to verification-writer, which updates do
 - `check-versions.js` reports `frontmatter-missing` for any doc — verification-writer must add frontmatter before this skill can proceed
 - About to edit a file in `docs/verification/` — this skill does not own those files
 - More than 20% of generated tests are stubs with invalid skip reasons — the classification system is being bypassed
+- About to emit a live test with a selector that has not been confirmed against component source — verify or stub; never ship a guessed selector as a live test
+- A data-dependent assertion is being generated against a page whose metadata `data_setup.ready` is `false` or unknown — stub with skip reason 2 until the seed helper exists
 - Declaring generation complete (step 12 Report) while any stub has an invalid skip reason — Checkpoint B must pass first
 - `check-versions.js` reports `skill-version-mismatch` and `--resync` has not been run — STOP; silent adoption of a newer verification-writer version corrupts manifests and test markers
 - About to overwrite a `source_generated_by` or `@source-generated-by` value as part of normal generation — these only change during a `--resync` pass

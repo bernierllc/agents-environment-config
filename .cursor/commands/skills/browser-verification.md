@@ -41,6 +41,7 @@ This skill operates at three depth levels. **Ask the user which depth they want*
 
 You MUST complete these in order:
 
+0. **Preflight** — run `bash scripts/preflight.sh` from the skill directory. If exit code is 0, continue. If non-zero, print its stdout verbatim to the user and STOP. The preflight verifies that `docs/verification/pages/` exists and contains at least one `.md` file. This check runs before memory lookup so a stale memory pointing at a deleted docs path can't lead to a confused fallback.
 1. **Find verification docs**
 2. **Determine scope and depth**
 3. **Detect environment**
@@ -223,6 +224,7 @@ Verification docs may include YAML frontmatter with structured page metadata (ad
 - **`page.has_forms` / `page.has_modals` / `page.has_realtime`**: Tells you what kinds of interactions to expect, helping you plan depth-appropriate testing.
 - **`data_dependencies`**: Tells you what state must exist before the page is meaningful. Check prerequisites before navigating rather than discovering empty pages mid-run.
 - **`environment.services`**: Tells you what services need to be running. Cross-reference with the service startup in Step 2 — if a page needs a service that isn't running, flag it before attempting verification.
+- **`affected_paths`** (verification-writer v3.3.0+): Source-code globs the page covers. Read informationally — when the user has scoped this run to recent code changes, prioritize pages whose `affected_paths` intersect those changes. If the field is absent or empty, do not block; note it in the log and continue. Do not attempt to populate or repair `affected_paths` — that is verification-writer's job.
 
 **If frontmatter is missing:** This is not a blocker — browser-verification has always worked from section headers and inline content. Continue with the normal flow. However, note missing frontmatter in the verification log and suggest running `/verification-writer` to add it:
 

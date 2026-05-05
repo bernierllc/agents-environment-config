@@ -4,7 +4,6 @@ description: "Autonomous Playwright test execution, environment management, prof
 tags: ["skill"]
 ---
 
-
 # Playwright Test Runner
 
 ## Overview
@@ -196,6 +195,7 @@ Flag any of these in the report:
 |---|---|---|
 | **Full suite** | Default, `--all` | Every test file |
 | **Changed files** | `--changed` | Tests mapped to changed source files (uses `manifest/import-index.json` if available) |
+| **Changed paths** | `--changed-paths <list>` | Tests for verification pages whose `affected_paths` (frontmatter) intersect the supplied path list. Reads `docs/verification/pages/*.md` frontmatter — only pages whose `affected_paths` glob-match a changed path contribute their spec file. Pages with absent or empty `affected_paths` are skipped (warn in the report). |
 | **Single file** | `--file path/to/spec.ts` | One test file |
 | **Single test** | `--grep "TEST-ID"` | One test by grep pattern |
 | **Failed only** | `--last-failed` | Re-run only tests that failed in the previous run |
@@ -204,6 +204,7 @@ Flag any of these in the report:
 
 Complete these in order:
 
+0. **Preflight** — run `bash scripts/preflight.sh` from the skill directory. If exit code is 0, continue. If non-zero, print its stdout verbatim to the user and STOP. The preflight verifies that `docs/verification/pages/` exists and contains at least one `.md` file. Without verification docs, the runner cannot map changed source paths to spec files for `--changed-paths` mode and cannot validate that test scope matches the documented contract.
 1. **Identify test command** — read `package.json` scripts and `playwright.config.ts` to determine the correct run command. Common patterns: `npx playwright test`, `npm run test:e2e`, `npm run test:playwright`. Record the base command for use in all subsequent steps.
 2. **Confirm test scope** — resolve which tests will run (see "Test Scope Confirmation" above). If the user provided scope, echo back the resolved list and confirm. If no scope was provided, ask the user. Do not proceed until scope is confirmed. Record: number of tests, number of files, scope mode used.
 3. **Audit test environment** — run the environment detection flow (see "Test Environment Lifecycle" above). Classify the project's environment state. If the environment is not isolated, warn the user and get acknowledgment before proceeding. Record the environment state for the report.

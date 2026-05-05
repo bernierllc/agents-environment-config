@@ -16,6 +16,28 @@ Analyze a codebase to generate and maintain manual verification docs for use by 
 
 **Relationship to browser-verification:** This skill creates and maintains the docs. Browser-verification executes against them. The two form a feedback loop.
 
+## Skills that depend on this output
+
+The verification docs and frontmatter this skill produces are consumed by:
+
+- **playwright-test-generator** — reads `version`, `generated_by`, `path`, `access`, and `affected_paths` to generate and version-track Playwright tests. Halts if `docs/verification/pages/*.md` is missing.
+- **playwright-test-runner** — reads `affected_paths` to scope test runs by changed source files. Halts if docs are missing.
+- **browser-verification** — reads frontmatter informationally to plan auth, data setup, and which source files are in scope. Halts if docs are missing; runs without frontmatter when present-but-incomplete.
+
+These consumers run a small `scripts/preflight.sh` at invocation that fails fast with a "run verification-writer first" message if `docs/verification/pages/` doesn't exist. The phase 2 work in `plans/skill-dependency-management.md` will surface this dependency at install time too.
+
+## Version scanning
+
+`scripts/scan-versions.py` is a deterministic, no-LLM scanner that reports which version of verification-writer produced each doc. It maintains a SHA-256 cache at `docs/verification/.scan-cache.json` (auto-added to `.gitignore`) so repeat runs only re-scan changed files.
+
+Run it manually:
+
+```bash
+python3 verification-writer/scripts/scan-versions.py --root . --current-version 3.3.0
+```
+
+The output is JSON: counts of `current` / `stale` / `missing_frontmatter` / `stamp_missing` / `no_affected_paths` plus per-file lists. Use this at the start of any update pass to know which docs need migration. See `references/version-fingerprints.md` for how versions are inferred when a `generated_by` stamp is missing.
+
 ## Entry Points
 
 Determine which applies from context:
@@ -139,6 +161,15 @@ data_dependencies:
 environment:
   services: [api, database]
   feature_flags: []
+
+# Source-code paths this page is implemented by — used by downstream gates
+# (pre-commit hooks, --changed-paths-scoped test runs) to decide when this
+# doc's tests must re-run. Glob patterns supported (gitignore-style negations
+# allowed, later patterns override earlier ones).
+affected_paths:
+  - src/pages/EventDetail.tsx
+  - "src/components/event-detail/**"
+  - src/api/events/[id].ts
 ---
 ```
 
@@ -153,6 +184,7 @@ environment:
 - **`environment.services`**: Abstract service names. A downstream consumer maps these to actual infrastructure in its own config.
 - **`environment.feature_flags`**: Feature flags that affect this page's behavior. Empty array if none.
 - **`id_namespace`**: A short prefix string that all item IDs in this doc must start with (e.g., `EVT-DTL` means all IDs must begin `EVT-DTL-`). Verification-writer validates every item ID against this prefix before writing. Downstream parsers assert the same constraint. Choose the namespace from the page abbreviation used in the ID convention. On first generation, set this from the IDs you are minting. On subsequent runs, validate existing IDs match and flag any that don't.
+- **`affected_paths`**: List of glob patterns (or literal paths) identifying source files whose changes invalidate this verification doc. Used by downstream gates (pre-commit hooks, scoped test runs) to decide when to re-run associated tests. Glob semantics: standard glob with `**` for recursive subtrees and `!` prefix for negation; later patterns override earlier ones (gitignore-style). Required as of v3.3.0 for new docs. Existing docs without this field are reported as `no_affected_paths` by `scripts/scan-versions.py` and should be backfilled — but absence is not a failure for downstream skills, only a missed optimization. **Population rule:** on first generation or when adding the field to a legacy doc, run the deterministic heuristic (filename match + route-table lookup via `scripts/route-scanner.py`) to produce a candidate list, present it to the user for confirmation, then write. Never silently commit heuristic results. **Integrity check:** every `scan-versions.py` run expands each glob against the working tree; entries that match zero files are reported so the user can fix or remove them. Use `affected_paths: []` (empty list) only for docs that legitimately have no source-code mapping (external service flows, manual-only checks).
 
 **Auth model guidelines:**
 
@@ -173,7 +205,7 @@ When a page has different access rules per user type section (e.g., admin sees e
 ```markdown
 ---
 version: "1.0.0"
-generated_by: "verification-writer@3.1.0"
+generated_by: "verification-writer@3.3.0"
 id_namespace: EVT-DTL
 path: /events/{id}
 title: Event Detail Page
@@ -193,6 +225,10 @@ data_dependencies:
 environment:
   services: [api, database]
   feature_flags: []
+affected_paths:
+  - src/pages/EventDetail.tsx
+  - "src/components/event-detail/**"
+  - src/api/events/[id].ts
 ---
 
 # Event Detail Page (`/events/{id}`)
@@ -248,7 +284,7 @@ Flow files also include YAML frontmatter with versioning and metadata:
 ```yaml
 ---
 version: "1.0.0"
-generated_by: "verification-writer@3.1.0"
+generated_by: "verification-writer@3.3.0"
 id_namespace: FLOW-NOMLC  # all step IDs in this flow must start with this prefix
 title: Event Lifecycle
 user_types: [admin, promoter, artist]
@@ -259,17 +295,28 @@ data_dependencies:
 environment:
   services: [api, database, mailpit]
   feature_flags: []
+# Source-code paths this flow exercises end-to-end. Same semantics as on
+# page docs (globs allowed, gitignore-style negations supported). For flows
+# this is typically the union of the affected_paths of all referenced page
+# docs plus any flow-specific glue code (workflow engines, magic-link
+# generators, etc.).
+affected_paths:
+  - src/pages/EventCreate.tsx
+  - src/pages/EventDetail.tsx
+  - src/pages/MagicLinkLanding.tsx
+  - src/lib/workflow/**
+  - src/lib/magic-link.ts
 ---
 ```
 
-Flow frontmatter is lighter than page frontmatter — flows don't have their own `access` block because access is defined per-step by the referenced page docs. The `generated_by` stamp behaves the same way as on page docs: see "Skill Version Tracking and Migration".
+Flow frontmatter is lighter than page frontmatter — flows don't have their own `access` block because access is defined per-step by the referenced page docs. The `generated_by` stamp and `affected_paths` field behave the same way as on page docs: see "Skill Version Tracking and Migration" and the page-level `affected_paths` rules above.
 
 ##### Flow content example
 
 ```markdown
 ---
 version: "1.0.0"
-generated_by: "verification-writer@3.1.0"
+generated_by: "verification-writer@3.3.0"
 id_namespace: FLOW-NOMLC  # all step IDs in this flow must start with this prefix
 title: Event Lifecycle
 user_types: [admin, promoter, artist]
@@ -280,6 +327,12 @@ data_dependencies:
 environment:
   services: [api, database, mailpit]
   feature_flags: []
+affected_paths:
+  - src/pages/EventCreate.tsx
+  - src/pages/EventDetail.tsx
+  - src/pages/MagicLinkLanding.tsx
+  - src/lib/workflow/**
+  - src/lib/magic-link.ts
 ---
 
 # Flow: Event Lifecycle
@@ -510,6 +563,7 @@ When the skill version bumps, add a row describing what changes (if any) need to
 | (missing / unknown) | 3.1.0 | none — preserve all existing IDs | add `generated_by` stamp | no (automatic on first write) |
 | 3.0.0 | 3.1.0 | none — preserve all existing IDs | add `generated_by` stamp | no (automatic on first write) |
 | 3.1.0 | 3.2.0 | none — preserve all existing IDs | add `id_namespace` field to frontmatter (derive from existing item prefix pattern); flag any items whose IDs don't match the namespace | no (automatic on first write) |
+| 3.2.0 | 3.3.0 | none — preserve all existing IDs | add `affected_paths` field to page and flow frontmatter (glob patterns allowed). On first write, run the path-suggestion pass: deterministic filename + route-table heuristics first, then prompt the user to confirm before persisting. Never silently auto-commit heuristic results. Existing docs that the skill is not actively touching are left as-is and reported by `scan-versions.py` as `no_affected_paths`. | no (automatic on first write) |
 
 When you add a new version row, be explicit: list exact ID-to-ID mappings for any renames. Do not describe renames as "update to match new convention" — that is not actionable by a future Claude. If you cannot list the mappings, the skill is not ready to rename IDs and the rename should be postponed to a later version where the mapping can be defined.
 
@@ -1077,6 +1131,8 @@ HTML visualization: [flow-views | sitemap | both | none]
 | Leaving items for reverted features without a DEFERRED annotation | Items for features not in the current codebase must carry a DEFERRED annotation so downstream generators skip them properly rather than generating tests for non-existent UI |
 | Generating a checklist item without a bold **ID** | Format A (`**EVT-DTL-ADM-01**`) is required on every generated item — never derive an ID from action text (Format B) |
 | Not adding id_namespace to new page or flow frontmatter | Every new doc needs id_namespace; without it, downstream parsers cannot validate that IDs belong to this doc |
+| Auto-committing heuristic `affected_paths` without user confirmation | The filename + route-table heuristic is a *suggestion*, not authoritative. Always present candidates to the user and let them confirm, edit, or reject before writing. Silently committing wrong paths poisons the gate signal for every downstream tool |
+| Skipping `affected_paths` integrity check | On every write touch, expand each glob against the working tree. Entries matching zero files mean the source moved or was deleted — surface these to the user, do not silently strip |
 | Writing flow docs with only narrative steps | Each flow step needs a Format A `**FLOW-PREFIX-NN**` ID — narrative-only steps give downstream generators nothing to extract, causing invented IDs |
 | Writing to a doc with a newer `generated_by` than the current skill | STOP. Do not write. Tell the user the skill is older than the doc — writing would lose structural information encoded by the newer version |
 | Running `--migrate-ids` without a migration table row | If the migration table has no row for the version gap being crossed, the skill does not know what to rename. Do not invent renames — postpone the migration until the table is populated |
