@@ -172,7 +172,7 @@ def log_subprocess_failure(
         f"returncode: {returncode}",
     ]
     if note:
-        parts.append(f"note: {note}")
+        parts.append(f"note: {redact(note)}")
     if stdout:
         parts.append(f"stdout:\n{redact(stdout)}")
     if stderr:

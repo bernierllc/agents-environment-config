@@ -133,6 +133,17 @@ class TestSubprocessFailureLogging:
         assert "refusing to merge" in content
         assert "fetch_latest" in content
 
+    def test_redacts_user_path_in_note(self, fresh_debug, tmp_path):
+        fresh_debug.enable_debug()
+        result = fresh_debug.log_subprocess_failure(
+            cmd=["git", "pull"],
+            returncode=1,
+            note=f"fetch_latest in {tmp_path}",
+        )
+        assert result is not None
+        content = result.read_text()
+        assert str(tmp_path) not in content
+
 
 class TestFriendlyMessages:
     def test_friendly_message_points_to_issue_url(self, fresh_debug):
