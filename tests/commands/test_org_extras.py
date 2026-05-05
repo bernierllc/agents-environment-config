@@ -21,6 +21,21 @@ def _run(args, env_home: Path):
     return runner.invoke(app, args, env={"HOME": str(env_home)})
 
 
+def _all_output(result) -> str:
+    """Return stdout + stderr regardless of click version.
+
+    Old click's ``CliRunner`` merges streams by default and raises
+    ``ValueError`` on ``result.stderr``. Newer click splits them. We just
+    want every byte the command emitted, so try both and concatenate.
+    """
+    parts = [result.stdout or ""]
+    try:
+        parts.append(result.stderr or "")
+    except (ValueError, AttributeError):
+        pass
+    return "".join(parts).lower()
+
+
 def _enroll_minimal(env_home: Path):
     cfg = FIXTURES / "valid-minimal.yaml"
     return _run(["org", "enroll", str(cfg), "--allow-unsigned", "--yes"], env_home)
@@ -33,7 +48,7 @@ def test_enroll_file_not_found_exits_validation(tmp_path: Path):
     missing = tmp_path / "does-not-exist.yaml"
     result = _run(["org", "enroll", str(missing), "--allow-unsigned", "--yes"], tmp_path)
     assert result.exit_code == 13
-    assert "file not found" in result.stderr.lower()
+    assert "file not found" in _all_output(result)
 
 
 def test_enroll_directory_path_treated_as_not_a_file(tmp_path: Path):
@@ -48,7 +63,7 @@ def test_enroll_invalid_yaml_exits_validation(tmp_path: Path):
     bad.write_text("not a frontmatter doc\n", encoding="utf-8")
     result = _run(["org", "enroll", str(bad), "--allow-unsigned", "--yes"], tmp_path)
     assert result.exit_code == 13
-    assert "error:" in result.stderr.lower()
+    assert "error:" in _all_output(result)
 
 
 def test_enroll_validation_error_exits_13(tmp_path: Path):
@@ -106,7 +121,7 @@ def test_list_multi_org_exits_12(tmp_path: Path):
     shutil.copy(FIXTURES / "valid-full.yaml", orgs_dir / "acme.yaml")
     result = _run(["org", "list"], tmp_path)
     assert result.exit_code == 12
-    assert "phase 1" in result.stderr.lower()
+    assert "phase 1" in _all_output(result)
 
 
 # --- status ---------------------------------------------------------------
@@ -129,7 +144,7 @@ def test_status_with_org_id_mismatch_exits_13(tmp_path: Path):
     _enroll_minimal(tmp_path)
     result = _run(["org", "status", "ghost"], tmp_path)
     assert result.exit_code == 13
-    assert "ghost" in result.stderr
+    assert "ghost" in _all_output(result)
 
 
 def test_status_multi_org_exits_12(tmp_path: Path):
@@ -156,7 +171,7 @@ def test_status_prints_no_state_when_state_file_missing(tmp_path: Path):
 def test_show_unknown_org_exits_13(tmp_path: Path):
     result = _run(["org", "show", "ghost"], tmp_path)
     assert result.exit_code == 13
-    assert "ghost" in result.stderr
+    assert "ghost" in _all_output(result)
 
 
 def test_show_raw_prints_file_verbatim(tmp_path: Path):
