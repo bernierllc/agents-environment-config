@@ -22,6 +22,8 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+.coverage
+htmlcov/
 
 # Agent instruction files — templates live in templates/, root copies are local-only
 /AGENTINFO.md
