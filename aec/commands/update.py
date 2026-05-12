@@ -68,7 +68,7 @@ def run_update() -> None:
         Console.print("\nEverything is up to date.")
 
     # Informational: surface agent-blurb drift after update
-    check_blurb_drift(root=Path.cwd())
+    check_blurb_drift(root=repo)
 
 
 def check_blurb_drift(root: Path) -> int:

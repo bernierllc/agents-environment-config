@@ -151,7 +151,7 @@ def run_install(
     # Offer the agent-blurb feature on successful install (project scope only)
     if not scope.is_global:
         try:
-            maybe_offer_blurb(root=Path.cwd(), accept=yes)
+            maybe_offer_blurb(root=repo, accept=yes)
         except Exception as exc:  # noqa: BLE001 - never break install on blurb prompt
             Console.warning(f"agent-blurb offer skipped: {exc}")
 
