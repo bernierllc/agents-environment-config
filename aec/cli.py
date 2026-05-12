@@ -335,6 +335,24 @@ if HAS_TYPER:
         from .commands.doctor import run_doctor
         run_doctor()
 
+    @app.command("configure-agent")
+    def configure_agent_cmd(
+        scope: Optional[str] = typer.Option(None, "--scope", help="project|global|both"),
+        profile: Optional[str] = typer.Option(None, "--profile", help="conservative|balanced|permissive|custom"),
+        agent_files: Optional[str] = typer.Option(None, "--agent-files", help="all|<csv>"),
+        check: bool = typer.Option(False, "--check", help="Exit non-zero on drift"),
+        refresh: bool = typer.Option(False, "--refresh", help="Re-render from stored config"),
+        remove: bool = typer.Option(False, "--remove", help="Remove the blurb and config"),
+        dry_run: bool = typer.Option(False, "--dry-run", help="Show plan; write nothing"),
+        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmations"),
+    ):
+        """Manage the AEC agent-instruction blurb."""
+        from .commands.configure_agent import run_configure_agent
+        raise typer.Exit(run_configure_agent(
+            scope=scope, profile=profile, agent_files=agent_files,
+            check=check, refresh=refresh, remove=remove, dry_run=dry_run, yes=yes,
+        ))
+
     @app.command("version")
     def version_cmd():
         """Show version information."""
