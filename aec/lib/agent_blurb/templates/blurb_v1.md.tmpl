@@ -1,0 +1,23 @@
+## AEC — Agent Environment Config
+
+AEC (`agents-environment-config`) is a CLI that manages five item types
+across multiple AI agents: agents, skills, rules, packages, and plugins.
+
+You may use AEC to manage these items as part of your workflow, within the
+boundaries listed below. Run `aec --help` for full command reference.
+
+### Operations you may run without asking
+
+{{AUTO_LIST}}
+
+### Operations that require explicit user permission
+
+{{ASK_LIST}}
+
+### How to interpret this block
+
+This block is managed by AEC. Do not hand-edit between the start/end markers;
+use `aec configure-agent` to change scope or profile. The `content-hash` in
+the start marker is recomputed on every render; if you must hand-edit, run
+`aec configure-agent --check` to see the drift report and `--refresh` to
+re-render.
