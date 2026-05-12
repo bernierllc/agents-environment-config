@@ -338,6 +338,7 @@ class TestLoadSave:
     def test_target_record_round_trip(self, tmp_path):
         c = new_skeleton(scope="project", profile="balanced", aec_version="2.37.4")
         c["targets"].append({
+            "agent_key": "claude",
             "path": "CLAUDE.md",
             "template_hash": "abc123",
             "content_hash": "def456",
@@ -345,6 +346,7 @@ class TestLoadSave:
         })
         save_config(c, scope="project", root=tmp_path)
         loaded = load_config(scope="project", root=tmp_path)
+        assert loaded["targets"][0]["agent_key"] == "claude"
         assert loaded["targets"][0]["path"] == "CLAUDE.md"
 ```
 
@@ -375,7 +377,8 @@ CONFIG_FILENAME = "agent-blurb.json"
 
 
 class TargetRecord(TypedDict):
-    path: str
+    agent_key: str   # e.g. "claude", "codex", "gemini" — resolves to file via registry
+    path: str        # relative to scope root (project: repo root; global: $HOME)
     template_hash: str
     content_hash: str
     written_at: str  # ISO 8601 UTC
@@ -1295,6 +1298,24 @@ class TestDiscoverTargets:
         (tmp_path / "CLAUDE.md").write_text("# c\n")
         targets = discover_targets(scope="project", root=tmp_path)
         assert targets[0].agent_key == "claude-code"
+
+
+class TestResolvePathForAgentKey:
+    def test_project(self, tmp_path):
+        from aec.lib.agent_blurb.targets import resolve_path_for_agent_key
+        # Project scope resolution returns the would-be path even if not on disk.
+        p = resolve_path_for_agent_key("claude-code", scope="project", root=tmp_path)
+        assert p == tmp_path / "CLAUDE.md"
+
+    def test_global(self, mock_home):
+        from aec.lib.agent_blurb.targets import resolve_path_for_agent_key
+        p = resolve_path_for_agent_key("claude-code", scope="global")
+        assert mock_home in p.parents or p.is_relative_to(mock_home)
+
+    def test_unknown_agent_raises(self, tmp_path):
+        from aec.lib.agent_blurb.targets import resolve_path_for_agent_key
+        with pytest.raises(KeyError):
+            resolve_path_for_agent_key("not-a-real-agent", scope="project", root=tmp_path)
 ```
 
 - [ ] **Step 3: Verify failure**
@@ -1329,17 +1350,33 @@ def discover_targets(scope: str, root: Optional[Path] = None) -> List[AgentTarge
     registry = load_agent_registry()
     out: List[AgentTarget] = []
     for agent_key in registry.get("agents", {}).keys():
-        if scope == "project":
-            if root is None:
-                raise ValueError("project scope requires root")
-            path = get_agent_project_file(agent_key, root)
-        elif scope == "global":
-            path = get_agent_global_file(agent_key)
-        else:
-            raise ValueError(f"Unknown scope: {scope!r}")
+        path = resolve_path_for_agent_key(agent_key, scope=scope, root=root)
         if path and path.exists():
             out.append(AgentTarget(agent_key=agent_key, path=path))
     return out
+
+
+def resolve_path_for_agent_key(
+    agent_key: str, scope: str, root: Optional[Path] = None,
+) -> Path:
+    """Return the canonical file path for an agent_key in a scope.
+
+    Used both at discovery time (to find existing files) and at refresh/check
+    time (to round-trip a TargetRecord back to an absolute path even if the
+    file has been moved or recreated).
+
+    Raises KeyError if the agent_key is unknown to the registry.
+    """
+    registry = load_agent_registry()
+    if agent_key not in registry.get("agents", {}):
+        raise KeyError(f"Unknown agent_key: {agent_key!r}")
+    if scope == "project":
+        if root is None:
+            raise ValueError("project scope requires root")
+        return get_agent_project_file(agent_key, root)
+    if scope == "global":
+        return get_agent_global_file(agent_key)
+    raise ValueError(f"Unknown scope: {scope!r}")
 ```
 
 - [ ] **Step 5: Verify pass**
@@ -1569,20 +1606,73 @@ def _prompt_profile() -> str:
 
 def _resolve_targets(
     scope: str, root: Optional[Path], agent_files: Optional[str],
+    interactive: bool = False,
 ) -> List[AgentTarget]:
+    """Resolve the list of targets for a scope.
+
+    Selection precedence:
+      1. `agent_files == "all"` or no flag in non-interactive mode → all detected
+      2. `agent_files` csv (file basenames or agent_keys) → filtered
+      3. Interactive + no flag → prompt with "All / Let me choose" then
+         multi-select checklist (spec §3.2).
+    """
     detected = discover_targets(scope=scope, root=root)
-    if agent_files in (None, "all"):
+    if agent_files == "all":
         return detected
-    wanted = {x.strip() for x in agent_files.split(",")}
-    return [t for t in detected if t.path.name in wanted or t.agent_key in wanted]
+    if agent_files:
+        wanted = {x.strip() for x in agent_files.split(",")}
+        return [t for t in detected if t.path.name in wanted or t.agent_key in wanted]
+    if not interactive:
+        return detected
+    return _prompt_agent_files(detected)
 
 
-def _write_target(target: AgentTarget, block: str, content_hash: str, tmpl_hash: str) -> dict:
+def _prompt_agent_files(detected: List[AgentTarget]) -> List[AgentTarget]:
+    """Interactive picker per spec §3.2: All / Let me choose."""
+    typer.echo("Apply blurb to which agent files?")
+    typer.echo("  1) All detected")
+    typer.echo("  2) Let me choose")
+    raw = typer.prompt("Select", default="1")
+    if raw in ("1", "all"):
+        return detected
+    selected: List[AgentTarget] = []
+    typer.echo("Pick targets (y/n for each):")
+    for t in detected:
+        if typer.confirm(f"  include {t.path.name} ({t.agent_key})?", default=True):
+            selected.append(t)
+    return selected
+
+
+def _scope_root(scope: str) -> Path:
+    """Resolve the root for a scope. Project = cwd; global = $HOME."""
+    return Path.cwd() if scope == "project" else Path.home()
+
+
+def _relpath_for(target: AgentTarget, scope: str) -> str:
+    """Stable relative path from the scope root for round-trip storage."""
+    return str(target.path.relative_to(_scope_root(scope)))
+
+
+def _resolve_target_path(record: dict, scope: str) -> Path:
+    """Resolve a stored TargetRecord back to an absolute path.
+
+    Preferred path: use agent_key + scope to call into the targets module,
+    falling back to <scope_root>/<path> for legacy records missing agent_key.
+    """
+    from aec.lib.agent_blurb.targets import resolve_path_for_agent_key
+    if record.get("agent_key"):
+        return resolve_path_for_agent_key(record["agent_key"], scope=scope)
+    return _scope_root(scope) / record["path"]
+
+
+def _write_target(target: AgentTarget, block: str, content_hash: str,
+                  tmpl_hash: str, scope: str) -> dict:
     original = target.path.read_text(encoding="utf-8")
     new_content = replace_block(original, block)
     atomic_write_text(target.path, new_content)
     return {
-        "path": str(target.path.name),
+        "agent_key": target.agent_key,
+        "path": _relpath_for(target, scope),
         "template_hash": tmpl_hash,
         "content_hash": content_hash,
         "written_at": _now_iso(),
@@ -1597,7 +1687,7 @@ def _check_drift_for_scope(scope: str, root: Optional[Path]) -> int:
     shipped = shipped_template_hash()
     exit_code = 0
     for t in cfg.get("targets", []):
-        target_path = (root or Path.home()) / t["path"] if scope == "project" else _global_path_for(t["path"])
+        target_path = _resolve_target_path(t, scope=scope)
         if not target_path.exists():
             Console.warn(f"Target missing: {target_path}")
             exit_code = max(exit_code, 1)
@@ -1615,11 +1705,6 @@ def _check_drift_for_scope(scope: str, root: Optional[Path]) -> int:
             Console.warn(f"{target_path}: {state.value}")
             exit_code = max(exit_code, 1)
     return exit_code
-
-
-def _global_path_for(name: str) -> Path:
-    # Minimal helper - real impl should map name->agent_key->global path via targets module.
-    return Path.home() / ".claude" / name
 
 
 def run_configure_agent(
@@ -1648,21 +1733,35 @@ def run_configure_agent(
         return _do_remove(scopes, yes=yes)
 
     if refresh:
-        return _do_refresh(scopes)
+        return _do_refresh(scopes, yes=yes)
+
+    # Per-scope profile prompting (spec §3.3): each scope gets its own choice
+    # unless a CLI --profile is supplied (which then applies to every scope).
+    scope_profiles = {}
+    for s in scopes:
+        if profile is not None:
+            scope_profiles[s] = profile
+        elif interactive:
+            Console.info(f"Profile for scope={s}:")
+            scope_profiles[s] = _prompt_profile()
+        else:
+            scope_profiles[s] = DEFAULT_PROFILE
 
     return _do_install(
         scopes=scopes,
-        profile=profile or (_prompt_profile() if interactive else DEFAULT_PROFILE),
+        scope_profiles=scope_profiles,
         agent_files=agent_files,
         dry_run=dry_run,
         yes=yes,
+        interactive=interactive,
     )
 
 
-def _do_install(scopes, profile, agent_files, dry_run, yes) -> int:
+def _do_install(scopes, scope_profiles, agent_files, dry_run, yes, interactive) -> int:
     for s in scopes:
         root = Path.cwd() if s == "project" else None
-        targets = _resolve_targets(s, root, agent_files)
+        profile = scope_profiles[s]
+        targets = _resolve_targets(s, root, agent_files, interactive=interactive)
         if not targets:
             Console.warn(f"No agent files detected for scope={s}; skipping")
             continue
@@ -1680,14 +1779,22 @@ def _do_install(scopes, profile, agent_files, dry_run, yes) -> int:
         tmpl_hash = shipped_template_hash()
         content_hash = sha256_short(extract_inner_body(block))
         for t in targets:
-            record = _write_target(t, block, content_hash, tmpl_hash)
+            record = _write_target(t, block, content_hash, tmpl_hash, scope=s)
             cfg["targets"].append(record)
         save_config(cfg, scope=s, root=root)
         Console.success(f"Blurb installed for scope={s}")
     return 0
 
 
-def _do_refresh(scopes) -> int:
+def _do_refresh(scopes, yes: bool = False) -> int:
+    """Re-render the blurb from stored config.
+
+    Per spec §6.2: never silently overwrite manual edits. Before writing each
+    target, compute drift; on MANUAL_EDIT or CONFLICT, require --yes or an
+    interactive confirmation. UPSTREAM_UPDATE proceeds without prompt (that
+    is the whole point of refresh).
+    """
+    shipped = shipped_template_hash()
     for s in scopes:
         root = Path.cwd() if s == "project" else None
         cfg = load_config(scope=s, root=root)
@@ -1700,12 +1807,23 @@ def _do_refresh(scopes) -> int:
         content_hash = sha256_short(extract_inner_body(block))
         new_targets = []
         for t in cfg["targets"]:
-            target_path = (root or Path.cwd()) / t["path"] if s == "project" \
-                else _global_path_for(t["path"])
+            target_path = _resolve_target_path(t, scope=s)
             if not target_path.exists():
                 Console.warn(f"Skipping missing target: {target_path}")
                 continue
             original = target_path.read_text(encoding="utf-8")
+            state = compute_drift(
+                on_disk_content=original,
+                stored_template_hash=t["template_hash"],
+                stored_content_hash=t["content_hash"],
+                shipped_template_hash=shipped,
+            )
+            if state in (DriftState.MANUAL_EDIT, DriftState.CONFLICT):
+                Console.warn(f"{target_path}: {state.value} — refresh would overwrite local edits")
+                if not yes and not typer.confirm("Overwrite?", default=False):
+                    Console.info(f"Skipped {target_path}")
+                    new_targets.append(t)  # preserve old record untouched
+                    continue
             atomic_write_text(target_path, replace_block(original, block))
             new_targets.append({**t, "template_hash": tmpl_hash,
                                 "content_hash": content_hash,
@@ -1729,8 +1847,7 @@ def _do_remove(scopes, yes: bool) -> int:
                 default=False):
             continue
         for t in cfg["targets"]:
-            target_path = (root or Path.cwd()) / t["path"] if s == "project" \
-                else _global_path_for(t["path"])
+            target_path = _resolve_target_path(t, scope=s)
             if not target_path.exists():
                 continue
             original = target_path.read_text(encoding="utf-8")
@@ -1774,7 +1891,7 @@ Run: `pytest tests/commands/test_configure_agent.py -v`
 
 Iterate on the implementation until all tests pass. Common gotchas:
 - `discover_targets` uses `Path.cwd()` for project root; tests use `monkeypatch.chdir(tmp_path)` to redirect.
-- Global-path resolution helper (`_global_path_for`) needs to use `targets.py` rather than the placeholder shown above — refactor before merging.
+- All target-path round-tripping goes through `targets.resolve_path_for_agent_key`; never reconstruct paths inline.
 
 - [ ] **Step 7: Run full suite + commit**
 
@@ -1814,10 +1931,7 @@ from aec.lib.agent_blurb.config import load_config
 def test_install_offers_blurb_when_missing(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "CLAUDE.md").write_text("# c\n")
-    # Simulate accepting via env var or stdin
-    monkeypatch.setenv("AEC_BLURB_AUTO_ACCEPT", "1")  # implementation detail; set in install_cmd
-    runner = CliRunner()
-    # Use a no-op install target, or assert via a unit test on the helper directly:
+    # Direct helper call; `accept=True` mimics user saying yes at the prompt.
     from aec.commands.install_cmd import maybe_offer_blurb
     maybe_offer_blurb(root=tmp_path, accept=True)
     assert load_config(scope="project", root=tmp_path) is not None
@@ -1848,6 +1962,7 @@ def test_update_reports_no_config_silently(tmp_path):
 def test_update_reports_upstream_change(tmp_path, monkeypatch):
     cfg = new_skeleton(scope="project", profile="balanced", aec_version="1.0.0")
     cfg["targets"].append({
+        "agent_key": "claude",
         "path": "CLAUDE.md", "template_hash": "OLD", "content_hash": "X",
         "written_at": "2026-01-01T00:00:00Z",
     })
@@ -2004,7 +2119,52 @@ Append to `docs/qa-verification.md`:
 4. Run another `aec install` — verify prompt returns.
 ```
 
-- [ ] **Step 3: Run full test suite**
+- [ ] **Step 3: Add contract test — every rendered command exists in `aec --help`**
+
+Create `tests/lib/agent_blurb/test_render_contract.py`:
+
+```python
+"""Spec §10.3: every command name listed in the blurb must exist in aec --help.
+
+Prevents drift between the renderer's command vocabulary and the actual CLI.
+"""
+
+import re
+import subprocess
+
+from aec.lib.agent_blurb.profile import (
+    READ_ONLY_COMMANDS, ADDITIVE_COMMANDS, DESTRUCTIVE_COMMANDS,
+)
+
+
+def _aec_commands() -> set[str]:
+    out = subprocess.run(
+        ["aec", "--help"], check=True, capture_output=True, text=True,
+    ).stdout
+    # Typer help lists commands one per line, e.g. "  install   Install ..."
+    cmds: set[str] = set()
+    for line in out.splitlines():
+        m = re.match(r"^\s{2,}([a-z][a-z0-9-]+)\s{2,}", line)
+        if m:
+            cmds.add(m.group(1))
+    return cmds
+
+
+def test_every_classified_command_is_real():
+    real = _aec_commands()
+    classified = READ_ONLY_COMMANDS | ADDITIVE_COMMANDS | DESTRUCTIVE_COMMANDS
+    missing = classified - real
+    # `untrack` etc. may legitimately not yet exist — but the spec says all
+    # commands the blurb names MUST be real. Fail loudly on drift.
+    assert not missing, f"Classified commands missing from `aec --help`: {missing}"
+```
+
+Run: `pytest tests/lib/agent_blurb/test_render_contract.py -v`
+Expected: PASS. If it fails, either add the missing command, remove it from
+the classifier set, or mark the test xfail with a tracked plan file (no
+silent patch).
+
+- [ ] **Step 4: Run full test suite**
 
 ```bash
 pytest
@@ -2012,21 +2172,21 @@ pytest
 
 Expected: all tests pass, coverage ≥ 65%.
 
-- [ ] **Step 4: Run repo's existing checks**
+- [ ] **Step 5: Run repo's existing checks**
 
 ```bash
 python3 scripts/audit-project-rules.py
 python3 scripts/validate-rule-parity.py
 ```
 
-- [ ] **Step 5: Commit final touches**
+- [ ] **Step 6: Commit final touches**
 
 ```bash
-git add docs/qa-verification.md
-git commit -m "docs(qa): add agent-blurb verification checklist"
+git add docs/qa-verification.md tests/lib/agent_blurb/test_render_contract.py
+git commit -m "docs(qa): add agent-blurb verification checklist and contract test"
 ```
 
-- [ ] **Step 6: Push branch and open PR**
+- [ ] **Step 7: Push branch and open PR**
 
 ```bash
 git push -u origin <branch-name>
@@ -2067,3 +2227,6 @@ EOF
 - Org-defined profile defaults via overlay (spec §13.4 — future).
 - Per-agent (Claude vs. Cursor) profile differentiation.
 - Sourcing the read-only command list from `aec` introspection (spec §13.3 — v2).
+- File locking on `.aec/agent-blurb.json` for concurrent invocations (spec §9 — accepted risk in v1; atomic_write_text guarantees no partial files but not last-writer-wins protection).
+- Matrix evolution prompts on `aec update` when a new item type is added (spec §7.3 — defer to v2; v1 fills in unknown item types with the profile's default at refresh time).
+- Cursor `.cursor/rules/aec.mdc` target (spec §13.2 — v1 ships with the four agent files registered in `agents.json` only: CLAUDE.md, AGENTS.md, GEMINI.md, QWEN.md).
