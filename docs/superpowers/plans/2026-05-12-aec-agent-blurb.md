@@ -1653,16 +1653,22 @@ def _relpath_for(target: AgentTarget, scope: str) -> str:
     return str(target.path.relative_to(_scope_root(scope)))
 
 
-def _resolve_target_path(record: dict, scope: str) -> Path:
+def _resolve_target_path(record: dict, scope: str,
+                         root: Optional[Path] = None) -> Path:
     """Resolve a stored TargetRecord back to an absolute path.
 
     Preferred path: use agent_key + scope to call into the targets module,
     falling back to <scope_root>/<path> for legacy records missing agent_key.
+    `root` is required for project scope (passed through to the targets module).
     """
     from aec.lib.agent_blurb.targets import resolve_path_for_agent_key
+    project_root = root if scope == "project" else None
     if record.get("agent_key"):
-        return resolve_path_for_agent_key(record["agent_key"], scope=scope)
-    return _scope_root(scope) / record["path"]
+        return resolve_path_for_agent_key(
+            record["agent_key"], scope=scope, root=project_root,
+        )
+    base = project_root if scope == "project" else Path.home()
+    return base / record["path"]
 
 
 def _write_target(target: AgentTarget, block: str, content_hash: str,
@@ -1687,7 +1693,7 @@ def _check_drift_for_scope(scope: str, root: Optional[Path]) -> int:
     shipped = shipped_template_hash()
     exit_code = 0
     for t in cfg.get("targets", []):
-        target_path = _resolve_target_path(t, scope=scope)
+        target_path = _resolve_target_path(t, scope=scope, root=root)
         if not target_path.exists():
             Console.warn(f"Target missing: {target_path}")
             exit_code = max(exit_code, 1)
@@ -1807,7 +1813,7 @@ def _do_refresh(scopes, yes: bool = False) -> int:
         content_hash = sha256_short(extract_inner_body(block))
         new_targets = []
         for t in cfg["targets"]:
-            target_path = _resolve_target_path(t, scope=s)
+            target_path = _resolve_target_path(t, scope=s, root=root)
             if not target_path.exists():
                 Console.warn(f"Skipping missing target: {target_path}")
                 continue
@@ -1847,7 +1853,7 @@ def _do_remove(scopes, yes: bool) -> int:
                 default=False):
             continue
         for t in cfg["targets"]:
-            target_path = _resolve_target_path(t, scope=s)
+            target_path = _resolve_target_path(t, scope=s, root=root)
             if not target_path.exists():
                 continue
             original = target_path.read_text(encoding="utf-8")
