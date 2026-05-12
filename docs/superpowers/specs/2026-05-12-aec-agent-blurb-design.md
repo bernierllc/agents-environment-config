@@ -72,6 +72,8 @@ Choose an allow/deny profile:
 
 `custom` opens the 5-toggle matrix (one toggle per item type: additive auto vs. additive ask-first). Read-only is always auto; destructive is always ask-first; these are not user-configurable.
 
+When both `project` and `global` scopes are selected in §3.2, the profile prompt (and `custom` matrix prompt, if chosen) runs **once per selected scope**. Profile and matrix may differ between scopes.
+
 ### 3.4 Confirmation summary
 
 Before writing, AEC prints a summary:
@@ -155,6 +157,10 @@ Project scope:
 
 Global scope:
   ~/.aec/agent-blurb.json
+
+Decline state (separate, per "one concern per file"):
+  Project: <repo>/.aec/agent-blurb-decline.json
+  Global:  ~/.aec/agent-blurb-decline.json
 ```
 
 ### 5.2 JSON shape (v1)
@@ -229,8 +235,10 @@ For each target file, AEC computes four values at check time:
 | Class       | Examples                                           | Configurable? |
 | ----------- | -------------------------------------------------- | ------------- |
 | Read-only   | `aec list`, `aec status`, `aec doctor`, `aec --help` | No — always auto |
-| Additive    | `aec add <type> <name>`, `aec init`                | **Yes — per item type** |
-| Destructive | `aec remove`, `aec uninstall`, `aec update`, `aec reset` | No — always ask |
+| Additive    | `aec add <type> <name>`                            | **Yes — per item type** |
+| Destructive | `aec remove`, `aec uninstall`, `aec update`, `aec reset`, `aec init` | No — always ask |
+
+`aec init` is classified destructive because it scaffolds `.aec/` and can overwrite existing config; it is always ask-first regardless of profile.
 
 `aec update` is classified destructive because it mutates AEC itself and can change the very contract this blurb describes.
 
@@ -279,7 +287,7 @@ Integration points:
 | File is read-only / permission denied                         | Skip target with clear error; other targets still process. |
 | `.aec/agent-blurb.json` exists but `targets` empty            | Treat as "configured but no targets" — `--check` is clean; `configure-agent` lets user add targets. |
 | Hand-edit inside the block detected on `aec update`           | Always show diff first; never silently overwrite; default action is "keep manual edit, mark as drifted." |
-| Repo is a git submodule or worktree                           | Project scope writes go to the inner repo's `.aec/` (existing AEC behavior). |
+| Repo is a git submodule or worktree                           | Project scope writes go to the inner repo's `.aec/`. Implementation must reference AEC's existing repo-root resolution (see `feedback_repo_sync_expectations` + `project_hook_worktree_quirks` memories and current `aec install` behavior) — the planner needs to identify the exact resolver function before implementing. |
 | `.aec/agent-blurb.json` is gitignored                         | Warn user during `configure-agent` — recommends committing for team consistency. |
 | Concurrent `aec configure-agent` invocations                  | File-lock `.aec/agent-blurb.json` during write; second invocation waits or errors with clear message. |
 
@@ -322,7 +330,7 @@ Per CLAUDE.md, `docs/qa-verification.md` must be updated alongside this feature 
 ## 13. Open Questions
 
 1. **Decline persistence.** If a user declines the install-time prompt, should the decline persist (don't ask again until next major) or expire (ask again on next minor)? *Suggested default:* persist via `~/.aec/agent-blurb.json` with `{"declined": true, "declined_at_version": "x.y.z"}`. Re-prompt on major version change.
-2. **`.cursor/rules/*.mdc` format.** Cursor's per-rule MDC files aren't a single document — should the blurb go in one `aec.mdc` rule file, or be merged into an existing global rule? *Suggested default:* dedicated `~/.cursor/rules/aec.mdc` (project) and `~/.cursor/rules/aec.mdc` (global), respecting Cursor's globs.
+2. **`.cursor/rules/*.mdc` format.** Cursor's per-rule MDC files aren't a single document — should the blurb go in one `aec.mdc` rule file, or be merged into an existing global rule? *Suggested default:* dedicated `<repo>/.cursor/rules/aec.mdc` (project) and `~/.cursor/rules/aec.mdc` (global), respecting Cursor's globs.
 3. **Read-only command list.** Is the read-only set truly static, or does it grow per release? If it grows, it should be sourced from a manifest, not hard-coded. *Suggested default:* hard-code v1, source from `aec` introspection (`aec list-commands --class=read-only`) in v2.
 4. **Team / shared profiles.** Should orgs be able to ship a default profile via the org-config overlay system (existing AEC feature)? *Suggested default:* yes — phase 2; out of scope for v1 but design must not preclude it.
 
