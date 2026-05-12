@@ -5,11 +5,11 @@ See docs/superpowers/specs/2026-05-12-aec-agent-blurb-design.md §6.
 
 from __future__ import annotations
 
-import re
 from enum import Enum
 from typing import Optional
 
 from aec.lib.agent_blurb.markers import find_block
+from aec.lib.agent_blurb.render import extract_inner_body, sha256_short
 
 
 class DriftState(str, Enum):
@@ -20,26 +20,18 @@ class DriftState(str, Enum):
     CONFLICT = "conflict"
 
 
-_MARKER_RE = re.compile(
-    r"template-hash=([a-f0-9]+).*?content-hash=([a-f0-9]+)",
-    re.DOTALL,
-)
-
-
-def _extract_hashes(on_disk_block: str) -> tuple[Optional[str], Optional[str]]:
-    m = _MARKER_RE.search(on_disk_block)
-    if not m:
-        return None, None
-    return m.group(1), m.group(2)
-
-
 def compute_drift(
     on_disk_content: str,
     stored_template_hash: Optional[str],
     stored_content_hash: Optional[str],
     shipped_template_hash: str,
 ) -> DriftState:
-    """Compute drift state from the three signals."""
+    """Compute drift state from the three signals.
+
+    The on-disk content hash is recomputed by re-hashing the body between
+    markers — the marker's claimed content-hash is informational only and
+    cannot be trusted as a signal of body integrity.
+    """
     try:
         loc = find_block(on_disk_content)
     except Exception:
@@ -48,7 +40,10 @@ def compute_drift(
         return DriftState.NOT_INSTALLED
 
     block = on_disk_content[loc.start:loc.end]
-    _on_disk_tmpl, on_disk_content_hash = _extract_hashes(block)
+    try:
+        on_disk_content_hash = sha256_short(extract_inner_body(block))
+    except ValueError:
+        return DriftState.CONFLICT
 
     template_changed = shipped_template_hash != stored_template_hash
     edited_on_disk = on_disk_content_hash != stored_content_hash
