@@ -43,6 +43,11 @@ class TestSkeleton:
         assert c["profile"] == "custom"
         assert c["matrix"]["agents"]["additive"] == "auto"
 
+    def test_new_skeleton_custom_unknown_key_raises(self):
+        with pytest.raises(ValueError, match="Unknown matrix item types"):
+            new_skeleton(scope="global", profile="custom", aec_version="2.37.4",
+                         matrix_override={"agnts": {"additive": "auto"}})
+
 
 class TestLoadSave:
     def test_round_trip(self, tmp_path):
@@ -82,3 +87,17 @@ class TestLoadSave:
 
     def test_filename_constant(self):
         assert CONFIG_FILENAME == "agent-blurb.json"
+
+    def test_load_non_object_raises(self, tmp_path):
+        path = tmp_path / ".aec" / "agent-blurb.json"
+        path.parent.mkdir()
+        path.write_text("[1, 2, 3]")
+        with pytest.raises(ValueError, match="not a JSON object"):
+            load_config(scope="project", root=tmp_path)
+
+    def test_load_wrong_schema_version_raises(self, tmp_path):
+        path = tmp_path / ".aec" / "agent-blurb.json"
+        path.parent.mkdir()
+        path.write_text('{"schema": 999, "scope": "project"}')
+        with pytest.raises(ValueError, match="schema"):
+            load_config(scope="project", root=tmp_path)

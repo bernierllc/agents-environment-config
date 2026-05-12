@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional, TypedDict
 
-from aec.lib.agent_blurb.profile import expand_profile
+from aec.lib.agent_blurb.profile import ITEM_TYPES, expand_profile
 from aec.lib.atomic_write import atomic_write_text
 
 SCHEMA_VERSION = 1
@@ -61,9 +61,11 @@ def new_skeleton(
     if profile == "custom":
         matrix = expand_profile("balanced")
         if matrix_override:
+            unknown = set(matrix_override) - set(ITEM_TYPES)
+            if unknown:
+                raise ValueError(f"Unknown matrix item types: {sorted(unknown)}")
             for it, settings in matrix_override.items():
-                if it in matrix:
-                    matrix[it].update(settings)
+                matrix[it].update(settings)
     else:
         matrix = expand_profile(profile)
 
@@ -82,7 +84,15 @@ def load_config(scope: str, root: Optional[Path] = None) -> Optional[AgentBlurbC
     path = config_path(scope, root)
     if not path.exists():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"agent-blurb config at {path} is not a JSON object")
+    if data.get("schema") != SCHEMA_VERSION:
+        raise ValueError(
+            f"agent-blurb config at {path} has schema {data.get('schema')!r}, "
+            f"expected {SCHEMA_VERSION}"
+        )
+    return data
 
 
 def save_config(
