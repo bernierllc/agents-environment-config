@@ -51,13 +51,13 @@ class TestScanLocalItems:
         (tmp_path / "agent-a.md").touch()
         (tmp_path / "skill-b").mkdir()
         result = _scan_local_items(tmp_path)
-        assert sorted(result) == ["agent-a.md", "skill-b"]
+        assert sorted(result) == ["agent-a", "skill-b"]
 
     def test_skips_hidden_files(self, tmp_path):
         (tmp_path / ".hidden").touch()
         (tmp_path / "visible.md").touch()
         result = _scan_local_items(tmp_path)
-        assert result == ["visible.md"]
+        assert result == ["visible"]
 
     def test_returns_empty_for_missing_dir(self, tmp_path):
         result = _scan_local_items(tmp_path / "nonexistent")
@@ -234,7 +234,7 @@ class TestQuickScanNotification:
         dismissed = {
             "schemaVersion": 1,
             "items": {
-                "engineering-backend-architect.md": {
+                "engineering-backend-architect": {
                     "dismissedAt": "2026-04-10T18:00:00Z",
                     "matchedCatalogItem": "backend-architect",
                 }
@@ -316,7 +316,7 @@ class TestQuickScanNotification:
             "global": {
                 "skills": {},
                 "agents": {
-                    "engineering-backend-architect.md": {"version": "1.0.0"}
+                    "engineering-backend-architect": {"version": "1.0.0"}
                 },
                 "rules": {},
             },
