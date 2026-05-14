@@ -148,6 +148,55 @@ def run_install(
     if item_type == "skill" and name == "playwright-test-generator":
         _post_install_playwright_pipeline(name, scope, yes=yes)
 
+    # Offer the agent-blurb feature on successful install (project scope only)
+    if not scope.is_global:
+        try:
+            maybe_offer_blurb(root=repo, accept=yes)
+        except Exception as exc:  # noqa: BLE001 - never break install on blurb prompt
+            Console.warning(f"agent-blurb offer skipped: {exc}")
+
+
+def maybe_offer_blurb(root: Path, accept: bool = False) -> None:
+    """Offer the agent-blurb feature if not configured and not declined.
+
+    Called from run_install after successful installation. ``accept`` short-circuits
+    the prompt (used by tests and the -y flag).
+    """
+    from aec import __version__
+    from aec.lib.agent_blurb.config import load_config
+    from aec.lib.agent_blurb.decline import should_reprompt, record_decline
+    from aec.commands.configure_agent import run_configure_agent
+
+    if load_config(scope="project", root=root) is not None:
+        return
+    if not should_reprompt(scope="project", current_version=__version__, root=root):
+        return
+
+    if not accept:
+        try:
+            import typer
+            accept = typer.confirm(
+                "AEC can add instructions to your agent files. Add now?",
+                default=True,
+            )
+        except (EOFError, KeyboardInterrupt):
+            accept = False
+
+    if not accept:
+        record_decline(scope="project", aec_version=__version__, root=root)
+        return
+
+    run_configure_agent(
+        scope="project",
+        profile=None,
+        agent_files="all",
+        check=False,
+        refresh=False,
+        remove=False,
+        dry_run=False,
+        yes=True,
+    )
+
 
 def _install_single_item(
     *,

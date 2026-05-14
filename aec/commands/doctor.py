@@ -82,6 +82,60 @@ def _check_org_configurations() -> None:
             Console.print(f"  last_applied_at: {state.last_applied_at}")
 
 
+def _check_agent_blurb_drift(repo_root) -> None:
+    """Report agent-blurb drift in the current project, if configured.
+
+    Informational only — never flips the overall pass/fail state. Section is
+    omitted entirely when the blurb feature is not configured for the project.
+    """
+    if repo_root is None:
+        return
+    try:
+        from ..lib.agent_blurb.config import load_config
+        from ..lib.agent_blurb.drift import compute_drift, DriftState
+        from ..lib.agent_blurb.render import shipped_template_hash
+    except ImportError:
+        return
+
+    cfg = load_config(scope="project", root=repo_root)
+    if cfg is None:
+        return
+
+    Console.subheader("Agent Blurb")
+    shipped = shipped_template_hash()
+    any_drift = False
+    for t in cfg.get("targets", []):
+        target_path = repo_root / t["path"]
+        if not target_path.exists():
+            Console.warning(f"Target missing: {target_path}")
+            any_drift = True
+            continue
+        state = compute_drift(
+            on_disk_content=target_path.read_text(encoding="utf-8"),
+            stored_template_hash=t["template_hash"],
+            stored_content_hash=t["content_hash"],
+            shipped_template_hash=shipped,
+        )
+        if state == DriftState.CLEAN:
+            Console.success(f"{target_path}: clean")
+        elif state == DriftState.UPSTREAM_UPDATE:
+            Console.info(
+                f"{target_path}: newer template available "
+                f"(run: aec configure-agent --refresh)"
+            )
+            any_drift = True
+        elif state == DriftState.MANUAL_EDIT:
+            Console.warning(f"{target_path}: hand-edited")
+            any_drift = True
+        elif state == DriftState.CONFLICT:
+            Console.warning(f"{target_path}: conflict (upstream + local edits)")
+            any_drift = True
+        else:  # NOT_INSTALLED
+            Console.info(f"{target_path}: not installed")
+    if not any_drift:
+        Console.info("All blurbs up to date")
+
+
 def run_doctor() -> Tuple[bool, List[str]]:
     """
     Check installation health.
@@ -399,6 +453,9 @@ def run_doctor() -> Tuple[bool, List[str]]:
 
     # Org configurations (Phase 1: 0 or 1 enrolled org)
     _check_org_configurations()
+
+    # Agent blurb drift (informational; never gates pass/fail)
+    _check_agent_blurb_drift(repo_root)
 
     # Summary
     Console.header("Summary")

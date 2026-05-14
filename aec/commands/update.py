@@ -67,6 +67,43 @@ def run_update() -> None:
     else:
         Console.print("\nEverything is up to date.")
 
+    # Informational: surface agent-blurb drift after update
+    check_blurb_drift(root=repo)
+
+
+def check_blurb_drift(root: Path) -> int:
+    """Check blurb drift after an update. Informational; returns 0."""
+    from aec.lib.agent_blurb.config import load_config
+    from aec.lib.agent_blurb.drift import compute_drift, DriftState
+    from aec.lib.agent_blurb.render import shipped_template_hash
+
+    cfg = load_config(scope="project", root=root)
+    if cfg is None:
+        return 0
+    shipped = shipped_template_hash()
+    for t in cfg.get("targets", []):
+        target_path = root / t["path"]
+        if not target_path.exists():
+            continue
+        state = compute_drift(
+            on_disk_content=target_path.read_text(encoding="utf-8"),
+            stored_template_hash=t["template_hash"],
+            stored_content_hash=t["content_hash"],
+            shipped_template_hash=shipped,
+        )
+        if state == DriftState.UPSTREAM_UPDATE:
+            Console.info(
+                f"{target_path}: AEC blurb has a newer template — run "
+                f"`aec configure-agent --refresh` to update."
+            )
+        elif state == DriftState.MANUAL_EDIT:
+            Console.warning(f"{target_path}: blurb has been hand-edited.")
+        elif state == DriftState.CONFLICT:
+            Console.warning(
+                f"{target_path}: blurb conflict (upstream + local edits)."
+            )
+    return 0
+
 
 def _report_scope_outdated(manifest: dict, scope: str, source_dirs: dict) -> int:
     """Report outdated items for a scope. Returns count of outdated items."""
