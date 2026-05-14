@@ -77,9 +77,9 @@ class TestRenderBlock:
             scope="project", profile="permissive", matrix=matrix, aec_version="2.37.4"
         )
         assert "aec list" in body
-        assert "aec add skill" in body
-        assert "aec add agent" in body
-        assert "aec remove" in body
+        assert "aec install skill" in body
+        assert "aec install agent" in body
+        assert "aec uninstall" in body
         assert "aec update" in body
 
     def test_content_hash_in_marker_matches_body(self):

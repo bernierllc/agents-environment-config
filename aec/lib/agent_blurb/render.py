@@ -46,7 +46,7 @@ def _format_auto_list(matrix: Dict[str, Dict[str, str]]) -> str:
         lines.append(f"- `aec {cmd}` — read-only (always auto)")
     for itype in ITEM_TYPES:
         if matrix[itype]["additive"] == "auto":
-            lines.append(f"- `aec add {itype[:-1]} <name>` — install a {itype[:-1]} ({itype}: additive=auto)")
+            lines.append(f"- `aec install {itype[:-1]} <name>` — install a {itype[:-1]} ({itype}: additive=auto)")
     return "\n".join(lines)
 
 
@@ -54,7 +54,7 @@ def _format_ask_list(matrix: Dict[str, Dict[str, str]]) -> str:
     lines = []
     for itype in ITEM_TYPES:
         if matrix[itype]["additive"] == "ask":
-            lines.append(f"- `aec add {itype[:-1]} <name>` ({itype}: additive=ask)")
+            lines.append(f"- `aec install {itype[:-1]} <name>` ({itype}: additive=ask)")
     for cmd in sorted(DESTRUCTIVE_COMMANDS):
         lines.append(f"- `aec {cmd}` — destructive (always ask)")
     return "\n".join(lines)

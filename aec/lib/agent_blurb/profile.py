@@ -31,13 +31,15 @@ class CommandClass(str, Enum):
 
 
 READ_ONLY_COMMANDS = frozenset({
-    "list", "status", "doctor", "search", "info", "outdated",
+    "list", "doctor", "search", "info", "outdated",
+    "discover", "discover-repos", "validate", "version",
 })
 
-ADDITIVE_COMMANDS = frozenset({"install", "add"})
+ADDITIVE_COMMANDS = frozenset({"install"})
 
 DESTRUCTIVE_COMMANDS = frozenset({
-    "remove", "uninstall", "update", "upgrade", "reset", "init", "untrack",
+    "uninstall", "update", "upgrade", "untrack", "setup", "prune",
+    "configure-agent",
 })
 
 
