@@ -114,6 +114,15 @@ def run_uninstall(
             Console.info("Skipped.")
             return
 
+    if scope.repo_path is not None:
+        try:
+            from ..lib.hooks.lifecycle import remove_hooks_for_item
+            remove_hooks_for_item(
+                item_type=item_type, item_key=name, repo_root=scope.repo_path,
+            )
+        except Exception as e:  # noqa: BLE001 — never block uninstall on hook removal
+            Console.warning(f"hooks removal failed for {name}: {e}")
+
     if item_path.is_dir():
         shutil.rmtree(item_path)
     else:

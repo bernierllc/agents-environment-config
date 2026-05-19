@@ -136,6 +136,23 @@ def run_install(
     )
     Console.success(f"Installed {name} v{item_info.get('version', '0.0.0')}")
 
+    # Install hooks declared by the item (per-repo only — hooks are repo-scoped)
+    if not scope.is_global and scope.repo_path is not None:
+        try:
+            from ..lib.hooks.lifecycle import install_hooks_for_item
+            install_hooks_for_item(
+                item_type=item_type,
+                item_key=name,
+                item_version=item_info.get("version", "0.0.0"),
+                item_dir=dst,
+                repo_root=scope.repo_path,
+                allow_custom_check=yes,
+            )
+        except PermissionError as e:
+            Console.warning(f"hooks not installed: {e}")
+        except Exception as e:  # noqa: BLE001 — never break install on hook failure
+            Console.warning(f"hooks install failed for {name}: {e}")
+
     # Quick-scan notification for global installs
     if scope.is_global:
         try:

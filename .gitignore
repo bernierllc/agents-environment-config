@@ -36,6 +36,7 @@ htmlcov/
 
 # Worktrees
 .worktrees/
+.claude/worktrees/
 
 # Raycast scripts - exclude agent-specific scripts
 raycast_scripts/claude-*.sh
