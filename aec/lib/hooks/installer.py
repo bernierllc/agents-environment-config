@@ -13,6 +13,7 @@ from typing import Dict, List, Sequence
 from ..atomic_write import atomic_write_json
 from . import git_blocks, state as hook_state
 from .fingerprint import fingerprint_hook
+from .git_hooks_path import HUSKY_V8_BOOTSTRAP, resolve_hooks_dir
 from .predicates import evaluate_when
 from .schema import HooksFile, load_hooks_file
 from .translator import translate_to_agent
@@ -241,8 +242,10 @@ def _install_git(
     item_version: str,
 ) -> None:
     item_ref = f"{item_type}:{item_key}"
-    hooks_dir = repo_root / ".git/hooks"
+    resolution = resolve_hooks_dir(repo_root)
+    hooks_dir = resolution.hooks_dir
     hooks_dir.mkdir(parents=True, exist_ok=True)
+    header_line = HUSKY_V8_BOOTSTRAP if resolution.needs_v8_bootstrap else ""
     for entry in entries:
         event_key = entry["event_key"]
         payload = entry["payload"]
@@ -255,6 +258,7 @@ def _install_git(
             hook_id=hook_id,
             version=item_version,
             command=command,
+            header_line=header_line,
         )
         fp = fingerprint_hook({"command": command, "hook_name": event_key})
         st.hooks_installed.append({
@@ -270,7 +274,8 @@ def _remove_git(
     repo_root: Path, event_key: str, installed: dict,
     item_type: str, item_key: str,
 ) -> None:
-    hook_file = repo_root / ".git/hooks" / event_key
+    hooks_dir = resolve_hooks_dir(repo_root).hooks_dir
+    hook_file = hooks_dir / event_key
     git_blocks.remove_block(
         hook_file,
         item_key=f"{item_type}:{item_key}",
