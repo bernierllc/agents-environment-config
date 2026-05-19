@@ -277,3 +277,79 @@ class TestInstallGeminiAndCursor:
         assert "hooks" in gemini
         cursor = json.loads((repo_root / ".cursor/hooks.json").read_text())
         assert cursor["hooks"]["afterFileEdit"][0]["command"] == "echo hi"
+
+
+class TestInstallGitHusky:
+    def _init_repo(self, repo_root: Path):
+        import subprocess
+        repo_root.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", "-q", str(repo_root)], check=True)
+
+    def test_install_targets_husky_dir_with_v8_bootstrap(self, tmp_path):
+        import subprocess
+        from aec.lib.hooks.installer import install_item_hooks
+        repo_root = tmp_path / "repo"
+        self._init_repo(repo_root)
+        (repo_root / ".husky" / "_").mkdir(parents=True)
+        (repo_root / ".husky" / "_" / "husky.sh").write_text("#!/bin/sh\n")
+        subprocess.run(["git", "-C", str(repo_root), "config",
+                        "core.hooksPath", ".husky"], check=True)
+        item_dir = tmp_path / "item"
+        _write_item(item_dir, hooks=[{
+            "id": "lint", "event": "pre_commit",
+            "command": "echo linting", "description": "d",
+        }])
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["git"],
+        )
+        assert not (repo_root / ".git/hooks/pre-commit").exists()
+        content = (repo_root / ".husky" / "pre-commit").read_text()
+        assert '. "$(dirname -- "$0")/_/husky.sh"' in content
+        assert "# >>> AEC:BEGIN item=skill:demo hook_id=lint" in content
+        assert "echo linting" in content
+
+    def test_install_targets_husky_dir_v9_no_bootstrap(self, tmp_path):
+        import subprocess
+        from aec.lib.hooks.installer import install_item_hooks
+        repo_root = tmp_path / "repo"
+        self._init_repo(repo_root)
+        (repo_root / ".husky" / "_").mkdir(parents=True)
+        (repo_root / ".husky" / "_" / "pre-commit").write_text("#!/usr/bin/env sh\n")
+        subprocess.run(["git", "-C", str(repo_root), "config",
+                        "core.hooksPath", ".husky/_"], check=True)
+        item_dir = tmp_path / "item"
+        _write_item(item_dir, hooks=[{
+            "id": "lint", "event": "pre_commit",
+            "command": "echo linting", "description": "d",
+        }])
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["git"],
+        )
+        content = (repo_root / ".husky" / "pre-commit").read_text()
+        assert "husky.sh" not in content
+        assert "echo linting" in content
+
+    def test_remove_husky_strips_block_in_correct_dir(self, tmp_path):
+        import subprocess
+        from aec.lib.hooks.installer import install_item_hooks, remove_item_hooks
+        repo_root = tmp_path / "repo"
+        self._init_repo(repo_root)
+        (repo_root / ".husky" / "_").mkdir(parents=True)
+        (repo_root / ".husky" / "_" / "husky.sh").write_text("#!/bin/sh\n")
+        subprocess.run(["git", "-C", str(repo_root), "config",
+                        "core.hooksPath", ".husky"], check=True)
+        item_dir = tmp_path / "item"
+        _write_item(item_dir, hooks=[{
+            "id": "lint", "event": "pre_commit",
+            "command": "echo linting", "description": "d",
+        }])
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["git"],
+        )
+        remove_item_hooks(item_type="skill", item_key="demo", repo_root=repo_root)
+        content = (repo_root / ".husky" / "pre-commit").read_text()
+        assert "AEC:BEGIN" not in content
+        assert "echo linting" not in content

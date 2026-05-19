@@ -48,6 +48,19 @@ def _ensure_shebang(text: str) -> str:
     return prefix + (text if text.endswith("\n") else text + "\n")
 
 
+def _ensure_header_line(text: str, header_line: str) -> str:
+    """Idempotently inject `header_line` after the shebang (if any).
+
+    Used to add the husky v8 bootstrap source-line exactly once.
+    """
+    if header_line in text.splitlines():
+        return text
+    lines = text.splitlines(keepends=True)
+    if lines and lines[0].startswith("#!"):
+        return lines[0] + header_line + "\n" + "".join(lines[1:])
+    return header_line + "\n" + text
+
+
 def _try_chmod_exec(path: Path) -> None:
     try:
         current = path.stat().st_mode
@@ -63,15 +76,21 @@ def write_block(
     hook_id: str,
     version: str,
     command: str,
+    header_line: str = "",
 ) -> None:
     """Idempotently install a delimited block for (item_key, hook_id).
 
     If a block with the same item_key+hook_id already exists, it is replaced.
     Otherwise the new block is appended. User content outside AEC blocks is
     preserved. Ensures a shebang and sets the executable bit (best-effort).
+
+    `header_line`, if given, is injected once below the shebang (used to add
+    husky v8's `. "$(dirname -- "$0")/_/husky.sh"` bootstrap).
     """
     existing = hook_file.read_text(encoding="utf-8") if hook_file.exists() else ""
     existing = _ensure_shebang(existing)
+    if header_line:
+        existing = _ensure_header_line(existing, header_line)
 
     block = _render_block(item_key, hook_id, version, command)
     pattern = _block_regex(item_key, hook_id)
