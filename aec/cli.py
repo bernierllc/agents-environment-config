@@ -362,6 +362,10 @@ if HAS_TYPER:
     from .commands.hooks_cmd import hooks_app
     app.add_typer(hooks_app, name="hooks")
 
+    # --- run-script (top-level; invoked from hook bodies) ---
+    from .commands.run_script_cmd import run_script
+    app.command("run-script")(run_script)
+
     # ------------------------------------------------------------------ #
     #  Deprecated command groups (kept as shims)                          #
     # ------------------------------------------------------------------ #

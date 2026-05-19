@@ -408,6 +408,33 @@ def _upgrade_scope(
             record_item_install_pertype(item_type[:-1], name, avail_v, content_hash)
 
             Console.success(f"  {item_type[:-1]}  {name}  {inst_v} -> {avail_v}")
+
+            # Refresh hooks (per-repo only). Remove old, install new from new tree.
+            if scope != "global":
+                try:
+                    from ..lib.hooks.lifecycle import (
+                        install_hooks_for_item,
+                        remove_hooks_for_item,
+                    )
+                    repo_root = Path(scope)
+                    remove_hooks_for_item(
+                        item_type=item_type[:-1],
+                        item_key=name,
+                        repo_root=repo_root,
+                    )
+                    install_hooks_for_item(
+                        item_type=item_type[:-1],
+                        item_key=name,
+                        item_version=avail_v,
+                        item_dir=dst_path,
+                        repo_root=repo_root,
+                        allow_custom_check=yes,
+                    )
+                except PermissionError as e:
+                    Console.warning(f"  hooks not refreshed: {e}")
+                except Exception as e:  # noqa: BLE001
+                    Console.warning(f"  hooks refresh failed for {name}: {e}")
+
             upgraded = True
 
     return upgraded
