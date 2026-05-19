@@ -1,3 +1,5 @@
+> Status: shipped — Phase 1 via PR #47 (2026-05-04..18), test coverage via PR #48. Phase 2 tracked separately in 2026-05-19-org-config-overlay-phase-2.md.
+
 # Org Config Overlay — Phase 1 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

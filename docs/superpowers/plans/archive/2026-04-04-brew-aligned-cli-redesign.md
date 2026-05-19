@@ -1,3 +1,5 @@
+> Status: shipped — flat-command CLI live as of 2026-04 (no single PR; multi-commit rollout)
+
 # Brew-Aligned CLI Redesign Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

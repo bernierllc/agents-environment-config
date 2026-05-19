@@ -1,3 +1,16 @@
+> Status: Later tier — Phase 0 (seed-data rule + skill) shipped per project memory.
+> Phases 1–6 (package system, agent-friendly CLI, agent-native onboarding, multi-project
+> intelligence, retrofit, rules-as-packages) are deferred until org-config Phase 2 lands
+> — the two designs overlap on "declarative configuration applied across machines" and
+> packages are a natural successor to org-config items.
+>
+> When this advances to Next: scope down to a single phase. Phase 1 (package system +
+> tracked file writer + handlebars templates) is the natural next slice and should be
+> re-spec'd against the post-org-config-Phase-2 codebase before committing tasks.
+>
+> Treat Tasks 0.x and onward in this file as the original 2026-04 brainstorm record —
+> they will need re-validation before any of them are picked up.
+
 # AEC Packages, Agent-Native Onboarding & Seed Data
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

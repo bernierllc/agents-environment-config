@@ -1,3 +1,5 @@
+> Status: OUT OF SCOPE for AEC — plan describes a UI audit skill targeting SCF-Neue / Vibe-Kanban integration, not AEC CLI surface. Flagged for relocation or deletion by maintainer.
+
 # UI Audit Skill and Command Implementation Plan
 
 ## Overview

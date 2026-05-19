@@ -1,3 +1,5 @@
+> Status: OUT OF SCOPE for AEC — this plan targets the `claude-skills` repository (gdocs skill), not the AEC CLI. Flagged for relocation or deletion by maintainer. Last activity 2025-11-23; appears abandoned.
+
 # Google Docs Skill - Table Manipulation Implementation Plan
 
 ## Overview
