@@ -1,3 +1,5 @@
+> Status: OUT OF SCOPE for AEC — companion to gdocs plan; targets `claude-skills` repo.
+
 # Google Docs Table Manipulation - Resume Guide
 
 **Last Updated:** 2025-11-23

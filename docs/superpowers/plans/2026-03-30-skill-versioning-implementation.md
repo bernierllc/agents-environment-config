@@ -1,3 +1,22 @@
+> Status: largely shipped — verify-then-archive candidate (Backlog tier).
+>
+> Per 2026-05-19 audit: `aec/lib/skills_manifest.py` and `aec/commands/skills.py`
+> both exist in main with the functions this plan specifies (parse_skill_frontmatter,
+> version_is_newer, hash_skill_directory, load/save_installed_manifest,
+> discover_available_skills, install_skills, uninstall_skills, update_skills,
+> install_step, _parse_selection). CLI registration (`aec skills list/install/
+> uninstall/update`) is live. `aec doctor` carries a Skills section.
+>
+> Open verification items before archiving (Tasks 5–8 of this plan):
+>  - Confirm legacy symlink cleanup (`_cleanup_legacy_symlinks`) is wired into
+>    `aec install` and tested.
+>  - Confirm `agent_tools.setup()` no longer creates skills symlinks.
+>  - Confirm install summary references `aec skills list` next-step.
+>  - End-to-end smoke per Task 9 (install/update/uninstall a real skill).
+>
+> Once those four are verified or fixed, archive this plan. Until then it stays
+> in Backlog with a 1-hour verification task as the only remaining work.
+
 # Skill Versioning & Copy-Based Installation — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
