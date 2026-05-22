@@ -28,6 +28,8 @@ On Windows, the CLI uses NTFS junctions (no admin required) instead of symlinks 
 | `aec doctor` | Health check for installation |
 | `aec version` | Show version |
 | `aec prune` | Remove stale tracking entries |
+| `aec export` | Write the current setup to a portable manifest file |
+| `aec apply <file>` | Reproduce a setup from a portable manifest file |
 
 ### Catalog
 
@@ -125,6 +127,36 @@ aec ports list
 # Check for port conflicts before registering
 aec ports check /path/to/project
 ```
+
+## Portable setup across machines
+
+`aec export` captures everything you have installed — skills, rules, agents, and
+MCP servers, in both global and per-repo scope — into a single, hand-editable
+manifest file. `aec apply` reads that file on another machine and installs the
+same set, so your setup is reproducible everywhere.
+
+The manifest is machine-independent: absolute paths, content hashes, and
+timestamps are stripped, and project paths are stored as portable tokens (e.g.
+`${PROJECTS}/my-app`) that resolve to the right location on each machine.
+
+```bash
+# On machine 1 — capture your current setup
+aec export --out my-setup.aec.json
+
+# Move the file to machine 2 (commit it, scp it, etc.), then:
+aec apply my-setup.aec.json --dry-run   # preview the plan, change nothing
+aec apply my-setup.aec.json             # install everything in the manifest
+```
+
+| Flag | Applies to | Description |
+|------|------------|-------------|
+| `--out`, `-o <file>` | `export` | Write to a file instead of stdout |
+| `--latest` | `export`, `apply` | Track/install the latest catalog version instead of the pinned one |
+| `--no-repos` | `export` | Export global-scope items only |
+| `--dry-run` | `apply` | Print the install plan without making changes |
+
+`apply` is idempotent — items already installed at the requested version are
+left untouched, so it is safe to re-run.
 
 ## Scripts vs CLI
 

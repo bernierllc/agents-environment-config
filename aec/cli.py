@@ -124,6 +124,26 @@ if HAS_TYPER:
         from .commands.info import run_info
         run_info(item_type=item_type, name=name)
 
+    @app.command("export")
+    def export_cmd(
+        out: Optional[str] = typer.Option(None, "--out", "-o", help="Write manifest to FILE (default: stdout)"),
+        latest: bool = typer.Option(False, "--latest", help="Record versions as 'latest' instead of pinning"),
+        no_repos: bool = typer.Option(False, "--no-repos", help="Export global scope only"),
+    ):
+        """Export the current setup to a portable manifest file."""
+        from .commands.export_cmd import run_export
+        run_export(out=out, latest=latest, include_repos=not no_repos)
+
+    @app.command("apply")
+    def apply_cmd(
+        file: str = typer.Argument(..., help="Path to a portable manifest file"),
+        dry_run: bool = typer.Option(False, "--dry-run", help="Preview without making changes"),
+        latest: bool = typer.Option(False, "--latest", help="Install latest catalog versions"),
+    ):
+        """Apply a portable manifest - reproduce its setup on this machine."""
+        from .commands.apply_cmd import run_apply
+        run_apply(file=file, dry_run=dry_run, latest=latest)
+
     @app.command("setup")
     def setup_cmd(
         path: Optional[str] = typer.Argument(None, help="Project path to set up"),
@@ -643,6 +663,18 @@ else:
         info_parser.add_argument("item_type", help="Type: skill, rule, or agent")
         info_parser.add_argument("name", help="Name of the item")
 
+        # export
+        export_parser = subparsers.add_parser("export", help="Export current setup to a portable manifest")
+        export_parser.add_argument("--out", "-o", dest="out", default=None, help="Write to FILE (default: stdout)")
+        export_parser.add_argument("--latest", action="store_true", help="Record versions as 'latest'")
+        export_parser.add_argument("--no-repos", dest="no_repos", action="store_true", help="Global scope only")
+
+        # apply
+        apply_parser = subparsers.add_parser("apply", help="Apply a portable manifest to this machine")
+        apply_parser.add_argument("file", help="Path to a portable manifest file")
+        apply_parser.add_argument("--dry-run", action="store_true", help="Preview without making changes")
+        apply_parser.add_argument("--latest", action="store_true", help="Install latest catalog versions")
+
         # setup
         setup_parser = subparsers.add_parser("setup", help="Set up a project or all projects")
         setup_parser.add_argument("path", nargs="?", default=None, help="Project path")
@@ -865,6 +897,14 @@ else:
         elif args.command == "info":
             from .commands.info import run_info
             run_info(item_type=args.item_type, name=args.name)
+
+        elif args.command == "export":
+            from .commands.export_cmd import run_export
+            run_export(out=args.out, latest=args.latest, include_repos=not args.no_repos)
+
+        elif args.command == "apply":
+            from .commands.apply_cmd import run_apply
+            run_apply(file=args.file, dry_run=args.dry_run, latest=args.latest)
 
         elif args.command == "setup":
             from .commands.setup import run_setup, run_setup_path, run_setup_all
