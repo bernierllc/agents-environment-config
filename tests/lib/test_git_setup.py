@@ -70,6 +70,12 @@ class TestExecuteCommitStrategy:
             ["git", "config", "user.name", "Test"],
             cwd=tmp_path, check=True, capture_output=True,
         )
+        # Keep the test hermetic: never invoke ambient commit-signing config
+        # (gpg / signing servers), which is irrelevant to commit-strategy logic.
+        subprocess.run(
+            ["git", "config", "commit.gpgsign", "false"],
+            cwd=tmp_path, check=True, capture_output=True,
+        )
         return tmp_path
 
     def test_one_commit_strategy_creates_single_commit(self, tmp_path):
