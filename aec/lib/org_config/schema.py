@@ -71,3 +71,10 @@ class OrgConfig:
     install_prompts: dict[str, Any]
     install_agents_enabled: list[str]
     install_agents_disabled: list[str]
+
+    # trust detail (Phase 2): plumbing for signed modes. Optional so unsigned
+    # configs and existing callers are unaffected.
+    trust_pubkey: Optional[str] = None
+    trust_pubkey_url: Optional[str] = None
+    trust_signature_url: Optional[str] = None
+    trust_dns_domain: Optional[str] = None

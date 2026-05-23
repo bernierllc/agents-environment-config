@@ -6,6 +6,7 @@ deferred to Phase 2. Multi-org coexistence is deferred to Phase 3.
 """
 from __future__ import annotations
 
+import dataclasses
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -13,6 +14,7 @@ from typing import Optional
 import typer
 
 from ..lib.org_config import (
+    OrgConfigCryptoUnavailable,
     OrgConfigMultiOrgRejectedError,
     OrgConfigParseError,
     OrgConfigTrustError,
@@ -48,10 +50,67 @@ def _paths() -> OrgPaths:
     return OrgPaths.default()
 
 
+def _load_signature(src_path: Path, signature_opt: Optional[str]) -> Optional[bytes]:
+    """Locate a detached signature: explicit ``--signature`` or sidecar ``<config>.sig``."""
+    if signature_opt:
+        sp = Path(signature_opt)
+        if not sp.exists():
+            return None
+        return sp.read_bytes()
+    sidecar = src_path.with_name(src_path.name + ".sig")
+    if sidecar.exists():
+        return sidecar.read_bytes()
+    return None
+
+
+def _verify_pinned_key_enroll(config, raw_bytes, src_path, signature_opt, trust_fingerprint, yes):
+    """Verify a pinned_key config and return (fingerprint, pubkey_source).
+
+    Raises ``typer.Exit`` with the appropriate exit code on any failure.
+    """
+    sig_bytes = _load_signature(src_path, signature_opt)
+    if sig_bytes is None:
+        typer.echo(
+            "trust error: pinned_key config needs a detached signature "
+            "(<config>.sig sidecar or --signature)",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_TRUST)
+
+    prior = read_state(_paths(), config.org_id)
+    pinned_fp = prior.pubkey_fingerprint if prior else None
+    try:
+        result = verify_trust(
+            trust_mode="pinned_key",
+            config_bytes=raw_bytes,
+            consent=UnsignedConsent(acknowledged=True),
+            pubkey_b64=config.trust_pubkey,
+            signature=sig_bytes,
+            pinned_fingerprint=pinned_fp,
+        )
+    except OrgConfigCryptoUnavailable as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=EXIT_VALIDATION) from exc
+    except OrgConfigTrustError as exc:
+        typer.echo(f"trust error: {exc}", err=True)
+        raise typer.Exit(code=EXIT_TRUST) from exc
+
+    fp = result.pubkey_fingerprint
+    if pinned_fp is None and not (trust_fingerprint or yes):
+        typer.echo(f"public key fingerprint: {fp}")
+        typer.echo("you should have received this fingerprint from your IT/security team.")
+        if not typer.confirm("does this fingerprint match?", default=False):
+            typer.echo("trust error: fingerprint not confirmed; enrollment aborted", err=True)
+            raise typer.Exit(code=EXIT_TRUST)
+    return fp, "inline"
+
+
 @app.command("enroll")
 def enroll_cmd(
     source: str = typer.Argument(..., help="Local path to org config YAML (URL support arrives in phase 2)"),
     allow_unsigned: bool = typer.Option(False, "--allow-unsigned", help="Bypass the unsigned-config consent prompt"),
+    signature: Optional[str] = typer.Option(None, "--signature", help="Path to a detached signature file (pinned_key)"),
+    trust_fingerprint: bool = typer.Option(False, "--trust-fingerprint", help="Accept the pubkey fingerprint without prompting (pinned_key)"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip interactive prompts"),
 ):
     """Enroll an org configuration from a local YAML file."""
@@ -77,23 +136,42 @@ def enroll_cmd(
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=EXIT_VALIDATION) from exc
 
-    # Trust check.
-    acknowledged = allow_unsigned or yes
-    if not acknowledged and config.trust_mode == "unsigned":
-        typer.echo(
-            "WARNING: this org config is unsigned. An attacker who controls the "
-            "config file can change which skills, rules, agents, and MCPs are "
-            "applied to your environment.",
-            err=True,
-        )
-        acknowledged = typer.confirm("acknowledge unsigned-config risk and continue?", default=False)
+    pubkey_fingerprint: Optional[str] = None
+    pubkey_source: Optional[str] = None
 
-    consent = UnsignedConsent(acknowledged=acknowledged)
-    try:
-        verify_trust(trust_mode=config.trust_mode, config_bytes=raw_bytes, consent=consent)
-    except (OrgConfigTrustError, UnsignedConsentDeclined) as exc:
-        typer.echo(f"trust error: {exc}", err=True)
-        raise typer.Exit(code=EXIT_TRUST) from exc
+    if config.trust_mode == "unsigned":
+        acknowledged = allow_unsigned or yes
+        if not acknowledged:
+            typer.echo(
+                "WARNING: this org config is unsigned. An attacker who controls the "
+                "config file can change which skills, rules, agents, and MCPs are "
+                "applied to your environment.",
+                err=True,
+            )
+            acknowledged = typer.confirm("acknowledge unsigned-config risk and continue?", default=False)
+        try:
+            verify_trust(
+                trust_mode="unsigned",
+                config_bytes=raw_bytes,
+                consent=UnsignedConsent(acknowledged=acknowledged),
+            )
+        except (OrgConfigTrustError, UnsignedConsentDeclined) as exc:
+            typer.echo(f"trust error: {exc}", err=True)
+            raise typer.Exit(code=EXIT_TRUST) from exc
+    elif config.trust_mode == "pinned_key":
+        pubkey_fingerprint, pubkey_source = _verify_pinned_key_enroll(
+            config, raw_bytes, src_path, signature, trust_fingerprint, yes
+        )
+    else:  # dns_anchor and any other signed mode not yet implemented
+        try:
+            verify_trust(
+                trust_mode=config.trust_mode,
+                config_bytes=raw_bytes,
+                consent=UnsignedConsent(acknowledged=True),
+            )
+        except OrgConfigTrustError as exc:
+            typer.echo(f"trust error: {exc}", err=True)
+            raise typer.Exit(code=EXIT_TRUST) from exc
 
     paths = _paths()
     paths.orgs_dir.mkdir(parents=True, exist_ok=True)
@@ -107,8 +185,8 @@ def enroll_cmd(
         config_version=config.config_version,
         config_hash=hash_config_bytes(raw_bytes),
         trust_mode=config.trust_mode,
-        pubkey_fingerprint=None,
-        pubkey_source=None,
+        pubkey_fingerprint=pubkey_fingerprint,
+        pubkey_source=pubkey_source,
         last_verified_at=now,
         last_applied_at=now,
         source_of_record="local",
@@ -264,6 +342,101 @@ def remove_cmd(
             typer.echo(f"warning: could not remove {p}: {exc}", err=True)
 
     typer.echo(f"removed org '{org_id}'")
+
+
+@app.command("trust-rotate")
+def trust_rotate_cmd(
+    org_id: str = typer.Argument(..., help="Org id whose pinned key to rotate"),
+    signature: Optional[str] = typer.Option(None, "--signature", help="Detached signature for the current config"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the fingerprint confirmation prompt"),
+):
+    """Acknowledge a rotated pinned_key public key for an enrolled org."""
+    paths = _paths()
+    cfg_path = paths.config_for(org_id)
+    if not cfg_path.exists():
+        typer.echo(f"error: org '{org_id}' is not enrolled", err=True)
+        raise typer.Exit(code=EXIT_VALIDATION)
+
+    raw_bytes = cfg_path.read_bytes()
+    try:
+        frontmatter, body = parse_org_config_text(raw_bytes.decode("utf-8"))
+        config = validate_org_config(frontmatter, body)
+    except (OrgConfigParseError, OrgConfigValidationError, OrgConfigUnknownSchemaError) as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=EXIT_VALIDATION) from exc
+
+    if config.trust_mode != "pinned_key":
+        typer.echo(f"error: org '{org_id}' is not a pinned_key org", err=True)
+        raise typer.Exit(code=EXIT_VALIDATION)
+
+    sig_bytes = _load_signature(cfg_path, signature)
+    if sig_bytes is None:
+        typer.echo(
+            "error: need a detached signature for the current config "
+            "(<config>.sig sidecar or --signature)",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_VALIDATION)
+
+    # Verify the config against its new key (no pinned comparison — that is the
+    # whole point of a rotation), then require explicit acknowledgment.
+    try:
+        result = verify_trust(
+            trust_mode="pinned_key",
+            config_bytes=raw_bytes,
+            consent=UnsignedConsent(acknowledged=True),
+            pubkey_b64=config.trust_pubkey,
+            signature=sig_bytes,
+            pinned_fingerprint=None,
+        )
+    except OrgConfigCryptoUnavailable as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=EXIT_VALIDATION) from exc
+    except OrgConfigTrustError as exc:
+        typer.echo(f"trust error: {exc}", err=True)
+        raise typer.Exit(code=EXIT_TRUST) from exc
+
+    new_fp = result.pubkey_fingerprint
+    prior = read_state(paths, org_id)
+    old_fp = prior.pubkey_fingerprint if prior else None
+    if old_fp == new_fp:
+        typer.echo(f"no rotation needed: key fingerprint unchanged ({new_fp})")
+        return
+
+    if not yes:
+        typer.echo(f"old fingerprint: {old_fp}")
+        typer.echo(f"new fingerprint: {new_fp}")
+        if not typer.confirm("acknowledge the rotated key?", default=False):
+            typer.echo("aborted")
+            raise typer.Exit(code=1)
+
+    now = _now_iso_utc()
+    if prior is not None:
+        new_state = dataclasses.replace(
+            prior,
+            config_version=config.config_version,
+            config_hash=hash_config_bytes(raw_bytes),
+            pubkey_fingerprint=new_fp,
+            pubkey_source="inline",
+            last_verified_at=now,
+            key_rotation_pending=None,
+        )
+    else:
+        new_state = OrgState(
+            org_id=org_id,
+            config_version=config.config_version,
+            config_hash=hash_config_bytes(raw_bytes),
+            trust_mode="pinned_key",
+            pubkey_fingerprint=new_fp,
+            pubkey_source="inline",
+            last_verified_at=now,
+            last_applied_at=now,
+            source_of_record="local",
+            unsigned_warning_acknowledged_at=None,
+            key_rotation_pending=None,
+        )
+    write_state(paths, new_state)
+    typer.echo(f"rotated pinned key for '{org_id}' to {new_fp}")
 
 
 # Public alias matching the registration convention used elsewhere in cli.py.

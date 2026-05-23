@@ -26,17 +26,11 @@ def test_unsigned_without_consent_raises():
         )
 
 
-def test_signed_modes_rejected_in_phase_1():
+def test_dns_anchor_still_deferred():
+    # dns_anchor lands in phase 2b; until then it is a deliberate deferral.
     with pytest.raises(OrgConfigTrustError, match="phase 2"):
         verify_trust(
             trust_mode="dns_anchor",
-            config_bytes=b"x",
-            consent=UnsignedConsent(acknowledged=True),
-        )
-
-    with pytest.raises(OrgConfigTrustError, match="phase 2"):
-        verify_trust(
-            trust_mode="pinned_key",
             config_bytes=b"x",
             consent=UnsignedConsent(acknowledged=True),
         )

@@ -48,6 +48,36 @@ Phase 1 supports only the `unsigned` trust mode. **Unsigned configs have no cryp
 
 Phase 2 will add signed trust modes (`pinned_key`, `dns_anchor`). Until then, only enroll configs you received through a trusted channel.
 
+## Signed configs (`pinned_key`)
+
+Signed enrollment is available with the crypto extra:
+
+```bash
+pip install "aec[org-configs]"
+```
+
+A `pinned_key` org config carries an inline ed25519 public key in its
+frontmatter and ships with a detached signature (a `<config>.sig` sidecar, or
+pass `--signature <file>`):
+
+```bash
+aec org enroll acme.yaml --signature acme.yaml.sig
+```
+
+On first enrollment AEC shows the public-key **fingerprint** and asks you to
+confirm it matches what your IT/security team gave you (trust on first use).
+Pass `--trust-fingerprint` to accept it non-interactively. The fingerprint is
+pinned in the org's state file; if the key later changes, enrollment is blocked
+until you acknowledge the new key:
+
+```bash
+aec org trust-rotate acme   # confirm and pin the rotated key
+```
+
+`dns_anchor` (domain-anchored keys) and URL-based fetch arrive in later 2.x
+sub-phases. Until then, `pinned_key` covers internally-distributed signed
+configs (MDM, internal git, authenticated S3).
+
 ## Inspecting
 
 ```bash

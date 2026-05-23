@@ -79,8 +79,7 @@ def test_enroll_unknown_schema_exits_13(tmp_path: Path):
 
 
 def test_enroll_signed_trust_mode_exits_trust(tmp_path: Path):
-    """An overlay claiming `pinned_key` trust should be rejected by the
-    validator (Phase 1 only allows `unsigned`) — exit 13, not 10."""
+    """A `pinned_key` overlay with no `pubkey` fails validation — exit 13."""
     src = (FIXTURES / "valid-minimal.yaml").read_text()
     pinned = src.replace('mode: "unsigned"', 'mode: "pinned_key"')
     p = tmp_path / "pinned.yaml"

@@ -46,10 +46,21 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
     trust_mode = trust.get("mode")
     if trust_mode is None:
         raise OrgConfigValidationError("trust.mode is required", field_path="trust.mode")
-    if trust_mode != "unsigned":
+    if trust_mode not in ("unsigned", "pinned_key", "dns_anchor"):
         raise OrgConfigValidationError(
-            f"trust.mode '{trust_mode}' is not supported in Phase 1 (only 'unsigned')",
-            field_path="trust.mode",
+            f"unknown trust.mode: {trust_mode!r}", field_path="trust.mode"
+        )
+    trust_pubkey = trust.get("pubkey")
+    trust_pubkey_url = trust.get("pubkey_url")
+    trust_signature_url = trust.get("signature_url")
+    trust_dns_domain = trust.get("dns_domain")
+    if trust_mode == "pinned_key" and not (trust_pubkey or trust_pubkey_url):
+        raise OrgConfigValidationError(
+            "pinned_key trust requires 'pubkey' or 'pubkey_url'", field_path="trust.pubkey"
+        )
+    if trust_mode == "dns_anchor" and not trust_dns_domain:
+        raise OrgConfigValidationError(
+            "dns_anchor trust requires 'dns_domain'", field_path="trust.dns_domain"
         )
 
     if body.get("projects"):
@@ -157,4 +168,8 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
         install_prompts=install_prompts,
         install_agents_enabled=install_agents_enabled,
         install_agents_disabled=install_agents_disabled,
+        trust_pubkey=trust_pubkey,
+        trust_pubkey_url=trust_pubkey_url,
+        trust_signature_url=trust_signature_url,
+        trust_dns_domain=trust_dns_domain,
     )

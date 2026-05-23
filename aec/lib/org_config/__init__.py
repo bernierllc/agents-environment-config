@@ -2,6 +2,7 @@
 
 Phase 1: schema, validation, single-org discovery, unsigned trust.
 """
+from .crypto import OrgConfigCryptoUnavailable
 from .discovery import EnrolledOrg, discover_enrolled_orgs
 from .errors import (
     OrgConfigError,
@@ -19,6 +20,7 @@ __all__ = [
     "EnrolledOrg",
     "ItemPolicy",
     "OrgConfig",
+    "OrgConfigCryptoUnavailable",
     "OrgConfigError",
     "OrgConfigMultiOrgRejectedError",
     "OrgConfigParseError",
