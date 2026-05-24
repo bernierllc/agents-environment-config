@@ -23,6 +23,7 @@ from ..lib.org_config import (
     OrgPaths,
     discover_enrolled_orgs,
 )
+from ..lib.org_config.apply import apply_org_policy
 from ..lib.org_config.fetch import fetch_bytes
 from ..lib.org_config.hashing import hash_config_bytes
 from ..lib.org_config.parser import parse_org_config_text
@@ -676,6 +677,32 @@ def resolve_cmd(
 
     for oc in targets:
         _resolve_one(paths, oc)
+
+
+@app.command("apply")
+def apply_cmd(
+    enroll: Optional[str] = typer.Option(
+        None, "--enroll", help="Enroll a config (local path or https url) before applying"
+    ),
+    allow_unsigned: bool = typer.Option(False, "--allow-unsigned", help="Allow an unsigned --enroll source"),
+    managed: bool = typer.Option(False, "--managed", help="Force silent (managed) apply"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show the plan without applying"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Apply without confirmation (guided mode)"),
+):
+    """Apply enrolled org policy to this environment (preferences, prompts, items)."""
+    paths = _paths()
+    if enroll:
+        perform_enroll(enroll, allow_unsigned=allow_unsigned, yes=yes)
+
+    confirm = (lambda _policy: True) if yes else None
+    outcome = apply_org_policy(
+        paths,
+        mode_override="managed" if managed else None,
+        dry_run=dry_run,
+        confirm=confirm,
+    )
+    if outcome.skipped_reason == "locked":
+        raise typer.Exit(code=EXIT_TRUST)
 
 
 # Public alias matching the registration convention used elsewhere in cli.py.
