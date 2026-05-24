@@ -58,6 +58,36 @@ def _pubkey_fetcher(url: str) -> bytes:
     return fetch_bytes(url)
 
 
+def _url_fetcher(url: str) -> bytes:
+    """Fetch a remote config / signature / pubkey_url. Monkeypatched in tests."""
+    return fetch_bytes(url)
+
+
+def _fetch_config_bytes(url: str) -> bytes:
+    try:
+        return _url_fetcher(url)
+    except OrgConfigFetchError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=EXIT_VALIDATION) from exc
+
+
+def _signature_for_url(config, url: str, signature_opt: Optional[str]) -> Optional[bytes]:
+    """Acquire a detached signature for a url-fetched config.
+
+    Precedence: explicit ``--signature`` local file, then the config's
+    ``trust.signature_url``, then a ``<url>.sig`` sibling.
+    """
+    if signature_opt:
+        sp = Path(signature_opt)
+        return sp.read_bytes() if sp.exists() else None
+    if config.trust_signature_url:
+        return _url_fetcher(config.trust_signature_url)
+    try:
+        return _url_fetcher(url + ".sig")
+    except OrgConfigFetchError:
+        return None
+
+
 def _load_signature(src_path: Path, signature_opt: Optional[str]) -> Optional[bytes]:
     """Locate a detached signature: explicit ``--signature`` or sidecar ``<config>.sig``."""
     if signature_opt:
@@ -71,19 +101,26 @@ def _load_signature(src_path: Path, signature_opt: Optional[str]) -> Optional[by
     return None
 
 
-def _verify_pinned_key_enroll(config, raw_bytes, src_path, signature_opt, trust_fingerprint, yes):
+def _verify_pinned_key_enroll(config, raw_bytes, sig_bytes, trust_fingerprint, yes):
     """Verify a pinned_key config and return (fingerprint, pubkey_source).
 
     Raises ``typer.Exit`` with the appropriate exit code on any failure.
     """
-    sig_bytes = _load_signature(src_path, signature_opt)
     if sig_bytes is None:
         typer.echo(
             "trust error: pinned_key config needs a detached signature "
-            "(<config>.sig sidecar or --signature)",
+            "(<config>.sig sidecar, signature_url, or --signature)",
             err=True,
         )
         raise typer.Exit(code=EXIT_TRUST)
+
+    pubkey_b64 = config.trust_pubkey
+    if not pubkey_b64 and config.trust_pubkey_url:
+        try:
+            pubkey_b64 = _url_fetcher(config.trust_pubkey_url).decode("utf-8").strip()
+        except OrgConfigFetchError as exc:
+            typer.echo(f"trust error: {exc}", err=True)
+            raise typer.Exit(code=EXIT_TRUST) from exc
 
     prior = read_state(_paths(), config.org_id)
     pinned_fp = prior.pubkey_fingerprint if prior else None
@@ -92,7 +129,7 @@ def _verify_pinned_key_enroll(config, raw_bytes, src_path, signature_opt, trust_
             trust_mode="pinned_key",
             config_bytes=raw_bytes,
             consent=UnsignedConsent(acknowledged=True),
-            pubkey_b64=config.trust_pubkey,
+            pubkey_b64=pubkey_b64,
             signature=sig_bytes,
             pinned_fingerprint=pinned_fp,
         )
@@ -113,16 +150,15 @@ def _verify_pinned_key_enroll(config, raw_bytes, src_path, signature_opt, trust_
     return fp, "inline"
 
 
-def _verify_dns_anchor_enroll(config, raw_bytes, src_path, signature_opt, trust_fingerprint, yes):
+def _verify_dns_anchor_enroll(config, raw_bytes, sig_bytes, trust_fingerprint, yes):
     """Verify a dns_anchor config and return (fingerprint, pubkey_source).
 
     Raises ``typer.Exit`` with the appropriate exit code on any failure.
     """
-    sig_bytes = _load_signature(src_path, signature_opt)
     if sig_bytes is None:
         typer.echo(
             "trust error: dns_anchor config needs a detached signature "
-            "(<config>.sig sidecar or --signature)",
+            "(<config>.sig sidecar, signature_url, or --signature)",
             err=True,
         )
         raise typer.Exit(code=EXIT_TRUST)
@@ -160,27 +196,56 @@ def _verify_dns_anchor_enroll(config, raw_bytes, src_path, signature_opt, trust_
 
 @app.command("enroll")
 def enroll_cmd(
-    source: str = typer.Argument(..., help="Local path to org config YAML (URL support arrives in phase 2)"),
+    source: str = typer.Argument(..., help="Local path or https URL to an org config YAML"),
     allow_unsigned: bool = typer.Option(False, "--allow-unsigned", help="Bypass the unsigned-config consent prompt"),
-    signature: Optional[str] = typer.Option(None, "--signature", help="Path to a detached signature file (pinned_key)"),
-    trust_fingerprint: bool = typer.Option(False, "--trust-fingerprint", help="Accept the pubkey fingerprint without prompting (pinned_key)"),
+    signature: Optional[str] = typer.Option(None, "--signature", help="Path to a detached signature file (signed modes)"),
+    trust_fingerprint: bool = typer.Option(False, "--trust-fingerprint", help="Accept the pubkey fingerprint without prompting (signed modes)"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip interactive prompts"),
 ):
-    """Enroll an org configuration from a local YAML file."""
-    if _looks_like_url(source):
-        typer.echo("url fetch added in phase 2")
-        raise typer.Exit(code=1)
+    """Enroll an org configuration from a local YAML file or an https URL."""
+    perform_enroll(
+        source,
+        allow_unsigned=allow_unsigned,
+        signature=signature,
+        trust_fingerprint=trust_fingerprint,
+        yes=yes,
+    )
 
-    src_path = Path(source)
-    if not src_path.exists() or not src_path.is_file():
-        typer.echo(f"error: file not found: {source}", err=True)
-        raise typer.Exit(code=EXIT_VALIDATION)
 
-    try:
-        raw_bytes = src_path.read_bytes()
-    except OSError as exc:
-        typer.echo(f"error: could not read {source}: {exc}", err=True)
-        raise typer.Exit(code=EXIT_VALIDATION) from exc
+def perform_enroll(
+    source: str,
+    *,
+    allow_unsigned: bool = False,
+    signature: Optional[str] = None,
+    trust_fingerprint: bool = False,
+    yes: bool = False,
+) -> str:
+    """Fetch/read, verify, and persist an org config. Returns the org_id.
+
+    Shared by ``aec org enroll`` and ``aec install --org-config``.
+    """
+    is_url = _looks_like_url(source)
+    src_path: Optional[Path] = None
+
+    if is_url:
+        if not source.startswith("https://"):
+            typer.echo("error: only https:// URLs are supported for org configs", err=True)
+            raise typer.Exit(code=EXIT_VALIDATION)
+        raw_bytes = _fetch_config_bytes(source)
+        source_of_record = "url"
+        source_url: Optional[str] = source
+    else:
+        src_path = Path(source)
+        if not src_path.exists() or not src_path.is_file():
+            typer.echo(f"error: file not found: {source}", err=True)
+            raise typer.Exit(code=EXIT_VALIDATION)
+        try:
+            raw_bytes = src_path.read_bytes()
+        except OSError as exc:
+            typer.echo(f"error: could not read {source}: {exc}", err=True)
+            raise typer.Exit(code=EXIT_VALIDATION) from exc
+        source_of_record = "local"
+        source_url = None
 
     try:
         frontmatter, body = parse_org_config_text(raw_bytes.decode("utf-8"))
@@ -211,14 +276,24 @@ def enroll_cmd(
         except (OrgConfigTrustError, UnsignedConsentDeclined) as exc:
             typer.echo(f"trust error: {exc}", err=True)
             raise typer.Exit(code=EXIT_TRUST) from exc
-    elif config.trust_mode == "pinned_key":
-        pubkey_fingerprint, pubkey_source = _verify_pinned_key_enroll(
-            config, raw_bytes, src_path, signature, trust_fingerprint, yes
-        )
-    else:  # dns_anchor
-        pubkey_fingerprint, pubkey_source = _verify_dns_anchor_enroll(
-            config, raw_bytes, src_path, signature, trust_fingerprint, yes
-        )
+    else:  # pinned_key or dns_anchor
+        try:
+            sig_bytes = (
+                _signature_for_url(config, source, signature)
+                if is_url
+                else _load_signature(src_path, signature)
+            )
+        except OrgConfigFetchError as exc:
+            typer.echo(f"trust error: {exc}", err=True)
+            raise typer.Exit(code=EXIT_TRUST) from exc
+        if config.trust_mode == "pinned_key":
+            pubkey_fingerprint, pubkey_source = _verify_pinned_key_enroll(
+                config, raw_bytes, sig_bytes, trust_fingerprint, yes
+            )
+        else:
+            pubkey_fingerprint, pubkey_source = _verify_dns_anchor_enroll(
+                config, raw_bytes, sig_bytes, trust_fingerprint, yes
+            )
 
     paths = _paths()
     paths.orgs_dir.mkdir(parents=True, exist_ok=True)
@@ -236,13 +311,15 @@ def enroll_cmd(
         pubkey_source=pubkey_source,
         last_verified_at=now,
         last_applied_at=now,
-        source_of_record="local",
+        source_of_record=source_of_record,
         unsigned_warning_acknowledged_at=now if config.trust_mode == "unsigned" else None,
         key_rotation_pending=None,
+        source_url=source_url,
     )
     write_state(paths, state)
 
     typer.echo(f"enrolled org '{config.org_id}'")
+    return config.org_id
 
 
 @app.command("list")

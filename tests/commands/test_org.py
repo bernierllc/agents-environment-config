@@ -66,10 +66,12 @@ def test_org_remove_deletes_state_and_config(tmp_path: Path):
     assert not (tmp_path / ".aec" / "orgs" / "minimal.state.json").exists()
 
 
-def test_org_enroll_url_not_supported_in_phase_1(tmp_path: Path):
-    result = _run(["org", "enroll", "https://example.com/config.yaml", "--allow-unsigned", "--yes"], tmp_path)
+def test_org_enroll_rejects_non_https_url(tmp_path: Path):
+    # https URL enrollment is supported (see test_org_enroll_url.py); plaintext
+    # http is refused before any network access.
+    result = _run(["org", "enroll", "http://example.com/config.yaml", "--allow-unsigned", "--yes"], tmp_path)
     assert result.exit_code != 0
-    assert "phase 2" in result.stdout.lower() or "phase 2" in result.stderr.lower()
+    assert "https" in (result.stdout + result.stderr).lower()
 
 
 def test_doctor_shows_org_section_when_org_enrolled(tmp_path: Path):
