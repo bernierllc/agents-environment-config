@@ -51,6 +51,7 @@ def _check_org_configurations() -> None:
             OrgPaths,
             discover_enrolled_orgs,
         )
+        from ..lib.org_config.rotation import rotation_status
         from ..lib.org_config.state import read_state
     except ImportError:
         # PyYAML extra not installed — silently skip.
@@ -80,6 +81,23 @@ def _check_org_configurations() -> None:
         if state is not None:
             Console.print(f"  last_verified_at: {state.last_verified_at}")
             Console.print(f"  last_applied_at: {state.last_applied_at}")
+            if state.pubkey_fingerprint:
+                Console.print(f"  pubkey_fingerprint: {state.pubkey_fingerprint}")
+            from datetime import datetime, timezone
+
+            now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            rs = rotation_status(
+                pending=state.key_rotation_pending, now=now_iso, org_id=cfg.org_id
+            )
+            if rs.state == "warn":
+                Console.warning(
+                    f"  key rotation pending — {rs.days_remaining} days remaining "
+                    f"(run: aec org trust-rotate {cfg.org_id})"
+                )
+            elif rs.state == "locked":
+                Console.error(
+                    f"  key rotation LOCKED (run: aec org trust-rotate {cfg.org_id})"
+                )
 
 
 def _check_agent_blurb_drift(repo_root) -> None:

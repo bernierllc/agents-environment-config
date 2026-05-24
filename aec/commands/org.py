@@ -15,6 +15,7 @@ import typer
 
 from ..lib.org_config import (
     OrgConfigCryptoUnavailable,
+    OrgConfigFetchError,
     OrgConfigMultiOrgRejectedError,
     OrgConfigParseError,
     OrgConfigTrustError,
@@ -23,8 +24,10 @@ from ..lib.org_config import (
     OrgPaths,
     discover_enrolled_orgs,
 )
+from ..lib.org_config.fetch import fetch_bytes
 from ..lib.org_config.hashing import hash_config_bytes
 from ..lib.org_config.parser import parse_org_config_text
+from ..lib.org_config.rotation import rotation_status
 from ..lib.org_config.state import OrgState, read_state, write_state
 from ..lib.org_config.trust import UnsignedConsent, UnsignedConsentDeclined, verify_trust
 from ..lib.org_config.validator import validate_org_config
@@ -48,6 +51,11 @@ def _looks_like_url(s: str) -> bool:
 
 def _paths() -> OrgPaths:
     return OrgPaths.default()
+
+
+def _pubkey_fetcher(url: str) -> bytes:
+    """Fetch a well-known pubkey. Indirection point so tests can monkeypatch."""
+    return fetch_bytes(url)
 
 
 def _load_signature(src_path: Path, signature_opt: Optional[str]) -> Optional[bytes]:
@@ -103,6 +111,51 @@ def _verify_pinned_key_enroll(config, raw_bytes, src_path, signature_opt, trust_
             typer.echo("trust error: fingerprint not confirmed; enrollment aborted", err=True)
             raise typer.Exit(code=EXIT_TRUST)
     return fp, "inline"
+
+
+def _verify_dns_anchor_enroll(config, raw_bytes, src_path, signature_opt, trust_fingerprint, yes):
+    """Verify a dns_anchor config and return (fingerprint, pubkey_source).
+
+    Raises ``typer.Exit`` with the appropriate exit code on any failure.
+    """
+    sig_bytes = _load_signature(src_path, signature_opt)
+    if sig_bytes is None:
+        typer.echo(
+            "trust error: dns_anchor config needs a detached signature "
+            "(<config>.sig sidecar or --signature)",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_TRUST)
+
+    prior = read_state(_paths(), config.org_id)
+    pinned_fp = prior.pubkey_fingerprint if prior else None
+    try:
+        result = verify_trust(
+            trust_mode="dns_anchor",
+            config_bytes=raw_bytes,
+            consent=UnsignedConsent(acknowledged=True),
+            signature=sig_bytes,
+            dns_domain=config.trust_dns_domain,
+            pinned_fingerprint=pinned_fp,
+            pubkey_fetcher=_pubkey_fetcher,
+        )
+    except OrgConfigCryptoUnavailable as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=EXIT_VALIDATION) from exc
+    except (OrgConfigTrustError, OrgConfigFetchError) as exc:
+        typer.echo(f"trust error: {exc}", err=True)
+        raise typer.Exit(code=EXIT_TRUST) from exc
+
+    fp = result.pubkey_fingerprint
+    if pinned_fp is None and not (trust_fingerprint or yes):
+        typer.echo(f"public key fingerprint: {fp}")
+        typer.echo(
+            f"fetched from https://{config.trust_dns_domain}/.well-known/aec-pubkey"
+        )
+        if not typer.confirm("does this fingerprint match?", default=False):
+            typer.echo("trust error: fingerprint not confirmed; enrollment aborted", err=True)
+            raise typer.Exit(code=EXIT_TRUST)
+    return fp, "dns_anchor"
 
 
 @app.command("enroll")
@@ -162,16 +215,10 @@ def enroll_cmd(
         pubkey_fingerprint, pubkey_source = _verify_pinned_key_enroll(
             config, raw_bytes, src_path, signature, trust_fingerprint, yes
         )
-    else:  # dns_anchor and any other signed mode not yet implemented
-        try:
-            verify_trust(
-                trust_mode=config.trust_mode,
-                config_bytes=raw_bytes,
-                consent=UnsignedConsent(acknowledged=True),
-            )
-        except OrgConfigTrustError as exc:
-            typer.echo(f"trust error: {exc}", err=True)
-            raise typer.Exit(code=EXIT_TRUST) from exc
+    else:  # dns_anchor
+        pubkey_fingerprint, pubkey_source = _verify_dns_anchor_enroll(
+            config, raw_bytes, src_path, signature, trust_fingerprint, yes
+        )
 
     paths = _paths()
     paths.orgs_dir.mkdir(parents=True, exist_ok=True)
@@ -239,6 +286,15 @@ def _print_status_for(paths: OrgPaths, enrolled) -> None:
         typer.echo(f"  last_verified_at: {state.last_verified_at}")
         typer.echo(f"  last_applied_at: {state.last_applied_at}")
         typer.echo(f"  source_of_record: {state.source_of_record}")
+        if state.pubkey_fingerprint:
+            typer.echo(f"  pubkey_fingerprint: {state.pubkey_fingerprint}")
+        rs = rotation_status(
+            pending=state.key_rotation_pending, now=_now_iso_utc(), org_id=cfg.org_id
+        )
+        if rs.state == "warn":
+            typer.echo(f"  key_rotation: PENDING ({rs.days_remaining} days remaining) — {rs.message}")
+        elif rs.state == "locked":
+            typer.echo(f"  key_rotation: LOCKED — {rs.message}")
     else:
         typer.echo("  state: (no state file)")
 
@@ -346,11 +402,11 @@ def remove_cmd(
 
 @app.command("trust-rotate")
 def trust_rotate_cmd(
-    org_id: str = typer.Argument(..., help="Org id whose pinned key to rotate"),
+    org_id: str = typer.Argument(..., help="Org id whose signing key to rotate"),
     signature: Optional[str] = typer.Option(None, "--signature", help="Detached signature for the current config"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the fingerprint confirmation prompt"),
 ):
-    """Acknowledge a rotated pinned_key public key for an enrolled org."""
+    """Acknowledge a rotated public key for a signed org (pinned_key or dns_anchor)."""
     paths = _paths()
     cfg_path = paths.config_for(org_id)
     if not cfg_path.exists():
@@ -365,8 +421,11 @@ def trust_rotate_cmd(
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=EXIT_VALIDATION) from exc
 
-    if config.trust_mode != "pinned_key":
-        typer.echo(f"error: org '{org_id}' is not a pinned_key org", err=True)
+    if config.trust_mode not in ("pinned_key", "dns_anchor"):
+        typer.echo(
+            f"error: org '{org_id}' is not a signed org (trust_mode={config.trust_mode})",
+            err=True,
+        )
         raise typer.Exit(code=EXIT_VALIDATION)
 
     sig_bytes = _load_signature(cfg_path, signature)
@@ -381,18 +440,31 @@ def trust_rotate_cmd(
     # Verify the config against its new key (no pinned comparison — that is the
     # whole point of a rotation), then require explicit acknowledgment.
     try:
-        result = verify_trust(
-            trust_mode="pinned_key",
-            config_bytes=raw_bytes,
-            consent=UnsignedConsent(acknowledged=True),
-            pubkey_b64=config.trust_pubkey,
-            signature=sig_bytes,
-            pinned_fingerprint=None,
-        )
+        if config.trust_mode == "pinned_key":
+            result = verify_trust(
+                trust_mode="pinned_key",
+                config_bytes=raw_bytes,
+                consent=UnsignedConsent(acknowledged=True),
+                pubkey_b64=config.trust_pubkey,
+                signature=sig_bytes,
+                pinned_fingerprint=None,
+            )
+            pubkey_source = "inline"
+        else:  # dns_anchor
+            result = verify_trust(
+                trust_mode="dns_anchor",
+                config_bytes=raw_bytes,
+                consent=UnsignedConsent(acknowledged=True),
+                signature=sig_bytes,
+                dns_domain=config.trust_dns_domain,
+                pinned_fingerprint=None,
+                pubkey_fetcher=_pubkey_fetcher,
+            )
+            pubkey_source = "dns_anchor"
     except OrgConfigCryptoUnavailable as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(code=EXIT_VALIDATION) from exc
-    except OrgConfigTrustError as exc:
+    except (OrgConfigTrustError, OrgConfigFetchError) as exc:
         typer.echo(f"trust error: {exc}", err=True)
         raise typer.Exit(code=EXIT_TRUST) from exc
 
@@ -417,7 +489,7 @@ def trust_rotate_cmd(
             config_version=config.config_version,
             config_hash=hash_config_bytes(raw_bytes),
             pubkey_fingerprint=new_fp,
-            pubkey_source="inline",
+            pubkey_source=pubkey_source,
             last_verified_at=now,
             key_rotation_pending=None,
         )
@@ -426,9 +498,9 @@ def trust_rotate_cmd(
             org_id=org_id,
             config_version=config.config_version,
             config_hash=hash_config_bytes(raw_bytes),
-            trust_mode="pinned_key",
+            trust_mode=config.trust_mode,
             pubkey_fingerprint=new_fp,
-            pubkey_source="inline",
+            pubkey_source=pubkey_source,
             last_verified_at=now,
             last_applied_at=now,
             source_of_record="local",

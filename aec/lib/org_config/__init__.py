@@ -6,6 +6,7 @@ from .crypto import OrgConfigCryptoUnavailable
 from .discovery import EnrolledOrg, discover_enrolled_orgs
 from .errors import (
     OrgConfigError,
+    OrgConfigFetchError,
     OrgConfigMultiOrgRejectedError,
     OrgConfigParseError,
     OrgConfigTrustError,
@@ -22,6 +23,7 @@ __all__ = [
     "OrgConfig",
     "OrgConfigCryptoUnavailable",
     "OrgConfigError",
+    "OrgConfigFetchError",
     "OrgConfigMultiOrgRejectedError",
     "OrgConfigParseError",
     "OrgConfigTrustError",
