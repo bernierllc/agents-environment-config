@@ -170,6 +170,13 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
     install_agents_enabled = list(install_agents.get("enabled") or [])
     install_agents_disabled = list(install_agents.get("disabled") or [])
 
+    install_mode = install_block.get("mode")
+    if install_mode is not None and install_mode not in ("managed", "guided"):
+        raise OrgConfigValidationError(
+            f"unknown install.mode: {install_mode!r} (expected 'managed' or 'guided')",
+            field_path="install.mode",
+        )
+
     return OrgConfig(
         schema_version=schema_version,
         org_id=org_id,
@@ -184,6 +191,7 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
         install_prompts=install_prompts,
         install_agents_enabled=install_agents_enabled,
         install_agents_disabled=install_agents_disabled,
+        install_mode=install_mode,
         trust_pubkey=trust_pubkey,
         trust_pubkey_url=trust_pubkey_url,
         trust_signature_url=trust_signature_url,

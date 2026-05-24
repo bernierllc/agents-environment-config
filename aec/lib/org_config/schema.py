@@ -71,6 +71,7 @@ class OrgConfig:
     install_prompts: dict[str, Any]
     install_agents_enabled: list[str]
     install_agents_disabled: list[str]
+    install_mode: Optional[str] = None  # "managed" | "guided" | None
 
     # trust detail (Phase 2): plumbing for signed modes. Optional so unsigned
     # configs and existing callers are unaffected.
