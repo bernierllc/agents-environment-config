@@ -16,7 +16,6 @@ import typer
 from ..lib.org_config import (
     OrgConfigCryptoUnavailable,
     OrgConfigFetchError,
-    OrgConfigMultiOrgRejectedError,
     OrgConfigParseError,
     OrgConfigTrustError,
     OrgConfigUnknownSchemaError,
@@ -37,7 +36,6 @@ app = typer.Typer(help="Manage organization configurations")
 
 
 EXIT_TRUST = 10
-EXIT_MULTI_ORG = 12
 EXIT_VALIDATION = 13
 
 
@@ -354,11 +352,7 @@ def refresh_url_sourced_orgs(paths: OrgPaths) -> list[tuple[str, str]]:
 def list_cmd():
     """List enrolled organizations."""
     paths = _paths()
-    try:
-        orgs = discover_enrolled_orgs(paths)
-    except OrgConfigMultiOrgRejectedError as exc:
-        typer.echo(f"error: {exc}", err=True)
-        raise typer.Exit(code=EXIT_MULTI_ORG) from exc
+    orgs = discover_enrolled_orgs(paths)
 
     if not orgs:
         typer.echo("no orgs enrolled")
@@ -410,11 +404,7 @@ def status_cmd(
 ):
     """Show detailed status for enrolled organizations."""
     paths = _paths()
-    try:
-        orgs = discover_enrolled_orgs(paths)
-    except OrgConfigMultiOrgRejectedError as exc:
-        typer.echo(f"error: {exc}", err=True)
-        raise typer.Exit(code=EXIT_MULTI_ORG) from exc
+    orgs = discover_enrolled_orgs(paths)
 
     if org_id is not None:
         matches = [e for e in orgs if e.config.org_id == org_id]

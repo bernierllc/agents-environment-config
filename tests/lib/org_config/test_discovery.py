@@ -1,10 +1,7 @@
 import shutil
 from pathlib import Path
 
-import pytest
-
 from aec.lib.org_config.discovery import discover_enrolled_orgs
-from aec.lib.org_config.errors import OrgConfigMultiOrgRejectedError
 from aec.lib.org_config.paths import OrgPaths
 
 
@@ -34,11 +31,12 @@ def test_discovery_loads_single_org(tmp_path: Path):
     assert orgs[0].source_path == paths.orgs_dir / "minimal.yaml"
 
 
-def test_discovery_rejects_multiple_orgs_in_phase_1(tmp_path: Path):
+def test_discovery_loads_multiple_orgs_sorted_by_id(tmp_path: Path):
     paths = OrgPaths(home_dir=tmp_path)
     paths.orgs_dir.mkdir(parents=True)
-    shutil.copy(FIXTURES / "valid-minimal.yaml", paths.orgs_dir / "minimal.yaml")
-    shutil.copy(FIXTURES / "valid-full.yaml", paths.orgs_dir / "full.yaml")
+    # File names intentionally not in org_id order to prove sorting is by id.
+    shutil.copy(FIXTURES / "valid-full.yaml", paths.orgs_dir / "zzz.yaml")  # org_id "acme"
+    shutil.copy(FIXTURES / "valid-minimal.yaml", paths.orgs_dir / "aaa.yaml")  # org_id "minimal"
 
-    with pytest.raises(OrgConfigMultiOrgRejectedError, match="phase 3"):
-        discover_enrolled_orgs(paths)
+    orgs = discover_enrolled_orgs(paths)
+    assert [e.config.org_id for e in orgs] == ["acme", "minimal"]

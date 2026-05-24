@@ -113,14 +113,15 @@ def test_list_with_one_enrolled_org_prints_summary_line(tmp_path: Path):
     assert "last_applied_at=" in result.stdout
 
 
-def test_list_multi_org_exits_12(tmp_path: Path):
+def test_list_multi_org_lists_all(tmp_path: Path):
     _enroll_minimal(tmp_path)
-    # Manually drop a second yaml file to trigger multi-org rejection.
+    # A second enrolled org now coexists (Phase 2d multi-org).
     orgs_dir = tmp_path / ".aec" / "orgs"
     shutil.copy(FIXTURES / "valid-full.yaml", orgs_dir / "acme.yaml")
     result = _run(["org", "list"], tmp_path)
-    assert result.exit_code == 12
-    assert "phase 1" in _all_output(result)
+    assert result.exit_code == 0
+    assert "minimal" in result.stdout
+    assert "acme" in result.stdout
 
 
 # --- status ---------------------------------------------------------------
@@ -146,12 +147,14 @@ def test_status_with_org_id_mismatch_exits_13(tmp_path: Path):
     assert "ghost" in _all_output(result)
 
 
-def test_status_multi_org_exits_12(tmp_path: Path):
+def test_status_multi_org_shows_all(tmp_path: Path):
     _enroll_minimal(tmp_path)
     orgs_dir = tmp_path / ".aec" / "orgs"
     shutil.copy(FIXTURES / "valid-full.yaml", orgs_dir / "acme.yaml")
     result = _run(["org", "status"], tmp_path)
-    assert result.exit_code == 12
+    assert result.exit_code == 0
+    assert "org_id: minimal" in result.stdout
+    assert "org_id: acme" in result.stdout
 
 
 def test_status_prints_no_state_when_state_file_missing(tmp_path: Path):
