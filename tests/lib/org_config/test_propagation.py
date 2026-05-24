@@ -7,7 +7,25 @@ import pytest
 nacl_signing = pytest.importorskip("nacl.signing")
 
 from aec.lib.org_config.crypto import fingerprint  # noqa: E402
-from aec.lib.org_config.propagation import detect_dns_rotation  # noqa: E402
+from aec.lib.org_config.propagation import detect_dns_rotation, due_for_refresh  # noqa: E402
+
+
+def test_due_for_refresh_none_ttl_never_due():
+    assert due_for_refresh(
+        last_verified_at="2026-01-01T00:00:00Z", ttl_hours=None, now="2026-05-24T00:00:00Z"
+    ) is False
+
+
+def test_due_for_refresh_elapsed_beyond_ttl():
+    assert due_for_refresh(
+        last_verified_at="2026-05-23T00:00:00Z", ttl_hours=24, now="2026-05-24T01:00:00Z"
+    ) is True
+
+
+def test_due_for_refresh_within_ttl():
+    assert due_for_refresh(
+        last_verified_at="2026-05-24T00:00:00Z", ttl_hours=24, now="2026-05-24T01:00:00Z"
+    ) is False
 
 
 def _pubkey_b64():

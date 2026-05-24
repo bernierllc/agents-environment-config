@@ -322,6 +322,34 @@ def perform_enroll(
     return config.org_id
 
 
+def refresh_url_sourced_orgs(paths: OrgPaths) -> list[tuple[str, str]]:
+    """Re-fetch url-sourced org configs (used by ``aec update``).
+
+    Returns a list of ``(org_id, status)`` where status is one of
+    ``unchanged`` / ``updated`` / a failure message. Unchanged configs are
+    left untouched so their applied-state timestamps are preserved.
+    """
+    results: list[tuple[str, str]] = []
+    for enrolled in discover_enrolled_orgs(paths):
+        st = read_state(paths, enrolled.config.org_id)
+        if not (st and st.source_of_record == "url" and st.source_url):
+            continue
+        try:
+            fetched = _url_fetcher(st.source_url)
+        except OrgConfigFetchError as exc:
+            results.append((st.org_id, f"fetch failed: {exc}"))
+            continue
+        if hash_config_bytes(fetched) == st.config_hash:
+            results.append((st.org_id, "unchanged"))
+            continue
+        try:
+            perform_enroll(st.source_url, allow_unsigned=True, yes=True)
+            results.append((st.org_id, "updated"))
+        except typer.Exit as exc:
+            results.append((st.org_id, f"refresh blocked (exit {exc.exit_code})"))
+    return results
+
+
 @app.command("list")
 def list_cmd():
     """List enrolled organizations."""

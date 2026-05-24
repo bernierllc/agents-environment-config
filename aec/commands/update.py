@@ -67,8 +67,36 @@ def run_update() -> None:
     else:
         Console.print("\nEverything is up to date.")
 
+    _refresh_org_configs()
+
     # Informational: surface agent-blurb drift after update
     check_blurb_drift(root=repo)
+
+
+def _refresh_org_configs() -> None:
+    """Re-fetch url-sourced org configs after an update. Best-effort."""
+    try:
+        from ..lib.org_config import OrgConfigError, OrgPaths
+        from .org import refresh_url_sourced_orgs
+    except ImportError:
+        return
+
+    paths = OrgPaths.default()
+    try:
+        results = refresh_url_sourced_orgs(paths)
+    except OrgConfigError:
+        return
+    if not results:
+        return
+
+    Console.print("\nOrg configs:")
+    for org_id, status in results:
+        if status == "updated":
+            Console.print(f"  {org_id}: re-fetched and re-verified")
+        elif status == "unchanged":
+            Console.print(f"  {org_id}: up to date")
+        else:
+            Console.warning(f"  {org_id}: {status}")
 
 
 def check_blurb_drift(root: Path) -> int:

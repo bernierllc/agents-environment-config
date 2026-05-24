@@ -7,9 +7,32 @@ on these primitives in Phase 2e.
 """
 from __future__ import annotations
 
-from typing import Callable, Optional
+from datetime import datetime, timezone
+from typing import Callable, Optional, Union
 
 PubkeyFetcher = Callable[[str], bytes]
+
+
+def _parse_dt(value: Union[str, datetime]) -> datetime:
+    dt = value if isinstance(value, datetime) else datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def due_for_refresh(
+    *,
+    last_verified_at: Union[str, datetime],
+    ttl_hours: Optional[int],
+    now: Union[str, datetime],
+) -> bool:
+    """Whether a url/mdm-sourced config is due for a TTL-based auto-refetch.
+
+    ``ttl_hours`` of None (the default) means "never auto-refetch" — only an
+    explicit ``aec update`` re-fetches. Used by the Phase 2e propagation gate.
+    """
+    if not ttl_hours:
+        return False
+    elapsed = _parse_dt(now) - _parse_dt(last_verified_at)
+    return elapsed.total_seconds() >= ttl_hours * 3600
 
 
 def detect_dns_rotation(
