@@ -7,8 +7,10 @@ Supported modes:
 - ``pinned_key`` (Phase 2a) — verifies a detached ed25519 signature over the
   config bytes against an inline public key, with TOFU fingerprint pinning. A
   changed key halts until acknowledged via ``aec org trust-rotate``.
-- ``dns_anchor`` — DNS-anchored pubkey discovery; arrives in Phase 2b and is
-  rejected with a deliberate deferral message until then.
+- ``dns_anchor`` — domain-anchored pubkey discovery: the public key is fetched
+  over https from ``https://<dns_domain>/.well-known/aec-pubkey`` and used to
+  verify a detached signature, with the same TOFU fingerprint pinning as
+  ``pinned_key``.
 
 ``verify_trust`` returns a result object carrying the verified pubkey
 fingerprint so callers can pin / re-verify it.
@@ -16,9 +18,13 @@ fingerprint so callers can pin / re-verify it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 from .errors import OrgConfigTrustError
+
+PubkeyFetcher = Callable[[str], bytes]
+
+WELL_KNOWN_PUBKEY_PATH = "/.well-known/aec-pubkey"
 
 
 @dataclass(frozen=True)
@@ -45,6 +51,8 @@ def verify_trust(
     pubkey_b64: Optional[str] = None,
     signature: Optional[bytes] = None,
     pinned_fingerprint: Optional[str] = None,
+    dns_domain: Optional[str] = None,
+    pubkey_fetcher: Optional[PubkeyFetcher] = None,
 ) -> TrustResult:
     if trust_mode == "unsigned":
         if not consent.acknowledged:
@@ -56,8 +64,8 @@ def verify_trust(
     if trust_mode == "pinned_key":
         return _verify_pinned_key(config_bytes, pubkey_b64, signature, pinned_fingerprint)
     if trust_mode == "dns_anchor":
-        raise OrgConfigTrustError(
-            "trust_mode 'dns_anchor' requires DNS-anchor support, which arrives in phase 2b"
+        return _verify_dns_anchor(
+            config_bytes, dns_domain, signature, pinned_fingerprint, pubkey_fetcher
         )
     raise OrgConfigTrustError(f"unknown trust_mode: '{trust_mode}'")
 
@@ -68,9 +76,6 @@ def _verify_pinned_key(
     signature: Optional[bytes],
     pinned_fingerprint: Optional[str],
 ) -> TrustResult:
-    from .crypto import decode_pubkey, decode_signature, fingerprint, verify_detached
-    from .errors import OrgConfigError
-
     if not pubkey_b64:
         raise OrgConfigTrustError(
             "pinned_key trust requires an inline 'pubkey' (pubkey_url fetch arrives in phase 2c)"
@@ -79,6 +84,48 @@ def _verify_pinned_key(
         raise OrgConfigTrustError(
             "pinned_key trust requires a detached signature (provide <config>.sig or --signature)"
         )
+    return _verify_with_pubkey(
+        config_bytes, pubkey_b64, signature, pinned_fingerprint, trust_mode="pinned_key"
+    )
+
+
+def _verify_dns_anchor(
+    config_bytes: bytes,
+    dns_domain: Optional[str],
+    signature: Optional[bytes],
+    pinned_fingerprint: Optional[str],
+    pubkey_fetcher: Optional[PubkeyFetcher],
+) -> TrustResult:
+    if not dns_domain:
+        raise OrgConfigTrustError("dns_anchor trust requires 'trust.dns_domain'")
+    if signature is None:
+        raise OrgConfigTrustError(
+            "dns_anchor trust requires a detached signature (provide <config>.sig or --signature)"
+        )
+    if pubkey_fetcher is None:
+        from .fetch import fetch_bytes
+
+        pubkey_fetcher = fetch_bytes
+
+    url = f"https://{dns_domain}{WELL_KNOWN_PUBKEY_PATH}"
+    fetched = pubkey_fetcher(url)
+    pubkey_b64 = fetched.decode("utf-8").strip() if isinstance(fetched, bytes) else fetched.strip()
+    return _verify_with_pubkey(
+        config_bytes, pubkey_b64, signature, pinned_fingerprint, trust_mode="dns_anchor"
+    )
+
+
+def _verify_with_pubkey(
+    config_bytes: bytes,
+    pubkey_b64: str,
+    signature: bytes,
+    pinned_fingerprint: Optional[str],
+    *,
+    trust_mode: str,
+) -> TrustResult:
+    from .crypto import decode_pubkey, decode_signature, fingerprint, verify_detached
+    from .errors import OrgConfigError
+
     try:
         pubkey_raw = decode_pubkey(pubkey_b64)
         sig = decode_signature(signature)
@@ -95,4 +142,4 @@ def _verify_pinned_key(
         raise OrgConfigTrustError(
             "signature verification failed: config does not match its signature"
         )
-    return TrustResult(trust_mode="pinned_key", acknowledged=True, pubkey_fingerprint=fp)
+    return TrustResult(trust_mode=trust_mode, acknowledged=True, pubkey_fingerprint=fp)

@@ -26,13 +26,15 @@ def test_unsigned_without_consent_raises():
         )
 
 
-def test_dns_anchor_still_deferred():
-    # dns_anchor lands in phase 2b; until then it is a deliberate deferral.
-    with pytest.raises(OrgConfigTrustError, match="phase 2"):
+def test_dns_anchor_requires_domain():
+    # dns_anchor is implemented (see test_trust_dns_anchor.py); without a
+    # configured domain it fails fast rather than being a no-op deferral.
+    with pytest.raises(OrgConfigTrustError, match="dns_domain"):
         verify_trust(
             trust_mode="dns_anchor",
             config_bytes=b"x",
             consent=UnsignedConsent(acknowledged=True),
+            signature=b"x" * 64,
         )
 
 
