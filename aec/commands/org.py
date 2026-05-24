@@ -26,6 +26,8 @@ from ..lib.org_config import (
 from ..lib.org_config.fetch import fetch_bytes
 from ..lib.org_config.hashing import hash_config_bytes
 from ..lib.org_config.parser import parse_org_config_text
+from ..lib.org_config.reconcile import open_conflicts
+from ..lib.org_config.resolutions import Resolution, save_resolution
 from ..lib.org_config.rotation import rotation_status
 from ..lib.org_config.state import OrgState, read_state, write_state
 from ..lib.org_config.trust import UnsignedConsent, UnsignedConsentDeclined, verify_trust
@@ -604,6 +606,76 @@ def trust_rotate_cmd(
         )
     write_state(paths, new_state)
     typer.echo(f"rotated pinned key for '{org_id}' to {new_fp}")
+
+
+def _format_conflict(conflict) -> str:
+    parts = ", ".join(f"{p.org_id}={p.value}" for p in conflict.participants)
+    return f"[{conflict.conflict_id}] {conflict.kind} on {conflict.subject}: {parts}"
+
+
+def _resolve_one(paths: OrgPaths, oc) -> None:
+    conflict = oc.conflict
+    typer.echo("")
+    typer.echo(f"Conflict ({conflict.kind}) on {conflict.subject}:")
+    options: list[tuple[str, str]] = [
+        (f"honor:{p.org_id}", f"honor {p.org_id} ({p.value})") for p in conflict.participants
+    ]
+    options.append(("skip", "skip — apply nobody's choice for this item"))
+    options.append(("defer", "defer — ask me again next time"))
+    for i, (_, label) in enumerate(options, start=1):
+        typer.echo(f"  {i}. {label}")
+
+    choice = typer.prompt(f"Choice [1-{len(options)}]", default=str(len(options)))
+    try:
+        decision = options[int(choice) - 1][0]
+    except (ValueError, IndexError):
+        typer.echo("invalid choice; deferring", err=True)
+        return
+
+    if decision == "defer":
+        typer.echo(f"deferred {conflict.subject}")
+        return
+
+    save_resolution(
+        paths,
+        Resolution(
+            conflict_id=conflict.conflict_id,
+            decision=decision,
+            input_hash=oc.input_hash,
+            decided_at=_now_iso_utc(),
+        ),
+    )
+    typer.echo(f"resolved {conflict.subject}: {decision}")
+
+
+@app.command("resolve")
+def resolve_cmd(
+    conflict_id: Optional[str] = typer.Argument(None, help="Resolve a single conflict by id"),
+    list_only: bool = typer.Option(False, "--list", help="List open conflicts without prompting"),
+):
+    """Resolve conflicts between multiple enrolled org configs."""
+    paths = _paths()
+    opens = open_conflicts(paths)
+
+    if not opens:
+        typer.echo("no unresolved org conflicts")
+        return
+
+    if list_only:
+        for oc in opens:
+            typer.echo(_format_conflict(oc.conflict))
+        return
+
+    if conflict_id is not None:
+        targets = [oc for oc in opens if oc.conflict.conflict_id == conflict_id]
+        if not targets:
+            typer.echo(f"error: no open conflict with id '{conflict_id}'", err=True)
+            raise typer.Exit(code=EXIT_VALIDATION)
+    else:
+        targets = opens
+
+    for oc in targets:
+        _resolve_one(paths, oc)
 
 
 # Public alias matching the registration convention used elsewhere in cli.py.
