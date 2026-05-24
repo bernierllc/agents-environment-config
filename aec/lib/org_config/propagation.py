@@ -110,6 +110,103 @@ def policy_diff(old: OrgConfig, new: OrgConfig) -> PolicyDiff:
     )
 
 
+DNS_PUBKEY_CACHE_HOURS = 24
+
+
+@dataclass(frozen=True)
+class GateResult:
+    changes: list
+    rotations_detected: list
+    warnings: list
+    locked: list
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def run_propagation_gate(
+    paths,
+    *,
+    now: Optional[str] = None,
+    pubkey_fetcher: Optional[PubkeyFetcher] = None,
+) -> GateResult:
+    """Run the per-invocation org-config gate.
+
+    For each enrolled org it detects config changes and, for dns_anchor orgs
+    whose pubkey cache is stale, re-fetches the well-known key to detect a
+    rotation — recording ``key_rotation_pending`` (concurrency-safe) so the
+    grace/countdown surfaces everywhere. Returns warn/locked messages for the
+    caller to display. Never performs network IO for non-dns orgs or when the
+    pubkey cache is fresh, keeping the common path off the wire.
+    """
+    from .rotation import rotation_status
+    from .state import read_state, write_state
+
+    now = now or _now_iso()
+    if pubkey_fetcher is None:
+        from .fetch import fetch_bytes as _fb
+
+        pubkey_fetcher = _fb
+
+    import dataclasses
+
+    from .discovery import discover_enrolled_orgs
+
+    changes = detect_changes(paths, now=now)
+    rotations_detected: list = []
+    warnings: list = []
+    locked: list = []
+
+    for enrolled in discover_enrolled_orgs(paths):
+        cfg = enrolled.config
+        st = read_state(paths, cfg.org_id)
+        if st is None:
+            continue
+
+        if (
+            cfg.trust_mode == "dns_anchor"
+            and not st.key_rotation_pending
+            and cfg.trust_dns_domain
+            and due_for_refresh(
+                last_verified_at=st.last_verified_at,
+                ttl_hours=cfg.refresh_ttl_hours or DNS_PUBKEY_CACHE_HOURS,
+                now=now,
+            )
+        ):
+            try:
+                pending = detect_dns_rotation(
+                    dns_domain=cfg.trust_dns_domain,
+                    pinned_fingerprint=st.pubkey_fingerprint,
+                    fetcher=pubkey_fetcher,
+                    now=now,
+                )
+            except Exception:  # noqa: BLE001 - network/parse errors must not break the gate
+                pending = None
+            else:
+                if pending:
+                    st = dataclasses.replace(st, key_rotation_pending=pending)
+                    write_state(paths, st)
+                    rotations_detected.append(cfg.org_id)
+                else:
+                    st = dataclasses.replace(st, last_verified_at=now)
+                    write_state(paths, st)
+
+        rs = rotation_status(pending=st.key_rotation_pending, now=now, org_id=cfg.org_id)
+        if rs.state == "warn":
+            warnings.append(rs.message)
+        elif rs.state == "locked":
+            locked.append(cfg.org_id)
+            warnings.append(rs.message)
+
+    return GateResult(
+        changes=changes,
+        rotations_detected=rotations_detected,
+        warnings=warnings,
+        locked=locked,
+    )
+
+
 def _flatten_items(cfg: OrgConfig) -> dict[str, tuple]:
     flat: dict[str, tuple] = {}
     for item_type in ITEM_TYPES:

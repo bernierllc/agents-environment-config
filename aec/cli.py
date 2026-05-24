@@ -24,6 +24,24 @@ if HAS_TYPER:
         no_args_is_help=True,
     )
 
+    def _run_org_config_gate() -> None:
+        """Per-invocation org-config propagation gate. Best-effort: surfaces key
+        rotation warnings/lockouts but never breaks the command being run."""
+        try:
+            from .lib.org_config import OrgPaths
+            from .lib.org_config.propagation import run_propagation_gate
+        except ImportError:
+            return  # org-configs extra not installed
+        try:
+            paths = OrgPaths.default()
+            if not paths.orgs_dir.exists():
+                return
+            result = run_propagation_gate(paths)
+        except Exception:  # noqa: BLE001 - the gate must never break other commands
+            return
+        for message in result.warnings:
+            Console.warning(message)
+
     @app.callback(invoke_without_command=True)
     def _cli_callback(
         ctx: typer.Context,
@@ -41,6 +59,8 @@ if HAS_TYPER:
             return
         from .lib.preferences import check_pending_preferences
         check_pending_preferences()
+
+        _run_org_config_gate()
 
         import atexit
         from .lib.version_check import maybe_check_for_update

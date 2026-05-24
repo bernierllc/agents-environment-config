@@ -105,6 +105,35 @@ def test_doctor_surfaces_unresolved_conflicts(tmp_path: Path):
     assert "aec org resolve" in result.stdout
 
 
+def test_cli_gate_surfaces_rotation_lockout(tmp_path: Path):
+    # Enroll a local unsigned org, then inject a long-overdue key rotation into
+    # its state; any aec command's pre-command gate must surface the lockout.
+    cfg = FIXTURES / "valid-minimal.yaml"
+    _run(["org", "enroll", str(cfg), "--allow-unsigned", "--yes"], tmp_path)
+
+    import dataclasses
+
+    from aec.lib.org_config.paths import OrgPaths
+    from aec.lib.org_config.state import read_state, write_state
+
+    paths = OrgPaths(home_dir=tmp_path)
+    st = read_state(paths, "minimal")
+    write_state(
+        paths,
+        dataclasses.replace(
+            st,
+            key_rotation_pending={
+                "detected_at": "2026-01-01T00:00:00Z",
+                "new_fingerprint": "SHA256:x",
+                "old_fingerprint": "SHA256:y",
+            },
+        ),
+    )
+
+    result = _run(["org", "list"], tmp_path)
+    assert "LOCKED" in result.stdout
+
+
 def test_doctor_omits_org_section_when_no_orgs(tmp_path: Path):
     result = _run(["doctor"], tmp_path)
     assert result.exit_code == 0
