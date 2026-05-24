@@ -98,6 +98,26 @@ Everything the orgs agree on still applies — only the conflicting items wait f
 your decision. Your choices are remembered, and re-asked automatically if a
 contributing config changes.
 
+## Applying policy
+
+Enrolling records an org's policy; **applying** it makes the changes — writing
+preferences, pre-answering install prompts, installing `required`/`pinned`
+items, and removing `blocked` ones:
+
+```bash
+aec org apply                 # apply enrolled policy
+aec org apply --dry-run       # preview the plan, change nothing
+aec org apply --enroll https://acme.example/aec.yaml   # enroll then apply in one step
+```
+
+- **Managed** orgs (`install.mode: managed`) apply silently; **guided** orgs
+  show the plan and ask before changing anything (use `--yes` to auto-confirm,
+  `--managed` to force silent).
+- Items still waiting on a conflict decision are **held** — everything else
+  applies, and `aec org apply` tells you how many remain for `aec org resolve`.
+- If an org's signing key is in rotation lockout, apply refuses until you run
+  `aec org trust-rotate`.
+
 ## Inspecting
 
 ```bash

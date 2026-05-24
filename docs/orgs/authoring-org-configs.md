@@ -149,6 +149,8 @@ install:
 
 `managed` applies your policy without prompting; `guided` presents changes for the user to confirm. When two enrolled orgs disagree on the mode, it's surfaced as a conflict (see below).
 
+Users apply your policy with `aec org apply` (or `aec org apply --enroll <url>` to enroll and apply in one step). Applying writes the allow-listed preferences, pre-answers the mapped install prompts, installs `required`/`pinned` items, and removes `blocked` ones. Items waiting on a conflict decision are held until the user runs `aec org resolve`, and apply is refused while a signing key is in rotation lockout.
+
 ## Delivery & refresh
 
 Configs can be enrolled from a local file **or** an `https://` URL:
