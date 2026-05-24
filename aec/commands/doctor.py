@@ -99,6 +99,18 @@ def _check_org_configurations() -> None:
                     f"  key rotation LOCKED (run: aec org trust-rotate {cfg.org_id})"
                 )
 
+    if len(orgs) > 1:
+        from ..lib.org_config.reconcile import open_conflicts
+
+        opens = open_conflicts(paths, prune=False)
+        if opens:
+            Console.subheader("Org conflicts")
+            for oc in opens:
+                c = oc.conflict
+                participants = ", ".join(f"{p.org_id}={p.value}" for p in c.participants)
+                Console.error(f"  {c.kind} on {c.subject}: {participants}")
+            Console.print("  Run `aec org resolve` to decide.")
+
 
 def _check_agent_blurb_drift(repo_root) -> None:
     """Report agent-blurb drift in the current project, if configured.

@@ -36,10 +36,16 @@ def scan_conflicts(paths: OrgPaths) -> tuple[list[Conflict], dict[str, str]]:
     return conflicts, input_hashes
 
 
-def open_conflicts(paths: OrgPaths) -> list[OpenConflict]:
-    """Conflicts that still need a decision, after auto-pruning stale ones."""
+def open_conflicts(paths: OrgPaths, *, prune: bool = True) -> list[OpenConflict]:
+    """Conflicts that still need a decision.
+
+    When ``prune`` is True, resolutions invalidated by config changes are moved
+    to history as a side effect. Read-only callers (e.g. ``aec doctor``) pass
+    ``prune=False``.
+    """
     conflicts, input_hashes = scan_conflicts(paths)
-    prune_invalid(paths, input_hashes)
+    if prune:
+        prune_invalid(paths, input_hashes)
     resolutions = load_resolutions(paths)
 
     out: list[OpenConflict] = []

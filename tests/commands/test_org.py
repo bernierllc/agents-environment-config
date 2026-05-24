@@ -84,6 +84,27 @@ def test_doctor_shows_org_section_when_org_enrolled(tmp_path: Path):
     assert "unsigned" in result.stdout.lower()
 
 
+def test_doctor_surfaces_unresolved_conflicts(tmp_path: Path):
+    orgs_dir = tmp_path / ".aec" / "orgs"
+    orgs_dir.mkdir(parents=True)
+    tmpl = (
+        '---\nschema_version: "1.0"\norg_id: "{oid}"\norg_name: "{oid}"\n'
+        'config_version: "1.0.0"\ntrust:\n  mode: "unsigned"\n---\n\n'
+        "sources:\n  default: {{ skills: keep, rules: keep, agents: keep, mcps: keep }}\n"
+        "  custom: []\n\nitems:\n  skills:\n    \"foo\":\n      source: \"aec.default.skills\"\n"
+        "      stance: {stance}\n  rules: {{}}\n  agents: {{}}\n  mcps: {{}}\n"
+    )
+    (orgs_dir / "acme.yaml").write_text(tmpl.format(oid="acme", stance="required"))
+    (orgs_dir / "globex.yaml").write_text(tmpl.format(oid="globex", stance="blocked"))
+
+    result = _run(["doctor"], tmp_path)
+    assert result.exit_code == 0
+    out = result.stdout.lower()
+    assert "org conflicts" in out
+    assert "skills/foo" in result.stdout
+    assert "aec org resolve" in result.stdout
+
+
 def test_doctor_omits_org_section_when_no_orgs(tmp_path: Path):
     result = _run(["doctor"], tmp_path)
     assert result.exit_code == 0
