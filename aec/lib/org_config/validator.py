@@ -62,6 +62,22 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
         raise OrgConfigValidationError(
             "dns_anchor trust requires 'dns_domain'", field_path="trust.dns_domain"
         )
+    for url_field, url_value in (
+        ("trust.pubkey_url", trust_pubkey_url),
+        ("trust.signature_url", trust_signature_url),
+    ):
+        if url_value is not None and not str(url_value).startswith("https://"):
+            raise OrgConfigValidationError(
+                f"{url_field} must be an https:// URL", field_path=url_field
+            )
+
+    refresh_block = body.get("refresh") or {}
+    refresh_ttl_hours = refresh_block.get("ttl_hours")
+    if refresh_ttl_hours is not None:
+        if not isinstance(refresh_ttl_hours, int) or isinstance(refresh_ttl_hours, bool) or refresh_ttl_hours <= 0:
+            raise OrgConfigValidationError(
+                "ttl_hours must be a positive integer", field_path="refresh.ttl_hours"
+            )
 
     if body.get("projects"):
         raise OrgConfigValidationError(
@@ -172,4 +188,5 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
         trust_pubkey_url=trust_pubkey_url,
         trust_signature_url=trust_signature_url,
         trust_dns_domain=trust_dns_domain,
+        refresh_ttl_hours=refresh_ttl_hours,
     )
