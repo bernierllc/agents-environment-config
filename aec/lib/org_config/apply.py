@@ -19,17 +19,44 @@ from typing import Callable, Optional
 from .effective import EffectivePolicy, effective_policy
 
 
+_CI_PREFIX = "configurable_instructions."
+
+
 def apply_preferences(policy: EffectivePolicy) -> list[str]:
-    """Write the policy's preferences into prefs.json. Returns applied keys."""
-    from ..preferences import OPTIONAL_FEATURES, set_preference, set_setting
+    """Write the policy's preferences into the right prefs.json section.
+
+    Routing: ``optional_rules`` (OPTIONAL_FEATURES keys) ->
+    ``configurable_instructions.<key>.<agent>`` (dotted namespace) ->
+    ``settings`` (everything else). Returns the keys applied.
+    """
+    from ..preferences import (
+        OPTIONAL_FEATURES,
+        get_instruction_config,
+        set_instruction_config,
+        set_preference,
+        set_setting,
+    )
 
     applied: list[str] = []
+    instruction_agents: dict[str, dict[str, bool]] = {}
     for key, value in policy.preferences.items():
         if key in OPTIONAL_FEATURES:
             set_preference(key, bool(value))
+        elif key.startswith(_CI_PREFIX):
+            parts = key.split(".")
+            if len(parts) == 3:
+                _, instruction_key, agent_key = parts
+                instruction_agents.setdefault(instruction_key, {})[agent_key] = bool(value)
+            else:
+                set_setting(key, value)
         else:
             set_setting(key, value)
         applied.append(key)
+
+    for instruction_key, agents in instruction_agents.items():
+        merged = {**(get_instruction_config(instruction_key) or {}), **agents}
+        set_instruction_config(instruction_key, merged)
+
     return applied
 
 

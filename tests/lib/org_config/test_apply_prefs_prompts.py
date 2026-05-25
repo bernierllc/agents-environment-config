@@ -45,6 +45,22 @@ def test_apply_preferences_returns_applied_keys(prefs_file):
     assert set(applied) == {"projects_dir", "hook_mode"}
 
 
+def test_configurable_instruction_routed_to_dedicated_section(prefs_file):
+    apply_preferences(
+        _policy(
+            preferences={
+                "configurable_instructions.commit-style.claude": True,
+                "configurable_instructions.commit-style.cursor": False,
+            }
+        )
+    )
+    data = preferences.load_preferences()
+    agents = data["configurable_instructions"]["commit-style"]["agents"]
+    assert agents == {"claude": True, "cursor": False}
+    # Not leaked into settings.
+    assert "configurable_instructions.commit-style.claude" not in data.get("settings", {})
+
+
 def test_apply_prompts_registers_overlay_answers():
     prompts.clear_overlay_answers()
     try:
