@@ -27,6 +27,9 @@ the maintainer (the PM-agent environment had no shell access to `git mv`):
 - `2026-05-02-git-setup-phase.md` — PR #39
 - `2026-05-04-org-config-overlay-phase-1.md` — PR #47 + #48
 - `2026-05-12-aec-agent-blurb.md` — PR #50
+- `2026-05-19-org-config-overlay-phase-2.md` — PR #54 (skeleton, superseded)
+- `2026-05-24-org-config-overlay-phase-2-remaining.md` — PR #54
+- `2026-05-24-org-config-overlay-applier.md` — PR #54
 
 To complete the archive:
 
