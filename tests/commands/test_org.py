@@ -71,7 +71,9 @@ def test_org_enroll_rejects_non_https_url(tmp_path: Path):
     # http is refused before any network access.
     result = _run(["org", "enroll", "http://example.com/config.yaml", "--allow-unsigned", "--yes"], tmp_path)
     assert result.exit_code != 0
-    assert "https" in (result.stdout + result.stderr).lower()
+    # Console.error prints to stdout, captured in result.output. Avoid result.stderr,
+    # which raises "stderr not separately captured" on click < 8.2 (Python 3.9 CI).
+    assert "https" in result.output.lower()
 
 
 def test_doctor_shows_org_section_when_org_enrolled(tmp_path: Path):
