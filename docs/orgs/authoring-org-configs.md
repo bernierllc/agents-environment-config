@@ -193,4 +193,36 @@ AEC never hosts org configs. Distribute the YAML through a channel your team tru
 
 ## Example
 
-See [`examples/minimal-phase1.yaml`](examples/minimal-phase1.yaml) for a complete, working starting point.
+See the [`examples/`](examples/) directory for complete, working starting points:
+
+- [`minimal-phase1.yaml`](examples/minimal-phase1.yaml) — smallest unsigned config.
+- [`dns-anchor.yaml`](examples/dns-anchor.yaml) — `dns_anchor` trust + `refresh.ttl_hours` + managed mode, with `required`/`pinned`/`blocked` stances.
+- [`multi-org-a-acme.yaml`](examples/multi-org-a-acme.yaml) + [`multi-org-b-globex.yaml`](examples/multi-org-b-globex.yaml) — two orgs whose stances clash on the same skill, to demonstrate conflict handling.
+
+## End-to-end walkthrough
+
+**As an author** — publish the YAML through a channel your team trusts (internal Git, an https URL, or your IT package channel). To let users verify integrity, sign it and use `pinned_key` or `dns_anchor` trust (see [Trust modes](#trust-modes)).
+
+**As a user** — enroll and apply:
+
+```bash
+# Enroll from a local path or an https URL (signed configs verify on enroll):
+aec org enroll https://acme.example.com/aec.yaml
+# ...or enroll and apply in one step:
+aec install --org-config https://acme.example.com/aec.yaml
+
+# Apply (or re-apply) enrolled policy. --dry-run previews the plan first:
+aec org apply --dry-run
+aec org apply
+```
+
+Managed-mode configs apply silently on every `aec` invocation; guided-mode configs show the plan and prompt first.
+
+**Multiple orgs** — if two enrolled orgs disagree on the same subject (e.g. Acme `required` vs Globex `blocked` for `secure-coding-v2`), that item is *held* while every non-conflicting item still applies (P7). Resolve it once:
+
+```bash
+aec org resolve            # list open conflicts
+aec org resolve <id>       # pick the winning org (honor:<org-id>) or skip
+```
+
+The decision is keyed to both configs' hashes, so it survives unchanged configs but re-opens if either side changes. `aec doctor` surfaces unresolved conflicts and any pending key rotation.
