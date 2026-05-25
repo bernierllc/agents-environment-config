@@ -87,12 +87,32 @@ if HAS_TYPER:
 
     @app.command("install")
     def install_cmd(
-        item_type: str = typer.Argument(..., help="Type: skill, rule, agent, or mcp"),
-        name: str = typer.Argument(..., help="Name of the item to install"),
+        item_type: Optional[str] = typer.Argument(None, help="Type: skill, rule, agent, or mcp"),
+        name: Optional[str] = typer.Argument(None, help="Name of the item to install"),
         global_flag: bool = typer.Option(False, "-g", "--global", help="Install globally"),
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+        org_config: Optional[str] = typer.Option(
+            None,
+            "--org-config",
+            help="Enroll an org config (local path or https url) and apply its policy",
+        ),
+        allow_unsigned: bool = typer.Option(
+            False, "--allow-unsigned", help="Allow an unsigned --org-config source"
+        ),
     ):
-        """Install a skill, rule, agent, or MCP server."""
+        """Install a skill, rule, agent, or MCP server (or apply an org config with --org-config)."""
+        if org_config:
+            from .commands.org import perform_enroll
+            from .lib.org_config import OrgPaths
+            from .lib.org_config.apply import apply_org_policy
+
+            perform_enroll(org_config, allow_unsigned=allow_unsigned, yes=yes)
+            confirm = (lambda _policy: True) if yes else None
+            apply_org_policy(OrgPaths.default(), confirm=confirm)
+            return
+        if not item_type or not name:
+            Console.error("install requires <type> <name> (or use --org-config <url|path>)")
+            raise typer.Exit(code=2)
         from .commands.install_cmd import run_install
         run_install(item_type=item_type, name=name, global_flag=global_flag, yes=yes)
 
