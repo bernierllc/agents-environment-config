@@ -56,6 +56,33 @@ class CustomSource:
 
 
 @dataclass(frozen=True)
+class ProjectMatch:
+    """Selector for a per-project overlay (Phase 4a).
+
+    At least one of ``git_remote`` / ``directory`` is set; both are globbed.
+    """
+    git_remote: Optional[str] = None
+    directory: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ProjectProfile:
+    """The policy delta a matching project overlay layers on the org policy.
+
+    v1 carries ``items`` and ``prompts`` only; project-scoped preferences are
+    deferred (the preference store is global, not repo-scoped).
+    """
+    items: dict[str, dict[str, "ItemPolicy"]]
+    prompts: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ProjectOverlay:
+    match: ProjectMatch
+    profile: ProjectProfile
+
+
+@dataclass(frozen=True)
 class OrgConfig:
     schema_version: str
     org_id: str
