@@ -37,6 +37,11 @@ class OrgPaths:
     def trusted_orgs(self) -> Path:
         return self.aec_dir / "trusted-orgs.json"
 
+    @property
+    def sources_dir(self) -> Path:
+        """Cache root for cloned custom sources (Phase 4c)."""
+        return self.aec_dir / "org-sources"
+
     def config_for(self, org_id: str) -> Path:
         return self.orgs_dir / f"{org_id}.yaml"
 
