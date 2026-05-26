@@ -136,13 +136,23 @@ aec org remove <org_id> --yes
 
 Removes both the YAML and the state file. Your `~/.agents-environment-config/` workspace is **not** modified — `aec org remove` only un-enrolls; it does not undo any item installs.
 
+## Phase 4 features (what an enrolled config can now do)
+
+Once enrolled, AEC honors these additional behaviors:
+
+- **Per-project overlays.** Inside a repo whose remote/path matches your org's `projects[]`, `aec org apply` installs the profile's items into that repo's `.claude/...` (a separate `repos[]` entry in the manifest) — base policy still lives globally. No per-repo opt-in is needed; the overlay activates from cwd.
+- **Time-bounded rules.** Items can declare an active window (`required_after` / `expires_at`). Outside that window the stance is silently dropped, so an expired blocking rule stops removing the item.
+- **`enrollment_script`.** A closed action set (`add_source`, `install_items`, `set_hooks`, `run_doctor`, `set_pref`) runs on enroll. No shell, no arbitrary URLs. If a custom source can't be cloned (e.g. you lack repo access), the failure is logged but enroll succeeds and items from the working sources still install.
+- **Branding.** Your org may surface a welcome line on enroll and a display name + footer in `aec doctor`.
+
 ## Still deferred to later phases
 
 | Feature | Phase |
 |---|---|
-| Per-project overlays (`projects[]`) | 4 |
-| `enrollment_script` execution | 4 |
-| `branding`, `aec daemon-check` periodic refresh | 5 |
+| Org-to-org inheritance / delegation | 5+ |
+| Per-user overrides inside one config | 5+ |
+| MDM auto key-rotation | 5+ |
+| Central org registry | 5+ |
 
 If your org config uses one of these, AEC will reject it at enrollment with a clear error.
 

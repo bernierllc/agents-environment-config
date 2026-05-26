@@ -1,0 +1,67 @@
+---
+# Demonstrates the four Phase 4 expressiveness features:
+#   - per-project overlays (projects[])
+#   - time-bounded rules (required_after/expires_at)
+#   - enrollment_script declarative actions
+#   - branding
+schema_version: "1.0"
+org_id: "acme"
+org_name: "Acme Corp"
+config_version: "4.0.0"
+trust:
+  mode: "unsigned"
+---
+
+sources:
+  default: { skills: keep, rules: keep, agents: keep, mcps: keep }
+  custom:
+    - id: "acme-skills"
+      url: "https://github.com/acme-corp/aec-skills.git"
+      ref: "v1.4.0"
+      contributes: ["skills"]
+
+items:
+  skills:
+    # Time-bounded: only enforced from June 1, 2026 onward; expires end of year.
+    "secure-coding-v2":
+      source: "aec.default.skills"
+      stance: required
+      required_after: "2026-06-01"
+      expires_at:     "2027-01-01"
+
+    # Always required from the org's own catalog.
+    "company-onboarding":
+      source: "acme-skills"
+      stance: required
+  rules: {}
+  agents: {}
+  mcps: {}
+
+install:
+  mode: "managed"
+
+  # Run on enroll. add_source failures are logged and items from that source
+  # are skipped, but enroll succeeds and the rest of the script proceeds.
+  enrollment_script:
+    - { action: "add_source",    source_id: "acme-skills" }
+    - { action: "set_pref",      key: "hook_mode", value: "auto", if_unset: true }
+    - { action: "install_items", types: ["skills"] }
+    - { action: "run_doctor" }
+
+# Per-project overlay: items here apply ONLY in the matched repo (repo scope).
+projects:
+  - match:
+      git_remote: "github.com:acme-corp/*"
+    profile:
+      items:
+        skills:
+          "internal-repo-skill":
+            source: "acme-skills"
+            stance: required
+      prompts:
+        setup.track_current_repo: true
+
+branding:
+  display_name: "Acme Engineering"
+  welcome_message: "Welcome to Acme. Questions? Slack #aec-help"
+  doctor_footer:  "Acme org config v4.0.0"

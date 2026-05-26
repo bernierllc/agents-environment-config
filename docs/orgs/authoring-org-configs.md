@@ -187,6 +187,69 @@ Do **not** ship configs that depend on the following — they will be rejected (
 
 If you author with these fields today, the file may parse but the behaviors won't fire. Bump `config_version` when later phases let you add more.
 
+## Phase 4 expressiveness
+
+The Phase 4 schema is backward-compatible (`schema_version` stays `"1.0"`); every new block is optional. Authors using these features must require users on a Phase-4-capable `aec`.
+
+### Per-project overlays — `projects[]`
+
+Scope a policy delta to specific repos. Matching is first-overlay-wins; an overlay matches when *either* its `match.git_remote` glob (over the normalized remote) *or* its `match.directory` glob (over the absolute working path) matches. Profiles carry `items` and `prompts`. Project-scoped preferences are intentionally unsupported in v1 because `prefs.json` is a global store.
+
+```yaml
+projects:
+  - match:
+      git_remote: "github.com:acme-corp/*"
+    profile:
+      items:
+        skills:
+          "internal-repo-skill":
+            source: "acme-skills"
+            stance: required
+      prompts:
+        setup.track_current_repo: true
+```
+
+Inside a matched repo, `aec org apply` installs the profile's items at repo scope (the repo's `.claude/...` and a `repos[]` entry in the manifest). Cross-org conflicts introduced by profiles are still *held* by the conflict pipeline.
+
+### Time-bounded rules — `required_after` / `expires_at`
+
+Gate an item's stance by an ISO-8601 window. The stance takes effect at `required_after` and stops at `expires_at`. Outside the window the item is silently dropped — including from blocked-removal, so an expired blocking stance no longer holds a subject.
+
+```yaml
+items:
+  skills:
+    "secure-coding-v2":
+      source: "aec.default.skills"
+      stance: required
+      required_after: "2026-06-01"
+      expires_at:     "2027-01-01"
+```
+
+### Declarative `enrollment_script`
+
+A closed set of five actions runs on enroll, in declared order. There is no shell escape hatch — `{ action: "run", cmd: "..." }` is rejected at validation.
+
+| Action | Params | Notes |
+|---|---|---|
+| `add_source` | `source_id` (required) | Clones a `sources.custom[]` entry under `~/.aec/org-sources/<id>`. Sync failures (permission denied, network) are logged and do **not** halt enroll; subsequent `install_items` skips items whose source failed. |
+| `install_items` | `types` (optional), `sources` (optional) | Applies this org's install-intent items, filtered by types/sources, skipping items from any failed sources. |
+| `set_hooks` | `policy` (optional: `auto`/`per-repo`/`never`) | Writes `hook_mode`. Defaults to the value of `install.preferences.hook_mode`. |
+| `run_doctor` | — | Runs `aec doctor`. Doctor errors halt the script. |
+| `set_pref` | `key`, `value`, `if_unset` (optional bool) | `key` must be on the install.preferences allow-list. `if_unset` defaults to `true` in guided mode, `false` in managed. |
+
+### Branding
+
+Optional org-supplied identity strings.
+
+```yaml
+branding:
+  display_name:    "Acme Engineering"
+  welcome_message: "Welcome to Acme. Questions? Slack #aec-help"
+  doctor_footer:   "Acme org config v4.0.0"
+```
+
+`welcome_message` prints after the enroll line; `display_name` and `doctor_footer` bracket the org's section in `aec doctor`.
+
 ## Distribution
 
 AEC never hosts org configs. Distribute the YAML through a channel your team trusts: an internal Git repo, an https URL, or your IT package channel. For integrity, sign your config (`pinned_key` or `dns_anchor`) so users can verify it cryptographically rather than relying on transport trust alone.
@@ -198,6 +261,7 @@ See the [`examples/`](examples/) directory for complete, working starting points
 - [`minimal-phase1.yaml`](examples/minimal-phase1.yaml) — smallest unsigned config.
 - [`dns-anchor.yaml`](examples/dns-anchor.yaml) — `dns_anchor` trust + `refresh.ttl_hours` + managed mode, with `required`/`pinned`/`blocked` stances.
 - [`multi-org-a-acme.yaml`](examples/multi-org-a-acme.yaml) + [`multi-org-b-globex.yaml`](examples/multi-org-b-globex.yaml) — two orgs whose stances clash on the same skill, to demonstrate conflict handling.
+- [`phase4-features.yaml`](examples/phase4-features.yaml) — per-project overlays, time-bounded rules, `enrollment_script`, and branding in one config.
 
 ## End-to-end walkthrough
 
