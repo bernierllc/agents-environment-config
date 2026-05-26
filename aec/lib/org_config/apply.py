@@ -195,7 +195,7 @@ def apply_org_policy(
         )
         return ApplyOutcome(0, 0, (), [], skipped_reason="locked")
 
-    policy = effective_policy(paths)
+    policy = effective_policy(paths, now=now)
     mode = mode_override or policy.install_mode or "guided"
 
     if dry_run:

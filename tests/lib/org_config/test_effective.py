@@ -130,3 +130,80 @@ def test_no_orgs_is_empty(tmp_path):
     assert pol.items == {}
     assert pol.preferences == {}
     assert pol.held == ()
+
+
+TIMED_TMPL = """---
+schema_version: "1.0"
+org_id: "{oid}"
+org_name: "{oid}"
+config_version: "1.0.0"
+trust:
+  mode: "unsigned"
+---
+
+sources:
+  default: {{ skills: keep, rules: keep, agents: keep, mcps: keep }}
+  custom: []
+
+items:
+  skills:
+    "foo":
+      source: "aec.default.skills"
+      stance: {stance}
+{bounds}
+  rules: {{}}
+  agents: {{}}
+  mcps: {{}}
+"""
+
+
+def _write_timed(home, oid, *, stance="required", required_after=None, expires_at=None):
+    bounds = ""
+    if required_after is not None:
+        bounds += f'      required_after: "{required_after}"\n'
+    if expires_at is not None:
+        bounds += f'      expires_at: "{expires_at}"\n'
+    orgs = home / ".aec" / "orgs"
+    orgs.mkdir(parents=True, exist_ok=True)
+    (orgs / f"{oid}.yaml").write_text(
+        TIMED_TMPL.format(oid=oid, stance=stance, bounds=bounds), encoding="utf-8"
+    )
+
+
+def test_item_before_required_after_is_omitted(tmp_path):
+    _write_timed(tmp_path, "acme", required_after="2026-06-01")
+    pol = effective_policy(OrgPaths(home_dir=tmp_path), now="2026-05-01")
+    assert "skills/foo" not in pol.items
+
+
+def test_item_after_required_after_is_present(tmp_path):
+    _write_timed(tmp_path, "acme", required_after="2026-06-01")
+    pol = effective_policy(OrgPaths(home_dir=tmp_path), now="2026-07-01")
+    assert "skills/foo" in pol.items
+
+
+def test_expired_item_is_omitted(tmp_path):
+    _write_timed(tmp_path, "acme", expires_at="2026-06-01")
+    pol = effective_policy(OrgPaths(home_dir=tmp_path), now="2026-07-01")
+    assert "skills/foo" not in pol.items
+
+
+def test_item_inside_window_is_present(tmp_path):
+    _write_timed(tmp_path, "acme", required_after="2026-06-01", expires_at="2026-08-01")
+    pol = effective_policy(OrgPaths(home_dir=tmp_path), now="2026-07-01")
+    assert "skills/foo" in pol.items
+
+
+def test_expired_blocked_no_longer_held(tmp_path):
+    _write_timed(tmp_path, "acme", stance="required")
+    _write_timed(tmp_path, "globex", stance="blocked", expires_at="2026-06-01")
+    pol = effective_policy(OrgPaths(home_dir=tmp_path), now="2026-07-01")
+    # globex's blocking stance expired, so the conflict is gone and acme wins.
+    assert pol.items["skills/foo"][0] == "acme"
+    assert "skills/foo" not in pol.held
+
+
+def test_default_now_omits_far_future_item(tmp_path):
+    _write_timed(tmp_path, "acme", required_after="2999-01-01")
+    pol = effective_policy(OrgPaths(home_dir=tmp_path))
+    assert "skills/foo" not in pol.items

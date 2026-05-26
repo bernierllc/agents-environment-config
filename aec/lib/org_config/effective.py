@@ -11,14 +11,16 @@ nothing.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from typing import Optional
 
 from .conflicts import detect_conflicts
 from .discovery import discover_enrolled_orgs
 from .paths import OrgPaths
 from .resolutions import input_hash_for, is_valid, load_resolutions
-from .schema import ITEM_TYPES, CustomSource, ItemPolicy
+from .schema import ITEM_TYPES, CustomSource, ItemPolicy, OrgConfig
+from .timebound import When, active_at
 
 # Higher wins when multiple orgs declare the same item with compatible stances.
 _STANCE_PRECEDENCE = {
@@ -41,15 +43,30 @@ class EffectivePolicy:
     held: tuple[str, ...]
 
 
-def _subject_status(paths: OrgPaths) -> dict[str, tuple]:
+def _time_filtered(cfg: OrgConfig, now: When) -> OrgConfig:
+    """A copy of ``cfg`` with items outside their time window removed."""
+    filtered = {
+        item_type: {
+            name: policy
+            for name, policy in policies.items()
+            if active_at(now, policy.required_after, policy.expires_at)
+        }
+        for item_type, policies in cfg.items.items()
+    }
+    return replace(cfg, items=filtered)
+
+
+def _subject_status(paths: OrgPaths, orgs, configs: list[OrgConfig]) -> dict[str, tuple]:
     """Map each conflicting subject to its disposition.
 
     Values: ``("held",)`` | ``("honor", org_id)`` | ``("skip",)``. ``held``
     dominates when a subject has multiple conflicts in mixed states.
+
+    ``configs`` are the (time-filtered) configs to detect conflicts over;
+    ``orgs`` are the discovered entries, used only for resolution hashing.
     """
-    orgs = discover_enrolled_orgs(paths)
     org_hashes = {e.config.org_id: e.content_hash for e in orgs}
-    conflicts = detect_conflicts([e.config for e in orgs])
+    conflicts = detect_conflicts(configs)
     resolutions = load_resolutions(paths)
 
     status: dict[str, tuple] = {}
@@ -103,13 +120,15 @@ def _merge_scalar(
     return True, by_org[org]
 
 
-def effective_policy(paths: OrgPaths) -> EffectivePolicy:
+def effective_policy(paths: OrgPaths, now: Optional[When] = None) -> EffectivePolicy:
+    if now is None:
+        now = datetime.now(timezone.utc)
     orgs = discover_enrolled_orgs(paths)
     if not orgs:
         return EffectivePolicy({}, {}, {}, {}, [], None, ())
 
-    configs = [e.config for e in orgs]
-    status = _subject_status(paths)
+    configs = [_time_filtered(e.config, now) for e in orgs]
+    status = _subject_status(paths, orgs, configs)
     held: list[str] = []
 
     # --- items -------------------------------------------------------------
