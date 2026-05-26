@@ -32,7 +32,13 @@ class EnrollmentResult:
 
     @property
     def ok(self) -> bool:
-        return all(s.success for s in self.steps)
+        """True iff every non-``add_source`` step succeeded.
+
+        ``add_source`` failures are reported via ``failed_sources`` and do not
+        fail the overall enroll, so a single inaccessible source repo cannot
+        block onboarding for the rest of the org's policy.
+        """
+        return all(s.success for s in self.steps if s.action != "add_source")
 
 
 _INSTALL_STANCES = frozenset({"required", "recommended", "pinned"})

@@ -111,6 +111,8 @@ def test_add_source_failure_does_not_halt(tmp_path):
     assert result.failed_sources == ("broken",)
     # The script continued to run_doctor despite the add_source failure.
     assert doctor_calls == ["x"]
+    # add_source failures don't poison ok — other actions decide that.
+    assert result.ok is True
 
 
 def test_set_pref_writes_setting(tmp_path, monkeypatch):

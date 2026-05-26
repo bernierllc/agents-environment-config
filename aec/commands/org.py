@@ -320,6 +320,25 @@ def perform_enroll(
     write_state(paths, state)
 
     typer.echo(f"enrolled org '{config.org_id}'")
+
+    if config.enrollment_script:
+        from ..lib.org_config.enrollment import run_enrollment_script
+
+        outcome = run_enrollment_script(
+            config, paths, mode=config.install_mode or "managed"
+        )
+        for step in outcome.steps:
+            marker = "  ✓" if step.success else "  ✗"
+            typer.echo(f"{marker} {step.action}: {step.message}")
+        if outcome.failed_sources:
+            typer.echo(
+                f"  warning: {len(outcome.failed_sources)} source(s) failed to sync: "
+                f"{', '.join(outcome.failed_sources)}",
+                err=True,
+            )
+        if not outcome.ok:
+            raise typer.Exit(code=EXIT_VALIDATION)
+
     return config.org_id
 
 
