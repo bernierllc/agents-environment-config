@@ -41,6 +41,11 @@ class ItemPolicy:
     stance: Stance
     version: Optional[str] = None
 
+    # Time-bounded rules (Phase 4b): ISO-8601 instants. The stance only takes
+    # effect once ``required_after`` has passed and stops at ``expires_at``.
+    required_after: Optional[str] = None
+    expires_at: Optional[str] = None
+
 
 @dataclass(frozen=True)
 class CustomSource:

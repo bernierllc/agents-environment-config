@@ -32,6 +32,23 @@ def test_item_policy_requires_source():
     assert pol.source == "aec.default.skills"
 
 
+def test_item_policy_time_bounds_default_none():
+    pol = ItemPolicy(source="aec.default.skills", stance=Stance.REQUIRED)
+    assert pol.required_after is None
+    assert pol.expires_at is None
+
+
+def test_item_policy_carries_time_bounds():
+    pol = ItemPolicy(
+        source="aec.default.skills",
+        stance=Stance.REQUIRED,
+        required_after="2026-06-01",
+        expires_at="2026-12-01",
+    )
+    assert pol.required_after == "2026-06-01"
+    assert pol.expires_at == "2026-12-01"
+
+
 def test_org_config_construct():
     cfg = OrgConfig(
         schema_version="1.0",

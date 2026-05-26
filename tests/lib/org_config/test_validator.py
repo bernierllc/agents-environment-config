@@ -113,3 +113,39 @@ def test_rejects_projects_block_in_phase_1():
     body["projects"] = [{"match": {"git_remote": "*"}, "profile": {}}]
     with pytest.raises(OrgConfigValidationError, match="projects"):
         validate_org_config(fm, body)
+
+
+def _item_with(**extra):
+    policy = {"source": "aec.default.skills", "stance": "required"}
+    policy.update(extra)
+    return {"skills": {"timed": policy}, "rules": {}, "agents": {}, "mcps": {}}
+
+
+def test_accepts_item_time_bounds():
+    fm, body = _load("valid-minimal.yaml")
+    body["items"] = _item_with(required_after="2026-06-01", expires_at="2026-12-01T00:00:00Z")
+    cfg = validate_org_config(fm, body)
+    pol = cfg.items["skills"]["timed"]
+    assert pol.required_after == "2026-06-01"
+    assert pol.expires_at == "2026-12-01T00:00:00Z"
+
+
+def test_rejects_non_iso_required_after():
+    fm, body = _load("valid-minimal.yaml")
+    body["items"] = _item_with(required_after="not-a-date")
+    with pytest.raises(OrgConfigValidationError, match="required_after"):
+        validate_org_config(fm, body)
+
+
+def test_rejects_non_iso_expires_at():
+    fm, body = _load("valid-minimal.yaml")
+    body["items"] = _item_with(expires_at="soon")
+    with pytest.raises(OrgConfigValidationError, match="expires_at"):
+        validate_org_config(fm, body)
+
+
+def test_rejects_expiry_before_required_after():
+    fm, body = _load("valid-minimal.yaml")
+    body["items"] = _item_with(required_after="2026-12-01", expires_at="2026-06-01")
+    with pytest.raises(OrgConfigValidationError, match="expires_at"):
+        validate_org_config(fm, body)

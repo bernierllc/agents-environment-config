@@ -10,6 +10,7 @@ from .allow_lists import (
     PROMPTS_DYNAMIC_PREFIXES,
 )
 from .errors import OrgConfigUnknownSchemaError, OrgConfigValidationError
+from .timebound import parse_iso
 from .schema import (
     ITEM_TYPES,
     RESERVED_SOURCE_IDS,
@@ -28,6 +29,19 @@ def _require(d: dict, key: str, field_path: str) -> Any:
     if key not in d or d[key] is None:
         raise OrgConfigValidationError(f"{key} is required", field_path=field_path)
     return d[key]
+
+
+def _validate_iso(value: Any, field_path: str):
+    if value is None:
+        return None
+    try:
+        parse_iso(str(value))
+    except ValueError:
+        raise OrgConfigValidationError(
+            f"{field_path.rsplit('.', 1)[-1]} must be an ISO-8601 date/time",
+            field_path=field_path,
+        )
+    return value
 
 
 def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
@@ -137,10 +151,27 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
                     field_path=f"{base_path}.stance",
                 )
             version = policy_dict.get("version")
+            required_after = _validate_iso(
+                policy_dict.get("required_after"), f"{base_path}.required_after"
+            )
+            expires_at = _validate_iso(
+                policy_dict.get("expires_at"), f"{base_path}.expires_at"
+            )
+            if (
+                required_after is not None
+                and expires_at is not None
+                and parse_iso(expires_at) <= parse_iso(required_after)
+            ):
+                raise OrgConfigValidationError(
+                    "expires_at must be after required_after",
+                    field_path=f"{base_path}.expires_at",
+                )
             validated[item_name] = ItemPolicy(
                 source=source,
                 stance=Stance(stance_raw),
                 version=version,
+                required_after=required_after,
+                expires_at=expires_at,
             )
         items[type_name] = validated
 
