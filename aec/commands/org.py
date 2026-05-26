@@ -321,6 +321,9 @@ def perform_enroll(
 
     typer.echo(f"enrolled org '{config.org_id}'")
 
+    if config.branding and config.branding.welcome_message:
+        typer.echo(config.branding.welcome_message)
+
     if config.enrollment_script:
         from ..lib.org_config.enrollment import run_enrollment_script
 

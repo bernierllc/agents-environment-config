@@ -83,6 +83,14 @@ class ProjectOverlay:
 
 
 @dataclass(frozen=True)
+class Branding:
+    """Org branding surfaced on enroll and in `aec doctor` (Phase 4d)."""
+    display_name: Optional[str] = None
+    welcome_message: Optional[str] = None
+    doctor_footer: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class OrgConfig:
     schema_version: str
     org_id: str
@@ -122,3 +130,6 @@ class OrgConfig:
     # enrollment_script (Phase 4c): closed set of declarative actions run on
     # enroll. Stored as validated dicts; the runner maps each to a primitive.
     enrollment_script: list[dict] = field(default_factory=list)
+
+    # branding (Phase 4d): optional org-supplied identity strings.
+    branding: Optional[Branding] = None

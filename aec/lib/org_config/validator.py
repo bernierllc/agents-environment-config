@@ -15,6 +15,7 @@ from .schema import (
     ITEM_TYPES,
     RESERVED_SOURCE_IDS,
     SCHEMA_VERSION_SUPPORTED,
+    Branding,
     CustomSource,
     ItemPolicy,
     OrgConfig,
@@ -331,6 +332,17 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
     install_agents_enabled = list(install_agents.get("enabled") or [])
     install_agents_disabled = list(install_agents.get("disabled") or [])
 
+    branding_block = body.get("branding") or {}
+    branding = (
+        Branding(
+            display_name=branding_block.get("display_name"),
+            welcome_message=branding_block.get("welcome_message"),
+            doctor_footer=branding_block.get("doctor_footer"),
+        )
+        if branding_block
+        else None
+    )
+
     install_mode = install_block.get("mode")
     if install_mode is not None and install_mode not in ("managed", "guided"):
         raise OrgConfigValidationError(
@@ -360,4 +372,5 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
         refresh_ttl_hours=refresh_ttl_hours,
         projects=projects,
         enrollment_script=enrollment_script,
+        branding=branding,
     )

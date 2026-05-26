@@ -71,6 +71,8 @@ def _check_org_configurations() -> None:
     Console.header("Org configurations")
     for enrolled in orgs:
         cfg = enrolled.config
+        if cfg.branding and cfg.branding.display_name:
+            Console.print(f"  {cfg.branding.display_name}")
         Console.print(f"  org_id: {cfg.org_id}")
         Console.print(f"  config_version: {cfg.config_version}")
         if cfg.trust_mode == "unsigned":
@@ -98,6 +100,8 @@ def _check_org_configurations() -> None:
                 Console.error(
                     f"  key rotation LOCKED (run: aec org trust-rotate {cfg.org_id})"
                 )
+        if cfg.branding and cfg.branding.doctor_footer:
+            Console.print(f"  {cfg.branding.doctor_footer}")
 
     if len(orgs) > 1:
         from ..lib.org_config.reconcile import open_conflicts
