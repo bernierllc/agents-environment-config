@@ -120,14 +120,58 @@ def _merge_scalar(
     return True, by_org[org]
 
 
+_EMPTY = EffectivePolicy({}, {}, {}, {}, [], None, ())
+
+
 def effective_policy(paths: OrgPaths, now: Optional[When] = None) -> EffectivePolicy:
     if now is None:
         now = datetime.now(timezone.utc)
     orgs = discover_enrolled_orgs(paths)
     if not orgs:
-        return EffectivePolicy({}, {}, {}, {}, [], None, ())
-
+        return _EMPTY
     configs = [_time_filtered(e.config, now) for e in orgs]
+    return _assemble(paths, orgs, configs)
+
+
+def effective_policy_for_repo(
+    paths: OrgPaths,
+    *,
+    repo_path: Optional[str],
+    git_remote: Optional[str],
+    now: Optional[When] = None,
+) -> EffectivePolicy:
+    """Effective policy for a specific repo, with project overlays layered in.
+
+    Each org's matching project profile is merged onto its own items/prompts
+    before the cross-org merge, so P7 conflict handling keys on the same
+    subjects whether they come from base policy or an overlay.
+    """
+    from .projects import match_project
+
+    if now is None:
+        now = datetime.now(timezone.utc)
+    orgs = discover_enrolled_orgs(paths)
+    if not orgs:
+        return _EMPTY
+    configs = []
+    for e in orgs:
+        cfg = e.config
+        profile = match_project(cfg.projects, repo_path=repo_path, git_remote=git_remote)
+        if profile is not None:
+            merged_items = {
+                item_type: {**cfg.items.get(item_type, {}), **profile.items.get(item_type, {})}
+                for item_type in ITEM_TYPES
+            }
+            cfg = replace(
+                cfg,
+                items=merged_items,
+                install_prompts={**cfg.install_prompts, **profile.prompts},
+            )
+        configs.append(_time_filtered(cfg, now))
+    return _assemble(paths, orgs, configs)
+
+
+def _assemble(paths: OrgPaths, orgs, configs: list[OrgConfig]) -> EffectivePolicy:
     status = _subject_status(paths, orgs, configs)
     held: list[str] = []
 
