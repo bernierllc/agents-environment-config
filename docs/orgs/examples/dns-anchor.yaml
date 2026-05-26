@@ -1,0 +1,63 @@
+---
+# Identity & versioning
+schema_version: "1.0"
+org_id: "acme-dns"
+org_name: "Acme (DNS-anchored)"
+config_version: "2.0.0"
+description: "Phase 2 example: dns_anchor trust + TTL refresh. Copy and adapt."
+
+# dns_anchor trust: the signing public key is fetched over TLS from
+#   https://<dns_domain>/.well-known/aec-pubkey
+# and pinned on first enrollment (TOFU). Rotating the published key triggers a
+# 30-day grace countdown; after that, org-config operations lock out until the
+# user runs `aec org trust-rotate acme-dns`.
+trust:
+  mode: "dns_anchor"
+  dns_domain: "acme.example.com"
+
+# Re-fetch and re-verify url/dns-sourced configs once the TTL elapses
+# (checked on `aec update`). Omit to never auto-refresh.
+refresh:
+  ttl_hours: 24
+---
+
+sources:
+  default:
+    skills:  keep
+    rules:   keep
+    agents:  keep
+    mcps:    keep
+  custom: []
+
+install:
+  # managed = apply policy silently on every `aec` invocation.
+  # guided  = show the plan and prompt before applying.
+  mode: "managed"
+
+  preferences:
+    plans_completion: "archive"
+    hook_mode: "auto"
+
+  prompts:
+    setup.track_current_repo: true
+
+items:
+  skills:
+    # Stance: required | recommended | blocked | pinned | silent
+    "secure-coding-v2":
+      source: "aec.default.skills"
+      stance: required
+
+  rules:
+    "general/architecture":
+      source: "aec.default.rules"
+      stance: pinned
+      version: "1.2.0"
+
+  agents:
+    # blocked items are removed from the user's environment if present.
+    "risky-agent":
+      source: "aec.default.agents"
+      stance: blocked
+
+  mcps: {}

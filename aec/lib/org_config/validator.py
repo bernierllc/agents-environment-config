@@ -46,11 +46,38 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
     trust_mode = trust.get("mode")
     if trust_mode is None:
         raise OrgConfigValidationError("trust.mode is required", field_path="trust.mode")
-    if trust_mode != "unsigned":
+    if trust_mode not in ("unsigned", "pinned_key", "dns_anchor"):
         raise OrgConfigValidationError(
-            f"trust.mode '{trust_mode}' is not supported in Phase 1 (only 'unsigned')",
-            field_path="trust.mode",
+            f"unknown trust.mode: {trust_mode!r}", field_path="trust.mode"
         )
+    trust_pubkey = trust.get("pubkey")
+    trust_pubkey_url = trust.get("pubkey_url")
+    trust_signature_url = trust.get("signature_url")
+    trust_dns_domain = trust.get("dns_domain")
+    if trust_mode == "pinned_key" and not (trust_pubkey or trust_pubkey_url):
+        raise OrgConfigValidationError(
+            "pinned_key trust requires 'pubkey' or 'pubkey_url'", field_path="trust.pubkey"
+        )
+    if trust_mode == "dns_anchor" and not trust_dns_domain:
+        raise OrgConfigValidationError(
+            "dns_anchor trust requires 'dns_domain'", field_path="trust.dns_domain"
+        )
+    for url_field, url_value in (
+        ("trust.pubkey_url", trust_pubkey_url),
+        ("trust.signature_url", trust_signature_url),
+    ):
+        if url_value is not None and not str(url_value).startswith("https://"):
+            raise OrgConfigValidationError(
+                f"{url_field} must be an https:// URL", field_path=url_field
+            )
+
+    refresh_block = body.get("refresh") or {}
+    refresh_ttl_hours = refresh_block.get("ttl_hours")
+    if refresh_ttl_hours is not None:
+        if not isinstance(refresh_ttl_hours, int) or isinstance(refresh_ttl_hours, bool) or refresh_ttl_hours <= 0:
+            raise OrgConfigValidationError(
+                "ttl_hours must be a positive integer", field_path="refresh.ttl_hours"
+            )
 
     if body.get("projects"):
         raise OrgConfigValidationError(
@@ -143,6 +170,13 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
     install_agents_enabled = list(install_agents.get("enabled") or [])
     install_agents_disabled = list(install_agents.get("disabled") or [])
 
+    install_mode = install_block.get("mode")
+    if install_mode is not None and install_mode not in ("managed", "guided"):
+        raise OrgConfigValidationError(
+            f"unknown install.mode: {install_mode!r} (expected 'managed' or 'guided')",
+            field_path="install.mode",
+        )
+
     return OrgConfig(
         schema_version=schema_version,
         org_id=org_id,
@@ -157,4 +191,10 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
         install_prompts=install_prompts,
         install_agents_enabled=install_agents_enabled,
         install_agents_disabled=install_agents_disabled,
+        install_mode=install_mode,
+        trust_pubkey=trust_pubkey,
+        trust_pubkey_url=trust_pubkey_url,
+        trust_signature_url=trust_signature_url,
+        trust_dns_domain=trust_dns_domain,
+        refresh_ttl_hours=refresh_ttl_hours,
     )

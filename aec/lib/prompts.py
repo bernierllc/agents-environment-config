@@ -19,6 +19,33 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
+# In-process registry of org-overlay pre-answers, keyed by prompt_id. Populated
+# by the overlay applier (aec.lib.org_config.apply) before an install/setup run
+# and cleared afterward. Empty by default, so absent any overlay the seam
+# behaves exactly like a bare input() prompt.
+_OVERLAY_ANSWERS: dict[str, Any] = {}
+
+
+def set_overlay_answers(answers: dict[str, Any]) -> None:
+    """Install org-overlay pre-answers consulted by ``prompt()``."""
+    _OVERLAY_ANSWERS.clear()
+    _OVERLAY_ANSWERS.update(answers)
+
+
+def clear_overlay_answers() -> None:
+    _OVERLAY_ANSWERS.clear()
+
+
+def _coerce(value: Any, type: str) -> Any:  # noqa: A002 - matches doc surface
+    if type == "bool" and isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "y", "on")
+    if type == "int" and not isinstance(value, bool):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return value
+    return value
+
 
 def prompt(
     prompt_id: str,
@@ -30,35 +57,28 @@ def prompt(
 ) -> str:
     """Read a line from the user, optionally pre-answered by an org overlay.
 
-    Phase 1 behaviour:
-      - Always falls through to ``input(prompt_text)``.
-      - On EOF, returns ``""`` (callers handle defaults — same as the
-        pre-refactor inline ``try/except EOFError`` blocks).
+    If the overlay registry holds an answer for ``prompt_id``, it is coerced to
+    ``type``, passed through ``validator`` (if any), announced, and returned
+    without prompting. Otherwise this falls through to ``input(prompt_text)``
+    (returning ``""`` on EOF, as before).
 
     Args:
-        prompt_id: Stable dotted-path ID from ``aec.lib.prompt_ids``. The
-            overlay applier (later phase) uses this ID to look up a pre-
-            answered value.
-        prompt_text: The text shown to the user when no overlay answer is
-            available.
-        type: Expected logical type of the answer (``"string"``, ``"bool"``,
-            ``"int"``, ``"enum"``, ``"path"``). Phase 1 records this on the
-            interface but does not act on it.
-        default: Default value to surface if the user just presses Enter.
-            Callers continue to apply their own default logic in Phase 1;
-            this argument exists so later phases can centralize it.
-        validator: Optional callable that the overlay applier (later phase)
-            will run against pre-answered values before returning them.
-            Phase 1 does not invoke it.
-
-    Returns:
-        The raw user input as a string. Callers convert/validate it the
-        same way they did before the refactor — Phase 1 deliberately does
-        not change observable behaviour.
+        prompt_id: Stable dotted-path ID from ``aec.lib.prompt_ids``.
+        prompt_text: Text shown when no overlay answer is available.
+        type: Logical type (``"string"``/``"bool"``/``"int"``/``"enum"``/``"path"``).
+        default: Default surfaced on empty input (callers still apply their own).
+        validator: Optional callable run against the (pre-)answered value.
     """
-    # Reference the parameters so static checkers don't flag them as unused;
-    # later phases consume them.
-    _ = (prompt_id, type, default, validator)
+    if prompt_id in _OVERLAY_ANSWERS:
+        from .console import Console
+
+        value = _coerce(_OVERLAY_ANSWERS[prompt_id], type)
+        if validator is not None:
+            value = validator(value if isinstance(value, str) else str(value))
+        Console.info(f"Pre-answered by org config: {prompt_id}")
+        return value
+
+    _ = (default,)
     try:
         return input(prompt_text)
     except EOFError:

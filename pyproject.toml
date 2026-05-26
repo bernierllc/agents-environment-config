@@ -29,12 +29,23 @@ dependencies = []
 [project.optional-dependencies]
 dev = [
     "typer>=0.9.0",
+    "typing_extensions>=4.0",
+    "PyYAML>=6.0",
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "pytest-timeout>=2.0.0",
 ]
 org-configs-preview = [
     "PyYAML>=6.0",
+]
+org-configs = [
+    "PyYAML>=6.0",
+    # Supply-chain policy: hold pynacl at least one release AND three weeks
+    # behind the latest PyPI release, with no known CVEs in the pinned version
+    # (exception: a known-good security patch). Re-check OSV / pip-audit before
+    # bumping. Latest at pin time was 1.6.2; 1.5.0 is the long-stable, widely
+    # deployed release with abi3 wheels for macOS arm64/x86_64 + Linux x86_64.
+    "pynacl==1.5.0",
 ]
 
 [project.scripts]

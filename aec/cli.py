@@ -24,6 +24,24 @@ if HAS_TYPER:
         no_args_is_help=True,
     )
 
+    def _run_org_config_gate() -> None:
+        """Per-invocation org-config propagation gate. Best-effort: surfaces key
+        rotation warnings/lockouts but never breaks the command being run."""
+        try:
+            from .lib.org_config import OrgPaths
+            from .lib.org_config.propagation import run_propagation_gate
+        except ImportError:
+            return  # org-configs extra not installed
+        try:
+            paths = OrgPaths.default()
+            if not paths.orgs_dir.exists():
+                return
+            result = run_propagation_gate(paths)
+        except Exception:  # noqa: BLE001 - the gate must never break other commands
+            return
+        for message in result.warnings:
+            Console.warning(message)
+
     @app.callback(invoke_without_command=True)
     def _cli_callback(
         ctx: typer.Context,
@@ -41,6 +59,8 @@ if HAS_TYPER:
             return
         from .lib.preferences import check_pending_preferences
         check_pending_preferences()
+
+        _run_org_config_gate()
 
         import atexit
         from .lib.version_check import maybe_check_for_update
@@ -67,12 +87,32 @@ if HAS_TYPER:
 
     @app.command("install")
     def install_cmd(
-        item_type: str = typer.Argument(..., help="Type: skill, rule, agent, or mcp"),
-        name: str = typer.Argument(..., help="Name of the item to install"),
+        item_type: Optional[str] = typer.Argument(None, help="Type: skill, rule, agent, or mcp"),
+        name: Optional[str] = typer.Argument(None, help="Name of the item to install"),
         global_flag: bool = typer.Option(False, "-g", "--global", help="Install globally"),
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+        org_config: Optional[str] = typer.Option(
+            None,
+            "--org-config",
+            help="Enroll an org config (local path or https url) and apply its policy",
+        ),
+        allow_unsigned: bool = typer.Option(
+            False, "--allow-unsigned", help="Allow an unsigned --org-config source"
+        ),
     ):
-        """Install a skill, rule, agent, or MCP server."""
+        """Install a skill, rule, agent, or MCP server (or apply an org config with --org-config)."""
+        if org_config:
+            from .commands.org import perform_enroll
+            from .lib.org_config import OrgPaths
+            from .lib.org_config.apply import apply_org_policy
+
+            perform_enroll(org_config, allow_unsigned=allow_unsigned, yes=yes)
+            confirm = (lambda _policy: True) if yes else None
+            apply_org_policy(OrgPaths.default(), confirm=confirm)
+            return
+        if not item_type or not name:
+            Console.error("install requires <type> <name> (or use --org-config <url|path>)")
+            raise typer.Exit(code=2)
         from .commands.install_cmd import run_install
         run_install(item_type=item_type, name=name, global_flag=global_flag, yes=yes)
 
@@ -123,6 +163,26 @@ if HAS_TYPER:
         """Show detailed metadata for an installed item."""
         from .commands.info import run_info
         run_info(item_type=item_type, name=name)
+
+    @app.command("export")
+    def export_cmd(
+        out: Optional[str] = typer.Option(None, "--out", "-o", help="Write manifest to FILE (default: stdout)"),
+        latest: bool = typer.Option(False, "--latest", help="Record versions as 'latest' instead of pinning"),
+        no_repos: bool = typer.Option(False, "--no-repos", help="Export global scope only"),
+    ):
+        """Export the current setup to a portable manifest file."""
+        from .commands.export_cmd import run_export
+        run_export(out=out, latest=latest, include_repos=not no_repos)
+
+    @app.command("apply")
+    def apply_cmd(
+        file: str = typer.Argument(..., help="Path to a portable manifest file"),
+        dry_run: bool = typer.Option(False, "--dry-run", help="Preview without making changes"),
+        latest: bool = typer.Option(False, "--latest", help="Install latest catalog versions"),
+    ):
+        """Apply a portable manifest - reproduce its setup on this machine."""
+        from .commands.apply_cmd import run_apply
+        run_apply(file=file, dry_run=dry_run, latest=latest)
 
     @app.command("setup")
     def setup_cmd(
@@ -643,6 +703,18 @@ else:
         info_parser.add_argument("item_type", help="Type: skill, rule, or agent")
         info_parser.add_argument("name", help="Name of the item")
 
+        # export
+        export_parser = subparsers.add_parser("export", help="Export current setup to a portable manifest")
+        export_parser.add_argument("--out", "-o", dest="out", default=None, help="Write to FILE (default: stdout)")
+        export_parser.add_argument("--latest", action="store_true", help="Record versions as 'latest'")
+        export_parser.add_argument("--no-repos", dest="no_repos", action="store_true", help="Global scope only")
+
+        # apply
+        apply_parser = subparsers.add_parser("apply", help="Apply a portable manifest to this machine")
+        apply_parser.add_argument("file", help="Path to a portable manifest file")
+        apply_parser.add_argument("--dry-run", action="store_true", help="Preview without making changes")
+        apply_parser.add_argument("--latest", action="store_true", help="Install latest catalog versions")
+
         # setup
         setup_parser = subparsers.add_parser("setup", help="Set up a project or all projects")
         setup_parser.add_argument("path", nargs="?", default=None, help="Project path")
@@ -865,6 +937,14 @@ else:
         elif args.command == "info":
             from .commands.info import run_info
             run_info(item_type=args.item_type, name=args.name)
+
+        elif args.command == "export":
+            from .commands.export_cmd import run_export
+            run_export(out=args.out, latest=args.latest, include_repos=not args.no_repos)
+
+        elif args.command == "apply":
+            from .commands.apply_cmd import run_apply
+            run_apply(file=args.file, dry_run=args.dry_run, latest=args.latest)
 
         elif args.command == "setup":
             from .commands.setup import run_setup, run_setup_path, run_setup_all

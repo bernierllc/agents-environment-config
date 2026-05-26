@@ -71,3 +71,15 @@ class OrgConfig:
     install_prompts: dict[str, Any]
     install_agents_enabled: list[str]
     install_agents_disabled: list[str]
+    install_mode: Optional[str] = None  # "managed" | "guided" | None
+
+    # trust detail (Phase 2): plumbing for signed modes. Optional so unsigned
+    # configs and existing callers are unaffected.
+    trust_pubkey: Optional[str] = None
+    trust_pubkey_url: Optional[str] = None
+    trust_signature_url: Optional[str] = None
+    trust_dns_domain: Optional[str] = None
+
+    # refresh policy (Phase 2c): opt-in TTL for re-fetching url/mdm-sourced
+    # configs on any invocation. None means "only on `aec update`".
+    refresh_ttl_hours: Optional[int] = None

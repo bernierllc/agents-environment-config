@@ -1,0 +1,37 @@
+---
+# Multi-org example, config B of 2. Enroll BOTH this and
+# multi-org-a-acme.yaml to see conflict handling + `aec org resolve`.
+schema_version: "1.0"
+org_id: "globex"
+org_name: "Globex Inc"
+config_version: "1.0.0"
+description: "Multi-org demo (B): blocks secure-coding-v2."
+
+trust:
+  mode: "unsigned"
+---
+
+sources:
+  default:
+    skills:  keep
+    rules:   keep
+    agents:  keep
+    mcps:    keep
+  custom: []
+
+install:
+  mode: "guided"
+  preferences:
+    # Same value as Acme -> no conflict.
+    plans_completion: "archive"
+
+items:
+  skills:
+    # Globex BLOCKS what Acme REQUIRES -> resolved via `aec org resolve`,
+    # which records an honor:<org-id> (or skip) decision keyed to both configs.
+    "secure-coding-v2":
+      source: "aec.default.skills"
+      stance: blocked
+  rules: {}
+  agents: {}
+  mcps: {}

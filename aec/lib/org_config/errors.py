@@ -37,3 +37,7 @@ class OrgConfigTrustError(OrgConfigError):
 
 class OrgConfigMultiOrgRejectedError(OrgConfigError):
     """Phase 1: more than one org config present in ~/.aec/orgs/."""
+
+
+class OrgConfigFetchError(OrgConfigError):
+    """A remote fetch (config or pubkey) failed or was refused."""

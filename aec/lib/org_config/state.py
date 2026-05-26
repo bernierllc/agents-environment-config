@@ -42,6 +42,8 @@ class OrgState:
     source_of_record: str
     unsigned_warning_acknowledged_at: Optional[str]
     key_rotation_pending: Optional[dict]
+    # URL the config was fetched from, when source_of_record is "url".
+    source_url: Optional[str] = None
 
 
 class OrgStateCorruptError(OrgConfigError):

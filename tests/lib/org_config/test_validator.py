@@ -58,10 +58,32 @@ def test_rejects_unknown_future_schema():
         validate_org_config(fm, body)
 
 
-def test_rejects_non_unsigned_trust_in_phase_1():
+def test_rejects_unknown_trust_mode():
     fm, body = _load("valid-minimal.yaml")
-    fm["trust"]["mode"] = "dns_anchor"
-    with pytest.raises(OrgConfigValidationError, match="trust"):
+    fm["trust"]["mode"] = "xyzzy"
+    with pytest.raises(OrgConfigValidationError, match="trust.mode"):
+        validate_org_config(fm, body)
+
+
+def test_accepts_pinned_key_with_inline_pubkey():
+    fm, body = _load("valid-minimal.yaml")
+    fm["trust"] = {"mode": "pinned_key", "pubkey": "AAAA"}
+    cfg = validate_org_config(fm, body)
+    assert cfg.trust_mode == "pinned_key"
+    assert cfg.trust_pubkey == "AAAA"
+
+
+def test_pinned_key_requires_pubkey():
+    fm, body = _load("valid-minimal.yaml")
+    fm["trust"] = {"mode": "pinned_key"}
+    with pytest.raises(OrgConfigValidationError, match="pubkey"):
+        validate_org_config(fm, body)
+
+
+def test_dns_anchor_requires_dns_domain():
+    fm, body = _load("valid-minimal.yaml")
+    fm["trust"] = {"mode": "dns_anchor"}
+    with pytest.raises(OrgConfigValidationError, match="dns_domain"):
         validate_org_config(fm, body)
 
 

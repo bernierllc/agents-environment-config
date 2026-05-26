@@ -1,5 +1,13 @@
 # Org Config Overlay — Phase 2 Implementation Plan (skeleton)
 
+> **Status (2026-05-24): EXPANDED & IMPLEMENTED.** Expanded into the build-ready plan
+> `2026-05-24-org-config-overlay-phase-2-remaining.md`; sub-phases 2b–2e have shipped
+> on branch `claude/manifest-features-launch-joqf5` (signed dns_anchor trust + key
+> rotation, https delivery + TTL refresh, multi-org conflict detection/resolution,
+> and the per-invocation propagation gate). Deliberately descoped pending the separate
+> overlay *applier*: `aec install --org-config` (enroll-then-apply) and managed/guided
+> apply of policy to installs. Retained for scope history.
+
 > **For agentic workers:** This is a Later-tier scope skeleton — NOT a build-ready
 > plan. Open questions below must be resolved with the user before tasks are
 > written. Use `superpowers:writing-plans` to expand once scope is locked.

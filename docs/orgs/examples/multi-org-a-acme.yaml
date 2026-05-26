@@ -1,0 +1,38 @@
+---
+# Multi-org example, config A of 2. Enroll BOTH this and
+# multi-org-b-globex.yaml to see conflict handling + `aec org resolve`.
+schema_version: "1.0"
+org_id: "acme"
+org_name: "Acme Corp"
+config_version: "1.0.0"
+description: "Multi-org demo (A): requires secure-coding-v2."
+
+trust:
+  mode: "unsigned"
+---
+
+sources:
+  default:
+    skills:  keep
+    rules:   keep
+    agents:  keep
+    mcps:    keep
+  custom: []
+
+install:
+  mode: "guided"
+  preferences:
+    # Same value as Globex -> no conflict, applies cleanly.
+    plans_completion: "archive"
+
+items:
+  skills:
+    # Acme REQUIRES this skill; Globex BLOCKS it -> a stance conflict.
+    # Until resolved with `aec org resolve`, this item is held (P7) while
+    # every non-conflicting item still applies.
+    "secure-coding-v2":
+      source: "aec.default.skills"
+      stance: required
+  rules: {}
+  agents: {}
+  mcps: {}
