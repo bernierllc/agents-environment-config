@@ -12,11 +12,12 @@ module holds the category appliers.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Optional
 
-from .effective import EffectivePolicy, effective_policy
+from .effective import EffectivePolicy, effective_policy, effective_policy_for_repo
+from .schema import ITEM_TYPES
 
 
 _CI_PREFIX = "configurable_instructions."
@@ -169,6 +170,84 @@ def _catalog(scope: str):
     return source_dirs, available, manifest_path
 
 
+def detect_current_repo() -> tuple[Optional[str], Optional[str]]:
+    """Best-effort (repo_root, origin_remote) for the current working directory."""
+    import subprocess
+
+    try:
+        root = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"], stderr=subprocess.DEVNULL, text=True
+        ).strip()
+    except Exception:  # noqa: BLE001 - not a repo / no git
+        return None, None
+    if not root:
+        return None, None
+    try:
+        remote = subprocess.check_output(
+            ["git", "config", "--get", "remote.origin.url"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:  # noqa: BLE001 - no origin remote
+        remote = ""
+    return root, (remote or None)
+
+
+def _profile_subjects(orgs, repo_path, git_remote) -> set:
+    from .projects import match_project
+
+    subjects: set = set()
+    for e in orgs:
+        profile = match_project(e.config.projects, repo_path=repo_path, git_remote=git_remote)
+        if profile is None:
+            continue
+        for item_type in ITEM_TYPES:
+            for name in profile.items.get(item_type, {}):
+                subjects.add(f"{item_type}/{name}")
+    return subjects
+
+
+def _apply_repo_overlays(paths, now, repo_path, git_remote) -> tuple[int, int]:
+    """Apply matching project-profile items at repo scope. Returns (applied, removed).
+
+    Only the items contributed/overridden by a matching profile are applied at
+    repo scope; base policy stays global. Profile-introduced cross-org conflicts
+    are still held by the repo-effective policy.
+    """
+    from .discovery import discover_enrolled_orgs
+
+    orgs = discover_enrolled_orgs(paths)
+    if not any(e.config.projects for e in orgs):
+        return 0, 0
+    if repo_path is None and git_remote is None:
+        repo_path, git_remote = detect_current_repo()
+    if repo_path is None and git_remote is None:
+        return 0, 0
+
+    subjects = _profile_subjects(orgs, repo_path, git_remote)
+    if not subjects:
+        return 0, 0
+
+    repo_policy = effective_policy_for_repo(
+        paths, repo_path=repo_path, git_remote=git_remote, now=now
+    )
+    restricted = {s: v for s, v in repo_policy.items.items() if s in subjects}
+    if not restricted:
+        return 0, 0
+
+    scope = repo_path
+    scoped = replace(repo_policy, items=restricted, preferences={}, prompts={})
+    source_dirs, available_by_type, manifest_path = _catalog(scope)
+    result, removed = apply_items(
+        scoped,
+        scope,
+        source_dirs=source_dirs,
+        available_by_type=available_by_type,
+        manifest_path=manifest_path,
+    )
+    return len(result.applied), len(removed)
+
+
 def apply_org_policy(
     paths,
     *,
@@ -178,6 +257,8 @@ def apply_org_policy(
     confirm: Optional[Callable[[EffectivePolicy], bool]] = None,
     now: Optional[str] = None,
     pubkey_fetcher=None,
+    repo_path: Optional[str] = None,
+    git_remote: Optional[str] = None,
 ) -> ApplyOutcome:
     """Apply effective org policy to the environment.
 
@@ -220,18 +301,25 @@ def apply_org_policy(
         manifest_path=manifest_path,
     )
 
-    applied = len(result.applied)
+    repo_applied, repo_removed = _apply_repo_overlays(paths, now, repo_path, git_remote)
+
+    applied = len(result.applied) + repo_applied
+    total_removed = len(removed) + repo_removed
     Console.success(
-        f"Org policy applied: {applied} installed, {len(removed)} removed, "
+        f"Org policy applied: {applied} installed, {total_removed} removed, "
         f"{len(prefs_applied)} preference(s) set."
     )
+    if repo_applied or repo_removed:
+        Console.info(
+            f"  ({repo_applied} installed, {repo_removed} removed at repo scope)"
+        )
     if policy.held:
         Console.warning(
             f"{len(policy.held)} item(s) held pending decision — run `aec org resolve`."
         )
     return ApplyOutcome(
         applied_items=applied,
-        removed_items=len(removed),
+        removed_items=total_removed,
         held=policy.held,
         preferences_applied=prefs_applied,
     )
