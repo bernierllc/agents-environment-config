@@ -108,10 +108,68 @@ def test_rejects_enrollment_script_in_phase_1():
         validate_org_config(fm, body)
 
 
-def test_rejects_projects_block_in_phase_1():
+def test_accepts_projects_overlay():
     fm, body = _load("valid-minimal.yaml")
-    body["projects"] = [{"match": {"git_remote": "*"}, "profile": {}}]
-    with pytest.raises(OrgConfigValidationError, match="projects"):
+    body["projects"] = [
+        {
+            "match": {"git_remote": "github.com:acme/*"},
+            "profile": {
+                "items": {
+                    "skills": {"repo-skill": {"source": "aec.default.skills", "stance": "required"}}
+                },
+                "prompts": {"setup.track_current_repo": True},
+            },
+        }
+    ]
+    cfg = validate_org_config(fm, body)
+    assert len(cfg.projects) == 1
+    overlay = cfg.projects[0]
+    assert overlay.match.git_remote == "github.com:acme/*"
+    assert overlay.profile.items["skills"]["repo-skill"].stance.value == "required"
+    assert overlay.profile.prompts["setup.track_current_repo"] is True
+
+
+def test_accepts_projects_directory_match():
+    fm, body = _load("valid-minimal.yaml")
+    body["projects"] = [{"match": {"directory": "~/work/acme/*"}, "profile": {}}]
+    cfg = validate_org_config(fm, body)
+    assert cfg.projects[0].match.directory == "~/work/acme/*"
+
+
+def test_rejects_project_match_without_selector():
+    fm, body = _load("valid-minimal.yaml")
+    body["projects"] = [{"match": {}, "profile": {}}]
+    with pytest.raises(OrgConfigValidationError, match="git_remote or directory"):
+        validate_org_config(fm, body)
+
+
+def test_rejects_project_profile_unknown_source():
+    fm, body = _load("valid-minimal.yaml")
+    body["projects"] = [
+        {
+            "match": {"git_remote": "*"},
+            "profile": {"items": {"skills": {"x": {"source": "nope", "stance": "required"}}}},
+        }
+    ]
+    with pytest.raises(OrgConfigValidationError, match="source"):
+        validate_org_config(fm, body)
+
+
+def test_rejects_project_profile_preferences_v1():
+    fm, body = _load("valid-minimal.yaml")
+    body["projects"] = [
+        {"match": {"git_remote": "*"}, "profile": {"preferences": {"hook_mode": "auto"}}}
+    ]
+    with pytest.raises(OrgConfigValidationError, match="preferences"):
+        validate_org_config(fm, body)
+
+
+def test_rejects_project_profile_prompt_outside_allow_list():
+    fm, body = _load("valid-minimal.yaml")
+    body["projects"] = [
+        {"match": {"git_remote": "*"}, "profile": {"prompts": {"definitely_not_a_prompt": True}}}
+    ]
+    with pytest.raises(OrgConfigValidationError, match="prompts"):
         validate_org_config(fm, body)
 
 

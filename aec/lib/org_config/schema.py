@@ -115,3 +115,6 @@ class OrgConfig:
     # refresh policy (Phase 2c): opt-in TTL for re-fetching url/mdm-sourced
     # configs on any invocation. None means "only on `aec update`".
     refresh_ttl_hours: Optional[int] = None
+
+    # per-project overlays (Phase 4a): repo-scoped policy deltas.
+    projects: list[ProjectOverlay] = field(default_factory=list)
