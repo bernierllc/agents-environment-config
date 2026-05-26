@@ -118,3 +118,7 @@ class OrgConfig:
 
     # per-project overlays (Phase 4a): repo-scoped policy deltas.
     projects: list[ProjectOverlay] = field(default_factory=list)
+
+    # enrollment_script (Phase 4c): closed set of declarative actions run on
+    # enroll. Stored as validated dicts; the runner maps each to a primitive.
+    enrollment_script: list[dict] = field(default_factory=list)

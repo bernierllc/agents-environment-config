@@ -101,13 +101,6 @@ def test_rejects_install_prompt_outside_allow_list():
         validate_org_config(fm, body)
 
 
-def test_rejects_enrollment_script_in_phase_1():
-    fm, body = _load("valid-minimal.yaml")
-    body["install"] = {"enrollment_script": [{"action": "run_doctor"}]}
-    with pytest.raises(OrgConfigValidationError, match="enrollment_script"):
-        validate_org_config(fm, body)
-
-
 def test_accepts_projects_overlay():
     fm, body = _load("valid-minimal.yaml")
     body["projects"] = [
@@ -170,6 +163,106 @@ def test_rejects_project_profile_prompt_outside_allow_list():
         {"match": {"git_remote": "*"}, "profile": {"prompts": {"definitely_not_a_prompt": True}}}
     ]
     with pytest.raises(OrgConfigValidationError, match="prompts"):
+        validate_org_config(fm, body)
+
+
+def _full_minimal_with_install(actions):
+    fm, body = _load("valid-minimal.yaml")
+    body["install"] = {"enrollment_script": actions}
+    return fm, body
+
+
+def test_accepts_enrollment_script_run_doctor():
+    fm, body = _full_minimal_with_install([{"action": "run_doctor"}])
+    cfg = validate_org_config(fm, body)
+    assert cfg.enrollment_script == [{"action": "run_doctor"}]
+
+
+def test_accepts_install_items_with_types_and_sources():
+    fm, body = _full_minimal_with_install(
+        [{"action": "install_items", "types": ["skills", "rules"], "sources": ["aec.default.skills"]}]
+    )
+    cfg = validate_org_config(fm, body)
+    assert cfg.enrollment_script[0]["types"] == ["skills", "rules"]
+
+
+def test_accepts_set_pref_with_if_unset():
+    fm, body = _full_minimal_with_install(
+        [{"action": "set_pref", "key": "hook_mode", "value": "auto", "if_unset": True}]
+    )
+    cfg = validate_org_config(fm, body)
+    assert cfg.enrollment_script[0]["if_unset"] is True
+
+
+def test_accepts_set_hooks_policy():
+    fm, body = _full_minimal_with_install([{"action": "set_hooks", "policy": "per-repo"}])
+    cfg = validate_org_config(fm, body)
+    assert cfg.enrollment_script[0]["policy"] == "per-repo"
+
+
+def test_accepts_add_source_referencing_custom_source():
+    fm, body = _load("valid-minimal.yaml")
+    body["sources"] = {
+        "default": {"skills": "keep", "rules": "keep", "agents": "keep", "mcps": "keep"},
+        "custom": [
+            {
+                "id": "acme-skills",
+                "url": "https://example.com/repo.git",
+                "ref": "main",
+                "contributes": ["skills"],
+            }
+        ],
+    }
+    body["install"] = {
+        "enrollment_script": [{"action": "add_source", "source_id": "acme-skills"}]
+    }
+    cfg = validate_org_config(fm, body)
+    assert cfg.enrollment_script[0]["source_id"] == "acme-skills"
+
+
+def test_rejects_unknown_action_escape_hatch():
+    fm, body = _full_minimal_with_install(
+        [
+            {"action": "run_doctor"},
+            {"action": "set_hooks"},
+            {"action": "install_items"},
+            {"action": "run", "cmd": "rm -rf /"},
+        ]
+    )
+    with pytest.raises(
+        OrgConfigValidationError,
+        match=r"enrollment_script\[3\]\.action 'run' is not a recognized action",
+    ):
+        validate_org_config(fm, body)
+
+
+def test_rejects_add_source_unknown_source_id():
+    fm, body = _full_minimal_with_install(
+        [{"action": "add_source", "source_id": "nope"}]
+    )
+    with pytest.raises(OrgConfigValidationError, match="source_id"):
+        validate_org_config(fm, body)
+
+
+def test_rejects_set_pref_unknown_key():
+    fm, body = _full_minimal_with_install(
+        [{"action": "set_pref", "key": "definitely_not_allow_listed", "value": 1}]
+    )
+    with pytest.raises(OrgConfigValidationError, match="key"):
+        validate_org_config(fm, body)
+
+
+def test_rejects_install_items_unknown_type():
+    fm, body = _full_minimal_with_install(
+        [{"action": "install_items", "types": ["bogus"]}]
+    )
+    with pytest.raises(OrgConfigValidationError, match="types"):
+        validate_org_config(fm, body)
+
+
+def test_rejects_set_hooks_invalid_policy():
+    fm, body = _full_minimal_with_install([{"action": "set_hooks", "policy": "off"}])
+    with pytest.raises(OrgConfigValidationError, match="policy"):
         validate_org_config(fm, body)
 
 

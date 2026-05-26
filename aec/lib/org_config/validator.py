@@ -117,6 +117,85 @@ def _validate_prompts(prompts_block: dict, path_prefix: str) -> dict:
     return prompts
 
 
+_ALLOWED_ACTIONS = ("add_source", "install_items", "set_hooks", "run_doctor", "set_pref")
+_HOOK_POLICIES = ("auto", "per-repo", "never")
+
+
+def _pref_key_allowed(key: str) -> bool:
+    if key in PREFERENCES_ALLOW_LIST:
+        return True
+    return any(key.startswith(f"{ns}.") for ns in PREFERENCES_DYNAMIC_NAMESPACES)
+
+
+def _validate_enrollment_script(
+    actions_raw: list, valid_source_ids: set, custom_source_ids: set
+) -> list[dict]:
+    validated: list[dict] = []
+    for idx, entry in enumerate(actions_raw):
+        ppath = f"enrollment_script[{idx}]"
+        if not isinstance(entry, dict):
+            raise OrgConfigValidationError(
+                "enrollment_script entry must be a mapping", field_path=ppath
+            )
+        action = entry.get("action")
+        if action not in _ALLOWED_ACTIONS:
+            raise OrgConfigValidationError(
+                f"{ppath}.action {action!r} is not a recognized action; "
+                f"allowed: {', '.join(_ALLOWED_ACTIONS)}",
+                field_path=f"{ppath}.action",
+            )
+        if action == "add_source":
+            source_id = entry.get("source_id")
+            if source_id not in custom_source_ids:
+                raise OrgConfigValidationError(
+                    f"add_source.source_id {source_id!r} is not declared in sources.custom",
+                    field_path=f"{ppath}.source_id",
+                )
+        elif action == "install_items":
+            types = entry.get("types")
+            if types is not None:
+                bad = [t for t in types if t not in ITEM_TYPES]
+                if bad:
+                    raise OrgConfigValidationError(
+                        f"unknown item types: {bad}; allowed: {list(ITEM_TYPES)}",
+                        field_path=f"{ppath}.types",
+                    )
+            srcs = entry.get("sources")
+            if srcs is not None:
+                bad = [s for s in srcs if s not in valid_source_ids]
+                if bad:
+                    raise OrgConfigValidationError(
+                        f"unknown sources: {bad}",
+                        field_path=f"{ppath}.sources",
+                    )
+        elif action == "set_hooks":
+            policy = entry.get("policy")
+            if policy is not None and policy not in _HOOK_POLICIES:
+                raise OrgConfigValidationError(
+                    f"set_hooks.policy {policy!r} must be one of {list(_HOOK_POLICIES)}",
+                    field_path=f"{ppath}.policy",
+                )
+        elif action == "set_pref":
+            key = entry.get("key")
+            if key is None or not _pref_key_allowed(key):
+                raise OrgConfigValidationError(
+                    f"set_pref.key {key!r} is not allow-listed",
+                    field_path=f"{ppath}.key",
+                )
+            if "value" not in entry:
+                raise OrgConfigValidationError(
+                    "set_pref requires 'value'", field_path=f"{ppath}.value"
+                )
+            if "if_unset" in entry and not isinstance(entry["if_unset"], bool):
+                raise OrgConfigValidationError(
+                    "set_pref.if_unset must be a boolean",
+                    field_path=f"{ppath}.if_unset",
+                )
+        # run_doctor: no params to validate
+        validated.append(dict(entry))
+    return validated
+
+
 def _validate_projects(
     projects_raw: list, valid_source_ids: set
 ) -> list[ProjectOverlay]:
@@ -207,11 +286,6 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
             )
 
     install_block = body.get("install") or {}
-    if install_block.get("enrollment_script"):
-        raise OrgConfigValidationError(
-            "enrollment_script is a Phase 2+ feature, not supported in Phase 1",
-            field_path="install.enrollment_script",
-        )
 
     sources_block = body.get("sources") or {}
     default_sources = dict(sources_block.get("default") or {})
@@ -233,6 +307,12 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
     items = _validate_items(body.get("items") or {}, valid_source_ids, "items")
 
     projects = _validate_projects(body.get("projects") or [], valid_source_ids)
+
+    enrollment_script = _validate_enrollment_script(
+        install_block.get("enrollment_script") or [],
+        valid_source_ids,
+        {cs.id for cs in custom_sources},
+    )
 
     install_preferences = dict((install_block.get("preferences") or {}))
     for k in install_preferences:
@@ -279,4 +359,5 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
         trust_dns_domain=trust_dns_domain,
         refresh_ttl_hours=refresh_ttl_hours,
         projects=projects,
+        enrollment_script=enrollment_script,
     )
