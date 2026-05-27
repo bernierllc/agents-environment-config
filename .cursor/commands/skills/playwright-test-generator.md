@@ -105,11 +105,12 @@ Complete these in order:
 7. **Generate tests** — for each ready page, generate Playwright test code with proper auth `beforeEach` blocks. For not-ready pages, generate `.skip()` stubs with clear skip reasons
    - **7a. Before writing each test:** classify the verification item by interaction type (see `references/test-generation-patterns.md`), confirm the planned test will contain all must-have elements for that type, then write the test (Checkpoint A — see Test Completeness Standards)
    - **7b. Pre-flight ID validation (before writing each spec file):** After generating the full text of a spec file, before writing to disk, extract every `@begin:ID` from the generated text and cross-check against the ID set from `parseVerificationItems()`. If any `@begin:ID` is not in that set, refuse to write and report the specific invalid IDs. This is a hard stop — do not write the file.
+   - **7b.1. Artifact-token guard (before writing each spec file):** In the same pre-write pass, scan the generated text for leaked tool-call artifact tokens (stray opening/closing `invoke`, `parameter`, or `function_calls` tags). If any are present the generation is malformed — refuse to write and regenerate. This is a hard stop: a single corrupted spec makes Playwright fail at *collection*, aborting the entire suite before any test runs. `verify-pipeline.js`'s `checkSpecArtifacts` re-checks this on disk as a defense-in-depth gate, but the file must never be written in the first place.
 8. **Handle missing testids** — exhaust stable alternative selectors first (`getByRole` → `getByLabel` → `getByText` for static copy → `getByPlaceholder` for static copy); generate `.skip()` stub only if all fail and only for types that require DOM selectors (not `api-response` or `auth-boundary`); document alternatives tried in stub comment (see stub template in `references/test-generation-patterns.md`); update `testid-gaps.md`
    - **8a. Selector verification (Checkpoint A.5 — gates every live test):** Before emitting any live (non-`.skip()`) test that depends on a DOM selector, the selector MUST be verified against actual component source. Open the component file (use `import-index.json` to locate it) and confirm the exact `data-testid`, label, role+name, or static text exists. **Best-guess selectors are forbidden in live tests.** If you cannot read the component source, or the component does not expose the expected hook, the test MUST be a `.skip()` stub citing skip reason 3 with "selector unverified" and a `testid-gaps.md` entry. See "Selector Verification" below.
    - **8b. Data dependency classification:** If a verification item asserts the presence of dynamic content (cards, list items, feed entries, table rows, counts > 0), classify as data-dependent. Set the page's metadata `data_setup.ready` accordingly. If `data_setup.ready = false`, generate a `.skip()` stub citing skip reason 2 — do not paper over with `hasCards || hasEmptyState` fallbacks unless the verification item is explicitly typed as `graceful empty state`. See "Live Data Dependencies" below.
 9. **Update manifest** — write changes atomically with lockfile
-10. **Rebuild import index** — trace routes to source files, update `manifest/import-index.json`
+10. **Rebuild import index** — trace routes to source files, update `manifest/import-index.json`. Index keys are **repo-root-relative** (the git toplevel), not relative to the Playwright project dir. This matters in monorepos where the project root is a subdirectory and sources span multiple packages: `map-changes.js --since-main` matches these keys against `git diff --name-only`, which always emits repo-root-relative paths. `verify-pipeline.js`/`map-changes.js` resolve the repo root via `git rev-parse --show-toplevel` and fall back to the project dir when not in a git repo (so single-root projects are unaffected).
 11. **Patch test headers** — for `header-missing` items, add `@source`, `@source-generated-by`, `@metadata`, and `@generated-by` comments to existing test files
     - **11a. Post-generation audit (Checkpoint B — gates step 12):** count complete tests vs. stubs; for every stub verify it carries one of the four valid skip reasons from Test Completeness Standards; reclassify and implement any stub with an invalid reason; do not proceed to step 12 until every stub has a valid reason
 12. **Report** — print summary of generated, updated, skipped, blocked, and pinned tests
@@ -278,9 +279,11 @@ test.describe('Event Detail - Admin', () => {
     await loginAsAdmin(page);
   });
 
-  test('EVT-DTL-ADM-01 Verify edit button is visible @EVT-DTL-ADM-01 @standard @event-detail', async ({ page }) => {
+  // @begin:EVT-DTL-ADM-01
+  test('@EVT-DTL-ADM-01 @standard @event-detail edit button is visible', async ({ page }) => {
     // ... test code
   });
+  // @end:EVT-DTL-ADM-01
 });
 ```
 
@@ -288,13 +291,17 @@ test.describe('Event Detail - Admin', () => {
 
 ```typescript
 test.describe('Event Detail - Admin', () => {
-  // SKIP: no auth helper for 'admin' role — see metadata/event-detail.md
-  test.skip('EVT-DTL-ADM-01 Verify edit button is visible @EVT-DTL-ADM-01 @standard @event-detail', async ({ page }) => {
+  // @begin:EVT-DTL-ADM-01
+  test.skip('@EVT-DTL-ADM-01 @standard @event-detail edit button is visible', async ({ page }) => {
+    // SKIP REASON: auth.ready = false (skip reason 1) — no auth helper for 'admin' role
     // Auth requirement: rbac, role: admin
-    // Implement helpers/auth.ts#loginAsAdmin, then update metadata/event-detail.md auth.ready=true
+    // TODO: Implement helpers/auth.ts#loginAsAdmin, set auth.ready=true in metadata/event-detail.md, then remove .skip()
   });
+  // @end:EVT-DTL-ADM-01
 });
 ```
+
+Both examples — live and `.skip()` — wrap each test in its own `@begin:ID`/`@end:ID` markers, **including inside a `test.describe` block**. This is not optional: a marker-less stub is invisible to `sync-tests.js` and is flagged as an orphan by `verify-pipeline.js`. See "ID Source Discipline" and "Generating Tests" for the invariant.
 
 ### Auth strategy is a per-project decision
 
@@ -478,7 +485,7 @@ The failure mode this prevents: 91 orphan `@begin` markers appeared in one proje
 Each verification item becomes one Playwright test function. Read `references/test-generation-patterns.md` for the complete mapping rules, including:
 
 - Tag format: `@ITEM-ID @depth @page-name` in test names
-- `@begin:ITEM-ID` / `@end:ITEM-ID` markers wrapping each test function
+- `@begin:ITEM-ID` / `@end:ITEM-ID` markers wrapping each test function — **including `.skip()` stubs**. Skip stubs are never marker-less: `sync-tests.js` locates, patches, and un-skips them by their markers, and `verify-pipeline.js` flags any `status: skipped` item whose marked block contains no `.skip()` (and any spec-backed item missing markers) as an orphan. A skip stub without markers is invisible to the pipeline — it can never be removed or re-enabled.
 - How each annotation type (`STATE-DEPENDENCY`, `BUSINESS-CONTEXT`, `API-VERIFICATION-FLAG`) maps to test setup, assertions, and comments
 - Content hash normalization algorithm
 - Test pinning behavior
@@ -710,7 +717,7 @@ Browser-verification findings feed back to verification-writer, which updates do
 | Using a different slugify implementation than sync-tests.js | Both tools must import from `scripts/verification-playwright/lib/slugify.js` — divergent implementations produce different IDs for the same input |
 | Generating tests for a flow doc with no Format A IDs | Flow docs without `**FLOW-PREFIX-NN**` IDs have nothing for `parseVerificationItems()` to return — report the gap, don't mint IDs |
 | Hash drift within the same hash_version | The normalization algorithm must be deterministic — strip trailing whitespace, normalize CRLF→LF, trim surrounding blank lines, encode UTF-8; any variation produces false manual-edit detections |
-| Writing absolute paths into manifest files | All paths in `items.json`, `import-index.json`, and `pending-generation.json` must be project-relative — absolute paths (especially worktree paths) break on any other machine or after worktree cleanup |
+| Writing absolute paths into manifest files | All manifest paths must be relative, never absolute — absolute paths (especially worktree paths) break on any other machine or after worktree cleanup. Two relative bases apply: `import-index.json` keys are **repo-root-relative** (they match `git diff` output and may span packages); `spec_file` / `source_doc` paths in `items.json` and `pending-generation.json` are **project-dir-relative** (under `tests/verification-playwright/`). In a single-root project the two bases coincide. |
 
 ## Red Flags — STOP
 
