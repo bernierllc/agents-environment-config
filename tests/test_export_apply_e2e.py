@@ -2,7 +2,6 @@
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -294,15 +293,15 @@ def test_plugins_apply_even_when_item_pass_fails(tmp_path, monkeypatch):
     source_dirs = _source_dirs(repo)
     source_dirs["plugins"] = repo / "plugins"
 
-    # force the item pass to report an error (lightest path: _print_result keys on result.errors)
-    failed_result = SimpleNamespace(
-        applied=[], skipped=[],
-        errors=[(SimpleNamespace(item=SimpleNamespace(name="my-skill")), "boom")],
-    )
+    # Force a GENUINE item-install failure (no mocking of our own apply core):
+    # my-skill is in the catalog so it plans as `install`, but its destination
+    # parent ~/.claude is a regular file, so the real copytree/mkdir raises and
+    # execute_apply records a real error -> items_failed.
+    (home / ".claude").write_text("not a directory")
 
     with patch("aec.commands.apply_cmd.get_repo_root", return_value=repo), patch(
         "aec.commands.apply_cmd.get_source_dirs", return_value=source_dirs
-    ), patch("aec.commands.apply_cmd.execute_apply", return_value=failed_result):
+    ):
         with pytest.raises(SystemExit) as exc:
             run_apply(file=str(manifest_file), yes=True)
     assert exc.value.code == 1  # item failure still surfaced
