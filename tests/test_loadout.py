@@ -37,6 +37,32 @@ class TestValidate:
         with pytest.raises(LoadoutError, match="schema"):
             validate_loadout({**VALID, "schema": "loadout/v2"})
 
+    def test_empty_install_block_raises(self) -> None:
+        # install: {} must not pass — consumers index install sub-keys and would
+        # otherwise KeyError at runtime.
+        with pytest.raises(LoadoutError, match="install"):
+            validate_loadout({**VALID, "install": {}})
+
+    def test_marketplace_missing_subkeys_raises(self) -> None:
+        with pytest.raises(LoadoutError, match="marketplace|plugin"):
+            validate_loadout({**VALID, "install_type": "marketplace",
+                              "install": {"marketplace": "a/b"}})
+
+    def test_per_tool_missing_tools_raises(self) -> None:
+        with pytest.raises(LoadoutError, match="tools"):
+            validate_loadout({**VALID, "install_type": "per-tool", "install": {}})
+
+    def test_bad_name_pattern_raises(self) -> None:
+        with pytest.raises(LoadoutError, match="name"):
+            validate_loadout({**VALID, "name": "Bad_Name"})
+
+    def test_non_utf8_manifest_raises_loadout_error(self, tmp_path: Path) -> None:
+        # undecodable bytes must surface as LoadoutError so discovery skips the
+        # file rather than aborting the whole scan with a raw UnicodeDecodeError.
+        (tmp_path / "plugin.json").write_bytes(b"\xff\xfe not utf-8")
+        with pytest.raises(LoadoutError):
+            load_loadout(tmp_path)
+
 
 class TestLoad:
     def test_loads_plugin_json(self, tmp_path: Path) -> None:

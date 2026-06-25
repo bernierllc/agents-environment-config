@@ -1,6 +1,7 @@
 """Locate, parse, and validate a loadout item-manifest (plugin.json / plugin.yaml)."""
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict
 
@@ -16,6 +17,13 @@ SCHEMA_VERSION = "loadout/v1"
 ITEM_TYPES = ("plugin", "skill", "agent", "rule")
 INSTALL_TYPES = ("marketplace", "per-tool", "external")
 _BASE_REQUIRED = ("schema", "item_type", "name", "version", "description", "source")
+_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+# install sub-keys each install_type's consumers index (mirrors plugin.schema.json allOf)
+_INSTALL_REQUIRED = {
+    "marketplace": ("marketplace", "plugin"),
+    "per-tool": ("tools",),
+    "external": ("external",),
+}
 # filename stems searched, in priority order, at dir root then .loadout/
 _STEMS = ("plugin", "skill", "agent", "rule")
 
@@ -36,17 +44,25 @@ def validate_loadout(data: Dict[str, Any]) -> None:
         )
     if data["item_type"] not in ITEM_TYPES:
         raise LoadoutError(f"invalid item_type: {data['item_type']!r}")
+    if not _NAME_RE.match(str(data["name"])):
+        raise LoadoutError(f"invalid name {data['name']!r}; must match {_NAME_RE.pattern}")
     if data["item_type"] == "plugin":
         it = data.get("install_type")
         if it not in INSTALL_TYPES:
             raise LoadoutError(f"invalid install_type: {it!r}")
-        if "install" not in data:
+        install = data.get("install")
+        if not isinstance(install, dict):
             raise LoadoutError("plugin loadout missing install block")
+        for key in _INSTALL_REQUIRED[it]:
+            if key not in install:
+                raise LoadoutError(f"{it} install block missing required key: {key}")
 
 
 def _parse(path: Path) -> Dict[str, Any]:
-    text = path.read_text(encoding="utf-8")
     try:
+        # read inside the try: UnicodeDecodeError (a ValueError) is in _PARSE_ERRORS,
+        # so an undecodable manifest surfaces as LoadoutError and discovery skips it.
+        text = path.read_text(encoding="utf-8")
         if path.suffix == ".json":
             return json.loads(text)
         if not HAS_YAML:
