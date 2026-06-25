@@ -38,6 +38,7 @@ def run_install(
     name: str,
     global_flag: bool = False,
     yes: bool = False,
+    allow_dormant_hooks: bool = False,
 ) -> None:
     """Install a skill, rule, agent, or MCP server to local or global scope."""
     if item_type not in VALID_TYPES:
@@ -101,6 +102,10 @@ def run_install(
         )
         if decision == "global":
             return
+
+    # Guard: installing a hook-bearing skill globally leaves its hooks dormant.
+    if not _dormant_hook_guard(name, src, scope.is_global, yes, allow_dormant_hooks):
+        return
 
     scope_label = "globally" if scope.is_global else f"to {scope.repo_path}"
     Console.print(f"Installing {name} v{item_info.get('version', '0.0.0')} {scope_label}...")
@@ -180,6 +185,61 @@ def run_install(
             maybe_offer_blurb(root=repo, accept=yes)
         except Exception as exc:  # noqa: BLE001 - never break install on blurb prompt
             Console.warning(f"agent-blurb offer skipped: {exc}")
+
+
+def _dormant_hook_guard(
+    name: str, src: Path, is_global: bool, assume_yes: bool, allow_dormant: bool
+) -> bool:
+    """Warn (and maybe abort) when installing a hook-bearing skill globally.
+
+    Returns True to proceed, False to abort the install.
+    """
+    from ..lib.hooks.dormant import (
+        GUARD_ALLOWED, GUARD_CONFIRM, GUARD_OK, GUARD_REFUSE,
+        count_item_hooks, dormant_guard_status,
+    )
+
+    count = count_item_hooks(src)
+    status = dormant_guard_status(
+        is_global=is_global, hook_count=count,
+        assume_yes=assume_yes, allow_dormant=allow_dormant,
+    )
+    if status == GUARD_OK:
+        return True
+
+    bold = Console.bold
+    plural = "hook" if count == 1 else "hooks"
+    Console.print()
+    Console.print(Console._colorize(
+        Console.BOLD + Console.YELLOW,
+        f"⚠  {name} ships {count} {plural} that will NOT run when installed globally.",
+    ))
+    Console.print(Console._colorize(
+        Console.BOLD + Console.YELLOW,
+        "   Global installs wire no hooks — you lose that functionality.",
+    ))
+    Console.print(f"   To keep the {plural}, run {Console.cmd(f'aec install skill {name}')} "
+                  "from inside a repo.")
+    Console.print()
+
+    if status == GUARD_ALLOWED:
+        Console.warning("Proceeding (--allow-dormant-hooks).")
+        return True
+    if status == GUARD_REFUSE:
+        Console.error(
+            f"Refusing global install of hook-bearing {name}. "
+            "Re-run from inside a repo, or pass --allow-dormant-hooks to override."
+        )
+        return False
+    # GUARD_CONFIRM — interactive
+    try:
+        resp = input(f"  Install {bold(name)} globally anyway, hooks dormant? [y/N]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        resp = "n"
+    if resp in ("y", "yes"):
+        return True
+    Console.info("Install cancelled. Tip: install from inside a repo to wire the hooks.")
+    return False
 
 
 def maybe_offer_blurb(root: Path, accept: bool = False) -> None:

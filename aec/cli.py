@@ -99,6 +99,10 @@ if HAS_TYPER:
         allow_unsigned: bool = typer.Option(
             False, "--allow-unsigned", help="Allow an unsigned --org-config source"
         ),
+        allow_dormant_hooks: bool = typer.Option(
+            False, "--allow-dormant-hooks",
+            help="Allow installing a hook-bearing skill globally (hooks stay dormant)",
+        ),
     ):
         """Install a skill, rule, agent, or MCP server (or apply an org config with --org-config)."""
         if org_config:
@@ -114,7 +118,8 @@ if HAS_TYPER:
             Console.error("install requires <type> <name> (or use --org-config <url|path>)")
             raise typer.Exit(code=2)
         from .commands.install_cmd import run_install
-        run_install(item_type=item_type, name=name, global_flag=global_flag, yes=yes)
+        run_install(item_type=item_type, name=name, global_flag=global_flag, yes=yes,
+                    allow_dormant_hooks=allow_dormant_hooks)
 
     @app.command("uninstall")
     def uninstall_cmd(
