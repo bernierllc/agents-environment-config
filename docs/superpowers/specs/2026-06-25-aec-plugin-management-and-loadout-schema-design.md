@@ -101,7 +101,7 @@ items.
 
 | Field | Required | Description |
 |---|---|---|
-| `schema` | yes | Loadout schema URL + version, e.g. `https://github.com/mbernier/loadout/schema/v1` |
+| `schema` | yes | Opaque loadout schema version identifier, e.g. `loadout/v1`. **Never fetched over the network** — AEC validates the file against its *vendored* schema and uses this field only to select which schema version to validate against. (Phase 2 may publish a resolvable URL, but resolution is never required.) |
 | `item_type` | yes | `plugin` \| `skill` \| `agent` \| `rule` |
 | `name` | yes | Stable identifier (kebab-case) |
 | `version` | yes | Semver |
@@ -125,7 +125,7 @@ install strategy per plugin.
 
 ```jsonc
 {
-  "schema": "https://github.com/mbernier/loadout/schema/v1",
+  "schema": "loadout/v1",
   "item_type": "plugin",
   "name": "ponytail",
   "version": "1.0.0",
@@ -155,7 +155,9 @@ install strategy per plugin.
 //   claude plugin install <plugin>
 ```
 
-`marketplace` plugins are Claude-only; `supports` is implicitly `["claude"]`.
+`marketplace` plugins are Claude-only; `supports` is implicitly `["claude"]`. If
+`claude` is not in `detect_agents()`, AEC skips the install with a note (mirroring the
+per-tool "supported but not detected ⇒ skipped" rule) rather than running the commands.
 
 #### `install_type: "per-tool"` (e.g. ponytail)
 
@@ -196,16 +198,19 @@ may be required.
 
 ### Validation
 
-A JSON Schema (`loadout/schema/v1/plugin.schema.json`, etc.) is the source of truth.
-AEC validates every loadout file it reads (vendored or fetched) before acting on it,
-and reports schema errors clearly rather than half-installing.
+A JSON Schema is the source of truth, vendored in this repo at
+`docs/loadout/schema/plugin.schema.json` (and `skill`/`agent`/`rule` siblings). The
+schema version lives in each file's `schema` field, not in the directory path. AEC
+validates every loadout file it reads (vendored or fetched) against the vendored schema
+before acting on it, and reports schema errors clearly rather than half-installing.
 
 ### Documentation deliverable (Phase 1, this repo)
 
 `docs/loadout/` containing:
 - `README.md` — what loadout is, why publishers should ship it, the file-naming rule.
-- `plugin.schema.json`, `skill.schema.json`, `agent.schema.json`, `rule.schema.json`
-  — JSON Schema definitions.
+- `schema/plugin.schema.json`, `schema/skill.schema.json`, `schema/agent.schema.json`,
+  `schema/rule.schema.json` — JSON Schema definitions.
+- `schema/` — the JSON Schema files above.
 - `examples/` — annotated `plugin.json`, `plugin.yaml`, and one of each other item type
   in both formats.
 - The AEC `README.md` links to `docs/loadout/` and suggests publishers adopt it.
@@ -227,6 +232,11 @@ and reports schema errors clearly rather than half-installing.
 
 Both paths converge on a validated loadout `plugin.json`; everything downstream is
 identical.
+
+**Known limitation (Phase 1):** the `plugin.json` / `.loadout/plugin.json` convention
+means a URL install exposes **one plugin per repo**. Multi-plugin repos via URL are out
+of scope for Phase 1 (the curated registry can still vendor each separately). Stated so
+it isn't mistaken for a gap later.
 
 ### Install handlers
 
@@ -276,7 +286,12 @@ preferences key lets a user force any executable type down to instructions-only 
 - `list`, `export`, `apply` iterate `ITEM_TYPES`, so plugins flow through once added.
   `apply` re-runs the install handler for each recorded plugin (portable manifest =
   reproducible plugin set). This satisfies the "support installation through the
-  manifest features we support" requirement.
+  manifest features we support" requirement. **Interactivity:** `apply` prompts once
+  up front ("apply N plugins?"), then runs each plugin's handler with assume-yes for
+  confirm-then-run types so it doesn't stop on every plugin; `external` plugins still
+  print instructions only. `--yes` skips the up-front prompt too. (Confirm this matches
+  how `apply` handles other item types during implementation; match the existing
+  behavior if it differs.)
 - `outdated`: compares installed version to the registry `plugin.json` version. For
   URL-only plugins with no tracked registry entry, reports **"version unknown"** rather
   than diffing a remote.
@@ -307,7 +322,10 @@ follow-on captured here and in `plans/ROADMAP.md`.
    `external` example, exercised end to end.
 
 ### Phase 2 — extract the open standard (after Phase 1 verified)
-1. Create `github.com/mbernier/loadout`.
+> The `github.com/mbernier/loadout` repo already exists and is cloned locally at
+> `~/projects/loadout`. No action there until Phase 2 — listed here so the destination
+> is known.
+1. ~~Create `github.com/mbernier/loadout`.~~ (done — cloned at `~/projects/loadout`)
 2. Move schema + docs there; add a polished standalone README.
 3. Repoint AEC's README/docs links to the new repo; keep a thin pointer in
    `docs/loadout/`.
