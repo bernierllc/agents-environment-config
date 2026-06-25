@@ -1,6 +1,6 @@
 # AEC Roadmap
 
-**Last reviewed:** 2026-05-19 — Alex (PM)
+**Last reviewed:** 2026-06-25 — Matt (plugin-management Phase 1 in flight)
 **Current shipped version:** v2.38.1
 
 ## What AEC is
@@ -22,6 +22,7 @@ Work that is in flight or unblocked and at the front of the queue.
 | Initiative | Why now | Plan file | Status |
 |---|---|---|---|
 | Hook management completion (Task 13/14/16 + `aec run-script`) | Library shipped in v2.32.0 but no caller invokes it — installed skills that ship hooks today do nothing. Closing the gap unlocks every downstream package that depends on hooks. | `docs/superpowers/plans/2026-04-21-aec-hook-management.md` *(active worktree — do not edit)* | In-flight (parallel agent) |
+| Plugin management + loadout schema (Phase 1) | Adds a fifth item type (plugins) installed via a portable `plugin.json` loadout manifest, with three install types (marketplace / per-tool / external) and a never-auto-install guarantee. Lets AEC install plugins and seeds the loadout manifest format. | `docs/superpowers/plans/2026-06-25-aec-plugin-management-loadout.md` | In-flight (`feature/plugin-management-loadout-schema`) |
 
 **Exit criteria for Tier 1:** `aec install <item-with-hooks>` actually wires
 hooks into Claude/Gemini/Cursor/Git; `aec uninstall` removes them cleanly;
@@ -37,6 +38,7 @@ pass before tasks are picked up.
 | Initiative | Hypothesis / expected outcome | Plan file | Confidence |
 |---|---|---|---|
 | Org-config Phase 2 — signing, multi-org, propagation | Phase 1 made org configs work for a single unsigned org. Phase 2 makes them safe (signed), multi-org-aware, and refresh-aware — the bar for any real org adoption. | `docs/superpowers/plans/2026-05-19-org-config-overlay-phase-2.md` *(skeleton — open questions inside)* | Med — 6 open Qs to resolve before tasks |
+| Loadout open-standard extraction (Phase 2) | Move the `loadout` / `plugin.json` schema + docs out of AEC into the open repo `github.com/mbernier/loadout` so any AI tool — not just AEC — can publish and consume loadout manifests, making loadout a tool-neutral standard. | `docs/superpowers/specs/2026-06-25-aec-plugin-management-and-loadout-schema-design.md` (Phase 2; repo cloned at `~/projects/loadout`) | Med — gated on Phase 1 shipping + intent to publish |
 
 **Gate to advance to Now:** answer the 6 open questions in the Phase-2 skeleton
 (esp. crypto library, conflict-UX shape, managed-mode propagation timing) and
@@ -52,6 +54,7 @@ needs a stronger user signal before we commit engineering time.
 | Initiative | Strategic hypothesis | Plan file | Signal to advance |
 |---|---|---|---|
 | AEC packages + agent-native onboarding | Today users (and their agents) drive AEC by remembering commands. A package + template system would let an agent reason about the project and `aec install` the right bundle. Natural successor to org-config. | `docs/superpowers/plans/2026-04-10-aec-packages-agent-onboarding.md` | Phase 2 of org-config shipped + first real external user asking for bundled setup |
+| Loadout adoption PRs (Phase 3) | Add `plugin.json` loadout files to the items and plugins we ship, and open PRs to the upstream plugins we depend on — seeding real-world loadout adoption beyond AEC itself. | `docs/superpowers/specs/2026-06-25-aec-plugin-management-and-loadout-schema-design.md` (Phase 3) | Phase 2 extraction landed + a second tool or plugin author consuming loadout |
 
 ---
 
