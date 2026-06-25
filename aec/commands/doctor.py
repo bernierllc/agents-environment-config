@@ -461,6 +461,29 @@ def run_doctor() -> Tuple[bool, List[str]]:
         else:
             Console.success("All agent config paths are directories")
             checks_passed += 1
+
+        # Check 5d: recorded hooks that have drifted out of the settings files
+        from ..lib.hooks.drift import Drift, verify_repo
+
+        total_drift = 0
+        for repo in tracked:
+            if not repo.exists:
+                continue
+            drifted = [s for s in verify_repo(repo.path) if s.status is not Drift.OK]
+            if drifted:
+                total_drift += len(drifted)
+                Console.error(f"{len(drifted)} drifted hook(s) in {repo.path}")
+
+        checks_total += 1
+        if total_drift:
+            Console.info(f"  Restore with: {Console.cmd('aec hooks verify --repair')}")
+            issues.append(
+                f"{total_drift} recorded hook(s) drifted from settings "
+                f"(fix with: aec hooks verify --repair)"
+            )
+        else:
+            Console.success("All recorded hooks present in settings")
+            checks_passed += 1
     else:
         Console.info("No tracked repos to check")
 

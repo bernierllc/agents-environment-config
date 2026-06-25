@@ -127,10 +127,16 @@ if HAS_TYPER:
         name: str = typer.Argument(..., help="Name of the item to uninstall"),
         global_flag: bool = typer.Option(False, "-g", "--global", help="Uninstall globally"),
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+        repos: Optional[str] = typer.Option(
+            None, "--repos",
+            help="For a global uninstall, also remove repo-scoped installs: "
+                 "all | none | comma-separated paths (default: none)",
+        ),
     ):
         """Remove an installed skill, rule, or agent."""
         from .commands.uninstall import run_uninstall
-        run_uninstall(item_type=item_type, name=name, global_flag=global_flag, yes=yes)
+        run_uninstall(item_type=item_type, name=name, global_flag=global_flag,
+                      yes=yes, repos=repos)
 
     @app.command("list")
     def list_cmd(
