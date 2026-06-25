@@ -111,4 +111,4 @@ AEC never executes external steps. It prints the download location and instructi
 
 ## Schema version
 
-The `schema` field (`loadout/v1`) identifies which vendored schema to validate against. It is **never resolved over the network**. The schemas live at `docs/loadout/schema/` in this repo.
+The `schema` field (`loadout/v1`) identifies which vendored schema to validate against. It is **never resolved over the network**. For Phase 1 the schemas live here in `docs/loadout/schema/`. The canonical published home (matching each schema's `$id`) will be the `mbernier/loadout` repository in a later phase.

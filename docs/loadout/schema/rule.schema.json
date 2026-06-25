@@ -11,11 +11,11 @@
     "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
     "version": { "type": "string" },
     "description": { "type": "string" },
-    "source": { "type": "string" },
-    "homepage": { "type": "string" },
+    "source": { "type": "string", "format": "uri" },
+    "homepage": { "type": "string", "format": "uri" },
     "author": {
       "type": "object",
-      "properties": { "name": { "type": "string" }, "url": { "type": "string" } },
+      "properties": { "name": { "type": "string" }, "url": { "type": "string", "format": "uri" } },
       "additionalProperties": false
     },
     "license": { "type": "string" },
