@@ -8,12 +8,17 @@ except ImportError:
     HAS_TYPER = False
 
 from ..lib.console import Console
+from ..lib import preferences as lib_preferences
 from ..lib.preferences import (
     OPTIONAL_FEATURES,
     get_preference,
     set_preference,
     reset_preference,
 )
+
+# String-valued settings (stored under preferences "settings", not the boolean
+# optional_rules). Maps key -> allowed values.
+STRING_SETTINGS = {"plugins.execution": {"default", "instructions-only"}}
 
 if HAS_TYPER:
     app = typer.Typer(help="Manage optional feature preferences")
@@ -38,9 +43,24 @@ def list_preferences() -> None:
         Console.print(f"  {Console.dim(feature['description'])}")
         Console.print()
 
+    for key in STRING_SETTINGS:
+        value = lib_preferences.get_setting(key) or "default"
+        Console.print(f"  {key:<25} {Console._colorize(Console.GREEN, value)}")
+        Console.print()
+
 
 def set_pref(feature: str, value: str) -> None:
     """Set an optional feature on or off."""
+    if feature in STRING_SETTINGS:
+        allowed = STRING_SETTINGS[feature]
+        if value not in allowed:
+            Console.error(f"Invalid value: {value}.")
+            Console.print(f"Allowed values: {', '.join(sorted(allowed))}")
+            raise SystemExit(1)
+        lib_preferences.set_setting(feature, value)
+        Console.success(f"Set: {feature} = {value}")
+        return
+
     if feature not in OPTIONAL_FEATURES:
         Console.error(f"Unknown feature: {feature}")
         Console.print(f"Available features: {', '.join(OPTIONAL_FEATURES.keys())}")
@@ -59,6 +79,14 @@ def set_pref(feature: str, value: str) -> None:
 
 def reset_pref(feature: str) -> None:
     """Reset a preference so the user will be re-prompted."""
+    if feature in STRING_SETTINGS:
+        # ponytail: lib has no settings-delete; set back to "default" (the
+        # unset sentinel). Add lib_preferences.clear_setting() if a real
+        # "remove the key" distinction is ever needed.
+        lib_preferences.set_setting(feature, "default")
+        Console.success(f"Reset: {feature} = default")
+        return
+
     reset_preference(feature)
     Console.success(f"Reset: {feature} (will prompt on next CLI run)")
 

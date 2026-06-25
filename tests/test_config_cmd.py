@@ -24,3 +24,44 @@ class TestConfig:
         assert callable(run_config_list)
         assert callable(run_config_set)
         assert callable(run_config_reset)
+
+
+@pytest.fixture
+def prefs_env(temp_dir, monkeypatch):
+    """Isolate preferences storage to a temp file."""
+    monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+    monkeypatch.setattr(
+        "aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json"
+    )
+    return temp_dir
+
+
+class TestPluginsExecutionSetting:
+    def test_set_persists_string_value(self, prefs_env):
+        from aec.commands.preferences import set_pref
+        from aec.lib.preferences import get_setting
+
+        set_pref("plugins.execution", "instructions-only")
+        assert get_setting("plugins.execution") == "instructions-only"
+
+    def test_invalid_value_exits_nonzero(self, prefs_env):
+        from aec.commands.preferences import set_pref
+
+        with pytest.raises(SystemExit):
+            set_pref("plugins.execution", "bogus")
+
+    def test_reset_returns_to_default(self, prefs_env):
+        from aec.commands.preferences import set_pref, reset_pref
+        from aec.lib.preferences import get_setting
+
+        set_pref("plugins.execution", "instructions-only")
+        reset_pref("plugins.execution")
+        value = get_setting("plugins.execution")
+        assert value in (None, "default")
+
+    def test_list_shows_string_setting(self, prefs_env, capsys):
+        from aec.commands.preferences import list_preferences
+
+        list_preferences()
+        out = capsys.readouterr().out
+        assert "plugins.execution" in out
