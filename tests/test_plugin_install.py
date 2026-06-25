@@ -141,6 +141,23 @@ def test_install_plugin_marketplace_without_claude_is_skipped():
     assert result["executed"] is False
 
 
+def test_install_plugin_marketplace_instructions_only_never_runs():
+    # never-auto-install guarantee: pref=instructions-only must downgrade the
+    # marketplace path to print-only even with claude detected and confirm->True.
+    ran, printed = [], []
+    m = {"schema": "loadout/v1", "item_type": "plugin", "name": "p",
+         "version": "1.0.0", "description": "x", "source": "https://x",
+         "install_type": "marketplace",
+         "install": {"marketplace": "a/b", "plugin": "b"}}
+    result = install_plugin(m, {"claude": {}}, runner=lambda c: ran.append(c),
+                            confirm=lambda *_: True, printer=lambda s: printed.append(s),
+                            pref="instructions-only")
+    assert ran == []
+    assert result["executed"] is False
+    assert any("a/b" in p for p in printed)
+    assert any("plugin install b" in p for p in printed)
+
+
 from aec.lib.plugin_install import uninstall_plugin
 
 

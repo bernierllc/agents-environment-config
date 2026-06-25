@@ -23,12 +23,16 @@ def effective_policy(install_type: str, *, has_run: bool, pref: str | None) -> s
     return "run"
 
 
-def install_marketplace(manifest, *, runner, confirm) -> List[str]:
+def _marketplace_cmds(manifest) -> List[List[str]]:
     blk = manifest["install"]
-    cmds = [
+    return [
         ["claude", "plugin", "marketplace", "add", blk["marketplace"]],
         ["claude", "plugin", "install", blk["plugin"]],
     ]
+
+
+def install_marketplace(manifest, *, runner, confirm) -> List[str]:
+    cmds = _marketplace_cmds(manifest)
     if not confirm(cmds):
         return []
     for cmd in cmds:
@@ -86,8 +90,15 @@ def install_plugin(manifest, detected, *, runner, confirm, printer, pref) -> Dic
     if install_type == "marketplace":
         # ponytail: install_marketplace doesn't check detection; guard here so a
         # claude-less environment skips cleanly instead of running claude commands.
-        executed = bool(install_marketplace(manifest, runner=runner, confirm=confirm)) \
-            if "claude" in detected else False
+        if "claude" not in detected:
+            executed = False
+        elif effective_policy("marketplace", has_run=True, pref=pref) == "instructions":
+            # never-auto-install: print-only, mirroring per-tool/external downgrade.
+            for cmd in _marketplace_cmds(manifest):
+                printer(f"run manually -> {' '.join(cmd)}")
+            executed = False
+        else:
+            executed = bool(install_marketplace(manifest, runner=runner, confirm=confirm))
     elif install_type == "per-tool":
         summary = install_per_tool(manifest, targets, runner=runner, confirm=confirm,
                                    printer=printer, pref=pref)
