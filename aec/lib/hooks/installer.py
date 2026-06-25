@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, List, Sequence
 
 from ..atomic_write import atomic_write_json
+from ..console import Console
 from . import git_blocks, state as hook_state
 from .fingerprint import fingerprint_hook
 from .git_hooks_path import HUSKY_V8_BOOTSTRAP, resolve_hooks_dir
@@ -21,6 +22,23 @@ from .validator import validate_hooks_file
 
 
 _RUN_SCRIPT_PREFIX = "aec run-script"
+
+# Per-agent config directory a hook write lands under. Cursor/Claude/Gemini all
+# expect a *directory* here; a stray file at the same path (e.g. a hand-written
+# `.cursor` JSON, which Cursor itself never reads — it uses a `.cursor/` dir)
+# makes mkdir(exist_ok=True) raise [Errno 17]. We skip that agent rather than
+# crash or clobber the user's file. `aec doctor` surfaces the same conflict.
+_AGENT_CONFIG_DIR = {"claude": ".claude", "gemini": ".gemini", "cursor": ".cursor"}
+
+
+def config_dir_blocked(repo_root: Path, agent: str) -> Path | None:
+    """Return the conflicting path if `agent`'s config dir is occupied by a
+    non-directory (a file where a directory is expected), else None."""
+    rel = _AGENT_CONFIG_DIR.get(agent)
+    if rel is None:
+        return None
+    path = repo_root / rel
+    return path if path.exists() and not path.is_dir() else None
 
 
 def _resolve_script_commands(hf, item_dir: Path) -> Dict[str, str]:
@@ -171,6 +189,15 @@ def install_item_hooks(
     )
 
     for agent in agents:
+        blocked = config_dir_blocked(repo_root, agent)
+        if blocked is not None:
+            reason = f"{blocked} is a file, not the {agent} config directory"
+            st.hooks_skipped.append({"agent": agent, "reason": reason})
+            Console.warning(
+                f"skipping {agent} hooks: {reason}. Move it aside "
+                f"(e.g. `mv {blocked} {blocked}.bak`) to enable {agent} hooks."
+            )
+            continue
         entries = translate_to_agent(filtered, agent, resolved_commands=resolved)
         if agent == "claude":
             _install_claude(repo_root, entries, st, item_version)
