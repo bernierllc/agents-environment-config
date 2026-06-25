@@ -87,7 +87,7 @@ if HAS_TYPER:
 
     @app.command("install")
     def install_cmd(
-        item_type: Optional[str] = typer.Argument(None, help="Type: skill, rule, agent, or mcp"),
+        item_type: Optional[str] = typer.Argument(None, help="Type: skill, rule, agent, mcp, or plugin"),
         name: Optional[str] = typer.Argument(None, help="Name of the item to install"),
         global_flag: bool = typer.Option(False, "-g", "--global", help="Install globally"),
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
@@ -118,7 +118,7 @@ if HAS_TYPER:
 
     @app.command("uninstall")
     def uninstall_cmd(
-        item_type: str = typer.Argument(..., help="Type: skill, rule, agent, or mcp"),
+        item_type: str = typer.Argument(..., help="Type: skill, rule, agent, mcp, or plugin"),
         name: str = typer.Argument(..., help="Name of the item to uninstall"),
         global_flag: bool = typer.Option(False, "-g", "--global", help="Uninstall globally"),
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
@@ -157,7 +157,7 @@ if HAS_TYPER:
 
     @app.command("info")
     def info_cmd(
-        item_type: str = typer.Argument(..., help="Type: skill, rule, or agent"),
+        item_type: str = typer.Argument(..., help="Type: skill, rule, agent, mcp, or plugin"),
         name: str = typer.Argument(..., help="Name of the item"),
     ):
         """Show detailed metadata for an installed item."""
@@ -671,14 +671,14 @@ else:
 
         # install
         install_new = subparsers.add_parser("install", help="Install a skill, rule, or agent")
-        install_new.add_argument("item_type", help="Type: skill, rule, or agent")
+        install_new.add_argument("item_type", help="Type: skill, rule, agent, mcp, or plugin")
         install_new.add_argument("name", help="Name of the item")
         install_new.add_argument("-g", "--global", dest="global_flag", action="store_true", help="Install globally")
         install_new.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
 
         # uninstall
         uninstall_parser = subparsers.add_parser("uninstall", help="Remove a skill, rule, or agent")
-        uninstall_parser.add_argument("item_type", help="Type: skill, rule, or agent")
+        uninstall_parser.add_argument("item_type", help="Type: skill, rule, agent, mcp, or plugin")
         uninstall_parser.add_argument("name", help="Name of the item")
         uninstall_parser.add_argument("-g", "--global", dest="global_flag", action="store_true", help="Uninstall globally")
         uninstall_parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
@@ -701,7 +701,7 @@ else:
 
         # info
         info_parser = subparsers.add_parser("info", help="Show detailed item metadata")
-        info_parser.add_argument("item_type", help="Type: skill, rule, or agent")
+        info_parser.add_argument("item_type", help="Type: skill, rule, agent, mcp, or plugin")
         info_parser.add_argument("name", help="Name of the item")
 
         # export
