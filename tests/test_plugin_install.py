@@ -87,3 +87,13 @@ def test_per_tool_pref_downgrades_run_to_instructions():
         printer=lambda s: printed.append(s), pref="instructions-only")
     assert ran == []
     assert printed  # claude's command was printed, not executed
+
+
+def test_per_tool_declined_confirm_does_not_run():
+    ran = []
+    summary = install_per_tool(
+        _manifest(), ["claude"],
+        runner=lambda c: ran.append(c), confirm=lambda *_: False,
+        printer=lambda s: None, pref=None)
+    assert ran == []
+    assert summary["claude"] == "declined"
