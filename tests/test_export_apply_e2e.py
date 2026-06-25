@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -264,3 +265,48 @@ def test_apply_declined_batch_prompt_installs_nothing(tmp_path, monkeypatch, cap
     if mp.exists():
         m = load_manifest(mp)
         assert not m["global"].get("plugins"), "declined plugin must not be recorded"
+
+
+def test_plugins_apply_even_when_item_pass_fails(tmp_path, monkeypatch):
+    """Regression guard: a failing item pass must not skip the plugin pass,
+    and the item-failure exit code must still surface."""
+    monkeypatch.delenv("PROJECTS_DIR", raising=False)
+    manifest_file = tmp_path / "plug.aec.json"
+
+    home = tmp_path / "home"
+    (home / ".agents-environment-config").mkdir(parents=True)
+    repo = _make_source_repo(home)  # provides my-skill in the catalog
+    plugin_dir = repo / "plugins" / "impeccable-style"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "plugin.json").write_text(json.dumps(_external_plugin_loadout()))
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("PROJECTS_DIR", str(home / "projects"))
+
+    # one item (so a plan exists -> execute_apply runs) plus one plugin
+    manifest_file.write_text(json.dumps({
+        "schemaVersion": 1,
+        "global": {"skills": [{"name": "my-skill", "version": "1.0.0"}],
+                   "rules": [], "agents": [], "mcps": [],
+                   "plugins": [{"name": "impeccable-style", "version": "1.0.0"}]},
+        "repos": {},
+    }))
+
+    source_dirs = _source_dirs(repo)
+    source_dirs["plugins"] = repo / "plugins"
+
+    # force the item pass to report an error (lightest path: _print_result keys on result.errors)
+    failed_result = SimpleNamespace(
+        applied=[], skipped=[],
+        errors=[(SimpleNamespace(item=SimpleNamespace(name="my-skill")), "boom")],
+    )
+
+    with patch("aec.commands.apply_cmd.get_repo_root", return_value=repo), patch(
+        "aec.commands.apply_cmd.get_source_dirs", return_value=source_dirs
+    ), patch("aec.commands.apply_cmd.execute_apply", return_value=failed_result):
+        with pytest.raises(SystemExit) as exc:
+            run_apply(file=str(manifest_file), yes=True)
+    assert exc.value.code == 1  # item failure still surfaced
+
+    # (b) the key assertion: plugin pass STILL ran despite the item failure
+    m = load_manifest(home / ".agents-environment-config" / "installed-manifest.json")
+    assert "impeccable-style" in m["global"]["plugins"]
