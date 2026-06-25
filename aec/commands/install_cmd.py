@@ -485,7 +485,24 @@ def _install_plugin(name_or_url: str, global_flag: bool, yes: bool) -> None:
         Console.error(f"Invalid plugin manifest: {e}")
         raise SystemExit(1)
 
+    name = manifest_def["name"]
+    version = manifest_def.get("version", "0.0.0")
     pref = get_setting("plugins.execution")
+    manifest_file = _manifest_path()
+    manifest = load_manifest(manifest_file)
+    scope_key = "global" if scope.is_global else str(scope.repo_path.resolve())
+
+    # Warn if already installed (mirrors _install_mcp)
+    from ..lib.manifest_v2 import get_installed
+    existing = get_installed(manifest, scope_key, "plugins")
+    if name in existing and not yes:
+        try:
+            resp = input(f"  {name} already installed. Reinstall? [y/N]: ").strip().lower()
+        except EOFError:
+            resp = "n"
+        if resp != "y":
+            Console.info("Skipped.")
+            return
 
     def runner(cmd):
         return subprocess.run(cmd)
@@ -493,7 +510,13 @@ def _install_plugin(name_or_url: str, global_flag: bool, yes: bool) -> None:
     def confirm(*args) -> bool:
         if yes:
             return True
-        prompt = f"  Run: {' '.join(args[-1])}? [y/N]: " if args else "  Proceed? [y/N]: "
+        cmds = args[-1] if args else []
+        # marketplace passes a list of command-lists; per-tool passes one flat list
+        if cmds and isinstance(cmds[0], list):
+            shown = "; ".join(" ".join(c) for c in cmds)
+        else:
+            shown = " ".join(cmds)
+        prompt = f"  Run: {shown}? [y/N]: " if shown else "  Proceed? [y/N]: "
         try:
             return input(prompt).strip().lower() == "y"
         except EOFError:
@@ -504,11 +527,6 @@ def _install_plugin(name_or_url: str, global_flag: bool, yes: bool) -> None:
         runner=runner, confirm=confirm, printer=Console.print, pref=pref,
     )
 
-    name = manifest_def["name"]
-    version = manifest_def.get("version", "0.0.0")
-    manifest_file = _manifest_path()
-    manifest = load_manifest(manifest_file)
-    scope_key = "global" if scope.is_global else str(scope.repo_path.resolve())
     record_plugin_install(
         manifest, scope_key, name, version,
         install_type=result["install_type"], targets=result["targets"],

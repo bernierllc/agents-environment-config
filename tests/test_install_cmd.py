@@ -544,3 +544,56 @@ class TestInstallPlugin:
         m = load_manifest(install_env["manifest_path"])
         assert m["global"]["plugins"]["imp"]["install_type"] == "external"
         assert ran == [], "external install must never execute anything"
+
+    def _write_marketplace_plugin(self, plugins_dir: Path) -> None:
+        plugin_dir = plugins_dir / "mkt"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text(json.dumps({
+            "schema": "loadout/v1",
+            "item_type": "plugin",
+            "name": "mkt",
+            "version": "2.0.0",
+            "description": "Marketplace test plugin.",
+            "source": "https://example.test",
+            "install_type": "marketplace",
+            "install": {"marketplace": "acme/market", "plugin": "acme-plugin"},
+        }))
+
+    def test_marketplace_confirm_decline_formats_prompt_without_raising(self, install_env):
+        # Regression: the confirm callback must format the marketplace list-of-lists
+        # shape. Drive the interactive path (yes=False, claude detected, decline).
+        from aec.commands.install_cmd import run_install
+        from aec.lib.manifest_v2 import load_manifest
+
+        plugins_dir = install_env["repo"] / "plugins"
+        self._write_marketplace_plugin(plugins_dir)
+
+        ran = []
+        patches = self._patch_repo_with_plugins(install_env, plugins_dir)
+        with patches[0], patches[1], \
+                patch("aec.lib.config.detect_agents", return_value={"claude": {}}), \
+                patch("builtins.input", return_value="n"), \
+                patch("subprocess.run", side_effect=lambda *a, **k: ran.append(a)):
+            # Must not raise (TypeError on the list-of-lists shape was the bug)
+            run_install(item_type="plugin", name="mkt", global_flag=True, yes=False)
+
+        assert ran == [], "declined marketplace install must run nothing"
+        m = load_manifest(install_env["manifest_path"])
+        assert m["global"]["plugins"]["mkt"]["install_type"] == "marketplace"
+
+    def test_marketplace_yes_records_install_type_and_targets(self, install_env):
+        from aec.commands.install_cmd import run_install
+        from aec.lib.manifest_v2 import load_manifest
+
+        plugins_dir = install_env["repo"] / "plugins"
+        self._write_marketplace_plugin(plugins_dir)
+
+        patches = self._patch_repo_with_plugins(install_env, plugins_dir)
+        with patches[0], patches[1], \
+                patch("aec.lib.config.detect_agents", return_value={"claude": {}}), \
+                patch("subprocess.run", return_value=None):
+            run_install(item_type="plugin", name="mkt", global_flag=True, yes=True)
+
+        entry = load_manifest(install_env["manifest_path"])["global"]["plugins"]["mkt"]
+        assert entry["install_type"] == "marketplace"
+        assert entry["targets"] == ["claude"]
