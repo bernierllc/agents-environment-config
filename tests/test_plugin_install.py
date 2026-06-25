@@ -139,3 +139,20 @@ def test_install_plugin_marketplace_without_claude_is_skipped():
                             confirm=lambda *_: True, printer=lambda s: None, pref=None)
     assert result["targets"] == []
     assert result["executed"] is False
+
+
+from aec.lib.plugin_install import uninstall_plugin
+
+
+def test_uninstall_plugin_no_block_prints_manual_cleanup():
+    # marketplace plugin with no uninstall block: must punt to manual cleanup,
+    # never fabricate/run a marketplace-uninstall command.
+    ran, printed = [], []
+    m = {"install_type": "marketplace",
+         "install": {"marketplace": "a/b", "plugin": "b"}}
+    result = uninstall_plugin(m, {"claude": {}}, runner=lambda c: ran.append(c),
+                              confirm=lambda *_: True, printer=lambda s: printed.append(s),
+                              pref=None)
+    assert ran == []
+    assert result["executed"] is False
+    assert any("manual cleanup may be required" in p for p in printed)
