@@ -1,0 +1,28 @@
+{
+  "schema": "loadout/v1",
+  "item_type": "plugin",
+  "name": "ponytail",
+  "version": "1.0.0",
+  "description": "Lazy-senior-dev review/build discipline for AI coding agents.",
+  "source": "https://github.com/DietrichGebert/ponytail",
+  "homepage": "https://github.com/DietrichGebert/ponytail",
+  "author": { "name": "Dietrich Gebert", "url": "https://github.com/DietrichGebert" },
+  "license": "MIT",
+  "supports": ["claude", "cursor", "gemini"],
+  "usage": "Type /ponytail in your agent to toggle modes.",
+  "install_type": "per-tool",
+  "install": {
+    "tools": {
+      "claude": { "steps": "Install per the instructions at https://github.com/DietrichGebert/ponytail (Claude Code setup section)." },
+      "cursor": { "steps": "Install per the instructions at https://github.com/DietrichGebert/ponytail (Cursor setup section)." },
+      "gemini": { "steps": "Install per the instructions at https://github.com/DietrichGebert/ponytail (Gemini setup section)." }
+    }
+  },
+  "uninstall": {
+    "tools": {
+      "claude": { "steps": "Remove ponytail per https://github.com/DietrichGebert/ponytail (uninstall section)." },
+      "cursor": { "steps": "Remove ponytail per https://github.com/DietrichGebert/ponytail (uninstall section)." },
+      "gemini": { "steps": "Remove ponytail per https://github.com/DietrichGebert/ponytail (uninstall section)." }
+    }
+  }
+}

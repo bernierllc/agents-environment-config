@@ -1,0 +1,23 @@
+{
+  "schema": "loadout/v1",
+  "item_type": "plugin",
+  "name": "impeccable-style",
+  "version": "1.0.0",
+  "description": "Impeccable visual design and styling guidance for AI coding agents.",
+  "source": "https://impeccable.style",
+  "homepage": "https://impeccable.style",
+  "license": "proprietary",
+  "supports": ["claude", "cursor", "gemini"],
+  "install_type": "external",
+  "install": {
+    "external": {
+      "download": "https://impeccable.style/#downloads",
+      "instructions": "1. Download the plugin from https://impeccable.style/#downloads. 2. In your agent, run /impeccable setup. 3. Follow the on-screen configuration steps."
+    }
+  },
+  "uninstall": {
+    "external": {
+      "instructions": "Remove the impeccable.style plugin files you installed and delete any /impeccable configuration from your agent."
+    }
+  }
+}

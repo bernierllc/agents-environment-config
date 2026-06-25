@@ -1,5 +1,6 @@
 """Tests for source management (fetch, discover available items)."""
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -155,3 +156,32 @@ class TestFetchLatest:
 
         with patch("aec.lib.sources.subprocess.run", fake_run):
             assert fetch_latest(tmp_path) is False
+
+
+from aec.lib.sources import _discover_available_plugins, discover_available
+
+
+def test_discover_plugins_finds_registry_entry(tmp_path):
+    d = tmp_path / "ponytail"
+    d.mkdir()
+    (d / "plugin.json").write_text(json.dumps({
+        "schema": "loadout/v1", "item_type": "plugin", "name": "ponytail",
+        "version": "1.0.0", "description": "lazy dev", "source": "https://x",
+        "install_type": "external",
+        "install": {"external": {"download": "https://x", "instructions": "go"}},
+    }))
+    found = _discover_available_plugins(tmp_path)
+    assert found["ponytail"]["version"] == "1.0.0"
+    assert found["ponytail"]["install_type"] == "external"
+
+
+def test_discover_available_dispatches_plugins(tmp_path):
+    d = tmp_path / "ponytail"
+    d.mkdir()
+    (d / "plugin.json").write_text(json.dumps({
+        "schema": "loadout/v1", "item_type": "plugin", "name": "ponytail",
+        "version": "1.0.0", "description": "x", "source": "https://x",
+        "install_type": "external",
+        "install": {"external": {"download": "https://x", "instructions": "go"}},
+    }))
+    assert "ponytail" in discover_available(tmp_path, "plugins")
