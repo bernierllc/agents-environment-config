@@ -101,3 +101,28 @@ class TestHooksVerifyCLI:
         repo_root.mkdir()
         result = self.runner.invoke(self.app, ["hooks", "verify", str(repo_root)])
         assert result.exit_code == 0
+
+    def test_repair_flag_fixes_drift_and_exits_zero(self, tmp_path):
+        from aec.lib.hooks.installer import install_item_hooks
+
+        repo_root = tmp_path / "repo"
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        item_dir.mkdir(parents=True, exist_ok=True)
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "on_file_edit",
+                "command": "echo hi", "description": "lint",
+            }],
+        }))
+        install_item_hooks(
+            item_type="skill", item_key="demo", item_version="1.0.0",
+            item_dir=item_dir, repo_root=repo_root, agents=["claude"],
+        )
+        (repo_root / ".claude/settings.json").write_text(json.dumps({"hooks": {}}))
+
+        result = self.runner.invoke(
+            self.app, ["hooks", "verify", str(repo_root), "--repair"]
+        )
+        assert result.exit_code == 0
+        settings = json.loads((repo_root / ".claude/settings.json").read_text())
+        assert settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"] == "echo hi"

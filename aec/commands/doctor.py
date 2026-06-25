@@ -434,6 +434,33 @@ def run_doctor() -> Tuple[bool, List[str]]:
         else:
             Console.success("All hook entries use correct nested structure")
             checks_passed += 1
+
+        # Check 5c: agent config path occupied by a file (blocks hook install)
+        from ..lib.hooks.installer import config_dir_blocked, _AGENT_CONFIG_DIR
+
+        blocked_dirs: list = []
+        for repo in tracked:
+            if not repo.exists:
+                continue
+            for agent_key in _AGENT_CONFIG_DIR:
+                conflict = config_dir_blocked(repo.path, agent_key)
+                if conflict is not None:
+                    blocked_dirs.append((conflict, agent_key))
+
+        checks_total += 1
+        if blocked_dirs:
+            for path, agent in blocked_dirs:
+                Console.error(
+                    f"{path} is a file, not the {agent} config directory "
+                    f"(blocks {agent} hooks; move it aside, e.g. mv {path} {path}.bak)"
+                )
+            issues.append(
+                f"{len(blocked_dirs)} agent config path(s) are files, not "
+                f"directories (hooks for those agents are skipped)"
+            )
+        else:
+            Console.success("All agent config paths are directories")
+            checks_passed += 1
     else:
         Console.info("No tracked repos to check")
 

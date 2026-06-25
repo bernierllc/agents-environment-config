@@ -40,6 +40,36 @@ class TestInstallItemHooksClaude:
         assert state["hooks_installed"][0]["agent"] == "claude"
 
 
+class TestInstallSkipsBlockedAgentDir:
+    def test_stray_cursor_file_skips_cursor_but_installs_others(self, tmp_path):
+        # Regression: a hand-written `.cursor` *file* (not the dir Cursor uses)
+        # must not crash the whole hooks install or get clobbered; cursor is
+        # skipped, claude still wired.
+        from aec.lib.hooks.installer import install_item_hooks
+        item_dir = tmp_path / "item"
+        _write_item(item_dir, hooks=[{
+            "id": "lint", "event": "on_file_edit",
+            "command": "echo hi", "description": "lint",
+        }])
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        (repo_root / ".cursor").write_text('{"formatOnSave": true}')
+
+        install_item_hooks(
+            item_type="skill", item_key="demo", item_version="1.0.0",
+            item_dir=item_dir, repo_root=repo_root, agents=["claude", "cursor"],
+        )
+
+        # user's stray file is untouched, claude hooks landed
+        assert (repo_root / ".cursor").read_text() == '{"formatOnSave": true}'
+        assert (repo_root / ".claude/settings.json").exists()
+        state = json.loads(
+            (repo_root / ".aec/installed-hooks/skill.demo.json").read_text()
+        )
+        assert [s["agent"] for s in state["hooks_skipped"]] == ["cursor"]
+        assert {h["agent"] for h in state["hooks_installed"]} == {"claude"}
+
+
 class TestInstallIdempotent:
     def test_install_twice_no_duplicates(self, tmp_path):
         from aec.lib.hooks.installer import install_item_hooks
