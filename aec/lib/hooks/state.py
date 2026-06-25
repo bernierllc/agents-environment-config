@@ -27,6 +27,11 @@ class ItemHookState:
     agents_targeted: List[str] = field(default_factory=list)
     skipped_versions: List[str] = field(default_factory=list)
     allow_custom_check: bool = False
+    # Provenance of this install: "repo" (wired locally) or "global". Today
+    # global installs wire no hooks, so every recorded hook is "repo".
+    # ponytail: per-state for now; move to per-hook-entry only once a global
+    # install can wire repo hooks (then one state file mixes both origins).
+    source_scope: str = "repo"
     schema_version: int = SCHEMA_VERSION
 
 
@@ -59,6 +64,7 @@ def load_state(repo_root: Path, item_type: str, item_key: str) -> ItemHookState:
         agents_targeted=list(data.get("agents_targeted", [])),
         skipped_versions=list(data.get("skipped_versions", [])),
         allow_custom_check=bool(data.get("allow_custom_check", False)),
+        source_scope=data.get("source_scope", "repo"),
         schema_version=int(data.get("schema_version", SCHEMA_VERSION)),
     )
 
@@ -76,6 +82,7 @@ def save_state(repo_root: Path, state: ItemHookState) -> None:
         "agents_targeted": state.agents_targeted,
         "skipped_versions": state.skipped_versions,
         "allow_custom_check": state.allow_custom_check,
+        "source_scope": state.source_scope,
     }
     atomic_write_json(path, payload)
 
