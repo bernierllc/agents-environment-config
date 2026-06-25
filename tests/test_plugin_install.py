@@ -111,3 +111,31 @@ def test_external_prints_and_never_runs():
     assert ran == []
     assert any("impeccable.style" in p for p in printed)
     assert any("/impeccable setup" in p for p in printed)
+
+
+from aec.lib.plugin_install import install_plugin
+
+
+def test_install_plugin_external_returns_result_and_prints_usage():
+    printed = []
+    m = {"schema": "loadout/v1", "item_type": "plugin", "name": "imp",
+         "version": "1.0.0", "description": "x", "source": "https://x",
+         "install_type": "external", "usage": "run /imp setup",
+         "install": {"external": {"download": "https://x", "instructions": "go"}}}
+    result = install_plugin(m, {"claude": {}}, runner=lambda c: None,
+                            confirm=lambda *_: True, printer=lambda s: printed.append(s),
+                            pref=None)
+    assert result["install_type"] == "external"
+    assert result["executed"] is False
+    assert any("run /imp setup" in p for p in printed)
+
+
+def test_install_plugin_marketplace_without_claude_is_skipped():
+    m = {"schema": "loadout/v1", "item_type": "plugin", "name": "p",
+         "version": "1.0.0", "description": "x", "source": "https://x",
+         "install_type": "marketplace",
+         "install": {"marketplace": "a/b", "plugin": "b"}}
+    result = install_plugin(m, {"cursor": {}}, runner=lambda c: None,
+                            confirm=lambda *_: True, printer=lambda s: None, pref=None)
+    assert result["targets"] == []
+    assert result["executed"] is False
