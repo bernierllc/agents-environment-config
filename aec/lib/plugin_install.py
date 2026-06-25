@@ -58,3 +58,11 @@ def install_per_tool(manifest, targets, *, runner, confirm, printer, pref) -> Di
                 printer(f"{tool}: {spec.get('steps', '')}")
             summary[tool] = "instructions"
     return summary
+
+
+def install_external(manifest, *, runner, printer) -> None:
+    # ponytail: external is instructions-only; runner accepted for a uniform
+    # signature but deliberately never called. Nothing here executes.
+    blk = manifest["install"]["external"]
+    printer(f"download: {blk['download']}")
+    printer(blk["instructions"])

@@ -97,3 +97,17 @@ def test_per_tool_declined_confirm_does_not_run():
         printer=lambda s: None, pref=None)
     assert ran == []
     assert summary["claude"] == "declined"
+
+
+from aec.lib.plugin_install import install_external
+
+
+def test_external_prints_and_never_runs():
+    ran, printed = [], []
+    m = {"install_type": "external", "install": {"external": {
+        "download": "https://impeccable.style/#downloads",
+        "instructions": "1. download 2. run /impeccable setup"}}}
+    install_external(m, runner=lambda c: ran.append(c), printer=lambda s: printed.append(s))
+    assert ran == []
+    assert any("impeccable.style" in p for p in printed)
+    assert any("/impeccable setup" in p for p in printed)
