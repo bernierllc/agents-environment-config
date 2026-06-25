@@ -118,3 +118,10 @@ class TestNewCommandHelp:
         assert result.returncode == 0
         assert "rules" in result.stdout
         assert "files" in result.stdout
+
+    def test_install_help_mentions_plugin(self):
+        result = subprocess.run(
+            [sys.executable, "-m", "aec", "install", "--help"],
+            capture_output=True, text=True,
+        )
+        assert "plugin" in result.stdout

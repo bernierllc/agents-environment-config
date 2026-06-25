@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 
@@ -11,25 +10,18 @@ import pytest
 
 @pytest.fixture
 def fresh_debug(monkeypatch, tmp_path):
-    """Reload the debug module against a temp HOME so each test is isolated."""
+    """Point debug at a temp HOME and reset its logger so each test is isolated.
+
+    No module reload: debug.py resolves the log path live from config.AEC_HOME
+    and aec.cli holds references into this same module object. Reloading would
+    orphan those references (the source of the old order-dependent failures).
+    """
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    # Reload config first so AEC_HOME picks up the patched home,
-    # then reload debug so LOG_DIR/LOG_FILE rebind to the new path.
     from aec.lib import config as _config
-    importlib.reload(_config)
+    monkeypatch.setattr(_config, "AEC_HOME", tmp_path / ".agents-environment-config")
     from aec.lib import debug as _debug
-    importlib.reload(_debug)
-    # Reset module-level state explicitly.
-    _debug._debug_enabled = False
-    _debug._logger = None
-    # The stdlib logging registry is global — drop any handlers from prior
-    # tests so the RotatingFileHandler is rebuilt against the current tmp HOME.
-    import logging as _logging
-    _stale = _logging.getLogger(_debug._LOGGER_NAME)
-    for h in list(_stale.handlers):
-        h.close()
-        _stale.removeHandler(h)
+    _debug.reset()
     return _debug
 
 
@@ -116,7 +108,7 @@ class TestSubprocessFailureLogging:
             cmd=["git", "pull"], returncode=1, stderr="bad"
         )
         assert result is None
-        assert not fresh_debug.LOG_FILE.exists()
+        assert not fresh_debug._log_file().exists()
 
     def test_writes_when_debug_enabled(self, fresh_debug):
         fresh_debug.enable_debug()
@@ -196,7 +188,7 @@ class TestCLIIntegration:
         combined = captured.out + captured.err
         assert "Traceback" in combined
         assert "synthetic crash for tests" in combined
-        log_file = fresh_debug.LOG_FILE
+        log_file = fresh_debug._log_file()
         assert log_file.exists(), f"expected log at {log_file}"
         content = log_file.read_text()
         assert "synthetic crash for tests" in content

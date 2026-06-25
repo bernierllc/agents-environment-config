@@ -8,8 +8,8 @@ from ..lib.config import INSTALLED_MANIFEST_V2
 from ..lib.manifest_v2 import load_manifest, get_installed, get_all_repo_scopes
 from ..lib.scope import find_tracked_repo, get_all_tracked_repos
 
-ITEM_TYPES = ("skills", "rules", "agents")
-TYPE_SINGULAR = {"skills": "skill", "rules": "rule", "agents": "agent"}
+ITEM_TYPES = ("skills", "rules", "agents", "plugins")
+TYPE_SINGULAR = {"skills": "skill", "rules": "rule", "agents": "agent", "plugins": "plugin"}
 
 
 def run_list(

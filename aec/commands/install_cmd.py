@@ -10,7 +10,9 @@ from ..lib import Console
 from ..lib.config import get_repo_root
 from ..lib.filesystem import installed_dst_path
 from ..lib.hooks import get_verification_playwright_hook
-from ..lib.manifest_v2 import load_manifest, save_manifest, record_install, record_mcp_install
+from ..lib.manifest_v2 import (
+    load_manifest, save_manifest, record_install, record_mcp_install, record_plugin_install,
+)
 from ..lib.global_install_prompt import prompt_multi_repo_global_or_proceed
 from ..lib.scope import resolve_scope, Scope, ScopeError
 from ..lib.sources import discover_available, get_source_dirs
@@ -19,8 +21,11 @@ from ..lib.skills_manifest import hash_skill_directory
 from ..lib.skill_dependencies import resolve_install_graph
 from ..lib.dep_approval_prompt import prompt_dep_install
 
-VALID_TYPES = ("skill", "rule", "agent", "mcp")
-TYPE_TO_PLURAL = {"skill": "skills", "rule": "rules", "agent": "agents", "mcp": "mcps"}
+VALID_TYPES = ("skill", "rule", "agent", "mcp", "plugin")
+TYPE_TO_PLURAL = {
+    "skill": "skills", "rule": "rules", "agent": "agents",
+    "mcp": "mcps", "plugin": "plugins",
+}
 
 
 def _manifest_path() -> Path:
@@ -41,6 +46,10 @@ def run_install(
 
     if item_type == "mcp":
         _install_mcp(name, global_flag, yes)
+        return
+
+    if item_type == "plugin":
+        _install_plugin(name, global_flag, yes)
         return
 
     plural = TYPE_TO_PLURAL[item_type]
@@ -425,6 +434,108 @@ def _install_mcp(name: str, global_flag: bool, yes: bool) -> None:
     Console.success(f"Installed MCP server: {name} v{item_info.get('version', '0.0.0')} {scope_label}")
     Console.print(f"  mcpServers entry written to {settings_path}")
     Console.print("  Restart Claude Code for the MCP server to take effect.")
+
+
+def _install_plugin(name_or_url: str, global_flag: bool, yes: bool) -> None:
+    """Install a plugin from the vendored registry (or a local plugin directory).
+
+    Mirrors ``_install_mcp``: resolve scope, locate the plugin's loadout manifest,
+    delegate to ``install_plugin`` (which honors the execution policy and never
+    auto-runs ``external`` plugins), then record the result in the manifest.
+    """
+    from ..lib.loadout import LoadoutError, find_loadout_file, load_loadout
+    from ..lib.plugin_install import install_plugin
+    from ..lib.config import detect_agents
+    from ..lib.preferences import get_setting
+
+    try:
+        scope = resolve_scope(global_flag)
+    except ScopeError as e:
+        Console.error(str(e))
+        raise SystemExit(1)
+
+    repo = get_repo_root()
+    if repo is None:
+        Console.error("AEC repo not found. Run `aec setup` first.")
+        raise SystemExit(1)
+
+    # Local directory path takes priority over a registry-name lookup.
+    # ponytail: local path is the MVP; a git-clone-from-URL upgrade path would
+    # clone name_or_url into a temp dir here, then load its loadout the same way.
+    candidate = Path(name_or_url).expanduser()
+    if candidate.is_dir() and find_loadout_file(candidate) is not None:
+        plugin_dir = candidate
+    else:
+        source_dirs = get_source_dirs()
+        source_dir = source_dirs.get("plugins")
+        if not source_dir or not source_dir.exists():
+            Console.error("No plugins source found.")
+            raise SystemExit(1)
+        available = discover_available(source_dir, "plugins")
+        if name_or_url not in available:
+            Console.error(f"Plugin not found: {name_or_url}")
+            if available:
+                Console.print(f"Available: {', '.join(sorted(available.keys()))}")
+            raise SystemExit(1)
+        plugin_dir = source_dir / available[name_or_url]["path"]
+
+    try:
+        manifest_def = load_loadout(plugin_dir)
+    except LoadoutError as e:
+        Console.error(f"Invalid plugin manifest: {e}")
+        raise SystemExit(1)
+
+    name = manifest_def["name"]
+    version = manifest_def.get("version", "0.0.0")
+    pref = get_setting("plugins.execution")
+    manifest_file = _manifest_path()
+    manifest = load_manifest(manifest_file)
+    scope_key = "global" if scope.is_global else str(scope.repo_path.resolve())
+
+    # Warn if already installed (mirrors _install_mcp)
+    from ..lib.manifest_v2 import get_installed
+    existing = get_installed(manifest, scope_key, "plugins")
+    if name in existing and not yes:
+        try:
+            resp = input(f"  {name} already installed. Reinstall? [y/N]: ").strip().lower()
+        except EOFError:
+            resp = "n"
+        if resp != "y":
+            Console.info("Skipped.")
+            return
+
+    def runner(cmd):
+        return subprocess.run(cmd)
+
+    def confirm(*args) -> bool:
+        if yes:
+            return True
+        cmds = args[-1] if args else []
+        # marketplace passes a list of command-lists; per-tool passes one flat list
+        if cmds and isinstance(cmds[0], list):
+            shown = "; ".join(" ".join(c) for c in cmds)
+        else:
+            shown = " ".join(cmds)
+        prompt = f"  Run: {shown}? [y/N]: " if shown else "  Proceed? [y/N]: "
+        try:
+            return input(prompt).strip().lower() == "y"
+        except EOFError:
+            return False
+
+    result = install_plugin(
+        manifest_def, detect_agents(),
+        runner=runner, confirm=confirm, printer=Console.print, pref=pref,
+    )
+
+    record_plugin_install(
+        manifest, scope_key, name, version,
+        install_type=result["install_type"], targets=result["targets"],
+    )
+    save_manifest(manifest, manifest_file)
+    record_item_install("plugin", name, version)
+
+    scope_label = "globally" if scope.is_global else f"to {scope.repo_path}"
+    Console.success(f"Installed plugin: {name} v{version} {scope_label}")
 
 
 def _post_install_playwright_pipeline(name: str, scope: Scope, yes: bool = False) -> None:

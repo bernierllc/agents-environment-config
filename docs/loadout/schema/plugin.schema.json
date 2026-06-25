@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mbernier/loadout/schema/plugin.schema.json",
+  "title": "loadout plugin manifest",
+  "type": "object",
+  "required": ["schema", "item_type", "name", "version", "description", "source", "install_type", "install"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "type": "string", "const": "loadout/v1" },
+    "item_type": { "type": "string", "const": "plugin" },
+    "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "version": { "type": "string" },
+    "description": { "type": "string" },
+    "source": { "type": "string", "format": "uri" },
+    "homepage": { "type": "string", "format": "uri" },
+    "author": {
+      "type": "object",
+      "properties": { "name": { "type": "string" }, "url": { "type": "string", "format": "uri" } },
+      "additionalProperties": false
+    },
+    "license": { "type": "string" },
+    "supports": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["claude", "cursor", "gemini", "qwen", "codex"] }
+    },
+    "usage": { "type": "string" },
+    "install_type": { "type": "string", "enum": ["marketplace", "per-tool", "external"] },
+    "install": { "type": "object" },
+    "uninstall": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "install_type": { "const": "marketplace" } }, "required": ["install_type"] },
+      "then": { "properties": { "install": { "required": ["marketplace", "plugin"] } } }
+    },
+    {
+      "if": { "properties": { "install_type": { "const": "per-tool" } }, "required": ["install_type"] },
+      "then": { "properties": { "install": { "required": ["tools"] } } }
+    },
+    {
+      "if": { "properties": { "install_type": { "const": "external" } }, "required": ["install_type"] },
+      "then": { "properties": { "install": { "required": ["external"] } } }
+    }
+  ]
+}

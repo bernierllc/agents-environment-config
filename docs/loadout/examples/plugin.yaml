@@ -1,0 +1,35 @@
+# Annotated loadout plugin manifest (per-tool install).
+# Parses to the same data as plugin.json.
+schema: loadout/v1            # const: identifies the loadout schema version
+item_type: plugin             # const for plugin manifests
+name: ponytail                # ^[a-z0-9][a-z0-9-]*$
+version: 1.0.0
+description: Lazy-senior-dev review/build discipline for AI coding agents.
+source: https://github.com/DietrichGebert/ponytail
+homepage: https://github.com/DietrichGebert/ponytail
+author:
+  name: Dietrich Gebert
+  url: https://github.com/DietrichGebert
+license: MIT
+supports:                     # intersected with detect_agents() at install time
+  - claude
+  - cursor
+  - gemini
+usage: Type /ponytail in your agent to toggle modes (lite | full | ultra).
+install_type: per-tool        # requires install.tools
+install:
+  tools:                      # one entry per supported tool; `steps` => instructions-only
+    claude:
+      steps: Follow the Claude install instructions in the ponytail README at https://github.com/DietrichGebert/ponytail
+    cursor:
+      steps: Follow the Cursor install instructions in the ponytail README at https://github.com/DietrichGebert/ponytail
+    gemini:
+      steps: Follow the Gemini install instructions in the ponytail README at https://github.com/DietrichGebert/ponytail
+uninstall:
+  tools:
+    claude:
+      steps: Remove the ponytail plugin files per the ponytail README.
+    cursor:
+      steps: Remove the ponytail plugin files per the ponytail README.
+    gemini:
+      steps: Remove the ponytail plugin files per the ponytail README.

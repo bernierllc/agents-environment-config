@@ -111,6 +111,20 @@ class TestListGlobal:
         output = capsys.readouterr().out
         assert "Tracked repos: 0" in output
 
+    def test_shows_installed_plugin(self, list_env, capsys):
+        # add a plugin to the global manifest scope
+        mp = list_env / "installed-manifest.json"
+        m = json.loads(mp.read_text())
+        m["global"]["plugins"] = {
+            "impeccable-style": {"version": "1.0.0", "install_type": "external", "installedAt": ""}
+        }
+        mp.write_text(json.dumps(m))
+        from aec.commands.list_cmd import run_list
+        run_list()
+        output = capsys.readouterr().out
+        assert "impeccable-style" in output
+        assert "plugin" in output
+
 
 class TestListTypeFilter:
     def test_filters_by_type_singular(self, list_env, capsys):

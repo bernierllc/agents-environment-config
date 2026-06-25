@@ -90,6 +90,7 @@ KNOWN_PREFERENCE_KEYS: frozenset[str] = frozenset({
     "report_retention_days",
     "global_install_multi_repo_threshold",
     "skip_global_install_prompt_for",
+    "plugins.execution",
 })
 
 

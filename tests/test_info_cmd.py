@@ -96,3 +96,26 @@ class TestInfo:
         run_info(item_type="skill", name="my-skill")
         output = capsys.readouterr().out
         assert "A test skill" in output
+
+    @patch("aec.commands.info.get_source_dirs")
+    def test_shows_plugin_loadout_fields(self, mock_dirs, info_env, capsys):
+        from aec.commands.info import run_info
+        plugin_dir = info_env / "plugins" / "impeccable-style"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text(json.dumps({
+            "schema": "loadout/v1", "item_type": "plugin", "name": "impeccable-style",
+            "version": "1.0.0", "description": "External style plugin.",
+            "source": "https://example.test", "install_type": "external",
+            "install": {"external": {"download": "https://example.test/d", "instructions": "go"}},
+        }))
+        mock_dirs.return_value = {
+            "skills": info_env / ".claude" / "skills",
+            "rules": info_env / ".agent-rules",
+            "agents": info_env / ".claude" / "agents",
+            "plugins": info_env / "plugins",
+        }
+        run_info(item_type="plugin", name="impeccable-style")
+        output = capsys.readouterr().out
+        assert "impeccable-style" in output
+        assert "external" in output
+        assert "https://example.test" in output

@@ -1,0 +1,16 @@
+# Annotated loadout skill manifest (common base only; no install block).
+schema: loadout/v1
+item_type: skill
+name: my-skill
+version: 1.0.0
+description: Example skill manifest using the loadout common base.
+source: https://example.com/my-skill
+homepage: https://example.com/my-skill
+author:
+  name: Example Author
+  url: https://example.com
+license: MIT
+supports:
+  - claude
+  - cursor
+usage: Invoke /my-skill in your agent after install.

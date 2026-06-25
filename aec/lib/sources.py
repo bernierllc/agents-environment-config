@@ -30,6 +30,8 @@ def discover_available(source_dir: Path, item_type: str) -> dict:
         return _discover_available_agents(source_dir)
     elif item_type == "mcps":
         return _discover_available_mcps(source_dir)
+    elif item_type == "plugins":
+        return _discover_available_plugins(source_dir)
     return {}
 
 
@@ -116,6 +118,36 @@ def _discover_available_mcps(source_dir: Path) -> dict:
     return mcps
 
 
+def _discover_available_plugins(source_dir: Path) -> dict:
+    """Discover available plugins from the vendored plugin registry.
+
+    Each plugin is a subdirectory containing a loadout manifest. A malformed
+    manifest is skipped (mirrors ``_discover_available_mcps``, which catches the
+    parse error and continues rather than aborting the whole scan).
+    """
+    from .loadout import LoadoutError, find_loadout_file, load_loadout
+
+    plugins = {}
+    if not source_dir.exists():
+        return plugins
+    for plugin_dir in sorted(source_dir.iterdir()):
+        if not plugin_dir.is_dir() or plugin_dir.name.startswith("."):
+            continue
+        if find_loadout_file(plugin_dir) is None:
+            continue
+        try:
+            data = load_loadout(plugin_dir)
+        except LoadoutError:
+            continue
+        plugins[data["name"]] = {
+            "version": data["version"],
+            "description": data.get("description", ""),
+            "path": plugin_dir.name,
+            "install_type": data.get("install_type", ""),
+        }
+    return plugins
+
+
 def get_source_dirs() -> dict:
     """Get source directories for each item type from the AEC repo.
 
@@ -132,6 +164,7 @@ def get_source_dirs() -> dict:
         "rules": repo / ".agent-rules",
         "agents": repo / ".claude" / "agents",
         "mcps": repo / "mcp-servers",
+        "plugins": repo / "plugins",
     }
 
 

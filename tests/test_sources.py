@@ -1,5 +1,6 @@
 """Tests for source management (fetch, discover available items)."""
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -155,3 +156,55 @@ class TestFetchLatest:
 
         with patch("aec.lib.sources.subprocess.run", fake_run):
             assert fetch_latest(tmp_path) is False
+
+
+def test_discover_plugins_finds_registry_entry(tmp_path):
+    from aec.lib.sources import _discover_available_plugins
+
+    d = tmp_path / "ponytail"
+    d.mkdir()
+    (d / "plugin.json").write_text(json.dumps({
+        "schema": "loadout/v1", "item_type": "plugin", "name": "ponytail",
+        "version": "1.0.0", "description": "lazy dev", "source": "https://x",
+        "install_type": "external",
+        "install": {"external": {"download": "https://x", "instructions": "go"}},
+    }))
+    found = _discover_available_plugins(tmp_path)
+    assert found["ponytail"]["version"] == "1.0.0"
+    assert found["ponytail"]["install_type"] == "external"
+    assert found["ponytail"]["description"] == "lazy dev"
+    assert found["ponytail"]["path"] == d.name
+
+
+def test_discover_plugins_skips_malformed_manifest(tmp_path):
+    from aec.lib.sources import _discover_available_plugins
+
+    valid = tmp_path / "ponytail"
+    valid.mkdir()
+    (valid / "plugin.json").write_text(json.dumps({
+        "schema": "loadout/v1", "item_type": "plugin", "name": "ponytail",
+        "version": "1.0.0", "description": "lazy dev", "source": "https://x",
+        "install_type": "external",
+        "install": {"external": {"download": "https://x", "instructions": "go"}},
+    }))
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    (broken / "plugin.json").write_text("{ not valid json")
+
+    found = _discover_available_plugins(tmp_path)
+    assert "ponytail" in found
+    assert "broken" not in found
+
+
+def test_discover_available_dispatches_plugins(tmp_path):
+    from aec.lib.sources import discover_available
+
+    d = tmp_path / "ponytail"
+    d.mkdir()
+    (d / "plugin.json").write_text(json.dumps({
+        "schema": "loadout/v1", "item_type": "plugin", "name": "ponytail",
+        "version": "1.0.0", "description": "x", "source": "https://x",
+        "install_type": "external",
+        "install": {"external": {"download": "https://x", "instructions": "go"}},
+    }))
+    assert "ponytail" in discover_available(tmp_path, "plugins")

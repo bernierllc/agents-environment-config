@@ -13,7 +13,7 @@ from typing import Optional
 from .config import VERSION, get_projects_dir
 
 PORTABLE_SCHEMA_VERSION = 1
-ITEM_TYPES = ("skills", "rules", "agents", "mcps")
+ITEM_TYPES = ("skills", "rules", "agents", "mcps", "plugins")
 PROJECTS_TOKEN = "${PROJECTS}"
 
 

@@ -114,7 +114,7 @@ The blurb is a delimited block inserted into each target agent file. Surrounding
 
 - `aec add agent <name>`   (balanced: agents additive = ask-first)
 - `aec add package <name>` (balanced: packages additive = ask-first)
-- `aec add plugin <name>`  (balanced: plugins additive = ask-first)
+- `aec install plugin <name>`  (balanced: plugins additive = ask-first)
 - `aec remove <anything>`  (destructive — always ask)
 - `aec update`             (mutates AEC itself — always ask)
 - … (generated from profile)

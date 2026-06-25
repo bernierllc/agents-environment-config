@@ -10,8 +10,8 @@ from ..lib.sources import discover_available, get_source_dirs
 from ..lib.scope import find_tracked_repo, get_all_tracked_repos
 from ..lib.skills_manifest import version_is_newer
 
-ITEM_TYPES = ("skills", "rules", "agents")
-TYPE_SINGULAR = {"skills": "skill", "rules": "rule", "agents": "agent"}
+ITEM_TYPES = ("skills", "rules", "agents", "plugins")
+TYPE_SINGULAR = {"skills": "skill", "rules": "rule", "agents": "agent", "plugins": "plugin"}
 
 
 def _manifest_path() -> Path:
@@ -86,4 +86,8 @@ def _print_outdated(
                 if version_is_newer(avail_v, inst_v):
                     Console.print(f"  {singular:<8} {name:<32} {inst_v} → {avail_v}")
                     found = True
+            elif item_type == "plugins":
+                # Plugins absent from the catalog have no version to compare.
+                Console.print(f"  {singular:<8} {name:<32} version unknown")
+                found = True
     return found

@@ -246,3 +246,33 @@ class TestRecordUpdateCheck:
         m = {"lastUpdateCheck": None}
         record_update_check(m)
         assert m["lastUpdateCheck"] is not None
+
+
+def test_record_plugin_install_stores_metadata() -> None:
+    from aec.lib.manifest_v2 import _empty_manifest, record_plugin_install, get_installed
+    m = _empty_manifest()
+    targets = ["claude", "cursor"]
+    record_plugin_install(m, "global", "ponytail", "1.0.0",
+                          install_type="per-tool", targets=targets)
+    targets.append("zed")  # mutate after the call; entry must not change
+    entry = get_installed(m, "global", "plugins")["ponytail"]
+    assert entry["version"] == "1.0.0"
+    assert entry["install_type"] == "per-tool"
+    assert entry["targets"] == ["claude", "cursor"]
+    assert entry["installedAs"] == "explicit"
+
+
+def test_load_manifest_backfills_plugins_bucket_on_repo_scope(manifest_path):
+    from aec.lib.manifest_v2 import load_manifest, record_plugin_install
+    # Legacy on-disk v2 manifest: repo scope predates the plugins bucket.
+    manifest_path.write_text(json.dumps({
+        "manifestVersion": 2,
+        "global": {"skills": {}, "rules": {}, "agents": {}, "mcps": {}, "plugins": {}},
+        "repos": {"/some/repo": {"skills": {}, "rules": {}, "agents": {}, "mcps": {}}},
+    }))
+    m = load_manifest(manifest_path)
+    assert m["repos"]["/some/repo"]["plugins"] == {}
+    # And a subsequent install into that repo scope does not raise.
+    record_plugin_install(m, "/some/repo", "ponytail", "1.0.0",
+                          install_type="per-tool", targets=["claude"])
+    assert m["repos"]["/some/repo"]["plugins"]["ponytail"]["version"] == "1.0.0"

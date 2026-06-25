@@ -9,8 +9,8 @@ from ..lib.manifest_v2 import load_manifest, get_installed
 from ..lib.sources import discover_available, get_source_dirs
 from ..lib.scope import find_tracked_repo
 
-ITEM_TYPES = ("skills", "rules", "agents")
-TYPE_SINGULAR = {"skills": "skill", "rules": "rule", "agents": "agent"}
+ITEM_TYPES = ("skills", "rules", "agents", "plugins")
+TYPE_SINGULAR = {"skills": "skill", "rules": "rule", "agents": "agent", "plugins": "plugin"}
 
 
 def _manifest_path() -> Path:

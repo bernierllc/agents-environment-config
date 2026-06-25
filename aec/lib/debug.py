@@ -20,18 +20,41 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Iterable, Optional
 
-from .config import AEC_HOME
+from . import config
 
 ISSUE_URL = "https://github.com/mattbernier/agents-environment-config/issues/new?template=cli-error.md"
 
-LOG_DIR = AEC_HOME / "logs"
-LOG_FILE = LOG_DIR / "aec-debug.log"
 _MAX_BYTES = 1 * 1024 * 1024  # 1 MB
 _BACKUP_COUNT = 5
 
 _LOGGER_NAME = "aec.debug"
 _logger: Optional[logging.Logger] = None
+_logger_path: Optional[Path] = None  # path the cached logger's handler writes to
 _debug_enabled: bool = False
+
+
+def _log_dir() -> Path:
+    """Resolve the log directory live from config, so tests (and any runtime
+    HOME change) get the current path rather than the import-time one."""
+    return config.AEC_HOME / "logs"
+
+
+def _log_file() -> Path:
+    return _log_dir() / "aec-debug.log"
+
+
+def reset() -> None:
+    """Drop the cached logger and its handlers. For test isolation: lets the
+    next log call rebuild against the current HOME without reloading this
+    module (which would orphan references held by aec.cli)."""
+    global _logger, _logger_path, _debug_enabled
+    stale = logging.getLogger(_LOGGER_NAME)
+    for h in list(stale.handlers):
+        h.close()
+        stale.removeHandler(h)
+    _logger = None
+    _logger_path = None
+    _debug_enabled = False
 
 # Env var names whose values are always redacted in full.
 _SECRET_NAME_RE = re.compile(
@@ -67,25 +90,28 @@ def debug_from_env_or_argv(argv: Optional[list[str]] = None) -> bool:
 
 
 def _build_logger() -> logging.Logger:
-    global _logger
-    if _logger is not None:
+    global _logger, _logger_path
+    target = _log_file()
+    if _logger is not None and _logger_path == target:
         return _logger
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger(_LOGGER_NAME)
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
-    if not logger.handlers:
-        handler = RotatingFileHandler(
-            LOG_FILE,
-            maxBytes=_MAX_BYTES,
-            backupCount=_BACKUP_COUNT,
-            encoding="utf-8",
-        )
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname)s %(message)s")
-        )
-        logger.addHandler(handler)
+    # Drop any handler pointing at a stale path (e.g. a prior HOME in tests).
+    for h in list(logger.handlers):
+        h.close()
+        logger.removeHandler(h)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    handler = RotatingFileHandler(
+        target,
+        maxBytes=_MAX_BYTES,
+        backupCount=_BACKUP_COUNT,
+        encoding="utf-8",
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger.addHandler(handler)
     _logger = logger
+    _logger_path = target
     return logger
 
 
@@ -147,7 +173,7 @@ def log_exception(exc: BaseException, command: Optional[str] = None) -> Path:
     logger = _build_logger()
     tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
     logger.error("%s\n%s\n==== end ====", _header(command), redact(tb))
-    return LOG_FILE
+    return _log_file()
 
 
 def log_subprocess_failure(
@@ -179,7 +205,7 @@ def log_subprocess_failure(
         parts.append(f"stderr:\n{redact(stderr)}")
     parts.append("---- end ----")
     logger.error("\n".join(parts))
-    return LOG_FILE
+    return _log_file()
 
 
 def friendly_error_message(log_path: Optional[Path] = None) -> str:
@@ -189,7 +215,7 @@ def friendly_error_message(log_path: Optional[Path] = None) -> str:
         "  - To capture details, re-run the command with --debug\n"
         "    (or set AEC_DEBUG=1).\n"
         f"  - Then file an issue at: {ISSUE_URL}\n"
-        f"    and attach the log at: {log_path or LOG_FILE}\n"
+        f"    and attach the log at: {log_path or _log_file()}\n"
     )
 
 
