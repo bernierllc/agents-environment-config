@@ -140,7 +140,7 @@ class TestOutdatedPlugins:
         (plugin_dir / "plugin.json").write_text(json.dumps({
             "schema": "loadout/v1", "item_type": "plugin", "name": "old-plugin",
             "version": "2.0.0", "description": "d", "source": "https://example.test",
-            "install_type": "marketplace", "install": {"marketplace": {"id": "x"}},
+            "install_type": "marketplace", "install": {"marketplace": "x", "plugin": "old-plugin"},
         }))
         _add_plugin_to_manifest(temp_dir, "old-plugin", {"version": "1.0.0", "install_type": "marketplace", "installedAt": ""})
 
