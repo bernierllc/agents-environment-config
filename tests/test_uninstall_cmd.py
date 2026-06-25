@@ -96,3 +96,61 @@ class TestUninstall:
 
         run_uninstall(item_type="agent", name="my-agent", global_flag=True, yes=True)
         assert not agent_file.exists()
+
+    def test_uninstall_external_plugin_removes_record_without_executing(
+        self, uninstall_env, monkeypatch
+    ):
+        """External plugin uninstall removes the manifest record and runs nothing."""
+        import subprocess
+        from aec.commands.uninstall import run_uninstall
+        from aec.lib.manifest_v2 import load_manifest
+
+        # external plugin lives in the real registry; nothing must execute
+        monkeypatch.setattr(
+            subprocess, "run",
+            lambda *a, **k: pytest.fail("external plugin uninstall must not execute commands"),
+        )
+
+        mp = uninstall_env["aec_home"] / "installed-manifest.json"
+        m = json.loads(mp.read_text())
+        m["global"]["plugins"] = {
+            "impeccable-style": {
+                "version": "1.0.0", "install_type": "external",
+                "targets": [], "installedAt": "",
+            }
+        }
+        mp.write_text(json.dumps(m))
+
+        run_uninstall(item_type="plugin", name="impeccable-style", global_flag=True, yes=True)
+
+        result = load_manifest(mp)
+        assert "impeccable-style" not in result["global"].get("plugins", {})
+
+    def test_uninstall_plugin_missing_from_registry_still_removes_record(
+        self, uninstall_env, capsys
+    ):
+        """If the registry manifest is gone, drop the record and warn — no fabricated commands."""
+        from aec.commands.uninstall import run_uninstall
+        from aec.lib.manifest_v2 import load_manifest
+
+        mp = uninstall_env["aec_home"] / "installed-manifest.json"
+        m = json.loads(mp.read_text())
+        m["global"]["plugins"] = {
+            "ghost-plugin": {
+                "version": "1.0.0", "install_type": "external",
+                "targets": [], "installedAt": "",
+            }
+        }
+        mp.write_text(json.dumps(m))
+
+        run_uninstall(item_type="plugin", name="ghost-plugin", global_flag=True, yes=True)
+
+        result = load_manifest(mp)
+        assert "ghost-plugin" not in result["global"].get("plugins", {})
+        assert "manual cleanup" in capsys.readouterr().out.lower()
+
+    def test_uninstall_plugin_not_installed_warns(self, uninstall_env, capsys):
+        from aec.commands.uninstall import run_uninstall
+
+        run_uninstall(item_type="plugin", name="nope", global_flag=True, yes=True)
+        assert "not found" in capsys.readouterr().out.lower()

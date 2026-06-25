@@ -10,8 +10,11 @@ from ..lib.installed_store import remove_item_install
 from ..lib.manifest_v2 import load_manifest, save_manifest, remove_install, get_installed
 from ..lib.scope import resolve_scope, ScopeError
 
-VALID_TYPES = ("skill", "rule", "agent", "mcp")
-TYPE_TO_PLURAL = {"skill": "skills", "rule": "rules", "agent": "agents", "mcp": "mcps"}
+VALID_TYPES = ("skill", "rule", "agent", "mcp", "plugin")
+TYPE_TO_PLURAL = {
+    "skill": "skills", "rule": "rules", "agent": "agents",
+    "mcp": "mcps", "plugin": "plugins",
+}
 
 
 def _manifest_path() -> Path:
@@ -72,6 +75,90 @@ def _uninstall_mcp(name: str, global_flag: bool, yes: bool) -> None:
     Console.success(f"Uninstalled MCP server: {name}")
 
 
+def _uninstall_plugin(name: str, global_flag: bool, yes: bool) -> None:
+    """Remove a plugin: run its loadout uninstall block under the execution policy.
+
+    Mirrors ``_uninstall_mcp`` and ``_install_plugin``: resolve scope, read the
+    recorded entry, re-load the registry loadout for the uninstall block, delegate
+    to ``uninstall_plugin`` (which never auto-runs ``external`` plugins), then drop
+    the record.
+    """
+    try:
+        scope = resolve_scope(global_flag)
+    except ScopeError as e:
+        Console.error(str(e))
+        raise SystemExit(1)
+
+    manifest_file = _manifest_path()
+    manifest = load_manifest(manifest_file)
+    scope_key = "global" if scope.is_global else str(scope.repo_path.resolve())
+
+    installed = get_installed(manifest, scope_key, "plugins")
+    if name not in installed:
+        Console.warning(f"Plugin not found in manifest: {name}")
+        return
+
+    if not yes:
+        scope_label = "global" if scope.is_global else str(scope.repo_path)
+        try:
+            resp = input(f"  Remove {name} from {scope_label}? [y/N]: ").strip().lower()
+        except EOFError:
+            resp = "n"
+        if resp != "y":
+            Console.info("Skipped.")
+            return
+
+    from ..lib.loadout import LoadoutError, load_loadout
+    from ..lib.plugin_install import uninstall_plugin
+    from ..lib.config import detect_agents
+    from ..lib.preferences import get_setting
+    from ..lib.sources import get_source_dirs
+
+    # Re-load the registry loadout to get the uninstall block.
+    manifest_def = None
+    source_dir = get_source_dirs().get("plugins")
+    if source_dir and source_dir.exists():
+        plugin_dir = source_dir / name
+        try:
+            manifest_def = load_loadout(plugin_dir)
+        except LoadoutError:
+            manifest_def = None
+
+    if manifest_def is None:
+        # ponytail: registry loadout gone — drop the record and warn; no documented
+        # command to fabricate. Add a stored-uninstall-block fallback if one ships.
+        Console.warning(f"Plugin manifest not found in registry; manual cleanup may be required: {name}")
+    else:
+        def runner(cmd):
+            return subprocess.run(cmd)
+
+        def confirm(*args) -> bool:
+            if yes:
+                return True
+            cmds = args[-1] if args else []
+            if cmds and isinstance(cmds[0], list):
+                shown = "; ".join(" ".join(c) for c in cmds)
+            else:
+                shown = " ".join(cmds)
+            prompt = f"  Run: {shown}? [y/N]: " if shown else "  Proceed? [y/N]: "
+            try:
+                return input(prompt).strip().lower() == "y"
+            except EOFError:
+                return False
+
+        uninstall_plugin(
+            manifest_def, detect_agents(),
+            runner=runner, confirm=confirm, printer=Console.print,
+            pref=get_setting("plugins.execution"),
+        )
+
+    remove_install(manifest, scope_key, "plugins", name)
+    save_manifest(manifest, manifest_file)
+    remove_item_install("plugin", name)
+
+    Console.success(f"Uninstalled plugin: {name}")
+
+
 def run_uninstall(
     item_type: str,
     name: str,
@@ -87,6 +174,10 @@ def run_uninstall(
 
     if item_type == "mcp":
         _uninstall_mcp(name, global_flag, yes)
+        return
+
+    if item_type == "plugin":
+        _uninstall_plugin(name, global_flag, yes)
         return
 
     plural = TYPE_TO_PLURAL[item_type]
