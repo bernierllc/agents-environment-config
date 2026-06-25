@@ -48,6 +48,44 @@ def _run_doctor_patched(temp_dir):
         return run_doctor()
 
 
+def _seed_drifted_repo(tmp_path):
+    """Install a claude hook then clobber settings so it reads MISSING."""
+    import json as _json
+    from aec.lib.hooks.installer import install_item_hooks
+
+    item_dir = tmp_path / "item"
+    item_dir.mkdir(parents=True, exist_ok=True)
+    (item_dir / "hooks.json").write_text(_json.dumps({
+        "$schema": "x", "version": "1.0.0", "hooks": [{
+            "id": "lint", "event": "on_file_edit",
+            "command": "echo hi", "description": "lint",
+        }],
+    }))
+    repo_root = tmp_path / "drifted-repo"
+    repo_root.mkdir()
+    install_item_hooks(
+        item_type="skill", item_key="demo", item_version="1.0.0",
+        item_dir=item_dir, repo_root=repo_root, agents=["claude"],
+    )
+    (repo_root / ".claude/settings.json").write_text(_json.dumps({"hooks": {}}))
+    return repo_root
+
+
+class TestDoctorHookDrift:
+    def test_reports_drift_for_tracked_repo(self, doctor_env, capsys):
+        from aec.lib.tracking import TrackedRepo
+
+        repo_root = _seed_drifted_repo(doctor_env["aec_home"].parent)
+        tracked = [TrackedRepo(timestamp="t", version="v", path=repo_root, exists=True)]
+
+        with patch("aec.commands.doctor.list_repos", return_value=tracked):
+            _, issues = _run_doctor_patched(doctor_env["aec_home"].parent)
+
+        output = capsys.readouterr().out
+        assert any("drift" in i.lower() for i in issues), f"no drift issue in {issues}"
+        assert "hooks verify" in output
+
+
 class TestDoctorExtensionlessAgents:
     def test_no_issue_when_agents_have_md_extension(self, doctor_env, capsys):
         agents_dir = doctor_env["agents_dir"]
