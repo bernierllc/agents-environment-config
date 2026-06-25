@@ -53,6 +53,7 @@ def set_pref(feature: str, value: str) -> None:
     """Set an optional feature on or off."""
     if feature in STRING_SETTINGS:
         allowed = STRING_SETTINGS[feature]
+        value = value.strip().lower()
         if value not in allowed:
             Console.error(f"Invalid value: {value}.")
             Console.print(f"Allowed values: {', '.join(sorted(allowed))}")

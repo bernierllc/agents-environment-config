@@ -46,9 +46,11 @@ class TestPluginsExecutionSetting:
 
     def test_invalid_value_exits_nonzero(self, prefs_env):
         from aec.commands.preferences import set_pref
+        from aec.lib.preferences import get_setting
 
         with pytest.raises(SystemExit):
             set_pref("plugins.execution", "bogus")
+        assert get_setting("plugins.execution") is None
 
     def test_reset_returns_to_default(self, prefs_env):
         from aec.commands.preferences import set_pref, reset_pref
@@ -60,8 +62,16 @@ class TestPluginsExecutionSetting:
         assert value in (None, "default")
 
     def test_list_shows_string_setting(self, prefs_env, capsys):
-        from aec.commands.preferences import list_preferences
+        from aec.commands.preferences import list_preferences, set_pref
 
+        # Unset shows "default"
         list_preferences()
         out = capsys.readouterr().out
         assert "plugins.execution" in out
+        assert "default" in out
+
+        # Set value is rendered
+        set_pref("plugins.execution", "instructions-only")
+        list_preferences()
+        out = capsys.readouterr().out
+        assert "instructions-only" in out
