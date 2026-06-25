@@ -65,3 +65,21 @@ def test_plugin_valid_marketplace_passes() -> None:
         "install": {"marketplace": "example/my-plugin", "plugin": "my-plugin"},
     }
     assert _plugin_validator().is_valid(instance)
+
+
+EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "docs" / "loadout" / "examples"
+
+
+def test_examples_validate_against_schema() -> None:
+    jsonschema = pytest.importorskip("jsonschema")
+    for path in sorted(EXAMPLES_DIR.glob("*.json")):
+        data = json.loads(path.read_text())
+        schema = json.loads((SCHEMA_DIR / f"{data['item_type']}.schema.json").read_text())
+        jsonschema.validate(data, schema)  # raises on invalid
+
+
+def test_plugin_json_and_yaml_are_equivalent() -> None:
+    yaml = pytest.importorskip("yaml")
+    j = json.loads((EXAMPLES_DIR / "plugin.json").read_text())
+    y = yaml.safe_load((EXAMPLES_DIR / "plugin.yaml").read_text())
+    assert j == y

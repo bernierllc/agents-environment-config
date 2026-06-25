@@ -1,0 +1,13 @@
+{
+  "schema": "loadout/v1",
+  "item_type": "agent",
+  "name": "my-agent",
+  "version": "1.0.0",
+  "description": "Example agent manifest using the loadout common base.",
+  "source": "https://example.com/my-agent",
+  "homepage": "https://example.com/my-agent",
+  "author": { "name": "Example Author", "url": "https://example.com" },
+  "license": "MIT",
+  "supports": ["claude"],
+  "usage": "Reference my-agent as a subagent_type after install."
+}
