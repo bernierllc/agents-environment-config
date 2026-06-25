@@ -179,10 +179,11 @@ if HAS_TYPER:
         file: str = typer.Argument(..., help="Path to a portable manifest file"),
         dry_run: bool = typer.Option(False, "--dry-run", help="Preview without making changes"),
         latest: bool = typer.Option(False, "--latest", help="Install latest catalog versions"),
+        yes: bool = typer.Option(False, "--yes", "-y", help="Skip prompts (plugins apply non-interactively)"),
     ):
         """Apply a portable manifest - reproduce its setup on this machine."""
         from .commands.apply_cmd import run_apply
-        run_apply(file=file, dry_run=dry_run, latest=latest)
+        run_apply(file=file, dry_run=dry_run, latest=latest, yes=yes)
 
     @app.command("setup")
     def setup_cmd(
@@ -714,6 +715,7 @@ else:
         apply_parser.add_argument("file", help="Path to a portable manifest file")
         apply_parser.add_argument("--dry-run", action="store_true", help="Preview without making changes")
         apply_parser.add_argument("--latest", action="store_true", help="Install latest catalog versions")
+        apply_parser.add_argument("--yes", "-y", action="store_true", help="Skip prompts (plugins apply non-interactively)")
 
         # setup
         setup_parser = subparsers.add_parser("setup", help="Set up a project or all projects")
@@ -944,7 +946,7 @@ else:
 
         elif args.command == "apply":
             from .commands.apply_cmd import run_apply
-            run_apply(file=args.file, dry_run=args.dry_run, latest=args.latest)
+            run_apply(file=args.file, dry_run=args.dry_run, latest=args.latest, yes=args.yes)
 
         elif args.command == "setup":
             from .commands.setup import run_setup, run_setup_path, run_setup_all

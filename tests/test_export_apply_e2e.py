@@ -142,3 +142,84 @@ def test_apply_dry_run_makes_no_changes(tmp_path, monkeypatch):
 def test_apply_missing_file_errors(tmp_path):
     with pytest.raises(SystemExit):
         run_apply(file=str(tmp_path / "nope.json"))
+
+
+def _external_plugin_loadout() -> dict:
+    return {
+        "schema": "loadout/v1",
+        "item_type": "plugin",
+        "name": "impeccable-style",
+        "version": "1.0.0",
+        "description": "External style plugin.",
+        "source": "https://example.test",
+        "install_type": "external",
+        "install": {
+            "external": {
+                "download": "https://example.test/download",
+                "instructions": "Download and run setup.",
+            }
+        },
+    }
+
+
+def test_export_then_apply_reproduces_external_plugin(tmp_path, monkeypatch):
+    monkeypatch.delenv("PROJECTS_DIR", raising=False)
+    manifest_file = tmp_path / "shared" / "plug.aec.json"
+    manifest_file.parent.mkdir()
+
+    # ---- machine 1: export (manifest has an installed external plugin) ----
+    home1 = tmp_path / "home1"
+    (home1 / ".agents-environment-config").mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", lambda: home1)
+    monkeypatch.setenv("PROJECTS_DIR", str(home1 / "projects"))
+    m1 = {
+        "manifestVersion": 2,
+        "installedAt": "x",
+        "updatedAt": "x",
+        "lastUpdateCheck": None,
+        "global": {
+            "skills": {},
+            "rules": {},
+            "agents": {},
+            "mcps": {},
+            "plugins": {
+                "impeccable-style": {
+                    "version": "1.0.0",
+                    "install_type": "external",
+                    "targets": [],
+                    "installedAs": "explicit",
+                    "installedAt": "x",
+                }
+            },
+        },
+        "repos": {},
+    }
+    (home1 / ".agents-environment-config" / "installed-manifest.json").write_text(json.dumps(m1))
+
+    run_export(out=str(manifest_file))
+    assert "impeccable-style" in manifest_file.read_text()
+
+    # ---- machine 2: apply into a fresh home, with the plugin in the catalog ----
+    home2 = tmp_path / "home2"
+    (home2 / ".agents-environment-config").mkdir(parents=True)
+    repo = _make_source_repo(home2)
+    plugins_dir = repo / "plugins"
+    plugin_dir = plugins_dir / "impeccable-style"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "plugin.json").write_text(json.dumps(_external_plugin_loadout()))
+    monkeypatch.setattr(Path, "home", lambda: home2)
+    monkeypatch.setenv("PROJECTS_DIR", str(home2 / "projects"))
+
+    source_dirs = _source_dirs(repo)
+    source_dirs["plugins"] = plugins_dir
+
+    ran = []
+    with patch("aec.commands.apply_cmd.get_repo_root", return_value=repo), patch(
+        "aec.commands.apply_cmd.get_source_dirs", return_value=source_dirs
+    ), patch("subprocess.run", side_effect=lambda *a, **k: ran.append(a)):
+        run_apply(file=str(manifest_file), yes=True)
+
+    m2 = load_manifest(home2 / ".agents-environment-config" / "installed-manifest.json")
+    assert "impeccable-style" in m2["global"]["plugins"]
+    assert m2["global"]["plugins"]["impeccable-style"]["install_type"] == "external"
+    assert ran == [], "external plugin must never execute anything during apply"

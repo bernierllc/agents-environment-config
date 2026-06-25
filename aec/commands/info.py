@@ -9,8 +9,8 @@ from ..lib.manifest_v2 import load_manifest, get_installed, get_all_repo_scopes
 from ..lib.sources import discover_available, get_source_dirs
 from ..lib.scope import find_tracked_repo
 
-VALID_TYPES = ("skill", "rule", "agent")
-TYPE_TO_PLURAL = {"skill": "skills", "rule": "rules", "agent": "agents"}
+VALID_TYPES = ("skill", "rule", "agent", "plugin")
+TYPE_TO_PLURAL = {"skill": "skills", "rule": "rules", "agent": "agents", "plugin": "plugins"}
 
 
 def _manifest_path() -> Path:
@@ -43,6 +43,18 @@ def run_info(item_type: str, name: str) -> None:
         Console.print(f"  Author:      {author}")
     if desc:
         Console.print(f"  Description: {desc}")
+
+    # Plugin loadout fields (install_type, source) come from the loadout manifest.
+    if plural == "plugins" and source_dir:
+        from ..lib.loadout import LoadoutError, load_loadout
+
+        try:
+            loadout = load_loadout(source_dir / source_info.get("path", name))
+            Console.print(f"  Install type: {loadout.get('install_type', '')}")
+            if loadout.get("source"):
+                Console.print(f"  Source:      {loadout['source']}")
+        except LoadoutError:
+            pass
 
     # Show install locations
     installed_in = []
