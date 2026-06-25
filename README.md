@@ -103,6 +103,40 @@ aec discover [-g]            # find existing items matching the catalog
 
 Full reference: [CLI commands](docs/users/cli-reference.md).
 
+## Plugins
+
+AEC manages a fifth item type — **plugins** — alongside skills, rules, agents, and packages.
+
+```bash
+aec install plugin <name|url>   # install a plugin
+aec uninstall plugin <name>     # remove a plugin
+```
+
+Plugins also appear in `aec list`, `aec info plugin <name>`, `aec search`, `aec outdated`, `aec export`, and `aec apply`.
+
+### Install types
+
+Each plugin declares its `install_type` in a `plugin.json` manifest:
+
+- **`marketplace`** — Claude-only; AEC runs the marketplace install command after you confirm (or pass `--yes`).
+- **`per-tool`** — per-agent install; if the plugin provides a `run` command, AEC runs it after confirmation; otherwise it prints `steps` as instructions only.
+- **`external`** — AEC **never executes anything**; it prints the publisher's download URL and instructions verbatim.
+
+### Never-auto-install guarantee
+
+AEC never auto-installs any plugin. `marketplace` and `per-tool` commands only run after explicit user confirmation (or `--yes`). `external` plugins are always instructions-only — no execution, ever.
+
+To downgrade every plugin to print-only (no execution even for `marketplace`/`per-tool`):
+
+```bash
+aec config set plugins.execution instructions-only   # print steps only, never run
+aec config set plugins.execution default             # restore confirm-then-run
+```
+
+AEC installs a plugin only to the agents that both the plugin `supports` and are detected in your project.
+
+Plugin publishers: ship a `plugin.json` loadout alongside your plugin. See [docs/loadout/](docs/loadout/) for the schema and examples.
+
 ## Documentation
 
 **Using AEC**

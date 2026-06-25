@@ -64,6 +64,39 @@ Database work MUST classify data correctly before it ships. Misclassification le
   - Creating test fixtures that touch the database
 - **Anti-pattern:** Do not commit test fixtures to migrations — migrations run in production.
 
+## AEC Item Types and Commands
+
+AEC manages five item types: **skills**, **rules**, **agents**, **packages**, and **plugins**.
+
+### Plugin commands
+
+```bash
+aec install plugin <name|url>   # install a plugin (prompts for confirmation before running any command)
+aec uninstall plugin <name>     # remove a plugin
+aec info plugin <name>          # details about an installed plugin
+```
+
+Plugins also appear in `aec list`, `aec search`, `aec outdated`, `aec export`, and `aec apply`.
+
+### Install types (declared in `plugin.json`)
+
+- `marketplace` — Claude-only; runs the marketplace install command after confirmation.
+- `per-tool` — runs per-agent `run` command after confirmation, or prints `steps` if no command is provided.
+- `external` — AEC **never executes anything**; prints instructions only.
+
+### Preferences
+
+| Key | Values | Effect |
+|-----|--------|--------|
+| `plugins.execution` | `default` / `instructions-only` | `instructions-only` downgrades all plugins (including marketplace/per-tool) to print-only; no commands are ever executed. |
+
+```bash
+aec config set plugins.execution instructions-only
+aec config set plugins.execution default
+```
+
+Loadout schema: `docs/loadout/` — plugin publishers ship a `plugin.json` at the item root.
+
 ## Commits and PRs
 
 - Conventional commits: `feat:`, `fix:`, `docs:`, `chore:`
