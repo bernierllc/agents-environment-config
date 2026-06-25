@@ -1,5 +1,7 @@
 """Install/uninstall plugins from validated loadout manifests."""
 
+from __future__ import annotations
+
 from typing import Any, Dict, List
 
 ALL_TOOLS = ("claude", "cursor", "gemini", "qwen", "codex")

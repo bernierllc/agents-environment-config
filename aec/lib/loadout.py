@@ -1,5 +1,7 @@
 """Locate, parse, and validate a loadout item-manifest (plugin.json / plugin.yaml)."""
 
+from __future__ import annotations
+
 import json
 import re
 from pathlib import Path
