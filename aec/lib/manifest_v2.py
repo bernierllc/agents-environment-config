@@ -8,7 +8,7 @@ from typing import Optional
 from .skills_manifest import build_skill_manifest_item
 
 MANIFEST_VERSION = 2
-ITEM_TYPES = ("skills", "rules", "agents", "mcps")
+ITEM_TYPES = ("skills", "rules", "agents", "mcps", "plugins")
 
 
 def _now_iso() -> str:
@@ -16,7 +16,7 @@ def _now_iso() -> str:
 
 
 def _empty_scope() -> dict:
-    return {"skills": {}, "rules": {}, "agents": {}, "mcps": {}}
+    return {"skills": {}, "rules": {}, "agents": {}, "mcps": {}, "plugins": {}}
 
 
 def _empty_manifest() -> dict:
@@ -53,6 +53,9 @@ def load_manifest(path: Path) -> dict:
                 data.setdefault("lastUpdateCheck", None)
                 for key in ITEM_TYPES:
                     data["global"].setdefault(key, {})
+                for scope_dict in data["repos"].values():
+                    for key in ITEM_TYPES:
+                        scope_dict.setdefault(key, {})
                 _backfill_installed_as(data)
                 return data
         except (json.JSONDecodeError, OSError):
@@ -117,6 +120,27 @@ def record_mcp_install(
         "version": version,
         "installedAt": _now_iso(),
         "package": package,
+    }
+
+
+def record_plugin_install(
+    manifest: dict,
+    scope: str,
+    name: str,
+    version: str,
+    *,
+    install_type: str,
+    targets,
+    installed_as: str = "explicit",
+) -> None:
+    """Record a plugin install with its install_type and resolved targets."""
+    scope_dict = _get_scope_dict(manifest, scope)
+    scope_dict["plugins"][name] = {
+        "version": version,
+        "install_type": install_type,
+        "targets": list(targets),
+        "installedAs": installed_as,
+        "installedAt": _now_iso(),
     }
 
 
