@@ -55,3 +55,35 @@ def test_marketplace_handler_respects_declined_confirm():
          "install": {"marketplace": "x", "plugin": "y"}}
     install_marketplace(m, runner=lambda cmd: calls.append(cmd), confirm=lambda _: False)
     assert calls == []
+
+
+from aec.lib.plugin_install import install_per_tool
+
+
+def _manifest():
+    return {"install_type": "per-tool", "install": {"tools": {
+        "claude": {"run": ["bash", "-c", "echo hi"]},
+        "gemini": {"steps": "copy X to ~/.gemini"},
+    }}}
+
+
+def test_per_tool_runs_run_tools_and_prints_steps_tools():
+    ran, printed = [], []
+    summary = install_per_tool(
+        _manifest(), ["claude", "gemini"],
+        runner=lambda c: ran.append(c), confirm=lambda *_: True,
+        printer=lambda s: printed.append(s), pref=None)
+    assert ran == [["bash", "-c", "echo hi"]]
+    assert any("gemini" in p or "~/.gemini" in p for p in printed)
+    assert summary["claude"] == "run"
+    assert summary["gemini"] == "instructions"
+
+
+def test_per_tool_pref_downgrades_run_to_instructions():
+    ran, printed = [], []
+    install_per_tool(
+        _manifest(), ["claude"],
+        runner=lambda c: ran.append(c), confirm=lambda *_: True,
+        printer=lambda s: printed.append(s), pref="instructions-only")
+    assert ran == []
+    assert printed  # claude's command was printed, not executed

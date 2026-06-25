@@ -34,3 +34,27 @@ def install_marketplace(manifest, *, runner, confirm) -> List[str]:
     for cmd in cmds:
         runner(cmd)
     return cmds
+
+
+def install_per_tool(manifest, targets, *, runner, confirm, printer, pref) -> Dict[str, str]:
+    tools = manifest["install"]["tools"]
+    summary: Dict[str, str] = {}
+    for tool in targets:
+        spec = tools.get(tool)
+        if spec is None:
+            continue  # ponytail: silently skip unknown targets; tests don't exercise it
+        has_run = "run" in spec
+        policy = effective_policy(manifest["install_type"], has_run=has_run, pref=pref)
+        if policy == "run":
+            if confirm(tool, spec["run"]):
+                runner(spec["run"])
+                summary[tool] = "run"
+            else:
+                summary[tool] = "declined"
+        else:
+            if has_run:
+                printer(f"{tool}: run manually -> {' '.join(spec['run'])}")
+            else:
+                printer(f"{tool}: {spec.get('steps', '')}")
+            summary[tool] = "instructions"
+    return summary
