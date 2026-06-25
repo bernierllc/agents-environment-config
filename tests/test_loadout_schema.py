@@ -78,6 +78,15 @@ def test_examples_validate_against_schema() -> None:
         jsonschema.validate(data, schema)  # raises on invalid
 
 
+def test_yaml_examples_validate_against_schema() -> None:
+    jsonschema = pytest.importorskip("jsonschema")
+    yaml = pytest.importorskip("yaml")
+    for path in sorted(EXAMPLES_DIR.glob("*.yaml")):
+        data = yaml.safe_load(path.read_text())
+        schema = json.loads((SCHEMA_DIR / f"{data['item_type']}.schema.json").read_text())
+        jsonschema.validate(data, schema)  # raises on invalid
+
+
 def test_plugin_json_and_yaml_are_equivalent() -> None:
     yaml = pytest.importorskip("yaml")
     j = json.loads((EXAMPLES_DIR / "plugin.json").read_text())
