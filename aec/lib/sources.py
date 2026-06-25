@@ -164,6 +164,7 @@ def get_source_dirs() -> dict:
         "rules": repo / ".agent-rules",
         "agents": repo / ".claude" / "agents",
         "mcps": repo / "mcp-servers",
+        "plugins": repo / "plugins",
     }
 
 

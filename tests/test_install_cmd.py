@@ -492,3 +492,55 @@ class TestInstallWithDeps:
         assert "dep-skill" not in m["repos"][repo_key]["skills"]
         # dep-skill remains only globally
         assert "dep-skill" in m["global"]["skills"]
+
+
+class TestInstallPlugin:
+    """Tests for wiring the plugin branch into run_install."""
+
+    def _patch_repo_with_plugins(self, install_env, plugins_dir: Path):
+        repo = install_env["repo"]
+        return [
+            patch("aec.commands.install_cmd.get_repo_root", return_value=repo),
+            patch(
+                "aec.commands.install_cmd.get_source_dirs",
+                return_value={
+                    "skills": repo / ".claude" / "skills",
+                    "rules": repo / ".agent-rules",
+                    "agents": repo / ".claude" / "agents",
+                    "plugins": plugins_dir,
+                },
+            ),
+        ]
+
+    def test_external_plugin_records_manifest_and_runs_nothing(self, install_env):
+        from aec.commands.install_cmd import run_install
+        from aec.lib.manifest_v2 import load_manifest
+
+        plugins_dir = install_env["repo"] / "plugins"
+        plugin_dir = plugins_dir / "imp"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text(json.dumps({
+            "schema": "loadout/v1",
+            "item_type": "plugin",
+            "name": "imp",
+            "version": "1.0.0",
+            "description": "External test plugin.",
+            "source": "https://example.test",
+            "install_type": "external",
+            "install": {
+                "external": {
+                    "download": "https://example.test/download",
+                    "instructions": "Download and run setup.",
+                }
+            },
+        }))
+
+        ran = []
+        patches = self._patch_repo_with_plugins(install_env, plugins_dir)
+        with patches[0], patches[1], \
+                patch("subprocess.run", side_effect=lambda *a, **k: ran.append(a)):
+            run_install(item_type="plugin", name="imp", global_flag=True, yes=True)
+
+        m = load_manifest(install_env["manifest_path"])
+        assert m["global"]["plugins"]["imp"]["install_type"] == "external"
+        assert ran == [], "external install must never execute anything"
