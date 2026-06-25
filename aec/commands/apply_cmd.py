@@ -163,12 +163,12 @@ def _print_plan(plan) -> None:
         )
 
 
-def _print_result(result) -> None:
+def _print_result(result) -> bool:
+    """Print the apply result; return True if any item failed."""
     Console.success(f"Applied {len(result.applied)} item(s); {len(result.skipped)} skipped.")
     for entry, err in result.errors:
         Console.error(f"  {entry.item.name}: {err}")
-    if result.errors:
-        raise SystemExit(1)
+    return bool(result.errors)
 
 
 def run_apply(file: str, dry_run: bool = False, latest: bool = False, yes: bool = False) -> None:
@@ -211,6 +211,7 @@ def run_apply(file: str, dry_run: bool = False, latest: bool = False, yes: bool 
         Console.info("Dry run - no changes made.")
         return
 
+    items_failed = False
     if plan:
         result = execute_apply(
             plan,
@@ -218,6 +219,10 @@ def run_apply(file: str, dry_run: bool = False, latest: bool = False, yes: bool 
             available_by_type=available_by_type,
             manifest_path=_manifest_path(),
         )
-        _print_result(result)
+        items_failed = _print_result(result)
+    # Plugins are independent of the item pass — apply them even if items failed,
+    # then surface the item-failure exit code afterward.
     if plugins:
         _apply_plugins(plugins, source_dirs=source_dirs, yes=yes)
+    if items_failed:
+        raise SystemExit(1)

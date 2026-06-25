@@ -87,7 +87,7 @@ def _print_outdated(
                     Console.print(f"  {singular:<8} {name:<32} {inst_v} → {avail_v}")
                     found = True
             elif item_type == "plugins":
-                # URL-only plugins have no registry entry to compare against.
+                # Plugins absent from the catalog have no version to compare.
                 Console.print(f"  {singular:<8} {name:<32} version unknown")
                 found = True
     return found

@@ -223,3 +223,44 @@ def test_export_then_apply_reproduces_external_plugin(tmp_path, monkeypatch):
     assert "impeccable-style" in m2["global"]["plugins"]
     assert m2["global"]["plugins"]["impeccable-style"]["install_type"] == "external"
     assert ran == [], "external plugin must never execute anything during apply"
+
+
+def test_apply_declined_batch_prompt_installs_nothing(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("PROJECTS_DIR", raising=False)
+    manifest_file = tmp_path / "plug.aec.json"
+
+    home = tmp_path / "home"
+    (home / ".agents-environment-config").mkdir(parents=True)
+    repo = _make_source_repo(home)
+    plugin_dir = repo / "plugins" / "impeccable-style"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "plugin.json").write_text(json.dumps(_external_plugin_loadout()))
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("PROJECTS_DIR", str(home / "projects"))
+
+    # manifest with only the plugin (no items) so apply reaches the plugin pass
+    manifest_file.write_text(json.dumps({
+        "schemaVersion": 1,
+        "global": {"skills": [], "rules": [], "agents": [], "mcps": [],
+                   "plugins": [{"name": "impeccable-style", "version": "1.0.0"}]},
+        "repos": {},
+    }))
+
+    source_dirs = _source_dirs(repo)
+    source_dirs["plugins"] = repo / "plugins"
+    mp = home / ".agents-environment-config" / "installed-manifest.json"
+
+    ran = []
+    monkeypatch.setattr("builtins.input", lambda *a, **k: "n")
+    with patch("aec.commands.apply_cmd.get_repo_root", return_value=repo), patch(
+        "aec.commands.apply_cmd.get_source_dirs", return_value=source_dirs
+    ), patch("subprocess.run", side_effect=lambda *a, **k: ran.append(a)):
+        run_apply(file=str(manifest_file), yes=False)
+
+    out = capsys.readouterr().out
+    assert "Skipped" in out
+    assert ran == [], "declined batch must not execute anything"
+    # nothing recorded: the install-manifest must not exist or have no plugins
+    if mp.exists():
+        m = load_manifest(mp)
+        assert not m["global"].get("plugins"), "declined plugin must not be recorded"
