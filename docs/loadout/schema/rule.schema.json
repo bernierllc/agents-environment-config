@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mbernier/loadout/schema/rule.schema.json",
+  "title": "loadout rule manifest",
+  "type": "object",
+  "required": ["schema", "item_type", "name", "version", "description", "source"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "type": "string", "const": "loadout/v1" },
+    "item_type": { "type": "string", "const": "rule" },
+    "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "version": { "type": "string" },
+    "description": { "type": "string" },
+    "source": { "type": "string" },
+    "homepage": { "type": "string" },
+    "author": {
+      "type": "object",
+      "properties": { "name": { "type": "string" }, "url": { "type": "string" } },
+      "additionalProperties": false
+    },
+    "license": { "type": "string" },
+    "supports": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["claude", "cursor", "gemini", "qwen", "codex"] }
+    },
+    "usage": { "type": "string" }
+  }
+}
