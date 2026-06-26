@@ -38,6 +38,7 @@ pass before tasks are picked up.
 | Initiative | Hypothesis / expected outcome | Plan file | Confidence |
 |---|---|---|---|
 | Org-config Phase 2 — signing, multi-org, propagation | Phase 1 made org configs work for a single unsigned org. Phase 2 makes them safe (signed), multi-org-aware, and refresh-aware — the bar for any real org adoption. | `docs/superpowers/plans/2026-05-19-org-config-overlay-phase-2.md` *(skeleton — open questions inside)* | Med — 6 open Qs to resolve before tasks |
+| Org-config plugin governance | `ITEM_TYPES` omits `plugins`, so an `items.plugins` org policy is silently dropped today and would `KeyError`-crash `aec org apply` once exercised. Closes the gap left when plugin management shipped (PR #55) — wires plugins through the org-config apply pass via the loadout `install_plugin` engine. | `docs/superpowers/plans/2026-06-25-org-config-plugin-governance.md` *(full plan — correct fix + affected surfaces inside)* | High — root cause + fix scoped; no open Qs |
 | Loadout open-standard extraction (Phase 2) | Move the `loadout` / `plugin.json` schema + docs out of AEC into the open repo `github.com/mbernier/loadout` so any AI tool — not just AEC — can publish and consume loadout manifests, making loadout a tool-neutral standard. | `docs/superpowers/specs/2026-06-25-aec-plugin-management-and-loadout-schema-design.md` (Phase 2; repo cloned at `~/projects/loadout`) | Med — gated on Phase 1 shipping + intent to publish |
 
 **Gate to advance to Now:** answer the 6 open questions in the Phase-2 skeleton
