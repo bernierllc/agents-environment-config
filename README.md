@@ -198,6 +198,14 @@ agents-environment-config/
 - Never commit `.env` files. API keys go in `.env` (copy from `.env.template`).
 - Review API key permissions — use least-privilege access.
 
-## Hook key repair
+## Hooks
+
+Hooks are **repo-scoped** — a skill's hooks are wired into `<repo>/.claude/settings.json` at install time, so a global install wires no hooks.
+
+- **`aec hooks verify`** — reports recorded hooks that have drifted out of the settings files (e.g. an out-of-band edit clobbered them). Add **`--repair`** to re-wire the missing hooks from source. `aec doctor` also surfaces a drift count across all tracked repos.
+- **Installing a hook-bearing skill globally** (`aec install skill <name> --global`) warns that its hooks stay dormant and lets you bail. Non-interactive runs must pass `--allow-dormant-hooks` to proceed.
+- **Uninstalling globally** never removes a repo-scoped copy of the item without consent. `aec uninstall <type> <name> --global` lists every repo that owns its own copy and asks; non-interactive runs select with `--repos all|none|<paths>` (default `none`).
+
+### Hook key repair
 
 Earlier versions of AEC wrote `.claude/settings.json` with camelCase hook keys (e.g., `postToolUse`) instead of the PascalCase keys Claude Code requires (`PostToolUse`). AEC automatically detects and fixes this in all tracked repos when you run `aec install`, `aec update && aec upgrade`, or `aec doctor`. No manual editing needed.
