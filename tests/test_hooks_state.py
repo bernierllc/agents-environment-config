@@ -85,3 +85,15 @@ class TestItemHookState:
     def test_remove_missing_state_is_noop(self, tmp_path):
         from aec.lib.hooks.state import remove_state
         remove_state(tmp_path, item_type="skill", item_key="ghost")
+
+    def test_source_scope_defaults_repo(self, tmp_path):
+        from aec.lib.hooks.state import load_state
+        s = load_state(tmp_path, item_type="skill", item_key="foo")
+        assert s.source_scope == "repo"
+
+    def test_source_scope_round_trips(self, tmp_path):
+        from aec.lib.hooks.state import load_state, save_state
+        s = load_state(tmp_path, item_type="skill", item_key="foo")
+        s.source_scope = "global"
+        save_state(tmp_path, s)
+        assert load_state(tmp_path, item_type="skill", item_key="foo").source_scope == "global"

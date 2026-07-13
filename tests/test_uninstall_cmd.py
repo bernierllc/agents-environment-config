@@ -81,6 +81,49 @@ class TestUninstall:
         run_uninstall(item_type="agent", name="my-agent", global_flag=True, yes=True)
         assert not agent_file.exists()
 
+    def _add_repo_install(self, uninstall_env, repo_path):
+        """Seed a repo-scoped copy of my-skill (dir + manifest entry)."""
+        repo_skill = repo_path / ".claude" / "skills" / "my-skill"
+        repo_skill.mkdir(parents=True)
+        (repo_skill / "SKILL.md").write_text("---\nname: my-skill\n---\n")
+        mp = uninstall_env["aec_home"] / "installed-manifest.json"
+        m = json.loads(mp.read_text())
+        m["repos"] = {str(repo_path.resolve()): {
+            "skills": {"my-skill": {"version": "1.0.0", "contentHash": "", "installedAt": ""}},
+            "rules": {}, "agents": {}, "mcps": {},
+        }}
+        mp.write_text(json.dumps(m))
+        return repo_skill
+
+    def test_global_uninstall_spares_repo_install_by_default(self, uninstall_env, temp_dir):
+        from aec.commands.uninstall import run_uninstall
+        from aec.lib.manifest_v2 import load_manifest
+
+        repo = temp_dir / "myrepo"
+        repo_skill = self._add_repo_install(uninstall_env, repo)
+
+        run_uninstall(item_type="skill", name="my-skill", global_flag=True, yes=True)
+
+        assert not uninstall_env["skill_dir"].exists()      # global gone
+        assert repo_skill.exists()                          # repo copy spared
+        m = load_manifest(uninstall_env["aec_home"] / "installed-manifest.json")
+        assert "my-skill" in m["repos"][str(repo.resolve())]["skills"]
+
+    def test_global_uninstall_repos_all_removes_repo_install(self, uninstall_env, temp_dir):
+        from aec.commands.uninstall import run_uninstall
+        from aec.lib.manifest_v2 import load_manifest
+
+        repo = temp_dir / "myrepo"
+        repo_skill = self._add_repo_install(uninstall_env, repo)
+
+        run_uninstall(item_type="skill", name="my-skill", global_flag=True,
+                      yes=True, repos="all")
+
+        assert not uninstall_env["skill_dir"].exists()
+        assert not repo_skill.exists()
+        m = load_manifest(uninstall_env["aec_home"] / "installed-manifest.json")
+        assert "my-skill" not in m["repos"][str(repo.resolve())]["skills"]
+
     def test_removes_legacy_agent_without_md_extension(self, uninstall_env):
         """Legacy agent files installed without .md extension should also be removed."""
         from aec.commands.uninstall import run_uninstall

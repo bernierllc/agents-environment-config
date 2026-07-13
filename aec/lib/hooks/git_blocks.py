@@ -109,6 +109,14 @@ def write_block(
     _try_chmod_exec(hook_file)
 
 
+def block_present(hook_file: Path, *, item_key: str, hook_id: str) -> bool:
+    """True if a delimited block for this item/hook exists in the hook file."""
+    if not hook_file.exists():
+        return False
+    text = hook_file.read_text(encoding="utf-8")
+    return _block_regex(item_key, hook_id).search(text) is not None
+
+
 def remove_block(hook_file: Path, *, item_key: str, hook_id: str) -> None:
     """Remove the matching delimited block. No-op if absent or file missing."""
     if not hook_file.exists():
