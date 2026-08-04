@@ -55,11 +55,16 @@ for sub in "${SUBMODULES[@]}"; do
     continue
   fi
 
-  # Unpushed commits (compare to origin/main)
+  # Unpushed commits: HEAD is fine if it's reachable from any remote branch
+  # (feature-branch work counts as pushed; don't force everything through main)
+  if git -C "$sub" branch -r --contains HEAD 2>/dev/null | grep -q .; then
+    echo -e "${GREEN}in sync${NC}"
+    continue
+  fi
   AHEAD=$(git -C "$sub" rev-list origin/main..HEAD --count 2>/dev/null || echo "0")
   if [ "${AHEAD:-0}" -gt 0 ]; then
     echo -e "${YELLOW}pushing ($AHEAD commit(s))${NC}"
-    if ! git -C "$sub" push origin main; then
+    if ! git -C "$sub" push origin HEAD; then
       echo -e "${RED}Push failed for $sub${NC}"
       FAILED=1
     else
