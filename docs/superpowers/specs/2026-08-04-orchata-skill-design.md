@@ -23,9 +23,9 @@ once, generically, and improve as it is used.
 - **Never pause just to pause:** the run never stops for approvals. Questions are batched once
   at intake; escalation items go to a punch list and work routes around them.
 - **Skill composition:** delegate to installed skills per phase instead of improvising.
-- **AEC awareness:** detect `aec` + installed agents/skills, cache in skill state. Offer
+- **AEC awareness:** detect `aec` + installed agents/skills, cache in user-global state. Offer
   installs from the catalog; never auto-install.
-- **Self-improvement:** friction register in skill state; retro offers a review-and-PR-back
+- **Self-improvement:** friction register in user-global state; retro offers a review-and-PR-back
   conversation with Y / N / Never semantics.
 
 ## Pipeline
@@ -40,7 +40,9 @@ once, generically, and improve as it is used.
    `superpowers:writing-plans` when installed. Decompose into stages tagged with: model tier,
    effort, dependencies, covering agent/skill (if installed), and escalation-contract flags.
    Plan file lands in `plans/` (or wherever a project override directs).
-3. **Orchestrate** — author and run Workflow scripts (orchestrator = session model):
+3. **Orchestrate** — via the Workflow tool where the host provides it (per-call `model` and
+   `effort` overrides); fall back to parallel Agent-tool dispatch (model override only) when it
+   doesn't, noting the degradation in the retro. Orchestrator = session model:
    implement → verify per stage via `pipeline()`, adversarial verification on risky stages
    (money/auth/data/contract changes), `model`/`effort` overrides per the tier table,
    worktree isolation only when workers mutate files in parallel. Stage prompts name the
@@ -52,7 +54,8 @@ once, generically, and improve as it is used.
 
 ## Escalation contract
 
-Inherits the user's global stop-and-confirm list: destructive ops, prod-visible shared state
+The canonical list is embedded verbatim in SKILL.md (works in bare environments); a user's
+global/project instructions may extend it and their additions win. Canonical: destructive ops, prod-visible shared state
 (main pushes, PR merges, external messages, CI changes), money/external quota, genuinely
 material ambiguity. Everything else proceeds without asking.
 
@@ -73,7 +76,16 @@ The run never blocks on a punch-list item.
 Rule: omit the override unless a tier clearly fits; never pay top-tier prices for mechanical
 work; never trust a single pass on risky work.
 
-## AEC awareness (state/capabilities.json)
+## State location (spec-review fix)
+
+All runtime state lives user-globally at `~/.claude/orchata/` — never inside the skill
+directory. AEC installs skills by copying, so skill-dir state would fragment per project and
+leak into fresh installs. `friction.json` is one register across all projects (opt-out is a
+user-level decision); `capabilities.json` is keyed by absolute project path. First run
+bootstraps the directory with `capabilities.json = {}` and
+`friction.json = {"opt_out": false, "last_review": null, "source_repo": null, "entries": []}`.
+
+## AEC awareness (~/.claude/orchata/capabilities.json, keyed by project path)
 
 ```json
 {
@@ -90,28 +102,32 @@ on a lookup miss. No `aec` → skip silently, use generic workers. Catalog has a
 agent/skill than what's installed → suggest `aec install ...` once, proceed generically if
 declined. **Never auto-install.**
 
-## Friction register (state/friction.json)
+## Friction register (~/.claude/orchata/friction.json)
 
 ```json
 {
   "opt_out": false,
-  "total": 0,
   "last_review": null,
+  "source_repo": null,
   "entries": [
     {"date": "2026-08-04", "level": "medium", "phase": "orchestrate",
-     "what_happened": "..."}
+     "project": "/abs/path", "what_happened": "..."}
   ]
 }
 ```
 
 - Log during any run when the skill's instructions caused rework, a wrong default, a missed
   case, or an unnecessary pause. Levels: high / medium / low.
-- **Retro threshold:** any high, or ≥3 medium, or ≥5 total since `last_review` → offer:
+- **Retro threshold:** counting only entries dated after `last_review` (all clauses):
+  any high, or ≥3 medium, or ≥5 total → offer:
   "Friction has been noted in previous runs — review together and suggest PR(s) back to the
   skill?" with **Y / N / Never**.
   - **Y:** review entries together, draft concrete diffs to the skill files, offer a PR to the
-    AEC repo (PR only with explicit confirmation — proposals, never auto-merge).
-  - **N:** keep logging; re-offer when new entries re-hit the threshold.
+    skill's source repo (PR only with explicit confirmation — proposals, never auto-merge).
+    Set `last_review` to today. Source repo resolved in order: cwd is the source repo →
+    `aec info skill orchata` → ask once; cached in `source_repo`.
+  - **N:** set `last_review` to today; keep logging; re-offer only when new entries re-hit
+    the threshold.
   - **Never:** confirm once; set `opt_out: true`; stop logging and stop asking.
 
 ## File layout
@@ -123,13 +139,8 @@ declined. **Never auto-install.**
 │   ├── model-tiers.md            # tier table + effort rules + Workflow shape rules
 │   ├── workflow-patterns.md      # canonical plan→execute→verify script shapes
 │   └── friction-register.md      # register schema, retro protocol, Y/N/Never
-└── state/                        # created at first run, not committed
-    ├── capabilities.json
-    └── friction.json
+└── (no state in the skill dir — runtime state is user-global at ~/.claude/orchata/)
 ```
-
-`state/` is runtime data: gitignored in the AEC repo (a `.gitignore` inside the skill dir),
-created lazily by the skill on first use in an installed location.
 
 ## Out of scope (v1)
 
