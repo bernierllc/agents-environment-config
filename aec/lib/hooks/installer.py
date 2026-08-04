@@ -5,6 +5,8 @@ Pure merge helpers live here alongside the `install_item_hooks` /
 I/O so they can be tested in isolation — this file grows across Tasks 9a-9g.
 """
 
+from __future__ import annotations
+
 import json
 import shlex
 from pathlib import Path
