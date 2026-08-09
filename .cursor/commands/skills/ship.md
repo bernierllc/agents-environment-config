@@ -4,7 +4,6 @@ description: "Use when work on the current branch is ready to land — "ship thi
 tags: ["skill"]
 ---
 
-
 # Ship
 
 Land the current branch's work with evidence. One pass, no skipped gates. If any gate

@@ -4,7 +4,6 @@ description: "Use at the start of a session in a repo with prior work in flight,
 tags: ["skill"]
 ---
 
-
 # Resume
 
 Recover an interrupted session from its checkpoints. The goal is to **continue, not
@@ -16,7 +15,11 @@ re-plan** — a run that is already mapped gets picked up at its first non-done 
   `run-state.json` if present (schema: a run has `steps[]` with `status`, plus
   `next_action`). Read the last ~10 lines of `activity.jsonl` if present.
 - **Git:** `git branch --show-current`, `git log --oneline -10`, `git status --short`,
-  `git branch --sort=-committerdate | head` for other recent branches.
+  `git branch --sort=-committerdate | head` for other recent branches. No run-state on
+  the current branch → check the most recent branches for a committed checkpoint
+  (`git show <branch>:<state-dir>/run-state.json`) before concluding no run is in
+  flight; a hit means the run lives on that branch — switch to it, or reconcile from
+  where you are.
 - **External tracker:** if the user's instructions configure one, query its open
   (non-done) rows whose source link matches this repo — match on `org/repo` from
   `git remote get-url origin`, never the repo name alone. Tracker unavailable → proceed
