@@ -18,8 +18,8 @@ re-plan** — a run that is already mapped gets picked up at its first non-done 
   `git branch --sort=-committerdate | head` for other recent branches. No run-state on
   the current branch → check the most recent branches for a committed checkpoint
   (`git show <branch>:<state-dir>/run-state.json`) before concluding no run is in
-  flight; a hit means the run lives on that branch — switch to it, or reconcile from
-  where you are.
+  flight; a hit means the run lives on that branch — handle it per the branch-mismatch
+  rule in step 2.
 - **External tracker:** if the user's instructions configure one, query its open
   (non-done) rows whose source link matches this repo — match on `org/repo` from
   `git remote get-url origin`, never the repo name alone. Tracker unavailable → proceed
@@ -30,8 +30,10 @@ re-plan** — a run that is already mapped gets picked up at its first non-done 
 For each claim in run-state / tracker rows, check it against git and the world before
 acting on it. One line per drift found:
 
-- run-state names a different branch than the checkout → the checkout wins; say which
-  run the state file belongs to.
+- run-state names a different branch than the checkout → the run belongs to the
+  recorded branch: switch to it when the working tree is clean; dirty tree or any
+  doubt → present it as a conflicting state (step 3) and pause. Never execute the
+  recorded steps from a different branch.
 - A step marked done with no matching commit/PR/evidence → treat as not done.
 - A step marked pending that git shows already happened → mark it done with the
   evidence.
