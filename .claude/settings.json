@@ -6,6 +6,20 @@
           {
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
+          },
+          {
+            "type": "command",
+            "command": "echo '--- BRANCH ---'; git branch --show-current; tail -n 5 .otto/activity.jsonl 2>/dev/null || echo 'no activity log'"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mkdir -p .otto && printf '{\"ts\":\"%s\",\"branch\":\"%s\",\"event\":\"session_end\"}\n' \"$(date -Iseconds)\" \"$(git branch --show-current)\" >> .otto/activity.jsonl"
           }
         ]
       }
