@@ -21,7 +21,12 @@ either proceed, or punch-list it.
 non-done run (see `references/run-state.md`; state dir per "State files" below): reconcile
 it against reality (git log, open PRs, CI/deploy status, the external tracker row if one is
 linked), report any drift in one line each, and continue from the first non-done step. Do
-NOT re-plan a run that is already in flight.
+NOT re-plan a run that is already in flight. No run-state on the current branch → before
+planning fresh, check other branches (`git branch -a --sort=-committerdate`, local and
+remote-tracking) for a committed checkpoint via
+`git show <branch>:<state-dir>/run-state.json`; a hit means the run lives on that branch —
+switch to it when the tree is clean, otherwise surface the conflict and pause (same rule as
+the resume skill).
 
 Read before asking, in order:
 
