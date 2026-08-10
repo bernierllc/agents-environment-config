@@ -15,11 +15,15 @@ re-plan** — a run that is already mapped gets picked up at its first non-done 
   `run-state.json` if present (schema: a run has `steps[]` with `status`, plus
   `next_action`). Read the last ~10 lines of `activity.jsonl` if present.
 - **Git:** `git branch --show-current`, `git log --oneline -10`, `git status --short`,
-  `git branch --sort=-committerdate | head` for other recent branches. No run-state on
-  the current branch → check the most recent branches for a committed checkpoint
-  (`git show <branch>:<state-dir>/run-state.json`) before concluding no run is in
-  flight; a hit means the run lives on that branch — handle it per the branch-mismatch
-  rule in step 2.
+  `git branch -a --sort=-committerdate` for other branches — local **and**
+  remote-tracking. No run-state on the current branch → check those branches, most
+  recent first, for a committed checkpoint
+  (`git show <branch>:<state-dir>/run-state.json`) — work through the list until a hit
+  or it's exhausted, never just the top few — before concluding no run is in flight.
+  Only a checkpoint with an in-flight run counts — one with at least one step whose
+  status is neither `done` nor `skipped`; a fully terminal run-state is history, not a
+  run in flight. A live hit means the run lives on that branch — handle it per
+  the branch-mismatch rule in step 2.
 - **External tracker:** if the user's instructions configure one, query its open
   (non-done) rows whose source link matches this repo — match on `org/repo` from
   `git remote get-url origin`, never the repo name alone. Tracker unavailable → proceed

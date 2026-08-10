@@ -13,12 +13,18 @@ fails, stop there, report plainly, and fix or hand back — never ship red.
 
 - `git status` + `git branch --show-current`. Nothing to ship (clean tree, no unpushed
   commits) → say so and stop.
-- On the default branch (`main`/`master`) with anything to ship — uncommitted work
+- Resolve the repo's actual default branch to a bare local name: run
+  `git symbolic-ref --short refs/remotes/origin/HEAD` first, and only if it succeeded
+  strip the remote prefix from its output (`sed 's|^origin/||'`). If the command failed
+  **or** produced empty output, fall back to
+  `gh repo view --json defaultBranchRef --jq .defaultBranchRef.name` — never pipe the
+  two steps blindly (the pipeline masks a symbolic-ref failure and yields an empty
+  name), never assume `main`/`master`, and never compare a remote-qualified name like
+  `origin/main` against `git branch --show-current`. On that branch with anything to ship — uncommitted work
   **or** unpushed local commits → move it to a feature branch first: create one named
   for the work at HEAD (unpushed commits ride along), then point the local default
   branch back at its upstream — from the feature branch, `git branch -f <default>
-  origin/<default>` using the actual default branch name you were just on. Never
-  commit to or push the default branch directly.
+  origin/<default>`. Never commit to or push the default branch directly.
 - Check nothing staged is gitignored or secret-shaped (`.env*`, keys, tokens). Never
   force-add ignored files.
 
