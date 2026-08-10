@@ -24,7 +24,10 @@ linked), report any drift in one line each, and continue from the first non-done
 NOT re-plan a run that is already in flight. No run-state on the current branch → before
 planning fresh, check other branches (`git branch -a --sort=-committerdate`, local and
 remote-tracking) for a committed checkpoint via
-`git show <branch>:<state-dir>/run-state.json`; a hit means the run lives on that branch —
+`git show <branch>:<state-dir>/run-state.json`; only a checkpoint with an in-flight run
+counts — one with at least one step whose status is neither `done` nor `skipped` (the
+terminal statuses per `references/run-state.md`); a fully terminal run-state is history,
+not an in-flight run. A live hit means the run lives on that branch —
 switch to it when the tree is clean, otherwise surface the conflict and pause (same rule as
 the resume skill).
 
