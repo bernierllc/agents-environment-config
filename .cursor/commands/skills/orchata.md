@@ -225,7 +225,9 @@ legitimate mid-run stop. One blocker never stops the run while other work can pr
 3. **Friction register** — read `references/friction-register.md`. Log this run's friction,
    then evaluate the register: any high-severity entry, ≥3 medium, or ≥5 total since the
    last review → present the compact register verdict from the reference (verdict line, top
-   entries with proposed fixes, proposed diffs) and offer the improvement conversation
+   entries with proposed fixes, proposed diffs) — every line attributed to the **orchata
+   skill** and to previous runs, never presented as bare "Friction register" output that
+   reads like it came from the current conversation — and offer the improvement conversation
    (Y / N / Never) exactly as the reference describes. On Y: review entries together, draft
    concrete diffs to this skill's files, and offer a PR back to the skill's source repo —
    PR only with explicit confirmation. Entries addressed by a shipped fix are pruned on
