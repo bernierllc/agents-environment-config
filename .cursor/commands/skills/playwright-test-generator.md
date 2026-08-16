@@ -41,13 +41,31 @@ Three modes of operation:
 
 ### Script mode (deterministic — runs first)
 
-A JS script at `scripts/verification-playwright/check-versions.js` handles all mechanical staleness detection without LLM involvement. This script:
+A JS script at `scripts/check-versions.js` handles all mechanical staleness detection without LLM involvement. This script:
 
 1. Reads all verification doc frontmatter (version, path, access)
 2. Reads all playwright metadata doc frontmatter (version, source reference)
 3. Reads all test file header comments (source and metadata references)
 4. Compares versions across the chain: verification doc → metadata doc → test file
 5. Outputs a structured task list for the agent
+
+```bash
+node playwright-test-generator/scripts/check-versions.js [project-dir]
+```
+
+It walks the **entire** verification root, excluding only `findings/`, `logs/`,
+`visualizations/`, and a top-level `index.md` / `README.md` — the same discovery rule
+verification-writer's `scan-versions.py` uses. Docs at the verification root or in
+project-specific subdirectories carry real items; a doc not discovered here is invisible
+to the whole pipeline.
+
+Output is a JSON report `{total, counts, results}` on stdout. Exit codes:
+
+| Code | Meaning |
+|---|---|
+| `0` | every doc is `up-to-date` |
+| `1` | at least one doc needs agent work |
+| `2` | at least one doc is a hard stop (`skill-version-mismatch` — run `--resync` first) |
 
 **The script produces one of these outputs for each page:**
 
@@ -73,6 +91,17 @@ Invoked by a user or triggered by verification-writer. Reads the task list from 
 ### Sync mode (deterministic post-hook)
 
 The existing `sync-tests.js` script handles mechanical operations after LLM generation: removing tests for deleted items, updating `@tag` annotations when item IDs change, re-enabling `.skip()` tests when previously-missing testids are found. The postToolUse hook calls this script. Read `references/test-generation-patterns.md` for marker format details.
+
+**Item ID collision guard.** `manifest/items.json` is keyed globally by item ID, so two
+verification docs that mint the same ID cannot both be represented. `sync-tests.js`
+refuses to write when an item it is about to add is already owned by a different
+`source_doc`: it exits non-zero, names each colliding ID and its current owner, and
+leaves the manifest untouched. Without the guard the second doc silently reassigns the
+first doc's item and that page's test coverage disappears with no error anywhere.
+
+The usual cause is two docs sharing an `id_namespace` — verification-writer's integrity
+pass (`scan-versions.py`, v3.4.0+) reports `duplicate_namespaces` upstream. Fix it there
+by giving each doc a unique namespace, then re-run sync.
 
 ### Queue bridge
 

@@ -30,13 +30,33 @@ These consumers run a small `scripts/preflight.sh` at invocation that fails fast
 
 `scripts/scan-versions.py` is a deterministic, no-LLM scanner that reports which version of verification-writer produced each doc. It maintains a SHA-256 cache at `docs/verification/.scan-cache.json` (auto-added to `.gitignore`) so repeat runs only re-scan changed files.
 
+It walks the **entire** verification root, excluding only `findings/`, `logs/`, `visualizations/`, and a top-level `index.md` / `README.md`. Docs that live at the verification root or in project-specific subdirectories hold real checklist items; anything not scanned here is invisible to both the version report and the integrity pass below.
+
 Run it manually:
 
 ```bash
-python3 verification-writer/scripts/scan-versions.py --root . --current-version 3.3.0
+python3 verification-writer/scripts/scan-versions.py --root . --current-version 3.4.0
 ```
 
 The output is JSON: counts of `current` / `stale` / `missing_frontmatter` / `stamp_missing` / `no_affected_paths` plus per-file lists. Use this at the start of any update pass to know which docs need migration. See `references/version-fingerprints.md` for how versions are inferred when a `generated_by` stamp is missing.
+
+### Integrity pass
+
+Every run also performs a deterministic integrity pass over the docs it scans, reported under the top-level `integrity` key. Each defect class below silently destroys downstream item coverage — the playwright-test-generator manifest keys items by ID in a single global map and skips checklist lines it cannot parse, so a collision or a malformed line loses items with no error anywhere:
+
+| Defect | Meaning |
+|---|---|
+| `duplicate_item_ids` | two items in one doc share an ID |
+| `duplicate_namespaces` | two docs declare the same `id_namespace` — their IDs collide and only the doc that syncs last survives downstream |
+| `namespace_mismatches` | an item ID does not start with the doc's `id_namespace` |
+| `malformed_items` | a checklist line is not Format A (missing bold ID, missing ` --- ` separator, or missing `*Expected: …*`), reported with line number and reason |
+| `missing_id_namespace` | the doc's frontmatter has no `id_namespace`, so no ID can be validated |
+
+The pass is report-only by default. Pass `--fail-on-integrity` to exit **2** when any defect is found — use it in blocking pre-commit hooks and CI. Exit `0` is a clean scan, `1` a fatal error (missing dirs, malformed cache).
+
+Fenced code blocks are skipped, so documentation examples inside a doc never register as malformed items.
+
+The scanner's own self-check is `scripts/test_scan_versions.py` — run `python3 verification-writer/scripts/test_scan_versions.py` (no test framework required) after changing it.
 
 ## Entry Points
 
@@ -205,7 +225,7 @@ When a page has different access rules per user type section (e.g., admin sees e
 ```markdown
 ---
 version: "1.0.0"
-generated_by: "verification-writer@3.3.0"
+generated_by: "verification-writer@3.4.0"
 id_namespace: EVT-DTL
 path: /events/{id}
 title: Event Detail Page
@@ -284,7 +304,7 @@ Flow files also include YAML frontmatter with versioning and metadata:
 ```yaml
 ---
 version: "1.0.0"
-generated_by: "verification-writer@3.3.0"
+generated_by: "verification-writer@3.4.0"
 id_namespace: FLOW-NOMLC  # all step IDs in this flow must start with this prefix
 title: Event Lifecycle
 user_types: [admin, promoter, artist]
@@ -316,7 +336,7 @@ Flow frontmatter is lighter than page frontmatter — flows don't have their own
 ```markdown
 ---
 version: "1.0.0"
-generated_by: "verification-writer@3.3.0"
+generated_by: "verification-writer@3.4.0"
 id_namespace: FLOW-NOMLC  # all step IDs in this flow must start with this prefix
 title: Event Lifecycle
 user_types: [admin, promoter, artist]
@@ -564,6 +584,7 @@ When the skill version bumps, add a row describing what changes (if any) need to
 | 3.0.0 | 3.1.0 | none — preserve all existing IDs | add `generated_by` stamp | no (automatic on first write) |
 | 3.1.0 | 3.2.0 | none — preserve all existing IDs | add `id_namespace` field to frontmatter (derive from existing item prefix pattern); flag any items whose IDs don't match the namespace | no (automatic on first write) |
 | 3.2.0 | 3.3.0 | none — preserve all existing IDs | add `affected_paths` field to page and flow frontmatter (glob patterns allowed). On first write, run the path-suggestion pass: deterministic filename + route-table heuristics first, then prompt the user to confirm before persisting. Never silently auto-commit heuristic results. Existing docs that the skill is not actively touching are left as-is and reported by `scan-versions.py` as `no_affected_paths`. | no (automatic on first write) |
+| 3.3.0 | 3.4.0 | none — preserve all existing IDs | no frontmatter changes. `scan-versions.py` now scans the whole verification tree (previously only `pages/`, `flows/`, and `shared.md`) and runs an integrity pass; docs that were never scanned before may newly surface as `missing_frontmatter` / `no_affected_paths`, and duplicate IDs, duplicate `id_namespace` values, namespace mismatches, and malformed Format A lines are now reported. Fix reported defects before generating downstream tests — each one silently drops items. | no (automatic on first write) |
 
 When you add a new version row, be explicit: list exact ID-to-ID mappings for any renames. Do not describe renames as "update to match new convention" — that is not actionable by a future Claude. If you cannot list the mappings, the skill is not ready to rename IDs and the rename should be postponed to a later version where the mapping can be defined.
 
