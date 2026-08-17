@@ -64,3 +64,6 @@ blog/
 
 # Local docs (demo scripts, notes, etc.)
 docs/demo-script.md
+
+# Otto session/activity state (local checkpoint, not part of the tool)
+.otto/
