@@ -12,6 +12,17 @@ except ImportError:
     HAS_TYPER = False
 
 from ..lib import Console, get_repo_root, AEC_HOME, CLAUDE_DIR
+from ..lib.prompt_catalog.install_flow_area import item_prompt_id
+from ..lib.prompt_catalog.skills_area import (
+    SKILLS_INSTALL_OVERWRITE_PREFIX,
+    SKILLS_INSTALL_SELECTION,
+    SKILLS_SYNC_CHOICE,
+    SKILLS_SYNC_SELECTION,
+    SKILLS_UNINSTALL_CONFIRM_PREFIX,
+    SKILLS_UPDATE_APPLY,
+    SKILLS_UPDATE_OVERWRITE_LOCAL_PREFIX,
+)
+from ..lib.prompts import prompt
 from ..lib.skills_manifest import (
     discover_available_skills,
     load_installed_manifest,
@@ -181,10 +192,12 @@ def install_skills(
         dst = installed_dir / name
 
         if dst.exists() and not yes:
-            try:
-                response = input(f"  {name} already exists. Overwrite? [y/N]: ").strip().lower()
-            except EOFError:
-                response = "n"
+            response = prompt(
+                item_prompt_id(SKILLS_INSTALL_OVERWRITE_PREFIX, name),
+                f"  {name} already exists. Overwrite? [y/N]: ",
+                type="yes_no",
+                default=False,
+            ).strip().lower()
             if response != "y":
                 Console.info(f"Skipped: {name}")
                 continue
@@ -230,10 +243,12 @@ def uninstall_skills(
             continue
 
         if not yes:
-            try:
-                response = input(f"  Remove {name} from ~/.claude/skills/? [y/N]: ").strip().lower()
-            except EOFError:
-                response = "n"
+            response = prompt(
+                item_prompt_id(SKILLS_UNINSTALL_CONFIRM_PREFIX, name),
+                f"  Remove {name} from ~/.claude/skills/? [y/N]: ",
+                type="yes_no",
+                default=False,
+            ).strip().lower()
             if response != "y":
                 Console.info(f"Skipped: {name}")
                 continue
@@ -292,10 +307,12 @@ def update_skills(
         Console.print(f"  {name}: {old_v} \u2192 {new_v}")
 
     if not yes:
-        try:
-            response = input("\nApply updates? [Y/n]: ").strip().lower()
-        except EOFError:
-            response = "n"
+        response = prompt(
+            SKILLS_UPDATE_APPLY,
+            "\nApply updates? [Y/n]: ",
+            type="yes_no",
+            default=True,
+        ).strip().lower()
         if response == "n":
             Console.info("Update skipped.")
             return
@@ -326,13 +343,13 @@ def update_skills(
             continue
 
         if plan == "prompt" and not yes:
-            try:
-                resp = input(
-                    f"  {name} differs from install baseline and source; "
-                    f"overwrite (lose local edits)? [y/N]: "
-                ).strip().lower()
-            except EOFError:
-                resp = "n"
+            resp = prompt(
+                item_prompt_id(SKILLS_UPDATE_OVERWRITE_LOCAL_PREFIX, name),
+                f"  {name} differs from install baseline and source; "
+                f"overwrite (lose local edits)? [y/N]: ",
+                type="yes_no",
+                default=False,
+            ).strip().lower()
             if resp != "y":
                 Console.info(f"Skipped: {name}")
                 continue
@@ -424,10 +441,11 @@ def install_step(dry_run: bool = False) -> None:
             Console.print(f"  {i:>3}. {name} ({info.get('version', '?')}) \u2014 {desc}")
 
         Console.print()
-        try:
-            response = input("Install: [a]ll, [n]one, or enter numbers (e.g. 1,3,5-8): ").strip()
-        except EOFError:
-            response = "n"
+        response = prompt(
+            SKILLS_INSTALL_SELECTION,
+            "Install: [a]ll, [n]one, or enter numbers (e.g. 1,3,5-8): ",
+            default="n",
+        ).strip()
 
         selected = _parse_selection(response, len(skill_list))
         names_to_install = [skill_list[i - 1] for i in sorted(selected)]
@@ -459,10 +477,11 @@ def install_step(dry_run: bool = False) -> None:
                 Console.print(f"  {name} ({info.get('version', '?')}) \u2014 {desc}")
 
         Console.print()
-        try:
-            response = input("Install updates and new skills? [a]ll, [s]elect, [S]kip: ").strip().lower()
-        except EOFError:
-            response = "s"
+        response = prompt(
+            SKILLS_SYNC_CHOICE,
+            "Install updates and new skills? [a]ll, [s]elect, [S]kip: ",
+            default="s",
+        ).strip().lower()
 
         if response == "a" or response == "all":
             if updates:
@@ -492,10 +511,11 @@ def install_step(dry_run: bool = False) -> None:
             for i, (name, label) in enumerate(items, 1):
                 Console.print(f"  {i:>3}. {name} \u2014 {label}")
 
-            try:
-                sel = input("Enter numbers (e.g. 1,3,5-8): ").strip()
-            except EOFError:
-                sel = ""
+            sel = prompt(
+                SKILLS_SYNC_SELECTION,
+                "Enter numbers (e.g. 1,3,5-8): ",
+                default="",
+            ).strip()
 
             selected = _parse_selection(sel, len(items))
             selected_names = [items[i - 1][0] for i in sorted(selected)]

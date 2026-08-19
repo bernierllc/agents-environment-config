@@ -13,6 +13,14 @@ from .install_flow_area import (
     FAMILIES as _INSTALL_FLOW_FAMILIES,
     SPECS as _INSTALL_FLOW_SPECS,
 )
+from .maintenance_area import (
+    FAMILIES as _MAINTENANCE_FAMILIES,
+    SPECS as _MAINTENANCE_SPECS,
+)
+from .skills_area import (
+    FAMILIES as _SKILLS_FAMILIES,
+    SPECS as _SKILLS_SPECS,
+)
 from .repo_area import (
     FAMILIES as _REPO_FAMILIES,
     SPECS as _REPO_SPECS,
@@ -43,6 +51,8 @@ _AREA_SPECS: tuple[tuple[PromptSpec, ...], ...] = (
     _LIFECYCLE_SPECS,
     _DISCOVERY_SPECS,
     _REPO_SPECS,
+    _SKILLS_SPECS,
+    _MAINTENANCE_SPECS,
     _TEST_SPECS,
 )
 _AREA_FAMILIES: tuple[tuple[DynamicPromptFamily, ...], ...] = (
@@ -51,6 +61,8 @@ _AREA_FAMILIES: tuple[tuple[DynamicPromptFamily, ...], ...] = (
     _LIFECYCLE_FAMILIES,
     _DISCOVERY_FAMILIES,
     _REPO_FAMILIES,
+    _SKILLS_FAMILIES,
+    _MAINTENANCE_FAMILIES,
     _TEST_FAMILIES,
 )
 
