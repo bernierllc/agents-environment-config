@@ -38,6 +38,12 @@ Read before asking, in order:
 3. `.aec.json` if present; note any project override for where tasks/punch lists live
 4. Capabilities cache — see "AEC awareness" below; refresh if stale
 
+Baseline before writing code: run the repo's build/typecheck once at intake so a pre-existing
+red baseline is a known punch-list item, not a discovery at first commit (pre-commit hooks
+surface it at the worst moment). And when acceptance for any item requires a live
+authenticated check on a remote environment, confirm credential availability now and
+punch-list the check upfront — never discover the gap at retro.
+
 Then ask **at most one batched `AskUserQuestion`** covering only genuine unknowns that would
 materially change the plan (e.g., prod posture when no profile exists, a real fork in scope).
 If everything is answerable from the repo, ask nothing — state each assumption in one line and
@@ -149,6 +155,8 @@ Worktree hygiene (either mode):
 - Workflow scripts whose `args` carries structure start with a defensive parse —
   `args = typeof args === 'string' ? JSON.parse(args) : args` — hosts may deliver args as a
   JSON string.
+- Prefer absolute paths (or `git -C <path>`) in every Bash call — never rely on the shell's
+  persisted cwd, which drifts across calls and environment moves.
 - Log friction as it happens — a wrong default in these instructions, an unnecessary pause, a
   missed case that caused rework → append to the friction register (see Phase 5).
 
@@ -191,6 +199,13 @@ Fan-out runs assume workers die. Rules:
   `packageManager` field in package.json") — or a smoke stage runs the consumer's setup
   after integration. Ownership splits hide exactly these seams.
 
+### Integration & shipping
+
+Promotion PRs between long-lived branches (e.g. staging → main) use **merge commits, never
+squash** — a squash leaves the branches' blobs divergent and the next promotion reports
+false conflicts. If a squash promotion already exists in history, back-merge the target
+into the source branch before opening the next promotion.
+
 ## Phase 4 — Escalate
 
 The escalation contract. This list is canonical and applies even when no global instructions
@@ -215,11 +230,18 @@ legitimate mid-run stop. One blocker never stops the run while other work can pr
 
 ## Phase 5 — Retro
 
-1. **Verify with evidence.** Tests actually run, outputs shown, claims match reality. A page
-   load is not verification. Deploy verification asserts deployment **identity** (a new
-   deployment id/commit visible in the provider's deployment list) plus a response-body
-   match — never a bare HTTP status code, which a stale or placeholder deploy also returns.
-   Report failures plainly.
+1. **Verify with evidence.** Tests actually run, outputs shown, claims match reality; report
+   failures plainly. Specifics:
+   - A page load is not verification. Deploy verification asserts deployment **identity**
+     (a new deployment id/commit visible in the provider's deployment list) plus a
+     response-body match — never a bare HTTP status code, which a stale or placeholder
+     deploy also returns.
+   - Smoke-testing deployed tools: read the run's own schema/handoff doc first instead of
+     guessing arg names.
+   - Monorepo workspaces sharing one local database: run the suite with workspace
+     concurrency 1 before diagnosing a timeout as a code defect.
+   - Before waiting on bot reviews for a PR, check `.github/workflows` is non-empty or the
+     repo has known review bots — if neither, skip the wait.
 2. **Report:** what shipped, what's on the punch list (inline summary + file path), what was
    assumed at intake.
 3. **Friction register** — read `references/friction-register.md`. Log this run's friction,
@@ -256,3 +278,6 @@ if nothing is configured, run with layers 1–2 (local write + git commit are su
 their own), and once — at retro, not mid-run — suggest the user name a tracker in their
 global instructions if they want run state visible outside the CLI. Never block any step
 on the tracker.
+
+Before the first create against a tracker collection in a run, fetch its schema once and
+cache the property names in run-state — never guess field names into a 400.
