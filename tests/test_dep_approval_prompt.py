@@ -37,11 +37,16 @@ class TestPromptDepInstall:
             result = prompt_dep_install("target", "1.0.0", self._make_deps(["dep-a", "dep-b"]))
         assert result is False
 
-    def test_eoferror_returns_false(self):
+    def test_eoferror_raises_prompt_unanswered(self):
+        # Closed stdin no longer silently declines: the seam names the missing
+        # prompt ID so an agent can supply it with --answers.
         from aec.lib.dep_approval_prompt import prompt_dep_install
+        from aec.lib.prompts import PromptUnanswered
+
         with patch("builtins.input", side_effect=EOFError):
-            result = prompt_dep_install("target", "1.0.0", self._make_deps(["dep-a"]))
-        assert result is False
+            with pytest.raises(PromptUnanswered) as exc:
+                prompt_dep_install("target", "1.0.0", self._make_deps(["dep-a"]))
+        assert "install.dependencies.approve.target" in str(exc.value)
 
     def test_no_deps_returns_true_without_prompting(self):
         from aec.lib.dep_approval_prompt import prompt_dep_install
@@ -82,13 +87,16 @@ class TestPromptDepUpgradeConflict:
             )
         assert result is False
 
-    def test_eoferror_returns_false(self):
+    def test_eoferror_raises_prompt_unanswered(self):
         from aec.lib.dep_approval_prompt import prompt_dep_upgrade_conflict
+        from aec.lib.prompts import PromptUnanswered
+
         with patch("builtins.input", side_effect=EOFError):
-            result = prompt_dep_upgrade_conflict(
-                "target", "3.5.0", "dep-skill", "3.4.0", "3.3.0"
-            )
-        assert result is False
+            with pytest.raises(PromptUnanswered) as exc:
+                prompt_dep_upgrade_conflict(
+                    "target", "3.5.0", "dep-skill", "3.4.0", "3.3.0"
+                )
+        assert "install.dependencies.upgrade.dep-skill" in str(exc.value)
 
     def test_prompt_includes_version_context(self, capsys):
         from aec.lib.dep_approval_prompt import prompt_dep_upgrade_conflict

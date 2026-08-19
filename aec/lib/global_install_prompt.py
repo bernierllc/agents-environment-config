@@ -11,6 +11,12 @@ from .filesystem import installed_dst_path, resolve_installed_path
 from .installed_store import record_item_install
 from .manifest_v2 import get_installed, record_install, remove_install, save_manifest
 from .preferences import load_preferences, save_preferences
+from .prompt_catalog.install_flow_area import (
+    INSTALL_GLOBAL_OFFER_CHOICE_PREFIX,
+    INSTALL_GLOBAL_OFFER_DISMISS_PREFIX,
+    item_prompt_id,
+)
+from .prompts import prompt
 from .scope import Scope
 from .skills_manifest import hash_skill_directory
 
@@ -185,14 +191,14 @@ def prompt_multi_repo_global_or_proceed(
     upcoming = len(existing) + 1
     label = _item_label(item_type)
     ord_ = english_ordinal(upcoming)
-    try:
-        ans = input(
-            f"You are about to install this {label} in your {ord_} tracked repo "
-            f"({len(existing)} repo(s) already have it). "
-            f"Would you like aec to convert this to a global install instead? [y/N]: "
-        ).strip().lower()
-    except EOFError:
-        ans = "n"
+    ans = prompt(
+        item_prompt_id(INSTALL_GLOBAL_OFFER_CHOICE_PREFIX, name),
+        f"You are about to install this {label} in your {ord_} tracked repo "
+        f"({len(existing)} repo(s) already have it). "
+        f"Would you like aec to convert this to a global install instead? [y/N]: ",
+        type="yes_no",
+        default=False,
+    ).strip().lower()
 
     if ans == "y":
         migrate_item_to_global(
@@ -213,12 +219,12 @@ def prompt_multi_repo_global_or_proceed(
             pass
         return "global"
 
-    try:
-        remember = input(
-            "Stop offering to make this a global install for this item? [y/N]: "
-        ).strip().lower()
-    except EOFError:
-        remember = "n"
+    remember = prompt(
+        item_prompt_id(INSTALL_GLOBAL_OFFER_DISMISS_PREFIX, name),
+        "Stop offering to make this a global install for this item? [y/N]: ",
+        type="yes_no",
+        default=False,
+    ).strip().lower()
     if remember == "y":
         dismiss_global_install_prompt(item_type, name)
         Console.info("Saved preference: will not ask again for this item.")

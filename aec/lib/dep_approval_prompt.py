@@ -7,6 +7,13 @@ to be installed alongside it.
 from typing import List
 
 from . import Console
+from .prompt_catalog.install_flow_area import (
+    INSTALL_DEPS_APPROVE_EACH_PREFIX,
+    INSTALL_DEPS_APPROVE_PREFIX,
+    INSTALL_DEPS_UPGRADE_PREFIX,
+    item_prompt_id,
+)
+from .prompts import prompt
 
 
 def prompt_dep_install(
@@ -50,20 +57,24 @@ def prompt_dep_install(
 
     Console.print()
 
-    try:
-        resp = input("Approve all? [y/n/each]: ").strip().lower()
-    except EOFError:
-        resp = "n"
+    resp = prompt(
+        item_prompt_id(INSTALL_DEPS_APPROVE_PREFIX, target),
+        "Approve all? [y/n/each]: ",
+        default="n",
+        choices=["y", "n", "each"],
+    ).strip().lower()
 
     if resp == "y":
         return True
 
     if resp == "each":
         for dep in deps_to_install:
-            try:
-                each_resp = input(f"  Install {dep['name']}@{dep['version']}? [y/N]: ").strip().lower()
-            except EOFError:
-                each_resp = "n"
+            each_resp = prompt(
+                item_prompt_id(INSTALL_DEPS_APPROVE_EACH_PREFIX, dep["name"]),
+                f"  Install {dep['name']}@{dep['version']}? [y/N]: ",
+                type="yes_no",
+                default=False,
+            ).strip().lower()
             if each_resp != "y":
                 Console.info(f"Rejected {dep['name']}. Aborting full install.")
                 return False
@@ -89,13 +100,13 @@ def prompt_dep_upgrade_conflict(
     if assume_yes:
         return True
 
-    try:
-        resp = input(
-            f"Updating {target} to {target_new_version} requires {dep_name} "
-            f">={required_min} (currently {installed_ver}). "
-            f"Update {dep_name} too? [y/n/cancel]: "
-        ).strip().lower()
-    except EOFError:
-        resp = "n"
+    resp = prompt(
+        item_prompt_id(INSTALL_DEPS_UPGRADE_PREFIX, dep_name),
+        f"Updating {target} to {target_new_version} requires {dep_name} "
+        f">={required_min} (currently {installed_ver}). "
+        f"Update {dep_name} too? [y/n/cancel]: ",
+        default="n",
+        choices=["y", "n", "cancel"],
+    ).strip().lower()
 
     return resp == "y"
