@@ -9,6 +9,7 @@ file.
 from __future__ import annotations
 
 from .install_area import FAMILIES as _INSTALL_FAMILIES, SPECS as _INSTALL_SPECS
+from .test_area import FAMILIES as _TEST_FAMILIES, SPECS as _TEST_SPECS
 from .spec import DynamicPromptFamily, PromptSpec
 
 __all__ = [
@@ -20,8 +21,11 @@ __all__ = [
     "catalog_ids",
 ]
 
-_AREA_SPECS: tuple[tuple[PromptSpec, ...], ...] = (_INSTALL_SPECS,)
-_AREA_FAMILIES: tuple[tuple[DynamicPromptFamily, ...], ...] = (_INSTALL_FAMILIES,)
+_AREA_SPECS: tuple[tuple[PromptSpec, ...], ...] = (_INSTALL_SPECS, _TEST_SPECS)
+_AREA_FAMILIES: tuple[tuple[DynamicPromptFamily, ...], ...] = (
+    _INSTALL_FAMILIES,
+    _TEST_FAMILIES,
+)
 
 
 def all_specs(*, expand_dynamic: bool = False) -> list:

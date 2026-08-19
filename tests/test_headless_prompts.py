@@ -198,7 +198,9 @@ def test_catalog_covers_every_declared_static_prompt_id():
     from aec.lib.prompt_catalog import catalog_ids
     from aec.lib.prompt_ids import ALL_STATIC_PROMPT_IDS
 
-    assert catalog_ids() == set(ALL_STATIC_PROMPT_IDS)
+    # The catalog is a superset: overlay-eligible IDs live in prompt_ids,
+    # but non-overlay areas (test schedule, etc.) are catalogued too.
+    assert set(ALL_STATIC_PROMPT_IDS) <= catalog_ids()
 
 
 def test_catalog_lookup_and_dynamic_expansion():

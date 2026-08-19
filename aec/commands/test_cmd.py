@@ -110,15 +110,24 @@ def _run_test_schedule_global() -> None:
         load_scheduler_config,
         save_scheduler_config,
     )
+    from ..lib.prompt_catalog.test_area import (
+        TEST_SCHEDULE_ENABLE,
+        TEST_SCHEDULE_PROFILE_RETENTION_DAYS,
+        TEST_SCHEDULE_RETENTION_DAYS,
+        TEST_SCHEDULE_TIME,
+    )
+    from ..lib.prompts import prompt
     from ..lib.schedulers import get_scheduler
 
     # 1. Check scheduled_tests_enabled preference
     enabled_pref = get_preference("scheduled_tests_enabled")
     if not enabled_pref:
-        try:
-            answer = input("Scheduled tests are not enabled. Enable? [Y/n]: ")
-        except EOFError:
-            answer = ""
+        answer = prompt(
+            TEST_SCHEDULE_ENABLE,
+            "Scheduled tests are not enabled. Enable? [Y/n]: ",
+            type="yes_no",
+            default=True,
+        )
         if answer.strip().lower() in ("n", "no"):
             Console.info("Aborted.")
             return
@@ -129,21 +138,22 @@ def _run_test_schedule_global() -> None:
 
     # 2. Prompt for run time
     current_time = schedule.get("time", "02:00")
-    try:
-        new_time = input(f"Run time (24h format, e.g. 02:00) [{current_time}]: ")
-    except EOFError:
-        new_time = ""
-    if not new_time.strip():
-        new_time = current_time
-    schedule["time"] = new_time.strip()
+    new_time = prompt(
+        TEST_SCHEDULE_TIME,
+        f"Run time (24h format, e.g. 02:00) [{current_time}]: ",
+        default=current_time,
+    )
+    schedule["time"] = (new_time.strip() or current_time)
 
     # 3. Retention settings
     retention = schedule.get("retention_days", 30)
     Console.info(f"Current report retention: {retention} days")
-    try:
-        new_ret = input(f"Report retention days [{retention}]: ")
-    except EOFError:
-        new_ret = ""
+    new_ret = prompt(
+        TEST_SCHEDULE_RETENTION_DAYS,
+        f"Report retention days [{retention}]: ",
+        type="int",
+        default=retention,
+    )
     if new_ret.strip():
         try:
             schedule["retention_days"] = int(new_ret.strip())
@@ -153,10 +163,12 @@ def _run_test_schedule_global() -> None:
     # 4. Profile retention
     profile_ret = schedule.get("profile_retention_days", 90)
     Console.info(f"Current profile retention: {profile_ret} days")
-    try:
-        new_prof = input(f"Profile retention days [{profile_ret}]: ")
-    except EOFError:
-        new_prof = ""
+    new_prof = prompt(
+        TEST_SCHEDULE_PROFILE_RETENTION_DAYS,
+        f"Profile retention days [{profile_ret}]: ",
+        type="int",
+        default=profile_ret,
+    )
     if new_prof.strip():
         try:
             schedule["profile_retention_days"] = int(new_prof.strip())

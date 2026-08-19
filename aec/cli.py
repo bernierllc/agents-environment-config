@@ -1226,6 +1226,9 @@ def main():
     and re-print the traceback so it can be copied into a GitHub issue.
     """
     from .lib import debug as _debug
+    from .lib.prompts import PromptInvalidAnswer as _PromptInvalidAnswer
+    from .lib.prompts import PromptUnanswered as _PromptUnanswered
+    from .lib.prompts import env_var_name as _prompt_env_var
 
     if _debug.debug_from_env_or_argv():
         _debug.enable_debug()
@@ -1243,6 +1246,20 @@ def main():
     except KeyboardInterrupt:
         Console.print("\nAborted.")
         sys.exit(130)
+    except _PromptUnanswered as exc:
+        # Not a bug — the run needed an answer nobody supplied. Tell the caller
+        # exactly which key to add rather than burying it in a debug report.
+        Console.error(f"Unanswered prompt: {exc.prompt_id}")
+        Console.print(f"  {exc.reason}")
+        Console.print(f"  Supply it with: --answers FILE (key {exc.prompt_id!r})")
+        Console.print(f"  or the environment variable {_prompt_env_var(exc.prompt_id)}")
+        if not exc.sensitive:
+            Console.print("  Run `aec prompts list` to see every prompt this command can ask.")
+        sys.exit(2)
+    except _PromptInvalidAnswer as exc:
+        Console.error(f"Invalid answer for prompt: {exc.prompt_id}")
+        Console.print(f"  {exc.value!r} is not a valid {exc.expected}")
+        sys.exit(2)
     except BaseException as exc:
         try:
             log_path = _debug.log_exception(exc)
