@@ -35,6 +35,25 @@ from ..lib import (
     get_migration_files,
     AGENT_TOOLS_DIR,
 )
+from ..lib.prompt_catalog.install_flow_area import item_prompt_id
+from ..lib.prompt_catalog.repo_area import (
+    REPO_DISCOVER_SCAN,
+    REPO_GIT_COMMIT_STRATEGY,
+    REPO_GIT_ESSENTIALS,
+    REPO_GIT_RUN_INIT,
+    REPO_GIT_USE_GITHUB,
+    REPO_HOOKS_EXISTING_CONFIG_PREFIX,
+    REPO_HOOKS_LANGUAGES,
+    REPO_HOOKS_MODE,
+    REPO_PRUNE_CONFIRM,
+    REPO_RAYCAST_GENERATE,
+    REPO_RAYCAST_LAUNCHERS,
+    REPO_SETUP_CREATE_DIRECTORY,
+    REPO_SETUP_EXISTING_ACTION,
+    REPO_SETUP_PROJECT_PATH,
+    REPO_TEST_SUITES_SELECTION,
+)
+from ..lib.prompts import prompt
 import subprocess
 from ..lib.config import load_env_file
 from ..lib.git import clone_repo
@@ -308,10 +327,12 @@ def _generate_raycast_scripts(
         return
 
     Console.print()
-    try:
-        response = input("Generate Raycast scripts for these agents? (Y/n): ").strip().lower()
-    except EOFError:
-        response = "y"
+    response = prompt(
+        REPO_RAYCAST_GENERATE,
+        "Generate Raycast scripts for these agents? (Y/n): ",
+        type="yes_no",
+        default=True,
+    ).strip().lower()
 
     if response == "n":
         Console.warning("Skipped Raycast script generation.")
@@ -506,10 +527,12 @@ def _setup_lint_hooks(project_dir: Path, batch: bool = False) -> None:
             Console.print("  2) per-repo - Ask which languages per project")
             Console.print("  3) never    - Never install lint hooks")
             Console.print()
-            try:
-                choice = input("Choose hook mode [1]: ").strip() or "1"
-            except EOFError:
-                choice = "1"
+            choice = prompt(
+                REPO_HOOKS_MODE,
+                "Choose hook mode [1]: ",
+                default="1",
+                choices=["1", "2", "3", ""],
+            ).strip() or "1"
 
             mode_map = {"1": "auto", "2": "per-repo", "3": "never"}
             hook_mode = mode_map.get(choice, "auto")
@@ -543,10 +566,15 @@ def _setup_lint_hooks(project_dir: Path, batch: bool = False) -> None:
         Console.print(f"  {none_option}) None")
         Console.print()
 
-        try:
-            choice = input("Select languages for lint hooks: ").strip()
-        except EOFError:
+        choice = prompt(
+            REPO_HOOKS_LANGUAGES,
+            "Select languages for lint hooks: ",
+            default="all",
+        ).strip()
+        if choice == "all":
             choice = str(all_option)
+        elif choice == "none":
+            choice = str(none_option)
 
         if choice == str(none_option):
             Console.skip("No languages selected, skipping lint hooks")
@@ -589,10 +617,12 @@ def _setup_lint_hooks(project_dir: Path, batch: bool = False) -> None:
             Console.print("  2) Merge hooks into existing config")
             Console.print("  3) Show config (don't write)")
             Console.print()
-            try:
-                action = input("Choice [1]: ").strip() or "1"
-            except EOFError:
-                action = "1"
+            action = prompt(
+                item_prompt_id(REPO_HOOKS_EXISTING_CONFIG_PREFIX, agent_key),
+                "Choice [1]: ",
+                default="1",
+                choices=["1", "2", "3", ""],
+            ).strip() or "1"
 
             action_map = {"1": "skip", "2": "merge", "3": "show"}
             mode = action_map.get(action, "skip")
@@ -709,10 +739,11 @@ def _detect_and_prompt_test_suites(
             Console.print(f"  Type 'all' for all, 'none' to skip")
             Console.print()
 
-            try:
-                choice = input("Selection (comma-separated numbers, 'all', or 'none'): ").strip().lower()
-            except EOFError:
-                choice = "all"
+            choice = prompt(
+                REPO_TEST_SUITES_SELECTION,
+                "Selection (comma-separated numbers, 'all', or 'none'): ",
+                default="all",
+            ).strip().lower()
 
             if choice == "none":
                 selected = []
@@ -923,16 +954,20 @@ def _run_git_phase(project_dir: Path) -> dict:
     if provider is None:
         # No git detected
         Console.print("\n  Git not detected in this project.")
-        try:
-            response = input("  Do you intend to use GitHub? (Y/n): ").strip().lower()
-        except EOFError:
-            response = "n"
+        response = prompt(
+            REPO_GIT_USE_GITHUB,
+            "  Do you intend to use GitHub? (Y/n): ",
+            type="yes_no",
+            default=True,
+        ).strip().lower()
 
         if response in ("", "y", "yes"):
-            try:
-                use_init = input("  Want AEC to run git init? (Y/n): ").strip().lower()
-            except EOFError:
-                use_init = "y"
+            use_init = prompt(
+                REPO_GIT_RUN_INIT,
+                "  Want AEC to run git init? (Y/n): ",
+                type="yes_no",
+                default=True,
+            ).strip().lower()
 
             if use_init in ("", "y", "yes"):
                 result = subprocess.run(
@@ -981,13 +1016,12 @@ def _run_git_phase(project_dir: Path) -> dict:
         display = GIT_PROVIDERS[provider]["essentials"][key]["display"]
         Console.print(f"    [{i}] {display}")
 
-    try:
-        response = input(
-            "\n  Select items for AEC to create\n"
-            "  (comma-separated numbers, 'all', or 'none') [all]: "
-        ).strip().lower()
-    except EOFError:
-        response = "all"
+    response = prompt(
+        REPO_GIT_ESSENTIALS,
+        "\n  Select items for AEC to create\n"
+        "  (comma-separated numbers, 'all', or 'none') [all]: ",
+        default="all",
+    ).strip().lower()
 
     if response in ("", "all"):
         items_to_create = missing
@@ -1062,10 +1096,12 @@ def _create_git_essentials(
     Console.print("    2. Incremental commits per file")
     Console.print("    3. Stage only (git add, you commit)")
     Console.print("    4. No git operations")
-    try:
-        choice = input("  Choice [1]: ").strip()
-    except EOFError:
-        choice = "1"
+    choice = prompt(
+        REPO_GIT_COMMIT_STRATEGY,
+        "  Choice [1]: ",
+        default="1",
+        choices=["1", "2", "3", "4", ""],
+    ).strip()
 
     strategy_map = {"1": "one_commit", "2": "incremental", "3": "stage_only", "4": "none", "": "one_commit"}
     strategy = strategy_map.get(choice, "one_commit")
@@ -1092,11 +1128,10 @@ def setup(
     load_env_file()
 
     if path is None:
-        try:
-            path = input("Enter project name or path: ").strip()
-        except EOFError:
-            Console.error("No project specified")
-            raise SystemExit(1)
+        path = prompt(
+            REPO_SETUP_PROJECT_PATH,
+            "Enter project name or path: ",
+        ).strip()
         if not path:
             Console.error("No project specified")
             raise SystemExit(1)
@@ -1152,10 +1187,12 @@ def setup(
         Console.print("  3) Cancel")
         Console.print()
 
-        try:
-            choice = input("Choice [1]: ").strip() or "1"
-        except EOFError:
-            choice = "1"
+        choice = prompt(
+            REPO_SETUP_EXISTING_ACTION,
+            "Choice [1]: ",
+            default="1",
+            choices=["1", "2", "3", ""],
+        ).strip() or "1"
 
         if choice == "1":
             update(str(project_dir), dry_run=False, update_all=False)
@@ -1184,10 +1221,12 @@ def setup(
                 break
 
         if not cloned:
-            try:
-                response = input("Create new directory? (y/N): ").strip().lower()
-            except EOFError:
-                response = "n"
+            response = prompt(
+                REPO_SETUP_CREATE_DIRECTORY,
+                "Create new directory? (y/N): ",
+                type="yes_no",
+                default=False,
+            ).strip().lower()
 
             if response == "y":
                 project_dir.mkdir(parents=True)
@@ -1268,10 +1307,12 @@ def setup(
                 _generate_raycast_scripts(project_dir, project_name, repo_root_path, dry_run=True)
         else:
             Console.print()
-            try:
-                raycast_response = input("Create Raycast launcher scripts? (y/N): ").strip().lower()
-            except EOFError:
-                raycast_response = "n"
+            raycast_response = prompt(
+                REPO_RAYCAST_LAUNCHERS,
+                "Create Raycast launcher scripts? (y/N): ",
+                type="yes_no",
+                default=False,
+            ).strip().lower()
 
             if raycast_response == "y":
                 repo_root_path = get_repo_root()
@@ -1282,12 +1323,12 @@ def setup(
 
     # --- Discovery scan ---
     if not dry_run and not batch:
-        try:
-            resp = input(
-                "\n  Scan for files that match items in the AEC catalog? [Y/n]: "
-            ).strip().lower()
-        except EOFError:
-            resp = "n"
+        resp = prompt(
+            REPO_DISCOVER_SCAN,
+            "\n  Scan for files that match items in the AEC catalog? [Y/n]: ",
+            type="yes_no",
+            default=True,
+        ).strip().lower()
 
         if resp not in ("n", "no"):
             try:
@@ -1376,8 +1417,13 @@ def prune(yes: bool = False, dry_run: bool = False) -> None:
     if not yes:
         Console.print()
         try:
-            answer = input("Remove these entries? [y/N] ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
+            answer = prompt(
+                REPO_PRUNE_CONFIRM,
+                "Remove these entries? [y/N] ",
+                type="yes_no",
+                default=False,
+            ).strip().lower()
+        except KeyboardInterrupt:
             Console.print("\nAborted.")
             return
         if answer != "y":

@@ -6,6 +6,18 @@ from pathlib import Path
 from typing import Optional
 
 from ..lib.console import Console
+from ..lib.prompt_catalog.install_flow_area import item_prompt_id
+from ..lib.prompt_catalog.lifecycle_area import (
+    UNINSTALL_MCP_PIP_UNINSTALL_PREFIX,
+    UNINSTALL_MCP_REMOVE_ENTRY_PREFIX,
+    UNINSTALL_MULTI_REPO_CHOICE_PREFIX,
+    UNINSTALL_MULTI_REPO_EACH_PREFIX,
+    UNINSTALL_PLUGIN_REMOVE_PREFIX,
+    UNINSTALL_PLUGIN_RUN_COMMAND_PREFIX,
+    UNINSTALL_SCOPE_GLOBAL_PREFIX,
+    UNINSTALL_SCOPE_REPO_PREFIX,
+)
+from ..lib.prompts import prompt as ask_prompt
 from ..lib.filesystem import resolve_installed_path
 from ..lib.installed_store import remove_item_install
 from ..lib.manifest_v2 import load_manifest, save_manifest, remove_install, get_installed
@@ -45,10 +57,12 @@ def _uninstall_mcp(name: str, global_flag: bool, yes: bool) -> None:
     pip_package = item_meta.get("package", "")
 
     if not yes:
-        try:
-            resp = input(f"  Remove {name} mcpServers entry? [y/N]: ").strip().lower()
-        except EOFError:
-            resp = "n"
+        resp = ask_prompt(
+            item_prompt_id(UNINSTALL_MCP_REMOVE_ENTRY_PREFIX, name),
+            f"  Remove {name} mcpServers entry? [y/N]: ",
+            type="yes_no",
+            default=False,
+        ).strip().lower()
         if resp != "y":
             Console.info("Skipped.")
             return
@@ -63,10 +77,12 @@ def _uninstall_mcp(name: str, global_flag: bool, yes: bool) -> None:
 
     # Offer pip uninstall (default no — user may have installed it independently)
     if pip_package and not yes:
-        try:
-            resp = input(f"  Also pip uninstall {pip_package}? [y/N]: ").strip().lower()
-        except EOFError:
-            resp = "n"
+        resp = ask_prompt(
+            item_prompt_id(UNINSTALL_MCP_PIP_UNINSTALL_PREFIX, name),
+            f"  Also pip uninstall {pip_package}? [y/N]: ",
+            type="yes_no",
+            default=False,
+        ).strip().lower()
         if resp == "y":
             subprocess.run(["pip", "uninstall", "-y", pip_package])
 
@@ -102,10 +118,12 @@ def _uninstall_plugin(name: str, global_flag: bool, yes: bool) -> None:
 
     if not yes:
         scope_label = "global" if scope.is_global else str(scope.repo_path)
-        try:
-            resp = input(f"  Remove {name} from {scope_label}? [y/N]: ").strip().lower()
-        except EOFError:
-            resp = "n"
+        resp = ask_prompt(
+            item_prompt_id(UNINSTALL_PLUGIN_REMOVE_PREFIX, name),
+            f"  Remove {name} from {scope_label}? [y/N]: ",
+            type="yes_no",
+            default=False,
+        ).strip().lower()
         if resp != "y":
             Console.info("Skipped.")
             return
@@ -142,11 +160,13 @@ def _uninstall_plugin(name: str, global_flag: bool, yes: bool) -> None:
                 shown = "; ".join(" ".join(c) for c in cmds)
             else:
                 shown = " ".join(cmds)
-            prompt = f"  Run: {shown}? [y/N]: " if shown else "  Proceed? [y/N]: "
-            try:
-                return input(prompt).strip().lower() == "y"
-            except EOFError:
-                return False
+            text = f"  Run: {shown}? [y/N]: " if shown else "  Proceed? [y/N]: "
+            return ask_prompt(
+                item_prompt_id(UNINSTALL_PLUGIN_RUN_COMMAND_PREFIX, name),
+                text,
+                type="yes_no",
+                default=False,
+            ).strip().lower() == "y"
 
         uninstall_plugin(
             manifest_def, detect_agents(),
@@ -161,33 +181,45 @@ def _uninstall_plugin(name: str, global_flag: bool, yes: bool) -> None:
     Console.success(f"Uninstalled plugin: {name}")
 
 
-def _confirm(prompt: str) -> bool:
-    try:
-        return input(prompt).strip().lower() in ("y", "yes")
-    except EOFError:
-        return False
+def _confirm(prompt_id: str, text: str) -> bool:
+    return ask_prompt(prompt_id, text, type="yes_no", default=False).strip().lower() in (
+        "y",
+        "yes",
+    )
 
 
 def _prompt_repo_selection(item_type: str, name: str, candidates: list[str]) -> list[str]:
     """Aggregated prompt: a repo install owns its copy, so ask before reaping it."""
     n = len(candidates)
     Console.warning(f"{item_type} '{name}' is also installed in {n} repo(s).")
+    shown_once = False
     while True:
         print(f"  Uninstall from repos? [a] all {n}  [e] each  "
               f"[s] show where  [g] only globally (default)")
-        try:
-            choice = input("  Choice [a/e/s/g]: ").strip().lower()
-        except EOFError:
-            return []
+        choice = ask_prompt(
+            item_prompt_id(UNINSTALL_MULTI_REPO_CHOICE_PREFIX, name),
+            "  Choice [a/e/s/g]: ",
+            default="g",
+            choices=["a", "e", "s", "g", ""],
+        ).strip().lower()
         if choice == "a":
             return list(candidates)
         if choice == "e":
-            return [r for r in candidates if _confirm(f"    Also uninstall from {r}? [y/N]: ")]
-        if choice == "s":
+            return [
+                r
+                for r in candidates
+                if _confirm(
+                    item_prompt_id(UNINSTALL_MULTI_REPO_EACH_PREFIX, r),
+                    f"    Also uninstall from {r}? [y/N]: ",
+                )
+            ]
+        if choice == "s" and not shown_once:
+            # ponytail: a pre-answered "s" would loop forever, so it only lists once.
+            shown_once = True
             for r in candidates:
                 print(f"    - {r}")
             continue
-        return []  # "g" or empty → only globally
+        return []  # "g", empty, or a repeated "s" → only globally
 
 
 def _purge_scope(item_type: str, name: str, plural: str, scope: Scope,
@@ -264,10 +296,16 @@ def run_uninstall(
             selected_repos = resolve_repos_flag(repos, candidates)
         elif candidates:
             selected_repos = _prompt_repo_selection(item_type, name, candidates)
-        elif not _confirm(f"  Remove {name} from global? [y/N]: "):
+        elif not _confirm(
+            item_prompt_id(UNINSTALL_SCOPE_GLOBAL_PREFIX, name),
+            f"  Remove {name} from global? [y/N]: ",
+        ):
             Console.info("Skipped.")
             return
-    elif not yes and not _confirm(f"  Remove {name} from {scope.repo_path}? [y/N]: "):
+    elif not yes and not _confirm(
+        item_prompt_id(UNINSTALL_SCOPE_REPO_PREFIX, name),
+        f"  Remove {name} from {scope.repo_path}? [y/N]: ",
+    ):
         Console.info("Skipped.")
         return
 

@@ -97,12 +97,16 @@ def _apply_plugins(plugins: list, *, source_dirs: dict, yes: bool) -> None:
     from ..lib.manifest_v2 import load_manifest, record_plugin_install, save_manifest
     from ..lib.plugin_install import install_plugin
     from ..lib.preferences import get_setting
+    from ..lib.prompt_catalog.lifecycle_area import APPLY_PLUGINS_CONFIRM
+    from ..lib.prompts import prompt
 
     if not yes:
-        try:
-            resp = input(f"Apply {len(plugins)} plugin(s)? [y/N]: ").strip().lower()
-        except EOFError:
-            resp = "n"
+        resp = prompt(
+            APPLY_PLUGINS_CONFIRM,
+            f"Apply {len(plugins)} plugin(s)? [y/N]: ",
+            type="yes_no",
+            default=False,
+        ).strip().lower()
         if resp != "y":
             Console.info("Skipped plugins.")
             return

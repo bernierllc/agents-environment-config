@@ -6,6 +6,8 @@ from typing import List
 
 from ..lib.aec_json import create_skeleton, load_aec_json, save_aec_json, update_test_section
 from ..lib.console import Console
+from ..lib.prompt_catalog.test_area import TEST_DETECT_SCHEDULED_SUITES
+from ..lib.prompts import prompt
 from ..lib.test_detection import detect_test_frameworks
 from ..lib.test_schedule_repo import merge_discovery_into_suites, normalize_scheduled_for_suites
 
@@ -62,12 +64,11 @@ def run_test_detect() -> None:
         Console.print("  Type 'all', 'none', comma-separated numbers, or Enter to keep current")
         Console.print()
 
-        try:
-            choice = input(
-                f"Selection [Enter=keep {prev_scheduled!r}]: "
-            ).strip().lower()
-        except EOFError:
-            choice = ""
+        choice = prompt(
+            TEST_DETECT_SCHEDULED_SUITES,
+            f"Selection [Enter=keep {prev_scheduled!r}]: ",
+            default="",
+        ).strip().lower()
 
         if choice == "":
             scheduled = list(prev_scheduled)

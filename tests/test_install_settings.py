@@ -85,8 +85,8 @@ class TestPromptSettings:
         assert get_setting("plans_gitignored") is False  # tracked = not gitignored
         assert get_setting("plans_completion") == "delete"
 
-    def test_handles_eof(self, temp_dir, monkeypatch):
-        """Should use defaults when input raises EOFError (non-interactive)."""
+    def test_eof_raises_instead_of_silently_defaulting(self, temp_dir, monkeypatch):
+        """No human and no supplied answer is an error, not a silent default."""
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "prefs.json")
         monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
 
@@ -95,7 +95,28 @@ class TestPromptSettings:
         monkeypatch.setattr("builtins.input", raise_eof)
 
         from aec.commands.install import _prompt_settings
-        _prompt_settings()
+        from aec.lib.prompts import PromptUnanswered
+
+        with pytest.raises(PromptUnanswered):
+            _prompt_settings()
+
+    def test_defaults_flag_applies_declared_defaults(self, temp_dir, monkeypatch):
+        """`--defaults` is the explicit opt-in to the old EOF behaviour."""
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "prefs.json")
+        monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+
+        def raise_eof(_):
+            raise EOFError
+        monkeypatch.setattr("builtins.input", raise_eof)
+
+        from aec.commands.install import _prompt_settings
+        from aec.lib.prompts import reset_mode, set_mode
+
+        set_mode(use_defaults=True)
+        try:
+            _prompt_settings()
+        finally:
+            reset_mode()
 
         from aec.lib.preferences import get_setting
         assert get_setting("projects_dir") is not None

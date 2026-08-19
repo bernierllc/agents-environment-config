@@ -85,21 +85,42 @@ def run_test_run(global_flag: bool = False) -> None:
         Console.info(f"Report: {summary_path}")
 
 
-def run_test_schedule(global_flag: bool = False) -> None:
-    """Configure scheduled tests: repo ``.aec.json`` or global OS time with ``-g``."""
+def run_test_schedule(
+    global_flag: bool = False,
+    commands: "list[str] | None" = None,
+    list_only: bool = False,
+) -> int:
+    """Configure scheduled tests: repo ``.aec.json`` or global OS time with ``-g``.
+
+    ``commands`` runs the same verbs the ``schedule>`` REPL accepts, without a
+    REPL — one grammar, two drivers, so a headless agent and a human can never
+    diverge. Returns an exit code.
+    """
     if global_flag:
         _run_test_schedule_global()
-        return
+        return 0
 
     from ..lib.scope import find_tracked_repo
-    from ..lib.test_schedule_repo import run_repo_schedule_interactive
+    from ..lib.test_schedule_repo import (
+        run_repo_schedule_batch,
+        run_repo_schedule_interactive,
+    )
 
     repo = find_tracked_repo()
-    if repo is not None:
-        run_repo_schedule_interactive(repo)
-        return
+    if repo is None:
+        if commands or list_only:
+            Console.error("Not inside a tracked project — nothing to schedule.")
+            return 1
+        _run_test_schedule_global()
+        return 0
 
-    _run_test_schedule_global()
+    if list_only:
+        return run_repo_schedule_batch(repo, ["list"], save=False)
+    if commands:
+        return run_repo_schedule_batch(repo, list(commands))
+
+    run_repo_schedule_interactive(repo)
+    return 0
 
 
 def _run_test_schedule_global() -> None:
@@ -110,15 +131,24 @@ def _run_test_schedule_global() -> None:
         load_scheduler_config,
         save_scheduler_config,
     )
+    from ..lib.prompt_catalog.test_area import (
+        TEST_SCHEDULE_ENABLE,
+        TEST_SCHEDULE_PROFILE_RETENTION_DAYS,
+        TEST_SCHEDULE_RETENTION_DAYS,
+        TEST_SCHEDULE_TIME,
+    )
+    from ..lib.prompts import prompt
     from ..lib.schedulers import get_scheduler
 
     # 1. Check scheduled_tests_enabled preference
     enabled_pref = get_preference("scheduled_tests_enabled")
     if not enabled_pref:
-        try:
-            answer = input("Scheduled tests are not enabled. Enable? [Y/n]: ")
-        except EOFError:
-            answer = ""
+        answer = prompt(
+            TEST_SCHEDULE_ENABLE,
+            "Scheduled tests are not enabled. Enable? [Y/n]: ",
+            type="yes_no",
+            default=True,
+        )
         if answer.strip().lower() in ("n", "no"):
             Console.info("Aborted.")
             return
@@ -129,21 +159,22 @@ def _run_test_schedule_global() -> None:
 
     # 2. Prompt for run time
     current_time = schedule.get("time", "02:00")
-    try:
-        new_time = input(f"Run time (24h format, e.g. 02:00) [{current_time}]: ")
-    except EOFError:
-        new_time = ""
-    if not new_time.strip():
-        new_time = current_time
-    schedule["time"] = new_time.strip()
+    new_time = prompt(
+        TEST_SCHEDULE_TIME,
+        f"Run time (24h format, e.g. 02:00) [{current_time}]: ",
+        default=current_time,
+    )
+    schedule["time"] = (new_time.strip() or current_time)
 
     # 3. Retention settings
     retention = schedule.get("retention_days", 30)
     Console.info(f"Current report retention: {retention} days")
-    try:
-        new_ret = input(f"Report retention days [{retention}]: ")
-    except EOFError:
-        new_ret = ""
+    new_ret = prompt(
+        TEST_SCHEDULE_RETENTION_DAYS,
+        f"Report retention days [{retention}]: ",
+        type="int",
+        default=retention,
+    )
     if new_ret.strip():
         try:
             schedule["retention_days"] = int(new_ret.strip())
@@ -153,10 +184,12 @@ def _run_test_schedule_global() -> None:
     # 4. Profile retention
     profile_ret = schedule.get("profile_retention_days", 90)
     Console.info(f"Current profile retention: {profile_ret} days")
-    try:
-        new_prof = input(f"Profile retention days [{profile_ret}]: ")
-    except EOFError:
-        new_prof = ""
+    new_prof = prompt(
+        TEST_SCHEDULE_PROFILE_RETENTION_DAYS,
+        f"Profile retention days [{profile_ret}]: ",
+        type="int",
+        default=profile_ret,
+    )
     if new_prof.strip():
         try:
             schedule["profile_retention_days"] = int(new_prof.strip())

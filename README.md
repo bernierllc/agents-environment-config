@@ -151,6 +151,7 @@ Plugin publishers: ship a `plugin.json` loadout alongside your plugin. See [docs
 - [`.aec.json` schema](docs/users/aec-json.md)
 - [Preferences & local config](docs/users/preferences.md)
 - [Org configs](docs/users/org-configs.md)
+- [Headless usage for agents](docs/users/headless.md)
 - [Raycast integration](docs/users/raycast.md)
 - [Rules architecture](docs/users/rules-architecture.md)
 - [Troubleshooting](docs/users/troubleshooting.md)

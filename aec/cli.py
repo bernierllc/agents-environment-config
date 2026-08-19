@@ -1,7 +1,7 @@
 """Main CLI dispatcher for aec."""
 
 import sys
-from typing import Optional
+from typing import List, Optional
 
 # Check for typer, fall back to argparse if not available
 try:
@@ -14,6 +14,37 @@ except ImportError:
 from . import __version__
 from .lib import Console
 from .commands.deprecation import deprecation_warning
+
+
+def _apply_prompt_globals(answers_path, non_interactive: bool, defaults: bool) -> None:
+    """Wire the headless-prompt global options into the prompt seam.
+
+    Shared by both CLI front-ends so typer and argparse can never drift.
+    """
+    from .lib.prompts import load_answers_file, set_answers, set_mode
+
+    if answers_path:
+        try:
+            set_answers(load_answers_file(answers_path))
+        except (FileNotFoundError, ValueError) as exc:
+            Console.error(str(exc))
+            raise SystemExit(2) from exc
+    else:
+        import os
+
+        inline = os.environ.get("AEC_ANSWERS")
+        if inline:
+            try:
+                set_answers(load_answers_file(inline))
+            except (FileNotFoundError, ValueError) as exc:
+                Console.error(f"AEC_ANSWERS: {exc}")
+                raise SystemExit(2) from exc
+
+    set_mode(
+        non_interactive=True if non_interactive else None,
+        use_defaults=True if defaults else None,
+    )
+
 
 if HAS_TYPER:
     # Typer-based CLI (preferred)
@@ -50,11 +81,28 @@ if HAS_TYPER:
             "--debug",
             help="Capture errors to ~/.agents-environment-config/logs/aec-debug.log and print the traceback.",
         ),
+        answers: str = typer.Option(
+            None,
+            "--answers",
+            metavar="PATH",
+            help="JSON file of {prompt_id: value} answers (see `aec prompts template`).",
+        ),
+        non_interactive: bool = typer.Option(
+            False,
+            "--non-interactive",
+            help="Never prompt; fail with the prompt ID if an answer is missing.",
+        ),
+        defaults: bool = typer.Option(
+            False,
+            "--defaults",
+            help="Accept each prompt's declared default when no answer is supplied.",
+        ),
     ):
         """Pre-command hook: check for unanswered preferences and register update check."""
         if debug:
             from .lib.debug import enable_debug
             enable_debug()
+        _apply_prompt_globals(answers, non_interactive, defaults)
         if ctx.invoked_subcommand is None:
             return
         from .lib.preferences import check_pending_preferences
@@ -340,10 +388,19 @@ if HAS_TYPER:
             False, "-g", "--global",
             help="Configure global daily time and OS scheduler",
         ),
+        do: List[str] = typer.Option(
+            None, "--do",
+            help="One schedule command, repeatable; same verbs as the schedule> REPL (e.g. 'merge', '+ unit', 'r 2', 'n e2e :: npm run e2e', 'o unit,e2e', 'mv 1 2')",
+        ),
+        list_only: bool = typer.Option(
+            False, "--list", help="Print the current schedule and exit (no prompts)"
+        ),
     ):
         """Edit this repo's scheduled suites, or use -g for system-wide setup."""
         from .commands.test_cmd import run_test_schedule
-        run_test_schedule(global_flag=global_flag)
+        raise typer.Exit(
+            run_test_schedule(global_flag=global_flag, commands=do, list_only=list_only)
+        )
 
     @test_app.command("status")
     def test_status_cmd(
@@ -608,6 +665,42 @@ if HAS_TYPER:
         from .commands.generate import run_generate_files
         run_generate_files()
 
+    # --- prompts (headless discovery) ---
+    prompts_app = typer.Typer(
+        help="Discover, template, and validate the prompts AEC can ask",
+    )
+    app.add_typer(prompts_app, name="prompts")
+
+    @prompts_app.command("list")
+    def prompts_list_cmd(
+        command: str = typer.Option(
+            None, "--command", "-c", help="Only show prompts for commands matching this text"
+        ),
+        json_output: bool = typer.Option(False, "--json", help="Machine-readable output"),
+    ):
+        """Show every prompt AEC can ask, with its ID, type, and default."""
+        from .commands.prompts_cmd import run_prompts_list
+        run_prompts_list(command=command, json_out=json_output)
+
+    @prompts_app.command("template")
+    def prompts_template_cmd(
+        command: str = typer.Option(
+            None, "--command", "-c", help="Only include prompts for commands matching this text"
+        ),
+        output: str = typer.Option(None, "--output", "-o", help="Write to this file instead of stdout"),
+    ):
+        """Emit a skeleton answers file for use with --answers."""
+        from .commands.prompts_cmd import run_prompts_template
+        run_prompts_template(command=command, output=output)
+
+    @prompts_app.command("check")
+    def prompts_check_cmd(
+        answers_file: str = typer.Argument(..., help="Answers file to validate"),
+    ):
+        """Validate an answers file against the prompt catalog."""
+        from .commands.prompts_cmd import run_prompts_check
+        raise typer.Exit(run_prompts_check(answers_file))
+
     # --- org (phase 1) ---
     from .commands.org import org_app
     app.add_typer(org_app, name="org", help="Manage organization configurations")
@@ -664,6 +757,21 @@ else:
             "--debug",
             action="store_true",
             help="Capture errors to ~/.agents-environment-config/logs/aec-debug.log and print the traceback.",
+        )
+        parser.add_argument(
+            "--answers",
+            metavar="PATH",
+            help="JSON file of {prompt_id: value} answers (see `aec prompts template`).",
+        )
+        parser.add_argument(
+            "--non-interactive",
+            action="store_true",
+            help="Never prompt; fail with the prompt ID if an answer is missing.",
+        )
+        parser.add_argument(
+            "--defaults",
+            action="store_true",
+            help="Accept each prompt's declared default when no answer is supplied.",
         )
 
         subparsers = parser.add_subparsers(dest="command", help="Commands")
@@ -792,6 +900,18 @@ else:
             action="store_true",
             help="Configure global daily run time and OS scheduler (not .aec.json)",
         )
+        test_schedule.add_argument(
+            "--do",
+            action="append",
+            dest="schedule_do",
+            help="One schedule command, repeatable; same verbs as the schedule> REPL (e.g. 'merge', '+ unit', 'r 2', 'n e2e :: npm run e2e', 'o unit,e2e', 'mv 1 2')",
+        )
+        test_schedule.add_argument(
+            "--list",
+            action="store_true",
+            dest="schedule_list",
+            help="Print the current schedule and exit (no prompts)",
+        )
         test_status = test_sub.add_parser("status", help="Show test configuration or schedule status")
         test_status.add_argument("-g", "--global", dest="global_flag", action="store_true", help="Show global schedule status")
         test_sub.add_parser("enable", help="Enable scheduled test runs")
@@ -848,6 +968,20 @@ else:
         at_rollback = at_sub.add_parser("rollback", help="[DEPRECATED] Use `aec doctor`")
         at_rollback.add_argument("backup_dir")
 
+        # prompts (headless discovery)
+        prompts_parser = subparsers.add_parser(
+            "prompts", help="Discover, template, and validate AEC's prompts"
+        )
+        prompts_sub = prompts_parser.add_subparsers(dest="prompts_command")
+        prompts_list_p = prompts_sub.add_parser("list", help="Show every prompt AEC can ask")
+        prompts_list_p.add_argument("--command", "-c", dest="command_filter")
+        prompts_list_p.add_argument("--json", action="store_true", dest="json_output")
+        prompts_tpl_p = prompts_sub.add_parser("template", help="Emit a skeleton answers file")
+        prompts_tpl_p.add_argument("--command", "-c", dest="command_filter")
+        prompts_tpl_p.add_argument("--output", "-o")
+        prompts_check_p = prompts_sub.add_parser("check", help="Validate an answers file")
+        prompts_check_p.add_argument("answers_file")
+
         # rules (deprecated)
         rules_parser = subparsers.add_parser("rules", help="[DEPRECATED] Use `aec generate rules` or `aec validate`")
         rules_sub = rules_parser.add_subparsers(dest="rules_command")
@@ -892,6 +1026,12 @@ else:
         if getattr(args, "debug", False):
             from .lib.debug import enable_debug
             enable_debug()
+
+        _apply_prompt_globals(
+            getattr(args, "answers", None),
+            getattr(args, "non_interactive", False),
+            getattr(args, "defaults", False),
+        )
 
         if args.command is None:
             parser.print_help()
@@ -1045,7 +1185,13 @@ else:
             if args.test_command == "run":
                 run_test_run(global_flag=args.global_flag)
             elif args.test_command == "schedule":
-                run_test_schedule(global_flag=getattr(args, "global_flag", False))
+                sys.exit(
+                    run_test_schedule(
+                        global_flag=getattr(args, "global_flag", False),
+                        commands=args.schedule_do,
+                        list_only=args.schedule_list,
+                    )
+                )
             elif args.test_command == "status":
                 run_test_status(global_flag=args.global_flag)
             elif args.test_command == "enable":
@@ -1093,6 +1239,21 @@ else:
                 at_cmd.rollback(args.backup_dir)
             else:
                 at_parser.print_help()
+
+        elif args.command == "prompts":
+            from .commands import prompts_cmd
+            if args.prompts_command == "list":
+                prompts_cmd.run_prompts_list(
+                    command=args.command_filter, json_out=args.json_output
+                )
+            elif args.prompts_command == "template":
+                prompts_cmd.run_prompts_template(
+                    command=args.command_filter, output=args.output
+                )
+            elif args.prompts_command == "check":
+                sys.exit(prompts_cmd.run_prompts_check(args.answers_file))
+            else:
+                prompts_parser.print_help()
 
         elif args.command == "rules":
             if args.rules_command == "generate":
@@ -1157,6 +1318,9 @@ def main():
     and re-print the traceback so it can be copied into a GitHub issue.
     """
     from .lib import debug as _debug
+    from .lib.prompts import PromptInvalidAnswer as _PromptInvalidAnswer
+    from .lib.prompts import PromptUnanswered as _PromptUnanswered
+    from .lib.prompts import env_var_name as _prompt_env_var
 
     if _debug.debug_from_env_or_argv():
         _debug.enable_debug()
@@ -1174,6 +1338,20 @@ def main():
     except KeyboardInterrupt:
         Console.print("\nAborted.")
         sys.exit(130)
+    except _PromptUnanswered as exc:
+        # Not a bug — the run needed an answer nobody supplied. Tell the caller
+        # exactly which key to add rather than burying it in a debug report.
+        Console.error(f"Unanswered prompt: {exc.prompt_id}")
+        Console.print(f"  {exc.reason}")
+        Console.print(f"  Supply it with: --answers FILE (key {exc.prompt_id!r})")
+        Console.print(f"  or the environment variable {_prompt_env_var(exc.prompt_id)}")
+        if not exc.sensitive:
+            Console.print("  Run `aec prompts list` to see every prompt this command can ask.")
+        sys.exit(2)
+    except _PromptInvalidAnswer as exc:
+        Console.error(f"Invalid answer for prompt: {exc.prompt_id}")
+        Console.print(f"  {exc.value!r} is not a valid {exc.expected}")
+        sys.exit(2)
     except BaseException as exc:
         try:
             log_path = _debug.log_exception(exc)

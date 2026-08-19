@@ -116,8 +116,8 @@ class TestPromptQualitySettings:
         from aec.commands.install import _prompt_quality_settings
         _prompt_quality_settings()  # Should not raise
 
-    def test_handles_eof(self, temp_dir, monkeypatch):
-        """Should use defaults when input raises EOFError."""
+    def test_eof_raises_instead_of_silently_defaulting(self, temp_dir, monkeypatch):
+        """No human and no supplied answer is an error, not a silent default."""
         self._enable_scheduled_tests(temp_dir, monkeypatch)
 
         def raise_eof(_):
@@ -125,7 +125,27 @@ class TestPromptQualitySettings:
         monkeypatch.setattr("builtins.input", raise_eof)
 
         from aec.commands.install import _prompt_quality_settings
-        _prompt_quality_settings()
+        from aec.lib.prompts import PromptUnanswered
+
+        with pytest.raises(PromptUnanswered):
+            _prompt_quality_settings()
+
+    def test_defaults_flag_applies_declared_defaults(self, temp_dir, monkeypatch):
+        """`--defaults` is the explicit opt-in to the old EOF behaviour."""
+        self._enable_scheduled_tests(temp_dir, monkeypatch)
+
+        def raise_eof(_):
+            raise EOFError
+        monkeypatch.setattr("builtins.input", raise_eof)
+
+        from aec.commands.install import _prompt_quality_settings
+        from aec.lib.prompts import reset_mode, set_mode
+
+        set_mode(use_defaults=True)
+        try:
+            _prompt_quality_settings()
+        finally:
+            reset_mode()
 
         from aec.lib.preferences import get_setting
         # Defaults: first viewer from detected list, auto retention, 30 days

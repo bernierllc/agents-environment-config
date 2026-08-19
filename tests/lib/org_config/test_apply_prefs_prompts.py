@@ -74,7 +74,7 @@ def test_apply_prompts_registers_overlay_answers():
         orig = builtins.input
         builtins.input = boom
         try:
-            assert prompts.prompt("setup.track_current_repo", "Q? ", type="bool") is True
+            assert prompts.prompt("setup.track_current_repo", "Q? ", type="yes_no") == "y"
         finally:
             builtins.input = orig
     finally:

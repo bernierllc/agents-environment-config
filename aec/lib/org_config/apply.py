@@ -250,8 +250,13 @@ def _print_policy_plan(policy: EffectivePolicy) -> None:
 
 
 def _default_confirm(policy: EffectivePolicy) -> bool:
+    from ..prompt_catalog.lifecycle_area import ORG_APPLY_CONFIRM
+    from ..prompts import prompt
+
     _print_policy_plan(policy)
-    try:
-        return input("Apply this org policy? [y/N]: ").strip().lower() == "y"
-    except EOFError:
-        return False
+    return prompt(
+        ORG_APPLY_CONFIRM,
+        "Apply this org policy? [y/N]: ",
+        type="yes_no",
+        default=False,
+    ).strip().lower() == "y"

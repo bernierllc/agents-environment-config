@@ -14,6 +14,16 @@ from ..lib.manifest_v2 import (
     load_manifest, save_manifest, record_install, record_mcp_install, record_plugin_install,
 )
 from ..lib.global_install_prompt import prompt_multi_repo_global_or_proceed
+from ..lib.prompt_catalog.install_flow_area import (
+    INSTALL_HOOKS_DORMANT_PREFIX,
+    INSTALL_MCP_PIP_PREFIX,
+    INSTALL_OVERWRITE_PREFIX,
+    INSTALL_PIPELINE_COPY_PREFIX,
+    INSTALL_PLUGIN_RUN_PREFIX,
+    INSTALL_REINSTALL_PREFIX,
+    item_prompt_id,
+)
+from ..lib.prompts import prompt as ask_prompt
 from ..lib.scope import resolve_scope, Scope, ScopeError
 from ..lib.sources import discover_available, get_source_dirs
 from ..lib.installed_store import record_item_install
@@ -129,10 +139,12 @@ def run_install(
         )
 
     if dst.exists() and not yes:
-        try:
-            resp = input(f"  {name} already exists. Overwrite? [y/N]: ").strip().lower()
-        except EOFError:
-            resp = "n"
+        resp = ask_prompt(
+            item_prompt_id(INSTALL_OVERWRITE_PREFIX, name),
+            f"  {name} already exists. Overwrite? [y/N]: ",
+            type="yes_no",
+            default=False,
+        ).strip().lower()
         if resp != "y":
             Console.info("Skipped.")
             return
@@ -233,8 +245,13 @@ def _dormant_hook_guard(
         return False
     # GUARD_CONFIRM — interactive
     try:
-        resp = input(f"  Install {bold(name)} globally anyway, hooks dormant? [y/N]: ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
+        resp = ask_prompt(
+            item_prompt_id(INSTALL_HOOKS_DORMANT_PREFIX, name),
+            f"  Install {bold(name)} globally anyway, hooks dormant? [y/N]: ",
+            type="yes_no",
+            default=False,
+        ).strip().lower()
+    except KeyboardInterrupt:
         resp = "n"
     if resp in ("y", "yes"):
         return True
@@ -451,10 +468,12 @@ def _install_mcp(name: str, global_flag: bool, yes: bool) -> None:
     from ..lib.manifest_v2 import get_installed
     existing = get_installed(manifest, scope_key, "mcps")
     if name in existing and not yes:
-        try:
-            resp = input(f"  {name} already installed. Reinstall? [y/N]: ").strip().lower()
-        except EOFError:
-            resp = "n"
+        resp = ask_prompt(
+            item_prompt_id(INSTALL_REINSTALL_PREFIX, name),
+            f"  {name} already installed. Reinstall? [y/N]: ",
+            type="yes_no",
+            default=False,
+        ).strip().lower()
         if resp != "y":
             Console.info("Skipped.")
             return
@@ -464,10 +483,12 @@ def _install_mcp(name: str, global_flag: bool, yes: bool) -> None:
     pip_package = install_block.get("pip", "")
     if pip_package:
         if not yes:
-            try:
-                resp = input(f"  pip install {pip_package}? [Y/n]: ").strip().lower()
-            except EOFError:
-                resp = ""
+            resp = ask_prompt(
+                item_prompt_id(INSTALL_MCP_PIP_PREFIX, name),
+                f"  pip install {pip_package}? [Y/n]: ",
+                type="yes_no",
+                default=True,
+            ).strip().lower()
             if resp == "n":
                 Console.info("Skipped package install. Add mcpServers entry manually if needed.")
                 return
@@ -556,10 +577,12 @@ def _install_plugin(name_or_url: str, global_flag: bool, yes: bool) -> None:
     from ..lib.manifest_v2 import get_installed
     existing = get_installed(manifest, scope_key, "plugins")
     if name in existing and not yes:
-        try:
-            resp = input(f"  {name} already installed. Reinstall? [y/N]: ").strip().lower()
-        except EOFError:
-            resp = "n"
+        resp = ask_prompt(
+            item_prompt_id(INSTALL_REINSTALL_PREFIX, name),
+            f"  {name} already installed. Reinstall? [y/N]: ",
+            type="yes_no",
+            default=False,
+        ).strip().lower()
         if resp != "y":
             Console.info("Skipped.")
             return
@@ -576,11 +599,13 @@ def _install_plugin(name_or_url: str, global_flag: bool, yes: bool) -> None:
             shown = "; ".join(" ".join(c) for c in cmds)
         else:
             shown = " ".join(cmds)
-        prompt = f"  Run: {shown}? [y/N]: " if shown else "  Proceed? [y/N]: "
-        try:
-            return input(prompt).strip().lower() == "y"
-        except EOFError:
-            return False
+        text = f"  Run: {shown}? [y/N]: " if shown else "  Proceed? [y/N]: "
+        return ask_prompt(
+            item_prompt_id(INSTALL_PLUGIN_RUN_PREFIX, name),
+            text,
+            type="yes_no",
+            default=False,
+        ).strip().lower() == "y"
 
     result = install_plugin(
         manifest_def, detect_agents(),
@@ -613,13 +638,13 @@ def _post_install_playwright_pipeline(name: str, scope: Scope, yes: bool = False
         return
 
     if not yes:
-        try:
-            resp = input(
-                "This project has verification docs. "
-                "Copy pipeline scripts to scripts/verification-playwright/? [y/N]: "
-            ).strip().lower()
-        except EOFError:
-            resp = "n"
+        resp = ask_prompt(
+            item_prompt_id(INSTALL_PIPELINE_COPY_PREFIX, name),
+            "This project has verification docs. "
+            "Copy pipeline scripts to scripts/verification-playwright/? [y/N]: ",
+            type="yes_no",
+            default=False,
+        ).strip().lower()
         if resp != "y":
             Console.info("Skipped pipeline scripts.")
             return

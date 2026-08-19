@@ -116,9 +116,33 @@ def _print_help() -> None:
     Console.print()
 
 
-def run_repo_schedule_interactive(repo: Path) -> None:
-    """Edit ``test.scheduled`` / ``test.suites`` for the current tracked repo."""
-    from .aec_json import load_aec_json, save_aec_json, create_skeleton, update_test_section
+class _ScheduleState:
+    """Mutable editing state shared by the REPL and the flag-driven driver."""
+
+    def __init__(self, repo: Path, data: dict, suites: dict, scheduled: List[str]):
+        self.repo = repo
+        self.data = data
+        self.suites = suites
+        self.scheduled = scheduled
+        self.dirty = False
+        self.quiet = False  # batch driver: echo state once at the end, not per verb
+
+    def print_state(self, *, force: bool = False) -> None:
+        if self.quiet and not force:
+            return
+        _print_state(self.repo, self.scheduled, self.suites)
+
+    def save(self) -> None:
+        from .aec_json import save_aec_json, update_test_section
+
+        self.scheduled = _normalize_scheduled(self.scheduled, self.suites)
+        update_test_section(self.data, suites=self.suites, scheduled=self.scheduled)
+        save_aec_json(self.repo, self.data)
+        Console.success(f"Saved {self.repo / '.aec.json'}")
+
+
+def _load_state(repo: Path) -> _ScheduleState:
+    from .aec_json import create_skeleton, load_aec_json
 
     data = load_aec_json(repo)
     if data is None:
@@ -129,7 +153,148 @@ def run_repo_schedule_interactive(repo: Path) -> None:
     scheduled = list(test.get("scheduled") or [])
     if isinstance(scheduled, str):  # tolerate bad type
         scheduled = [scheduled] if scheduled else []
-    scheduled = _normalize_scheduled(scheduled, suites)
+    return _ScheduleState(repo, data, suites, _normalize_scheduled(scheduled, suites))
+
+
+def apply_schedule_command(state: _ScheduleState, line: str) -> str:
+    """Run one schedule command against ``state``.
+
+    The REPL and ``aec test schedule --add/--remove/...`` share this grammar so
+    a headless run and an interactive one can never drift apart.
+
+    Returns:
+        ``"save"``, ``"quit"``, ``"error"``, or ``""`` to keep going.
+    """
+    line = line.strip()
+    if not line:
+        return ""
+
+    parts = line.split(maxsplit=1)
+    verb = parts[0].lower()
+    arg = parts[1].strip() if len(parts) > 1 else ""
+    suites, scheduled = state.suites, state.scheduled
+
+    if verb in ("h", "help", "?"):
+        _print_help()
+        return ""
+    if verb in ("l", "list"):
+        state.print_state()
+        return ""
+    if verb in ("m", "merge"):
+        new_keys = merge_discovery_into_suites(state.repo, suites)
+        if new_keys:
+            Console.success(f"Merged {len(new_keys)} suite(s): {', '.join(new_keys)}")
+            state.dirty = True
+        else:
+            Console.info("Nothing new to merge (already present or not detected).")
+        state.print_state()
+        return ""
+    if verb == "r" and arg.isdigit():
+        idx = int(arg)
+        if 1 <= idx <= len(scheduled):
+            removed = scheduled.pop(idx - 1)
+            Console.success(f"Removed '{removed}' from schedule.")
+            state.dirty = True
+            state.print_state()
+            return ""
+        Console.error(f"No scheduled item #{idx}.")
+        state.print_state()
+        return "error"
+    if verb == "+" and arg:
+        name = arg.strip()
+        if name not in suites:
+            Console.error(f"Unknown suite '{name}'. Use `merge` or `n NAME :: CMD` first.")
+            state.print_state()
+            return "error"
+        if name in scheduled:
+            Console.info(f"'{name}' is already scheduled.")
+        else:
+            scheduled.append(name)
+            Console.success(f"Scheduled '{name}'.")
+            state.dirty = True
+        state.print_state()
+        return ""
+    if verb == "n" and " :: " in arg:
+        left, cmd = arg.split(" :: ", 1)
+        name, cmd = left.strip(), cmd.strip()
+        if not name or not cmd:
+            Console.error("Usage: n NAME :: COMMAND")
+            state.print_state()
+            return "error"
+        suites[name] = {"command": cmd, "cleanup": None}
+        if name not in scheduled:
+            scheduled.append(name)
+        Console.success(f"Added suite '{name}' and scheduled it.")
+        state.dirty = True
+        state.print_state()
+        return ""
+    if verb == "o" and arg:
+        names = [x.strip() for x in arg.split(",") if x.strip()]
+        missing = [n for n in names if n not in suites]
+        if missing:
+            Console.error(f"Unknown suite(s): {', '.join(missing)}")
+            state.print_state()
+            return "error"
+        state.scheduled = names
+        Console.success("Schedule order updated.")
+        state.dirty = True
+        state.print_state()
+        return ""
+    if verb == "mv" and arg:
+        bits = arg.split()
+        if len(bits) == 2 and bits[0].isdigit() and bits[1].isdigit():
+            f_, t_ = int(bits[0]), int(bits[1])
+            if move_scheduled_item(scheduled, f_, t_):
+                Console.success(f"Moved scheduled item {f_} to position {t_}.")
+                state.dirty = True
+                state.print_state()
+                return ""
+            Console.error("mv: use two positions 1–N from the scheduled list (need ≥2 items).")
+            state.print_state()
+            return "error"
+        Console.error("Usage: mv FROM TO   (e.g. mv 1 3)")
+        state.print_state()
+        return "error"
+    if verb in ("s", "save"):
+        return "save"
+    if verb in ("q", "quit", "exit"):
+        return "quit"
+
+    Console.error("Unknown command — type `help`.")
+    return "error"
+
+
+def run_repo_schedule_batch(repo: Path, commands: List[str], *, save: bool = True) -> int:
+    """Headless driver: run ``commands`` in order, then save. Returns an exit code.
+
+    Any command that errors stops the run *before* saving — a half-applied
+    schedule written to .aec.json is worse than no change at all.
+    """
+    state = _load_state(repo)
+    state.quiet = True
+    for line in commands:
+        if line.strip().split(maxsplit=1)[:1] in (["l"], ["list"]):
+            state.print_state(force=True)
+            continue
+        outcome = apply_schedule_command(state, line)
+        if outcome == "error":
+            Console.error("Aborted — nothing was written.")
+            return 1
+        if outcome == "quit":
+            return 0
+        if outcome == "save":
+            state.save()
+            return 0
+
+    if save and state.dirty:
+        state.save()
+        state.print_state(force=True)
+    return 0
+
+
+def run_repo_schedule_interactive(repo: Path) -> None:
+    """Edit ``test.scheduled`` / ``test.suites`` for the current tracked repo."""
+    state = _load_state(repo)
 
     Console.header("AEC — schedule tests for this repository")
     Console.print(
@@ -137,102 +302,22 @@ def run_repo_schedule_interactive(repo: Path) -> None:
         "(same as `aec test run -g`)."
     )
     _print_help()
-    _print_state(repo, scheduled, suites)
-
-    dirty = False
+    state.print_state()
 
     while True:
         try:
-            line = input("\nschedule> ").strip()
+            line = input("\nschedule> ")
         except EOFError:
             Console.print()
-            if dirty:
+            if state.dirty:
                 Console.warning("EOF — exiting without save.")
             break
 
-        if not line:
-            continue
-
-        parts = line.split(maxsplit=1)
-        verb = parts[0].lower()
-        arg = parts[1].strip() if len(parts) > 1 else ""
-
-        if verb in ("h", "help", "?"):
-            _print_help()
-        elif verb in ("l", "list"):
-            _print_state(repo, scheduled, suites)
-        elif verb in ("m", "merge"):
-            new_keys = merge_discovery_into_suites(repo, suites)
-            if new_keys:
-                Console.success(f"Merged {len(new_keys)} suite(s): {', '.join(new_keys)}")
-                dirty = True
-            else:
-                Console.info("Nothing new to merge (already present or not detected).")
-            _print_state(repo, scheduled, suites)
-        elif verb == "r" and arg.isdigit():
-            idx = int(arg)
-            if 1 <= idx <= len(scheduled):
-                removed = scheduled.pop(idx - 1)
-                Console.success(f"Removed '{removed}' from schedule.")
-                dirty = True
-            else:
-                Console.error(f"No scheduled item #{idx}.")
-            _print_state(repo, scheduled, suites)
-        elif verb == "+" and arg:
-            name = arg.strip()
-            if name not in suites:
-                Console.error(f"Unknown suite '{name}'. Use `merge` or `n NAME :: CMD` first.")
-            elif name in scheduled:
-                Console.info(f"'{name}' is already scheduled.")
-            else:
-                scheduled.append(name)
-                Console.success(f"Scheduled '{name}'.")
-                dirty = True
-            _print_state(repo, scheduled, suites)
-        elif verb == "n" and " :: " in arg:
-            left, cmd = arg.split(" :: ", 1)
-            name = left.strip()
-            cmd = cmd.strip()
-            if not name or not cmd:
-                Console.error("Usage: n NAME :: COMMAND")
-            else:
-                suites[name] = {"command": cmd, "cleanup": None}
-                if name not in scheduled:
-                    scheduled.append(name)
-                Console.success(f"Added suite '{name}' and scheduled it.")
-                dirty = True
-            _print_state(repo, scheduled, suites)
-        elif verb == "o" and arg:
-            names = [x.strip() for x in arg.split(",") if x.strip()]
-            missing = [n for n in names if n not in suites]
-            if missing:
-                Console.error(f"Unknown suite(s): {', '.join(missing)}")
-            else:
-                scheduled = names
-                Console.success("Schedule order updated.")
-                dirty = True
-            _print_state(repo, scheduled, suites)
-        elif verb == "mv" and arg:
-            bits = arg.split()
-            if len(bits) == 2 and bits[0].isdigit() and bits[1].isdigit():
-                f_, t_ = int(bits[0]), int(bits[1])
-                if move_scheduled_item(scheduled, f_, t_):
-                    Console.success(f"Moved scheduled item {f_} to position {t_}.")
-                    dirty = True
-                else:
-                    Console.error("mv: use two positions 1–N from the scheduled list (need ≥2 items).")
-            else:
-                Console.error("Usage: mv FROM TO   (e.g. mv 1 3)")
-            _print_state(repo, scheduled, suites)
-        elif verb in ("s", "save"):
-            scheduled = _normalize_scheduled(scheduled, suites)
-            update_test_section(data, suites=suites, scheduled=scheduled)
-            save_aec_json(repo, data)
-            Console.success(f"Saved {repo / '.aec.json'}")
+        outcome = apply_schedule_command(state, line)
+        if outcome == "save":
+            state.save()
             break
-        elif verb in ("q", "quit", "exit"):
-            if dirty:
+        if outcome == "quit":
+            if state.dirty:
                 Console.warning("Discarding unsaved changes.")
             break
-        else:
-            Console.error("Unknown command — type `help`.")

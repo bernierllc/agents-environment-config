@@ -475,31 +475,45 @@ class TestDepthPrompt:
     def test_prompt_depth_default(self, monkeypatch):
         """Empty input returns default depth 2."""
         from aec.commands.discover_catalog import _prompt_depth
-        monkeypatch.setattr("builtins.input", lambda: "")
+        monkeypatch.setattr("builtins.input", lambda _text: "")
         assert _prompt_depth() == 2
 
     def test_prompt_depth_explicit(self, monkeypatch):
         """Explicit '3' returns depth 3."""
         from aec.commands.discover_catalog import _prompt_depth
-        monkeypatch.setattr("builtins.input", lambda: "3")
+        monkeypatch.setattr("builtins.input", lambda _text: "3")
         assert _prompt_depth() == 3
 
     def test_prompt_depth_invalid(self, monkeypatch):
         """Invalid input exits."""
         from aec.commands.discover_catalog import _prompt_depth
-        monkeypatch.setattr("builtins.input", lambda: "7")
+        monkeypatch.setattr("builtins.input", lambda _text: "7")
         with pytest.raises(SystemExit):
             _prompt_depth()
 
     def test_prompt_depth_eof(self, monkeypatch):
-        """EOFError returns default depth 2."""
+        """Closed stdin names the prompt ID instead of silently defaulting."""
         from aec.commands.discover_catalog import _prompt_depth
+        from aec.lib.prompts import PromptUnanswered
 
-        def raise_eof():
+        def raise_eof(_text):
             raise EOFError
 
         monkeypatch.setattr("builtins.input", raise_eof)
-        assert _prompt_depth() == 2
+        with pytest.raises(PromptUnanswered) as exc:
+            _prompt_depth()
+        assert "discover_catalog.depth" in str(exc.value)
+
+    def test_prompt_depth_pre_answered(self, monkeypatch):
+        """An agent can supply the depth with --answers."""
+        from aec.commands.discover_catalog import _prompt_depth
+        from aec.lib import prompts
+
+        prompts.set_answers({"discover_catalog.depth": "3"})
+        try:
+            assert _prompt_depth() == 3
+        finally:
+            prompts.clear_answers()
 
 
 class TestFormatMatch:

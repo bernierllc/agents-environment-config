@@ -17,6 +17,8 @@ from ..lib import (
     log_setup,
     list_repos as tracking_list_repos,
 )
+from ..lib.prompt_catalog.discovery_area import DISCOVER_ADD_PATHS
+from ..lib.prompts import prompt
 
 
 def discover(
@@ -119,11 +121,12 @@ def discover(
         return
 
     # Interactive mode - prompt for confirmation
-    Console.print(f"Add {len(new_paths)} new path(s) to tracking? (y/N): ", end="")
-    try:
-        response = input().strip().lower()
-    except EOFError:
-        response = "n"
+    response = prompt(
+        DISCOVER_ADD_PATHS,
+        f"Add {len(new_paths)} new path(s) to tracking? (y/N): ",
+        type="yes_no",
+        default=False,
+    ).strip().lower()
 
     if response == "y":
         _add_paths(new_paths)

@@ -5,7 +5,8 @@ These tests defend two contracts:
   1. Every constant in ``aec.lib.prompt_ids`` is a non-empty string and
      matches the addendum's resolved IDs.
   2. The ``prompt()`` helper in ``aec.lib.prompts`` falls through to
-     ``input()`` in Phase 1 (overlay applier arrives later).
+     ``input()`` when a human is available, and fails loudly with the prompt
+     ID when one is not.
 """
 from __future__ import annotations
 
@@ -33,7 +34,7 @@ from aec.lib.prompt_ids import (
     configurable_instruction_prompt_id,
     optional_rule_prompt_id,
 )
-from aec.lib.prompts import prompt
+from aec.lib.prompts import PromptUnanswered, prompt, reset_mode, set_mode
 
 
 # --- Static IDs match the addendum -----------------------------------------
@@ -110,21 +111,39 @@ def test_prompt_falls_through_to_input(monkeypatch):
     assert captured["text"] == "Continue? "
 
 
-def test_prompt_returns_empty_string_on_eof(monkeypatch):
-    """Matches pre-refactor try/except EOFError behaviour: callers default."""
+def test_prompt_raises_on_eof(monkeypatch):
+    """Closed stdin is a hard failure, not a silent default.
+
+    Pre-headless this returned "" and every caller quietly fell back to its
+    own default -- which is how `aec test schedule -g` could register a
+    launchd job nobody answered for. Now it names the prompt ID so an agent
+    can supply the answer.
+    """
 
     def fake_input(text: str = "") -> str:
         raise EOFError
 
     monkeypatch.setattr(builtins, "input", fake_input)
 
-    result = prompt(
-        INSTALL_SETTINGS_PROJECTS_DIR,
-        "Where? ",
-        type="path",
-        default="/tmp",
-    )
-    assert result == ""
+    with pytest.raises(PromptUnanswered) as exc:
+        prompt(INSTALL_SETTINGS_PROJECTS_DIR, "Where? ", type="path", default="/tmp")
+    assert INSTALL_SETTINGS_PROJECTS_DIR in str(exc.value)
+
+
+def test_prompt_uses_default_on_eof_under_use_defaults(monkeypatch):
+    """--defaults is the opt-in that makes the declared default acceptable."""
+
+    def fake_input(text: str = "") -> str:
+        raise EOFError
+
+    monkeypatch.setattr(builtins, "input", fake_input)
+    set_mode(use_defaults=True)
+    try:
+        assert prompt(
+            INSTALL_SETTINGS_PROJECTS_DIR, "Where? ", type="path", default="/tmp"
+        ) == "/tmp"
+    finally:
+        reset_mode()
 
 
 def test_prompt_accepts_validator_argument_without_calling_it(monkeypatch):

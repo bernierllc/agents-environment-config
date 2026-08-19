@@ -32,10 +32,11 @@ class TestDiscoveryCodePresence:
         source = self._get_setup_source()
         assert "not dry_run and not batch" in source
 
-    def test_discovery_handles_eoferror(self):
-        """Discovery prompt handles EOFError by defaulting to skip."""
+    def test_discovery_prompt_is_catalogued(self):
+        """Discovery prompt routes through the headless seam, not bare input()."""
         source = self._get_setup_source()
-        assert 'resp = "n"' in source
+        assert "REPO_DISCOVER_SCAN" in source
+        assert "input(" not in source
 
     def test_discovery_uses_normal_depth(self):
         """Discovery during setup always uses Normal depth (2), no depth prompt."""
