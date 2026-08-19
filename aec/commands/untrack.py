@@ -4,6 +4,9 @@ from pathlib import Path
 
 from ..lib import Console
 from ..lib.manifest_v2 import load_manifest, save_manifest
+from ..lib.prompt_catalog.install_flow_area import item_prompt_id
+from ..lib.prompt_catalog.lifecycle_area import UNTRACK_CONFIRM_PREFIX
+from ..lib.prompts import prompt
 from ..lib.tracking import is_logged, untrack_repo
 
 
@@ -18,10 +21,12 @@ def run_untrack(path: str, yes: bool = False) -> None:
         return
     if not yes:
         Console.print(f"This will stop tracking {project}.")
-        try:
-            resp = input("Continue? [y/N]: ").strip().lower()
-        except EOFError:
-            resp = "n"
+        resp = prompt(
+            item_prompt_id(UNTRACK_CONFIRM_PREFIX, str(project)),
+            "Continue? [y/N]: ",
+            type="yes_no",
+            default=False,
+        ).strip().lower()
         if resp != "y":
             Console.info("Skipped.")
             return
