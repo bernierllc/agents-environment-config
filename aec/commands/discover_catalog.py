@@ -126,8 +126,10 @@ def _install_item(result: MatchResult, scope: Scope, do_backup: bool) -> None:
     singular = item_type_singular.get(result.item_type, result.item_type)
 
     if do_backup:
-        backup_item(Path(result.local_path), scope.repo_path)
-        ensure_backup_gitignore(scope.repo_path)
+        backup_item(Path(result.local_path), scope.backup_root)
+        # ponytail: gitignore entry only matters inside a repo
+        if scope.is_local:
+            ensure_backup_gitignore(scope.repo_path)
 
     run_install(
         item_type=singular,
