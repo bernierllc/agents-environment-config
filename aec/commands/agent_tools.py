@@ -24,6 +24,11 @@ from ..lib import (
     is_our_symlink,
     get_symlink_target,
 )
+from ..lib.prompt_catalog.maintenance_area import (
+    AGENT_TOOLS_MIGRATE_RERUN,
+    AGENT_TOOLS_ROLLBACK_CONFIRM,
+)
+from ..lib.prompts import prompt
 
 if HAS_TYPER:
     app = typer.Typer(help="Manage ~/.agent-tools/ directory")
@@ -222,10 +227,12 @@ def migrate(dry_run: bool = False) -> None:
     if marker.exists():
         Console.info("Migration marker found - structure already exists")
 
-        try:
-            response = input("Re-run migration to update symlinks? (y/N): ").strip().lower()
-        except EOFError:
-            response = "n"
+        response = prompt(
+            AGENT_TOOLS_MIGRATE_RERUN,
+            "Re-run migration to update symlinks? (y/N): ",
+            type="yes_no",
+            default=False,
+        ).strip().lower()
 
         if response != "y":
             Console.warning("Migration skipped")
@@ -316,10 +323,12 @@ def rollback(backup_dir: str) -> None:
     Console.print("  3. Restore the old symlinks from backup")
     Console.print()
 
-    try:
-        response = input("Continue with rollback? (y/N): ").strip().lower()
-    except EOFError:
-        response = "n"
+    response = prompt(
+        AGENT_TOOLS_ROLLBACK_CONFIRM,
+        "Continue with rollback? (y/N): ",
+        type="yes_no",
+        default=False,
+    ).strip().lower()
 
     if response != "y":
         Console.warning("Rollback cancelled")

@@ -5,6 +5,13 @@ from pathlib import Path
 from typing import Optional
 
 from ..lib.console import Console
+from ..lib.prompt_catalog.install_flow_area import item_prompt_id
+from ..lib.prompt_catalog.maintenance_area import (
+    UPGRADE_OTHER_REPOS,
+    UPGRADE_OVERWRITE_LOCAL_PREFIX,
+    UPGRADE_RUN_UPDATE_FIRST,
+)
+from ..lib.prompts import prompt
 from ..lib.config import get_repo_root
 from ..lib.filesystem import installed_dst_path, resolve_installed_path
 from ..lib.installed_store import record_item_install as record_item_install_pertype
@@ -45,10 +52,12 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
     if is_stale(manifest) and not dry_run:
         Console.warning("Sources may be stale.")
         if not yes:
-            try:
-                resp = input("Run `aec update` first? [Y/n]: ").strip().lower()
-            except EOFError:
-                resp = "n"
+            resp = prompt(
+                UPGRADE_RUN_UPDATE_FIRST,
+                "Run `aec update` first? [Y/n]: ",
+                type="yes_no",
+                default=True,
+            ).strip().lower()
             if resp != "n":
                 from .update import run_update
 
@@ -88,10 +97,11 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
             for repo_path, count in outdated_repos:
                 Console.print(f"  {repo_path}    {count} item(s) outdated")
             if not yes:
-                try:
-                    resp = input("\nUpgrade them too? [y/N/list]: ").strip().lower()
-                except EOFError:
-                    resp = "n"
+                resp = prompt(
+                    UPGRADE_OTHER_REPOS,
+                    "\nUpgrade them too? [y/N/list]: ",
+                    default="n",
+                ).strip().lower()
                 if resp == "y":
                     for repo_path, _ in outdated_repos:
                         Console.print(f"\nUpgrading {repo_path}...")
@@ -371,17 +381,13 @@ def _upgrade_scope(
                     do_prompt = True
 
             if do_prompt:
-                try:
-                    resp = (
-                        input(
-                            f"  {name} differs from install baseline and source; "
-                            f"overwrite (lose local edits)? [y/N]: "
-                        )
-                        .strip()
-                        .lower()
-                    )
-                except EOFError:
-                    resp = "n"
+                resp = prompt(
+                    item_prompt_id(UPGRADE_OVERWRITE_LOCAL_PREFIX, name),
+                    f"  {name} differs from install baseline and source; "
+                    f"overwrite (lose local edits)? [y/N]: ",
+                    type="yes_no",
+                    default=False,
+                ).strip().lower()
                 if resp != "y":
                     Console.info(f"  Skipped: {name}")
                     continue
