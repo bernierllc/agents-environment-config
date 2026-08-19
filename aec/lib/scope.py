@@ -29,6 +29,14 @@ class Scope:
         return not self.is_global
 
     @property
+    def backup_root(self) -> Path:
+        """Directory that holds .aec-backup/. Global scope has no repo."""
+        if self.is_global:
+            return Path.home() / ".claude"
+        assert self.repo_path is not None
+        return self.repo_path
+
+    @property
     def skills_dir(self) -> Path:
         if self.is_global:
             return Path.home() / ".claude" / "skills"

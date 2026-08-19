@@ -564,3 +564,29 @@ class TestFormatMatch:
         formatted = _format_match(4, result)
         assert "Renamed" in formatted
         assert "new-name" in formatted
+
+
+class TestGlobalScopeBackup:
+    """Global scope has no repo_path; backup must still work (regression)."""
+
+    def test_install_item_global_backup_uses_home(self):
+        from aec.commands.discover_catalog import _install_item
+        from aec.lib.scope import Scope
+
+        result = FakeMatchResult(
+            local_name="resume",
+            catalog_item="resume",
+            match_type="modified",
+            item_type="skills",
+        )
+        result.local_path = "/fake/resume"
+        scope = Scope(is_global=True, repo_path=None)
+
+        with ExitStack() as stack:
+            backup = stack.enter_context(patch(f"{P}.backup_item"))
+            gitignore = stack.enter_context(patch(f"{P}.ensure_backup_gitignore"))
+            stack.enter_context(patch("aec.commands.install_cmd.run_install"))
+            _install_item(result, scope, do_backup=True)
+
+        backup.assert_called_once_with(Path("/fake/resume"), Path.home() / ".claude")
+        gitignore.assert_not_called()
