@@ -39,9 +39,10 @@ class TestSetupNoArgInteractive:
         with pytest.raises(SystemExit):
             setup(path=None)
 
-    def test_setup_exits_on_eof(self, tmp_path, monkeypatch):
-        """setup(path=None) exits on EOFError (piped input)."""
+    def test_setup_names_prompt_id_on_eof(self, tmp_path, monkeypatch):
+        """setup(path=None) names the unanswered prompt on EOF (piped input)."""
         from aec.commands.repo import setup
+        from aec.lib.prompts import PromptUnanswered
 
         def raise_eof(prompt):
             raise EOFError
@@ -49,8 +50,9 @@ class TestSetupNoArgInteractive:
         monkeypatch.setattr("builtins.input", raise_eof)
         monkeypatch.setattr("aec.commands.repo.load_env_file", lambda: None)
 
-        with pytest.raises(SystemExit):
+        with pytest.raises(PromptUnanswered) as exc:
             setup(path=None)
+        assert "repo.setup.project_path" in str(exc.value)
 
 
 class TestCleanAgentinfoRedundancy:

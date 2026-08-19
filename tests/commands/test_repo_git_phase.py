@@ -94,9 +94,11 @@ class TestRunGitPhase:
         assert result["git_enabled"] is True
         assert len(result["items_to_create"]) == 9
 
-    def test_eoferror_on_input_defaults_to_all(self, tmp_path):
+    def test_eoferror_names_the_prompt_id(self, tmp_path):
+        """Closed stdin no longer silently picks 'all' — it names the prompt."""
         _make_git_repo(tmp_path)
         from aec.commands.repo import _run_git_phase
+        from aec.lib.prompts import PromptUnanswered
 
         all_missing = {k: "missing" for k in [
             ".gitignore", "README.md", "dependabot", "pr_template",
@@ -105,7 +107,28 @@ class TestRunGitPhase:
         with patch("aec.commands.repo.detect_git_provider", return_value="github"):
             with patch("aec.commands.repo.scan_git_essentials", return_value=all_missing):
                 with patch("builtins.input", side_effect=EOFError):
+                    with pytest.raises(PromptUnanswered) as exc:
+                        _run_git_phase(tmp_path)
+
+        assert "repo.git.essentials" in str(exc.value)
+
+    def test_essentials_pre_answered_by_agent(self, tmp_path):
+        """--answers supplies the git-essentials selection headlessly."""
+        _make_git_repo(tmp_path)
+        from aec.commands.repo import _run_git_phase
+        from aec.lib import prompts
+
+        all_missing = {k: "missing" for k in [
+            ".gitignore", "README.md", "dependabot", "pr_template",
+            "issue_templates", "ci_workflow", "license", "editorconfig", "codeowners",
+        ]}
+        prompts.set_answers({"repo.git.essentials": "all"})
+        try:
+            with patch("aec.commands.repo.detect_git_provider", return_value="github"):
+                with patch("aec.commands.repo.scan_git_essentials", return_value=all_missing):
                     result = _run_git_phase(tmp_path)
+        finally:
+            prompts.clear_answers()
 
         assert result["git_enabled"] is True
         assert len(result["items_to_create"]) == 9
