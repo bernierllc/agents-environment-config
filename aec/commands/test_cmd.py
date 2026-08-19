@@ -85,21 +85,42 @@ def run_test_run(global_flag: bool = False) -> None:
         Console.info(f"Report: {summary_path}")
 
 
-def run_test_schedule(global_flag: bool = False) -> None:
-    """Configure scheduled tests: repo ``.aec.json`` or global OS time with ``-g``."""
+def run_test_schedule(
+    global_flag: bool = False,
+    commands: "list[str] | None" = None,
+    list_only: bool = False,
+) -> int:
+    """Configure scheduled tests: repo ``.aec.json`` or global OS time with ``-g``.
+
+    ``commands`` runs the same verbs the ``schedule>`` REPL accepts, without a
+    REPL — one grammar, two drivers, so a headless agent and a human can never
+    diverge. Returns an exit code.
+    """
     if global_flag:
         _run_test_schedule_global()
-        return
+        return 0
 
     from ..lib.scope import find_tracked_repo
-    from ..lib.test_schedule_repo import run_repo_schedule_interactive
+    from ..lib.test_schedule_repo import (
+        run_repo_schedule_batch,
+        run_repo_schedule_interactive,
+    )
 
     repo = find_tracked_repo()
-    if repo is not None:
-        run_repo_schedule_interactive(repo)
-        return
+    if repo is None:
+        if commands or list_only:
+            Console.error("Not inside a tracked project — nothing to schedule.")
+            return 1
+        _run_test_schedule_global()
+        return 0
 
-    _run_test_schedule_global()
+    if list_only:
+        return run_repo_schedule_batch(repo, ["list"], save=False)
+    if commands:
+        return run_repo_schedule_batch(repo, list(commands))
+
+    run_repo_schedule_interactive(repo)
+    return 0
 
 
 def _run_test_schedule_global() -> None:

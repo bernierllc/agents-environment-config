@@ -1,7 +1,7 @@
 """Main CLI dispatcher for aec."""
 
 import sys
-from typing import Optional
+from typing import List, Optional
 
 # Check for typer, fall back to argparse if not available
 try:
@@ -388,10 +388,19 @@ if HAS_TYPER:
             False, "-g", "--global",
             help="Configure global daily time and OS scheduler",
         ),
+        do: List[str] = typer.Option(
+            None, "--do",
+            help="One schedule command, repeatable; same verbs as the schedule> REPL (e.g. 'merge', '+ unit', 'r 2', 'n e2e :: npm run e2e', 'o unit,e2e', 'mv 1 2')",
+        ),
+        list_only: bool = typer.Option(
+            False, "--list", help="Print the current schedule and exit (no prompts)"
+        ),
     ):
         """Edit this repo's scheduled suites, or use -g for system-wide setup."""
         from .commands.test_cmd import run_test_schedule
-        run_test_schedule(global_flag=global_flag)
+        raise typer.Exit(
+            run_test_schedule(global_flag=global_flag, commands=do, list_only=list_only)
+        )
 
     @test_app.command("status")
     def test_status_cmd(
@@ -891,6 +900,18 @@ else:
             action="store_true",
             help="Configure global daily run time and OS scheduler (not .aec.json)",
         )
+        test_schedule.add_argument(
+            "--do",
+            action="append",
+            dest="schedule_do",
+            help="One schedule command, repeatable; same verbs as the schedule> REPL (e.g. 'merge', '+ unit', 'r 2', 'n e2e :: npm run e2e', 'o unit,e2e', 'mv 1 2')",
+        )
+        test_schedule.add_argument(
+            "--list",
+            action="store_true",
+            dest="schedule_list",
+            help="Print the current schedule and exit (no prompts)",
+        )
         test_status = test_sub.add_parser("status", help="Show test configuration or schedule status")
         test_status.add_argument("-g", "--global", dest="global_flag", action="store_true", help="Show global schedule status")
         test_sub.add_parser("enable", help="Enable scheduled test runs")
@@ -1164,7 +1185,13 @@ else:
             if args.test_command == "run":
                 run_test_run(global_flag=args.global_flag)
             elif args.test_command == "schedule":
-                run_test_schedule(global_flag=getattr(args, "global_flag", False))
+                sys.exit(
+                    run_test_schedule(
+                        global_flag=getattr(args, "global_flag", False),
+                        commands=args.schedule_do,
+                        list_only=args.schedule_list,
+                    )
+                )
             elif args.test_command == "status":
                 run_test_status(global_flag=args.global_flag)
             elif args.test_command == "enable":

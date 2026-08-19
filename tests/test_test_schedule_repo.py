@@ -75,3 +75,66 @@ class TestNormalizeScheduled:
         raw = ["a", "ghost", "a", "b"]
         out = tsr._normalize_scheduled(raw, suites)
         assert out == ["a", "b"]
+
+
+# --- headless batch driver (aec test schedule --do / --list) ---------------
+
+from aec.lib.test_schedule_repo import run_repo_schedule_batch  # noqa: E402
+
+
+def _load(repo):
+    return json.loads((repo / ".aec.json").read_text())["test"]
+
+
+def test_batch_applies_every_verb_and_saves(tmp_path):
+    rc = run_repo_schedule_batch(
+        tmp_path,
+        ["n unit :: npm test", "n e2e :: npm run e2e", "o e2e,unit", "mv 1 2"],
+    )
+    assert rc == 0
+    test = _load(tmp_path)
+    assert test["scheduled"] == ["unit", "e2e"]
+    assert test["suites"]["e2e"]["command"] == "npm run e2e"
+
+
+def test_batch_removes_by_position(tmp_path):
+    run_repo_schedule_batch(tmp_path, ["n unit :: npm test", "n e2e :: npm run e2e"])
+    assert run_repo_schedule_batch(tmp_path, ["r 1"]) == 0
+    assert _load(tmp_path)["scheduled"] == ["e2e"]
+
+
+def test_batch_writes_nothing_when_a_verb_fails(tmp_path):
+    run_repo_schedule_batch(tmp_path, ["n unit :: npm test"])
+    before = (tmp_path / ".aec.json").read_text()
+    assert run_repo_schedule_batch(tmp_path, ["n e2e :: npm run e2e", "+ nope"]) == 1
+    assert (tmp_path / ".aec.json").read_text() == before
+
+
+def test_batch_list_does_not_save(tmp_path):
+    run_repo_schedule_batch(tmp_path, ["n unit :: npm test"])
+    before = (tmp_path / ".aec.json").read_text()
+    assert run_repo_schedule_batch(tmp_path, ["list"], save=False) == 0
+    assert (tmp_path / ".aec.json").read_text() == before
+
+
+def test_batch_never_prompts(tmp_path, monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("headless batch must not call input()")
+
+    monkeypatch.setattr("builtins.input", boom)
+    assert run_repo_schedule_batch(tmp_path, ["n unit :: npm test"]) == 0
+
+
+def test_command_routes_to_the_batch_driver(tmp_path, monkeypatch):
+    from aec.commands import test_cmd
+
+    monkeypatch.setattr("aec.lib.scope.find_tracked_repo", lambda: tmp_path)
+    assert test_cmd.run_test_schedule(commands=["n unit :: npm test"]) == 0
+    assert _load(tmp_path)["scheduled"] == ["unit"]
+
+
+def test_command_errors_outside_a_tracked_repo(monkeypatch):
+    from aec.commands import test_cmd
+
+    monkeypatch.setattr("aec.lib.scope.find_tracked_repo", lambda: None)
+    assert test_cmd.run_test_schedule(list_only=True) == 1
