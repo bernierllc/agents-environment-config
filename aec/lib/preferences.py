@@ -1,6 +1,7 @@
 """User preferences for optional AEC features."""
 
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -198,6 +199,14 @@ def reset_preference(key: str) -> None:
     save_preferences(prefs)
 
 
+def _stdin_is_tty() -> bool:
+    """True when a human is at the terminal (patched in tests)."""
+    try:
+        return bool(sys.stdin.isatty())
+    except (AttributeError, ValueError):  # detached / closed stdin
+        return False
+
+
 def check_pending_preferences() -> None:
     """
     Check for unanswered optional features and prompt the user.
@@ -209,8 +218,14 @@ def check_pending_preferences() -> None:
     if not pending:
         return
 
+    # This questionnaire is ambient -- it is never the command the user ran.
+    # Only ask a human sitting at a terminal: piped or redirected stdin belongs
+    # to the real command's prompts, and reading a line here steals it.
+    if not _stdin_is_tty():
+        return
+
     from .console import Console
-    from .prompts import prompt as _prompt
+    from .prompts import PromptUnanswered, prompt as _prompt
     from .prompt_ids import optional_rule_prompt_id
 
     Console.print()
@@ -218,12 +233,18 @@ def check_pending_preferences() -> None:
     Console.print("AEC has optional rules you can enable for your AI agents.\n")
 
     for feature in pending:
-        response = _prompt(
-            optional_rule_prompt_id(feature["key"]),
-            feature["prompt"],
-            type="yes_no",
-            default=feature["default"],
-        ).strip().lower()
+        try:
+            response = _prompt(
+                optional_rule_prompt_id(feature["key"]),
+                feature["prompt"],
+                type="yes_no",
+                default=feature["default"],
+            ).strip().lower()
+        except PromptUnanswered:
+            # Ambient hook, not the command the user asked for: with no answer
+            # available, leave the feature pending and let the command run.
+            Console.print()
+            return
 
         if response == "":
             enabled = feature["default"]

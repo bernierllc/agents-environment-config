@@ -292,6 +292,7 @@ class TestCheckPendingPreferences:
         """Should prompt user when there are pending preferences."""
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
         monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+        monkeypatch.setattr("aec.lib.preferences._stdin_is_tty", lambda: True)
 
         # Simulate user pressing Enter (accepting default)
         monkeypatch.setattr("builtins.input", lambda _: "")
@@ -331,6 +332,7 @@ class TestCheckPendingPreferences:
         """Should store False when user types 'n'."""
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
         monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+        monkeypatch.setattr("aec.lib.preferences._stdin_is_tty", lambda: True)
         monkeypatch.setattr("builtins.input", lambda _: "n")
 
         from aec.lib.preferences import check_pending_preferences, get_preference
@@ -339,26 +341,53 @@ class TestCheckPendingPreferences:
 
         assert get_preference("leave-it-better") is False
 
-    def test_eof_raises_instead_of_silently_defaulting(self, temp_dir, monkeypatch):
-        """No human and no supplied answer is an error, not a silent default."""
+    def test_eof_defers_instead_of_silently_defaulting(self, temp_dir, monkeypatch):
+        """No answer available leaves the feature pending -- never a silent default.
+
+        This questionnaire is ambient, so it must not abort the command the
+        user actually ran; but it also must not record an answer nobody gave.
+        """
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
         monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+        monkeypatch.setattr("aec.lib.preferences._stdin_is_tty", lambda: True)
 
         def raise_eof(_):
             raise EOFError
 
         monkeypatch.setattr("builtins.input", raise_eof)
 
-        from aec.lib.preferences import check_pending_preferences
-        from aec.lib.prompts import PromptUnanswered
+        from aec.lib.preferences import check_pending_preferences, get_preference
 
-        with pytest.raises(PromptUnanswered):
-            check_pending_preferences()
+        check_pending_preferences()  # must not raise
+
+        assert get_preference("leave-it-better") is None
+
+    def test_non_tty_stdin_is_never_consumed(self, temp_dir, monkeypatch):
+        """Piped stdin belongs to the real command's prompts, not to this hook.
+
+        Reading a line here is how `printf '4\n' | aec org resolve` used to
+        lose its answer to the optional-features questionnaire.
+        """
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
+        monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+        monkeypatch.setattr("aec.lib.preferences._stdin_is_tty", lambda: False)
+
+        def should_not_be_called(_):
+            raise AssertionError("ambient hook read stdin without a terminal")
+
+        monkeypatch.setattr("builtins.input", should_not_be_called)
+
+        from aec.lib.preferences import check_pending_preferences, get_preference
+
+        check_pending_preferences()
+
+        assert get_preference("leave-it-better") is None
 
     def test_defaults_flag_applies_declared_default(self, temp_dir, monkeypatch):
         """`--defaults` is the explicit opt-in to the old EOF behaviour."""
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
         monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+        monkeypatch.setattr("aec.lib.preferences._stdin_is_tty", lambda: True)
 
         def raise_eof(_):
             raise EOFError
