@@ -656,6 +656,42 @@ if HAS_TYPER:
         from .commands.generate import run_generate_files
         run_generate_files()
 
+    # --- prompts (headless discovery) ---
+    prompts_app = typer.Typer(
+        help="Discover, template, and validate the prompts AEC can ask",
+    )
+    app.add_typer(prompts_app, name="prompts")
+
+    @prompts_app.command("list")
+    def prompts_list_cmd(
+        command: str = typer.Option(
+            None, "--command", "-c", help="Only show prompts for commands matching this text"
+        ),
+        json_output: bool = typer.Option(False, "--json", help="Machine-readable output"),
+    ):
+        """Show every prompt AEC can ask, with its ID, type, and default."""
+        from .commands.prompts_cmd import run_prompts_list
+        run_prompts_list(command=command, json_out=json_output)
+
+    @prompts_app.command("template")
+    def prompts_template_cmd(
+        command: str = typer.Option(
+            None, "--command", "-c", help="Only include prompts for commands matching this text"
+        ),
+        output: str = typer.Option(None, "--output", "-o", help="Write to this file instead of stdout"),
+    ):
+        """Emit a skeleton answers file for use with --answers."""
+        from .commands.prompts_cmd import run_prompts_template
+        run_prompts_template(command=command, output=output)
+
+    @prompts_app.command("check")
+    def prompts_check_cmd(
+        answers_file: str = typer.Argument(..., help="Answers file to validate"),
+    ):
+        """Validate an answers file against the prompt catalog."""
+        from .commands.prompts_cmd import run_prompts_check
+        raise typer.Exit(run_prompts_check(answers_file))
+
     # --- org (phase 1) ---
     from .commands.org import org_app
     app.add_typer(org_app, name="org", help="Manage organization configurations")
@@ -911,6 +947,20 @@ else:
         at_rollback = at_sub.add_parser("rollback", help="[DEPRECATED] Use `aec doctor`")
         at_rollback.add_argument("backup_dir")
 
+        # prompts (headless discovery)
+        prompts_parser = subparsers.add_parser(
+            "prompts", help="Discover, template, and validate AEC's prompts"
+        )
+        prompts_sub = prompts_parser.add_subparsers(dest="prompts_command")
+        prompts_list_p = prompts_sub.add_parser("list", help="Show every prompt AEC can ask")
+        prompts_list_p.add_argument("--command", "-c", dest="command_filter")
+        prompts_list_p.add_argument("--json", action="store_true", dest="json_output")
+        prompts_tpl_p = prompts_sub.add_parser("template", help="Emit a skeleton answers file")
+        prompts_tpl_p.add_argument("--command", "-c", dest="command_filter")
+        prompts_tpl_p.add_argument("--output", "-o")
+        prompts_check_p = prompts_sub.add_parser("check", help="Validate an answers file")
+        prompts_check_p.add_argument("answers_file")
+
         # rules (deprecated)
         rules_parser = subparsers.add_parser("rules", help="[DEPRECATED] Use `aec generate rules` or `aec validate`")
         rules_sub = rules_parser.add_subparsers(dest="rules_command")
@@ -1162,6 +1212,21 @@ else:
                 at_cmd.rollback(args.backup_dir)
             else:
                 at_parser.print_help()
+
+        elif args.command == "prompts":
+            from .commands import prompts_cmd
+            if args.prompts_command == "list":
+                prompts_cmd.run_prompts_list(
+                    command=args.command_filter, json_out=args.json_output
+                )
+            elif args.prompts_command == "template":
+                prompts_cmd.run_prompts_template(
+                    command=args.command_filter, output=args.output
+                )
+            elif args.prompts_command == "check":
+                sys.exit(prompts_cmd.run_prompts_check(args.answers_file))
+            else:
+                prompts_parser.print_help()
 
         elif args.command == "rules":
             if args.rules_command == "generate":
