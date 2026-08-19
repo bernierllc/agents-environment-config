@@ -13,6 +13,10 @@ from .install_flow_area import (
     FAMILIES as _INSTALL_FLOW_FAMILIES,
     SPECS as _INSTALL_FLOW_SPECS,
 )
+from .discovery_area import (
+    FAMILIES as _DISCOVERY_FAMILIES,
+    SPECS as _DISCOVERY_SPECS,
+)
 from .lifecycle_area import (
     FAMILIES as _LIFECYCLE_FAMILIES,
     SPECS as _LIFECYCLE_SPECS,
@@ -33,12 +37,14 @@ _AREA_SPECS: tuple[tuple[PromptSpec, ...], ...] = (
     _INSTALL_SPECS,
     _INSTALL_FLOW_SPECS,
     _LIFECYCLE_SPECS,
+    _DISCOVERY_SPECS,
     _TEST_SPECS,
 )
 _AREA_FAMILIES: tuple[tuple[DynamicPromptFamily, ...], ...] = (
     _INSTALL_FAMILIES,
     _INSTALL_FLOW_FAMILIES,
     _LIFECYCLE_FAMILIES,
+    _DISCOVERY_FAMILIES,
     _TEST_FAMILIES,
 )
 

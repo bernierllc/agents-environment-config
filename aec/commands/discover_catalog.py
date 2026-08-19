@@ -5,6 +5,14 @@ from pathlib import Path
 from typing import Optional
 
 from ..lib import Console
+from ..lib.prompt_catalog.discovery_area import (
+    DISCOVER_CATALOG_ACTION,
+    DISCOVER_CATALOG_BACKUP,
+    DISCOVER_CATALOG_DEPTH,
+    DISCOVER_CATALOG_REVIEW_PREFIX,
+)
+from ..lib.prompt_catalog.install_flow_area import item_prompt_id
+from ..lib.prompts import prompt
 from ..lib.aec_json import load_aec_json
 from ..lib.config import AEC_HOME
 from ..lib.scope import resolve_scope, Scope, ScopeError
@@ -38,11 +46,12 @@ def _prompt_depth() -> int:
     Console.print("  1) Quick  -- Name matching only (fast, could be false match)")
     Console.print("  2) Normal -- Name match + content hash comparison (shows identical vs modified)")
     Console.print("  3) Deep   -- Full content similarity scan, finds renamed/similar files (<1 min for ~500 items)")
-    Console.print("Choose [2]: ", end="")
-    try:
-        raw = input().strip()
-    except EOFError:
-        raw = ""
+    raw = prompt(
+        DISCOVER_CATALOG_DEPTH,
+        "Choose [2]: ",
+        default="2",
+        choices=["1", "2", "3", ""],
+    ).strip()
     if raw == "":
         return 2
     if raw in ("1", "2", "3"):
@@ -79,11 +88,12 @@ def _prompt_action_menu() -> int:
     Console.print("  2) Review one by one")
     Console.print("  3) Replace all with AEC-managed versions (will ask about backups)")
     Console.print("  4) Skip -- don't install any")
-    Console.print("Choose [1]: ", end="")
-    try:
-        raw = input().strip()
-    except EOFError:
-        raw = ""
+    raw = prompt(
+        DISCOVER_CATALOG_ACTION,
+        "Choose [1]: ",
+        default="1",
+        choices=["1", "2", "3", "4", ""],
+    ).strip()
     if raw == "":
         return 1
     if raw in ("1", "2", "3", "4"):
@@ -94,21 +104,23 @@ def _prompt_action_menu() -> int:
 
 def _prompt_backup() -> bool:
     """Prompt user for backup before replacing. Returns True for yes."""
-    Console.print("  Back up original before replacing? [Y/n]: ", end="")
-    try:
-        raw = input().strip().lower()
-    except EOFError:
-        raw = ""
+    raw = prompt(
+        DISCOVER_CATALOG_BACKUP,
+        "  Back up original before replacing? [Y/n]: ",
+        type="yes_no",
+        default=True,
+    ).strip().lower()
     return raw != "n"
 
 
 def _prompt_review_item(result: MatchResult) -> str:
     """Prompt user about a single item. Returns 'install', 'skip'."""
-    Console.print(f"  Replace with AEC version? [y/N]: ", end="")
-    try:
-        raw = input().strip().lower()
-    except EOFError:
-        raw = ""
+    raw = prompt(
+        item_prompt_id(DISCOVER_CATALOG_REVIEW_PREFIX, result.local_name),
+        "  Replace with AEC version? [y/N]: ",
+        type="yes_no",
+        default=False,
+    ).strip().lower()
     if raw == "y":
         return "install"
     return "skip"

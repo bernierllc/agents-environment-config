@@ -36,7 +36,40 @@ def item_prompt_id(prefix: str, name: str) -> str:
     return f"{prefix}.{name}"
 
 
-SPECS: tuple[PromptSpec, ...] = ()
+# --- Static IDs -------------------------------------------------------------
+#
+# Both are deliberately absent from PROMPTS_ALLOW_LIST (they are in
+# PROMPTS_EXCLUDED_IDS): one depends on the local project list, the other is a
+# free-form shell command. Excluded from the org overlay, still catalogued —
+# an agent answering for the user with --answers is not an org policy.
+
+INSTALL_BATCH_PROJECT_SETUP_PER_PROJECT = "install.batch_project_setup.per_project"
+INSTALL_QUALITY_REPORT_VIEWER_COMMAND = "install.quality.report_viewer.command"
+
+SPECS: tuple[PromptSpec, ...] = (
+    PromptSpec(
+        INSTALL_BATCH_PROJECT_SETUP_PER_PROJECT,
+        command="install",
+        summary=(
+            "Set up one discovered project during batch setup: y/Y to set up, "
+            "n to skip, q to stop the batch. The concrete answer applies to "
+            "every project in turn."
+        ),
+        type="enum[y,n,q]",
+        default="y",
+        choices=("y", "n", "q", ""),
+    ),
+    PromptSpec(
+        INSTALL_QUALITY_REPORT_VIEWER_COMMAND,
+        command="install",
+        summary=(
+            "Free-form command used to open test reports, with {file} as the "
+            "placeholder. 'none' skips report viewing."
+        ),
+        type="string",
+        default="none",
+    ),
+)
 
 FAMILIES: tuple[DynamicPromptFamily, ...] = (
     DynamicPromptFamily(

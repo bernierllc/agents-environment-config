@@ -25,6 +25,10 @@ from ..lib.prompt_ids import (
     INSTALL_SETTINGS_PROJECTS_DIR,
     configurable_instruction_prompt_id,
 )
+from ..lib.prompt_catalog.install_flow_area import (
+    INSTALL_BATCH_PROJECT_SETUP_PER_PROJECT,
+    INSTALL_QUALITY_REPORT_VIEWER_COMMAND,
+)
 from ..lib.prompts import prompt as _prompt
 from . import agent_tools, rules
 
@@ -177,10 +181,12 @@ def _batch_project_setup(dry_run: bool = False) -> None:
     for i, project in enumerate(projects):
         if i > 0:
             Console.print(f"\n  {Console.dim('─' * 40)}")
-        try:
-            response = input(f"\n  Setup {project.name}? (Y/n/q): ").strip().lower()
-        except EOFError:
-            response = "n"
+        response = _prompt(
+            INSTALL_BATCH_PROJECT_SETUP_PER_PROJECT,
+            f"\n  Setup {project.name}? (Y/n/q): ",
+            default="y",
+            choices=["y", "n", "q", ""],
+        ).strip().lower()
 
         if response == "q":
             Console.info("Stopped project setup.")
@@ -470,10 +476,11 @@ def _prompt_quality_settings(dry_run: bool = False) -> None:
             "\nEnter a command to open test reports (use {file} as placeholder),\n"
             'or "none" to skip:'
         )
-        try:
-            cmd = input("Viewer command [none]: ").strip() or "none"
-        except EOFError:
-            cmd = "none"
+        cmd = _prompt(
+            INSTALL_QUALITY_REPORT_VIEWER_COMMAND,
+            "Viewer command [none]: ",
+            default="none",
+        ).strip() or "none"
         if cmd.lower() != "none":
             viewer_value = cmd
 
