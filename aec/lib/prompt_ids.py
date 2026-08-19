@@ -1,11 +1,15 @@
-"""Stable prompt-ID constants for org-config overlay pre-answering.
+"""Stable prompt-ID constants for headless answering and org-config overlays.
 
-Phase 1 of the org-config overlay introduces a single seam (`prompt()` in
-`aec.lib.prompts`) that all install/setup/preferences prompts call through.
-Each prompt site has a stable, dotted-path identifier defined here. The
-overlay applier (later phase) looks up the ID in the loaded org overlay; if
-present, the user is not prompted and the pre-answered value flows through
-the same validator path the interactive answer would.
+Every prompt AEC asks should route through the single seam (`prompt()` in
+`aec.lib.prompts`) carrying a stable, dotted-path identifier. Given an ID, an
+answer can arrive from an org overlay, an `--answers` file, or an
+`AEC_ANSWER_<ID>` env var instead of from a human -- and it flows through the
+same validator path the typed answer would.
+
+Status: the constants below cover the install/setup/preferences callsites that
+route through the seam today. The remaining raw `input()` callsites are being
+converted; `aec.lib.prompt_catalog` is the discovery surface and the drift
+test is what keeps the two in sync.
 
 Source of truth: docs/superpowers/specs/2026-05-04-org-config-overlay-allow-lists.md (§2.1).
 

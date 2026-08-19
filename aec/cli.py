@@ -15,6 +15,37 @@ from . import __version__
 from .lib import Console
 from .commands.deprecation import deprecation_warning
 
+
+def _apply_prompt_globals(answers_path, non_interactive: bool, defaults: bool) -> None:
+    """Wire the headless-prompt global options into the prompt seam.
+
+    Shared by both CLI front-ends so typer and argparse can never drift.
+    """
+    from .lib.prompts import load_answers_file, set_answers, set_mode
+
+    if answers_path:
+        try:
+            set_answers(load_answers_file(answers_path))
+        except (FileNotFoundError, ValueError) as exc:
+            Console.error(str(exc))
+            raise SystemExit(2) from exc
+    else:
+        import os
+
+        inline = os.environ.get("AEC_ANSWERS")
+        if inline:
+            try:
+                set_answers(load_answers_file(inline))
+            except (FileNotFoundError, ValueError) as exc:
+                Console.error(f"AEC_ANSWERS: {exc}")
+                raise SystemExit(2) from exc
+
+    set_mode(
+        non_interactive=True if non_interactive else None,
+        use_defaults=True if defaults else None,
+    )
+
+
 if HAS_TYPER:
     # Typer-based CLI (preferred)
     app = typer.Typer(
@@ -50,11 +81,28 @@ if HAS_TYPER:
             "--debug",
             help="Capture errors to ~/.agents-environment-config/logs/aec-debug.log and print the traceback.",
         ),
+        answers: str = typer.Option(
+            None,
+            "--answers",
+            metavar="PATH",
+            help="JSON file of {prompt_id: value} answers (see `aec prompts template`).",
+        ),
+        non_interactive: bool = typer.Option(
+            False,
+            "--non-interactive",
+            help="Never prompt; fail with the prompt ID if an answer is missing.",
+        ),
+        defaults: bool = typer.Option(
+            False,
+            "--defaults",
+            help="Accept each prompt's declared default when no answer is supplied.",
+        ),
     ):
         """Pre-command hook: check for unanswered preferences and register update check."""
         if debug:
             from .lib.debug import enable_debug
             enable_debug()
+        _apply_prompt_globals(answers, non_interactive, defaults)
         if ctx.invoked_subcommand is None:
             return
         from .lib.preferences import check_pending_preferences
@@ -665,6 +713,21 @@ else:
             action="store_true",
             help="Capture errors to ~/.agents-environment-config/logs/aec-debug.log and print the traceback.",
         )
+        parser.add_argument(
+            "--answers",
+            metavar="PATH",
+            help="JSON file of {prompt_id: value} answers (see `aec prompts template`).",
+        )
+        parser.add_argument(
+            "--non-interactive",
+            action="store_true",
+            help="Never prompt; fail with the prompt ID if an answer is missing.",
+        )
+        parser.add_argument(
+            "--defaults",
+            action="store_true",
+            help="Accept each prompt's declared default when no answer is supplied.",
+        )
 
         subparsers = parser.add_subparsers(dest="command", help="Commands")
 
@@ -892,6 +955,12 @@ else:
         if getattr(args, "debug", False):
             from .lib.debug import enable_debug
             enable_debug()
+
+        _apply_prompt_globals(
+            getattr(args, "answers", None),
+            getattr(args, "non_interactive", False),
+            getattr(args, "defaults", False),
+        )
 
         if args.command is None:
             parser.print_help()

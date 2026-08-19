@@ -26,16 +26,22 @@ def test_registered_id_returns_preanswer_without_input(monkeypatch):
     assert prompts.prompt("install.settings.projects_dir", "Q? ") == "~/work"
 
 
-def test_bool_coercion():
+def test_bool_normalization():
+    """prompt() always returns the string a user would have typed.
+
+    Callsites chain ``.strip().lower()`` on the result, so returning a real
+    bool here would blow up with AttributeError the moment an overlay
+    pre-answered the prompt.
+    """
     prompts.set_overlay_answers({"x": "yes"})
-    assert prompts.prompt("x", "Q? ", type="bool") is True
-    prompts.set_overlay_answers({"x": "no"})
-    assert prompts.prompt("x", "Q? ", type="bool") is False
+    assert prompts.prompt("x", "Q? ", type="yes_no") == "y"
+    prompts.set_overlay_answers({"x": False})
+    assert prompts.prompt("x", "Q? ", type="yes_no") == "n"
 
 
-def test_int_coercion():
-    prompts.set_overlay_answers({"x": "42"})
-    assert prompts.prompt("x", "Q? ", type="int") == 42
+def test_int_normalization():
+    prompts.set_overlay_answers({"x": 42})
+    assert prompts.prompt("x", "Q? ", type="int") == "42"
 
 
 def test_validator_applied_to_preanswer():

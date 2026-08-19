@@ -1,6 +1,6 @@
 # AEC Roadmap
 
-**Last reviewed:** 2026-06-25 — Matt (plugin-management Phase 1 in flight)
+**Last reviewed:** 2026-08-18 — Matt (headless prompts added to Tier 1)
 **Current shipped version:** v2.38.1
 
 ## What AEC is
@@ -23,10 +23,12 @@ Work that is in flight or unblocked and at the front of the queue.
 |---|---|---|---|
 | Hook management completion (Task 13/14/16 + `aec run-script`) | Library shipped in v2.32.0 but no caller invokes it — installed skills that ship hooks today do nothing. Closing the gap unlocks every downstream package that depends on hooks. | `docs/superpowers/plans/2026-04-21-aec-hook-management.md` *(active worktree — do not edit)* | In-flight (parallel agent) |
 | Plugin management + loadout schema (Phase 1) | Adds a fifth item type (plugins) installed via a portable `plugin.json` loadout manifest, with three install types (marketplace / per-tool / external) and a never-auto-install guarantee. Lets AEC install plugins and seeds the loadout manifest format. | `docs/superpowers/plans/2026-06-25-aec-plugin-management-loadout.md` | In-flight (`feature/plugin-management-loadout-schema`) |
+| Headless prompts (agent-answerable CLI) | 75 interactive callsites across 19 files have no non-interactive path and no way for an agent to discover what will be asked. Gating dependency for the Tier-3 agent-native onboarding bet, and today `aec test schedule -g` under a closed stdin silently registers an OS job. Finishes the `prompts.py` seam org-config Phase 1 left at 4 of 75 callsites. | `docs/superpowers/plans/2026-08-18-headless-prompts.md` | In-flight (`feat/headless-prompts`) |
 
 **Exit criteria for Tier 1:** `aec install <item-with-hooks>` actually wires
 hooks into Claude/Gemini/Cursor/Git; `aec uninstall` removes them cleanly;
-`aec hooks` CLI exposes at least `validate`, `list`, `install`, `remove`.
+`aec hooks` CLI exposes at least `validate`, `list`, `install`, `remove`; every
+interactive prompt is answerable via `--answers` and discoverable via `aec prompts`.
 
 ---
 

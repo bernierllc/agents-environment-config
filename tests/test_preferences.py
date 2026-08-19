@@ -339,8 +339,24 @@ class TestCheckPendingPreferences:
 
         assert get_preference("leave-it-better") is False
 
-    def test_handles_eof(self, temp_dir, monkeypatch):
-        """Should use default when input raises EOFError (non-interactive)."""
+    def test_eof_raises_instead_of_silently_defaulting(self, temp_dir, monkeypatch):
+        """No human and no supplied answer is an error, not a silent default."""
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
+        monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+
+        def raise_eof(_):
+            raise EOFError
+
+        monkeypatch.setattr("builtins.input", raise_eof)
+
+        from aec.lib.preferences import check_pending_preferences
+        from aec.lib.prompts import PromptUnanswered
+
+        with pytest.raises(PromptUnanswered):
+            check_pending_preferences()
+
+    def test_defaults_flag_applies_declared_default(self, temp_dir, monkeypatch):
+        """`--defaults` is the explicit opt-in to the old EOF behaviour."""
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
         monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
 
@@ -350,8 +366,13 @@ class TestCheckPendingPreferences:
         monkeypatch.setattr("builtins.input", raise_eof)
 
         from aec.lib.preferences import check_pending_preferences, get_preference
+        from aec.lib.prompts import reset_mode, set_mode
 
-        check_pending_preferences()
+        set_mode(use_defaults=True)
+        try:
+            check_pending_preferences()
+        finally:
+            reset_mode()
 
         # Default for leave-it-better is True
         assert get_preference("leave-it-better") is True
