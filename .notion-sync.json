@@ -1,0 +1,46 @@
+{
+  "_comment": "Join table: plan file <-> Notion Roadmap row <-> Notion Tracker row. Plan files are authoritative; Notion rows mirror them. See ~/.claude/references/notion-roadmap-sync.md.",
+  "plans_dir": "docs/superpowers/plans",
+  "repo": "bernierllc/agents-environment-config",
+  "default_branch": "main",
+  "roadmap": {
+    "database_id": "4094efec-c95a-824a-a736-012eb5fbf3a8",
+    "data_source_id": "04c4efec-c95a-8331-b425-870da688b56f",
+    "project_option": "AEC"
+  },
+  "tracker": {
+    "data_source_id": "6364efec-c95a-83d4-b2f4-87d596c5c313"
+  },
+  "plans": {
+    "2026-08-18-headless-prompts.md": {
+      "roadmap_page_id": "3c14efec-c95a-8156-9a65-e9cb8fcd51e9",
+      "tracker_page_id": "3c14efec-c95a-8164-ac73-d7f15590ccac",
+      "source_sha256": "d96c1ce7a35b2894bf2acec62cf7df2c60a9d71a08c79e0d2f57e359a1aeba28",
+      "last_synced": "2026-08-18",
+      "status": "In Progress",
+      "branch": "feat/headless-prompts"
+    }
+  },
+  "pending_backfill": {
+    "_why": "The Roadmap DB had zero AEC rows as of 2026-08-18. Only the in-flight plan was given a row; the rest need their real merge status verified against origin/main (invariant 2) before a row is created, which is a separate pass.",
+    "files": [
+      "2026-03-30-skill-versioning-implementation.md",
+      "2026-04-10-aec-packages-agent-onboarding.md",
+      "2026-04-21-aec-hook-management.md",
+      "2026-05-25-org-config-overlay-phase-4.md",
+      "2026-06-25-aec-hook-drift-reconciliation-and-scope-aware-uninstall.md",
+      "2026-06-25-aec-plugin-management-loadout.md",
+      "2026-06-25-org-config-plugin-governance.md"
+    ]
+  },
+  "known_drift": [
+    "plans/ROADMAP.md Tier 2 links docs/superpowers/plans/2026-05-19-org-config-overlay-phase-2.md, which does not exist; the file on disk is 2026-05-25-org-config-overlay-phase-4.md."
+  ],
+  "invariants": [
+    "1. Every non-archived plan file has a Roadmap row, or an entry in pending_backfill/completed_unmapped naming why it has none.",
+    "2. Never mark a Roadmap row Done unless the work is on origin/main. Verify with git log/git ls-tree, not the plan file's checkboxes. Unmerged work is Blocked with the branch named.",
+    "3. The Tracker holds work in flight only (Ready / In progress / Blocked-on-a-human). Backlog lives in the Roadmap DB alone.",
+    "4. Drift check: shasum -a 256 <plan file> vs source_sha256 and the row's Source SHA. Editing a plan file refreshes both in the same turn.",
+    "5. Notion updates happen in the same turn the work ships - never batched to end of session."
+  ]
+}
