@@ -734,7 +734,7 @@ def _post_install_playwright_pipeline(name: str, scope: Scope, yes: bool = False
 
     Console.print(f"\nPipeline setup summary:")
     Console.print(f"  Scripts: {pipeline_dst}")
-    Console.print(f"  Hook:    {settings_path}")
+    Console.print(f"  Hook:    declared by the skill's hooks.json (see `aec hooks verify`)")
     Console.print(f"  Git:     pre-commit (gate tier), pre-push (thorough/full tiers)")
     Console.print(f"  Trigger: edits to docs/verification/ will auto-sync Playwright tests")
 
