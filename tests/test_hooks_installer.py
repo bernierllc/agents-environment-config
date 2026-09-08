@@ -1,6 +1,7 @@
 """Tests for aec.lib.hooks.installer end-to-end install/remove."""
 
 import json
+import os
 from pathlib import Path
 
 
@@ -203,6 +204,33 @@ class TestResolveScriptCommands:
         assert str(script) in cmd
         assert cmd.endswith("--flag")
         assert "aec run-script" not in cmd
+
+    def test_non_executable_script_gets_exec_bit(self, tmp_path):
+        """The rendered command execs the script directly, so install must chmod it.
+
+        Git only tracks +x, and skills ship plenty of 0644 scripts; without this
+        the hook fires and dies with EACCES, silently doing nothing.
+        """
+        from aec.lib.hooks.installer import install_item_hooks
+        item_dir = tmp_path / "item"
+        (item_dir / "scripts").mkdir(parents=True)
+        script = item_dir / "scripts" / "check.sh"
+        script.write_text("#!/bin/sh\necho ok\n")
+        script.chmod(0o644)
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "on_file_edit",
+                "command": "aec run-script skill:demo check.sh",
+                "description": "d",
+            }],
+        }))
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["claude"],
+        )
+        assert os.access(script, os.X_OK)
 
     def test_missing_script_raises(self, tmp_path):
         import pytest

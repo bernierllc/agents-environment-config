@@ -8,6 +8,7 @@ I/O so they can be tested in isolation — this file grows across Tasks 9a-9g.
 from __future__ import annotations
 
 import json
+import os
 import shlex
 from pathlib import Path
 from typing import Dict, List, Sequence
@@ -62,6 +63,15 @@ def _resolve_script_commands(hf, item_dir: Path) -> Dict[str, str]:
                     raise FileNotFoundError(
                         f"hook {h.id!r}: script not found: {script_path}"
                     )
+                # The rendered command execs the script directly, so it has to
+                # carry its exec bit. `aec run-script` chmods on the way through;
+                # this path has to do the same or a 0644 script (git only tracks
+                # +x, and skills ship plenty of 0644 ones) fails with EACCES.
+                if not os.access(script_path, os.X_OK):
+                    try:
+                        script_path.chmod(script_path.stat().st_mode | 0o111)
+                    except OSError:
+                        pass
                 pieces = [str(script_path), *extra]
                 cmd = shlex.join(pieces) if hasattr(shlex, "join") else " ".join(
                     shlex.quote(p) for p in pieces
