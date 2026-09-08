@@ -9,7 +9,6 @@ import subprocess
 from ..lib import Console
 from ..lib.config import get_repo_root
 from ..lib.filesystem import installed_dst_path
-from ..lib.hooks import get_verification_playwright_hook
 from ..lib.manifest_v2 import (
     load_manifest, save_manifest, record_install, record_mcp_install, record_plugin_install,
 )
@@ -714,35 +713,10 @@ def _post_install_playwright_pipeline(name: str, scope: Scope, yes: bool = False
     if not index_path.exists():
         index_path.write_text(json.dumps({"version": "1.0", "entries": {}}, indent=2) + "\n")
 
-    # Write PostToolUse hook to .claude/settings.json
-    settings_path = repo_path / ".claude" / "settings.json"
-    hook_config = get_verification_playwright_hook()
-
-    if settings_path.exists():
-        try:
-            existing = json.loads(settings_path.read_text())
-        except (json.JSONDecodeError, OSError):
-            existing = {}
-    else:
-        existing = {}
-        settings_path.parent.mkdir(parents=True, exist_ok=True)
-
-    existing_hooks = existing.setdefault("hooks", {})
-    existing_post = existing_hooks.setdefault("PostToolUse", [])
-    new_hook_entry = hook_config["hooks"]["PostToolUse"][0]
-
-    # Avoid duplicates
-    new_cmd = new_hook_entry["hooks"][0]["command"]
-    already_present = any(
-        h.get("hooks", [{}])[0].get("command") == new_cmd
-        for h in existing_post
-        if isinstance(h, dict)
-    )
-    if not already_present:
-        existing_post.append(new_hook_entry)
-
-    settings_path.write_text(json.dumps(existing, indent=2) + "\n")
-    Console.success(f"Wrote PostToolUse hook to {settings_path}")
+    # The doc-edit -> sync-tests PostToolUse hook is declared by the skill's own
+    # hooks.json (ptg-sync-tests-on-doc-edit) and rendered by the AEC hook installer.
+    # AEC used to also write a hand-rolled copy here keyed on $CLAUDE_FILE_PATH, an
+    # env var Claude Code never sets, so that copy could never fire.
 
     # Copy hook templates and wire into git hooks
     skill_templates = scope.skills_dir / name / "templates" / "hooks"
