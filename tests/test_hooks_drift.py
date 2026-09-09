@@ -183,3 +183,87 @@ class TestRepairRepo:
         results = repair_repo(repo_root)
         assert results and not any(r.repaired for r in results)
         assert any("source" in (r.detail or "").lower() for r in results)
+
+
+class TestStaleAbsolutePaths:
+    """Repos installed before the $CLAUDE_PROJECT_DIR rendering.
+
+    Their settings.json holds this machine's absolute repo path. The hook still
+    fires here, so it is not MISSING — but it breaks in a clone or worktree.
+    `verify` must call it STALE and `--repair` must upgrade it in place without
+    leaving the old absolute entry behind.
+    """
+
+    @staticmethod
+    def _install_repo_local(tmp_path: Path) -> Path:
+        from aec.lib.hooks.installer import install_item_hooks
+
+        repo_root = tmp_path / "repo"
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        (item_dir / "scripts").mkdir(parents=True)
+        script = item_dir / "scripts" / "check.sh"
+        script.write_text("#!/bin/sh\necho ok\n")
+        script.chmod(0o755)
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "on_file_edit",
+                "command": "aec run-script skill:demo check.sh",
+                "description": "d",
+            }],
+        }))
+        install_item_hooks(
+            item_type="skill", item_key="demo", item_version="1.0.0",
+            item_dir=item_dir, repo_root=repo_root, agents=["claude"],
+        )
+        return repo_root
+
+    @staticmethod
+    def _downgrade_to_absolute(repo_root: Path) -> None:
+        """Rewrite settings + state the way a pre-fix install left them."""
+        from aec.lib.hooks.fingerprint import fingerprint_hook
+        from aec.lib.hooks.state import load_state, save_state
+
+        settings_path = repo_root / ".claude/settings.json"
+        settings = json.loads(settings_path.read_text())
+        entry = settings["hooks"]["PostToolUse"][0]
+        inner = entry["hooks"][0]
+        inner["command"] = inner["command"].replace(
+            '"$CLAUDE_PROJECT_DIR"/', f"{repo_root}/"
+        )
+        assert str(repo_root) in inner["command"]
+        settings_path.write_text(json.dumps(settings))
+
+        st = load_state(repo_root, item_type="skill", item_key="demo")
+        st.hooks_installed[0]["content_fingerprint"] = fingerprint_hook(entry)
+        save_state(repo_root, st)
+
+    def test_absolute_path_reports_stale(self, tmp_path):
+        from aec.lib.hooks.drift import Drift, verify_repo
+
+        repo_root = self._install_repo_local(tmp_path)
+        self._downgrade_to_absolute(repo_root)
+
+        statuses = verify_repo(repo_root)
+        assert [s.status for s in statuses] == [Drift.STALE]
+
+    def test_repair_upgrades_and_leaves_no_duplicate(self, tmp_path):
+        from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
+
+        repo_root = self._install_repo_local(tmp_path)
+        self._downgrade_to_absolute(repo_root)
+
+        assert any(r.repaired for r in repair_repo(repo_root))
+
+        settings = json.loads((repo_root / ".claude/settings.json").read_text())
+        arr = settings["hooks"]["PostToolUse"]
+        assert len(arr) == 1, "the stale absolute entry must be retracted"
+        cmd = arr[0]["hooks"][0]["command"]
+        assert cmd.startswith('"$CLAUDE_PROJECT_DIR"/')
+        assert str(repo_root) not in cmd
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
+
+    def test_portable_install_is_not_stale(self, tmp_path):
+        from aec.lib.hooks.drift import Drift, verify_repo
+
+        repo_root = self._install_repo_local(tmp_path)
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]

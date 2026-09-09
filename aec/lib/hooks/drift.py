@@ -29,6 +29,7 @@ _AGENT_SETTINGS = {
 class Drift(str, Enum):
     OK = "OK"
     MISSING = "MISSING"
+    STALE = "STALE"
     # ponytail: MODIFIED/ORPHAN need a stable identity marker in the written
     # payload, which AEC doesn't write yet — add when the payload carries one.
 
@@ -66,6 +67,7 @@ def _event_key(pointer: str) -> str:
 
 
 def _locate_settings(repo_root: Path, agent: str, event_key: str, fp: str):
+    """Return (index, entry) for the recorded hook, or None if it's gone."""
     settings_path = repo_root / _AGENT_SETTINGS[agent]
     if not settings_path.exists():
         return None
@@ -76,8 +78,25 @@ def _locate_settings(repo_root: Path, agent: str, event_key: str, fp: str):
     arr = data.get("hooks", {}).get(event_key, [])
     for i, entry in enumerate(arr):
         if fingerprint_hook(entry) == fp:
-            return i
+            return i, entry
     return None
+
+
+def _is_stale(repo_root: Path, agent: str, entry: dict) -> bool:
+    """True if the entry hardcodes this checkout's absolute path.
+
+    Installs before the `$CLAUDE_PROJECT_DIR` rendering baked the machine's
+    absolute repo path into settings.json. That command still runs here, so it
+    isn't MISSING — but it breaks in a clone, a worktree, or a teammate's
+    checkout. Flagging it STALE lets `hooks verify --repair` upgrade it in
+    place; the reinstall retracts the absolute entry and writes the portable
+    one. Only claude has a project-dir variable, so only claude can be stale.
+    """
+    if agent != "claude":
+        return False
+    # Claude entries nest the command under a matcher object; scan the whole
+    # serialized entry rather than reaching into a shape that may grow.
+    return str(repo_root) in json.dumps(entry)
 
 
 def _git_present(repo_root: Path, event_key: str, item_type: str,
@@ -102,9 +121,14 @@ def classify_hook(repo_root: Path, installed: dict, *,
         present = _git_present(repo_root, event_key, item_type, item_key, hook_id)
         status, idx = (Drift.OK, None) if present else (Drift.MISSING, None)
     else:
-        idx = _locate_settings(repo_root, agent, event_key,
-                               installed["content_fingerprint"])
-        status = Drift.OK if idx is not None else Drift.MISSING
+        found = _locate_settings(repo_root, agent, event_key,
+                                 installed["content_fingerprint"])
+        if found is None:
+            status, idx = Drift.MISSING, None
+        else:
+            idx, entry = found
+            status = (Drift.STALE if _is_stale(repo_root, agent, entry)
+                      else Drift.OK)
 
     return HookStatus(
         item_type=item_type, item_key=item_key, hook_id=hook_id,
