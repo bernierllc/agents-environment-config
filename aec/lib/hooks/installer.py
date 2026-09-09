@@ -44,6 +44,15 @@ def config_dir_blocked(repo_root: Path, agent: str) -> Path | None:
     return path if path.exists() and not path.is_dir() else None
 
 
+def _is_repo_local(script_path: Path, repo_root: Path) -> bool:
+    """True if `script_path` lives inside `repo_root`."""
+    try:
+        script_path.relative_to(repo_root)
+    except ValueError:
+        return False
+    return True
+
+
 # How a resolved script path is written into each agent's config. Claude Code
 # exports $CLAUDE_PROJECT_DIR, so a repo-local script can be addressed
 # portably — the same settings.json then works in a clone, a worktree, or on a
@@ -65,6 +74,33 @@ def _render_script_path(script_path: Path, repo_root: Path, agent: str) -> str:
     if agent == "git":
         return shlex.quote(str(rel))
     return shlex.quote(str(script_path))
+
+
+# Skill/agent/rule sources are frequently untracked (a repo may gitignore
+# `.claude/`, or simply never have committed the installed skill), while
+# settings.json IS tracked. A clone then wires a hook to a file that isn't
+# there and every matching edit fails with 127. Guarding on the interpreter's
+# own terms keeps the hook dormant instead of broken.
+#
+# `if ...; then ...; fi` rather than `[ -x P ] && P`: the latter exits 1 when
+# the file is absent, which Claude Code reports as a failed hook.
+GUARD_PREFIX = "if [ -x "
+
+# Agents whose command string is evaluated by a POSIX shell. claude runs hooks
+# through `sh -c`; git hooks ARE shell scripts. cursor/gemini render absolute
+# paths (already checkout-specific) and their execution model isn't documented
+# as shell, so they stay unguarded.
+_SHELL_GUARD_AGENTS = frozenset({"claude", "git"})
+
+
+def guard_script_command(rendered_path: str, command: str) -> str:
+    """Wrap `command` so it only runs when `rendered_path` is executable."""
+    return f"{GUARD_PREFIX}{rendered_path} ]; then {command}; fi"
+
+
+def is_guarded(command: str) -> bool:
+    """True if `command` already carries the missing-script guard."""
+    return command.startswith(GUARD_PREFIX)
 
 
 def _resolve_script_commands(
@@ -98,9 +134,14 @@ def _resolve_script_commands(
                         script_path.chmod(script_path.stat().st_mode | 0o111)
                     except OSError:
                         pass
-                pieces = [_render_script_path(script_path, repo_root, agent)]
+                rendered = _render_script_path(script_path, repo_root, agent)
+                pieces = [rendered]
                 pieces += [shlex.quote(p) for p in extra]
                 cmd = " ".join(pieces)
+                if agent in _SHELL_GUARD_AGENTS and _is_repo_local(
+                    script_path, repo_root
+                ):
+                    cmd = guard_script_command(rendered, cmd)
         resolved[h.id] = cmd
     return resolved
 

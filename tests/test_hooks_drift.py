@@ -6,6 +6,7 @@ fingerprint is identity. When another tool inserts/removes entries the index
 shifts but the hook is still present — verify must find it by fingerprint.
 """
 
+import os
 import json
 from pathlib import Path
 
@@ -258,7 +259,7 @@ class TestStaleAbsolutePaths:
         arr = settings["hooks"]["PostToolUse"]
         assert len(arr) == 1, "the stale absolute entry must be retracted"
         cmd = arr[0]["hooks"][0]["command"]
-        assert cmd.startswith('"$CLAUDE_PROJECT_DIR"/')
+        assert '"$CLAUDE_PROJECT_DIR"/' in cmd
         assert str(repo_root) not in cmd
         assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
 
@@ -267,3 +268,102 @@ class TestStaleAbsolutePaths:
 
         repo_root = self._install_repo_local(tmp_path)
         assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
+
+
+class TestUnguardedScriptCommands:
+    """A portable-but-unguarded command is STALE too.
+
+    Rendering the path as `$CLAUDE_PROJECT_DIR` made settings.json portable,
+    but the file it points at (`.claude/skills/**/scripts/*`) is usually
+    untracked while settings.json is tracked. A clone therefore wires a hook
+    to a file that isn't there and every matching edit exits 127. Repair has
+    to upgrade those installs in place.
+    """
+
+    @staticmethod
+    def _drop_guard(repo_root: Path) -> str:
+        """Rewrite settings + state the way a pre-guard install left them."""
+        from aec.lib.hooks.fingerprint import fingerprint_hook
+        from aec.lib.hooks.state import load_state, save_state
+
+        settings_path = repo_root / ".claude/settings.json"
+        settings = json.loads(settings_path.read_text())
+        entry = settings["hooks"]["PostToolUse"][0]
+        inner = entry["hooks"][0]
+        guarded = inner["command"]
+        # "if [ -x P ]; then P args; fi" -> "P args"
+        body = guarded.split("; then ", 1)[1].rsplit("; fi", 1)[0]
+        inner["command"] = body
+        settings_path.write_text(json.dumps(settings))
+
+        st = load_state(repo_root, item_type="skill", item_key="demo")
+        st.hooks_installed[0]["content_fingerprint"] = fingerprint_hook(entry)
+        save_state(repo_root, st)
+        return body
+
+    def test_unguarded_project_dir_reports_stale(self, tmp_path):
+        from aec.lib.hooks.drift import Drift, verify_repo
+
+        repo_root = TestStaleAbsolutePaths._install_repo_local(tmp_path)
+        body = self._drop_guard(repo_root)
+        assert body.startswith('"$CLAUDE_PROJECT_DIR"/')
+
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.STALE]
+
+    def test_repair_adds_the_guard(self, tmp_path):
+        from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
+        from aec.lib.hooks.installer import is_guarded
+
+        repo_root = TestStaleAbsolutePaths._install_repo_local(tmp_path)
+        self._drop_guard(repo_root)
+
+        assert any(r.repaired for r in repair_repo(repo_root))
+
+        settings = json.loads(
+            (repo_root / ".claude/settings.json").read_text()
+        )
+        arr = settings["hooks"]["PostToolUse"]
+        assert len(arr) == 1, "the unguarded entry must be retracted"
+        assert is_guarded(arr[0]["hooks"][0]["command"])
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
+
+    def test_guarded_command_is_a_no_op_when_the_script_is_absent(
+        self, tmp_path
+    ):
+        """The whole point: a clone missing the skill must not fail the edit."""
+        import shutil
+        import subprocess
+
+        repo_root = TestStaleAbsolutePaths._install_repo_local(tmp_path)
+        settings = json.loads(
+            (repo_root / ".claude/settings.json").read_text()
+        )
+        cmd = settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
+
+        # Simulate the clone: settings.json is tracked, the skill isn't.
+        shutil.rmtree(repo_root / ".claude" / "skills")
+
+        proc = subprocess.run(
+            ["sh", "-c", cmd],
+            env={"CLAUDE_PROJECT_DIR": str(repo_root), "PATH": os.environ["PATH"]},
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stderr == ""
+
+    def test_guarded_command_still_runs_the_script_when_present(self, tmp_path):
+        import subprocess
+
+        repo_root = TestStaleAbsolutePaths._install_repo_local(tmp_path)
+        settings = json.loads(
+            (repo_root / ".claude/settings.json").read_text()
+        )
+        cmd = settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
+
+        proc = subprocess.run(
+            ["sh", "-c", cmd],
+            env={"CLAUDE_PROJECT_DIR": str(repo_root), "PATH": os.environ["PATH"]},
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.strip() == "ok"

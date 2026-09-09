@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .fingerprint import fingerprint_hook
+from .installer import is_guarded
 from .state import list_installed_items, load_state
 
 # Settings-file agents store entries under data["hooks"][<event_key>].
@@ -82,21 +83,43 @@ def _locate_settings(repo_root: Path, agent: str, event_key: str, fp: str):
     return None
 
 
-def _is_stale(repo_root: Path, agent: str, entry: dict) -> bool:
-    """True if the entry hardcodes this checkout's absolute path.
+def _entry_commands(entry: dict) -> List[str]:
+    """Every command string in a settings entry, whatever the nesting."""
+    cmds: List[str] = []
+    if isinstance(entry.get("command"), str):
+        cmds.append(entry["command"])
+    for inner in entry.get("hooks", []) or []:
+        if isinstance(inner, dict) and isinstance(inner.get("command"), str):
+            cmds.append(inner["command"])
+    return cmds
 
-    Installs before the `$CLAUDE_PROJECT_DIR` rendering baked the machine's
-    absolute repo path into settings.json. That command still runs here, so it
-    isn't MISSING — but it breaks in a clone, a worktree, or a teammate's
-    checkout. Flagging it STALE lets `hooks verify --repair` upgrade it in
-    place; the reinstall retracts the absolute entry and writes the portable
-    one. Only claude has a project-dir variable, so only claude can be stale.
+
+def _is_stale(repo_root: Path, agent: str, entry: dict) -> bool:
+    """True if the entry runs, but not in anyone else's checkout.
+
+    Two generations of that:
+
+    1. Installs before the `$CLAUDE_PROJECT_DIR` rendering baked the machine's
+       absolute repo path into settings.json.
+    2. Installs before the missing-script guard pointed a portable path at a
+       `.claude/skills/**` script that is typically untracked — settings.json
+       IS tracked, so a clone wires the hook and every matching edit exits 127.
+
+    Either way the command still runs here, so it isn't MISSING. Flagging it
+    STALE lets `hooks verify --repair` upgrade it in place: the reinstall
+    retracts the old entry and writes the current rendering. Only claude has a
+    project-dir variable, so only claude can be stale.
     """
     if agent != "claude":
         return False
     # Claude entries nest the command under a matcher object; scan the whole
     # serialized entry rather than reaching into a shape that may grow.
-    return str(repo_root) in json.dumps(entry)
+    if str(repo_root) in json.dumps(entry):
+        return True
+    return any(
+        "$CLAUDE_PROJECT_DIR" in cmd and not is_guarded(cmd)
+        for cmd in _entry_commands(entry)
+    )
 
 
 def _git_present(repo_root: Path, event_key: str, item_type: str,
