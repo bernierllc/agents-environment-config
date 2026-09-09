@@ -18,7 +18,17 @@ def _make_aec_json(project_dir: Path, project_name: str, ports: dict) -> Path:
     """Helper to create a .aec.json file."""
     project_dir.mkdir(parents=True, exist_ok=True)
     aec_json = project_dir / ".aec.json"
-    aec_json.write_text(json.dumps({"project": project_name, "ports": ports}))
+    # Real .aec.json stores project as an object (aec/lib/aec_json.py), not a
+    # bare string. A string fixture here is what hid the bug where register
+    # wrote the whole object into the registry's "project" field.
+    aec_json.write_text(
+        json.dumps(
+            {
+                "project": {"name": project_name, "description": ""},
+                "ports": ports,
+            }
+        )
+    )
     return aec_json
 
 
@@ -151,6 +161,9 @@ class TestRunPortsRegister:
         saved = json.loads(reg_path.read_text())
         assert "3000" in saved["ports"]
         assert "3001" in saved["ports"]
+        # The registry stores the project NAME, not the .aec.json project object;
+        # a dict here makes `aec ports list` raise TypeError: unhashable type.
+        assert saved["ports"]["3000"]["project"] == "my-project"
 
     def test_register_skips_conflicts(self, temp_dir, monkeypatch, capsys):
         """Should skip ports that conflict with existing registrations."""

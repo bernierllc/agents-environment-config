@@ -87,7 +87,10 @@ def run_ports_register(path: str) -> None:
         Console.error(f"Failed to read .aec.json: {exc}")
         return
 
-    project_name = aec_config.get("project", Path(project_path).name)
+    # .aec.json stores project as {"name": ..., "description": ...}; the registry
+    # stores a plain name string (see runner.py). Reading the object whole is what
+    # wrote dict-valued "project" entries that crash `aec ports list`.
+    project_name = aec_config.get("project", {}).get("name", Path(project_path).name)
     ports = aec_config.get("ports", {})
     if not ports:
         Console.info("No ports defined in .aec.json")
