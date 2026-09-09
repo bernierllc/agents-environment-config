@@ -44,11 +44,37 @@ def config_dir_blocked(repo_root: Path, agent: str) -> Path | None:
     return path if path.exists() and not path.is_dir() else None
 
 
-def _resolve_script_commands(hf, item_dir: Path) -> Dict[str, str]:
-    """Rewrite `aec run-script <item> <script> [args...]` to an absolute path.
+# How a resolved script path is written into each agent's config. Claude Code
+# exports $CLAUDE_PROJECT_DIR, so a repo-local script can be addressed
+# portably — the same settings.json then works in a clone, a worktree, or on a
+# teammate's machine. Git hooks run with cwd at the repo root, so a plain
+# relative path is enough there. gemini/cursor expose no verified project-dir
+# variable, so they keep the absolute path.
+# ponytail: per-agent rendering, not a plugin registry — add one when a fourth
+# agent needs a third rendering.
+def _render_script_path(script_path: Path, repo_root: Path, agent: str) -> str:
+    """Render `script_path` the way `agent` should see it."""
+    try:
+        rel = script_path.relative_to(repo_root)
+    except ValueError:
+        # Global install (or otherwise outside the repo): absolute is the only
+        # thing that resolves.
+        return shlex.quote(str(script_path))
+    if agent == "claude":
+        return '"$CLAUDE_PROJECT_DIR"/' + shlex.quote(str(rel))
+    if agent == "git":
+        return shlex.quote(str(rel))
+    return shlex.quote(str(script_path))
+
+
+def _resolve_script_commands(
+    hf, item_dir: Path, repo_root: Path, agent: str
+) -> Dict[str, str]:
+    """Rewrite `aec run-script <item> <script> [args...]` to a real path.
 
     Looks for `<item_dir>/scripts/<script>`. Raises FileNotFoundError if the
-    referenced script does not exist.
+    referenced script does not exist. The rendering is agent-specific — see
+    `_render_script_path`.
     """
     resolved: Dict[str, str] = {}
     for h in hf.hooks:
@@ -72,10 +98,9 @@ def _resolve_script_commands(hf, item_dir: Path) -> Dict[str, str]:
                         script_path.chmod(script_path.stat().st_mode | 0o111)
                     except OSError:
                         pass
-                pieces = [str(script_path), *extra]
-                cmd = shlex.join(pieces) if hasattr(shlex, "join") else " ".join(
-                    shlex.quote(p) for p in pieces
-                )
+                pieces = [_render_script_path(script_path, repo_root, agent)]
+                pieces += [shlex.quote(p) for p in extra]
+                cmd = " ".join(pieces)
         resolved[h.id] = cmd
     return resolved
 
@@ -170,8 +195,6 @@ def install_item_hooks(
             "allow_custom_check=True to consent to running custom shell"
         )
 
-    resolved = _resolve_script_commands(hf, item_dir)
-
     st = hook_state.load_state(repo_root, item_type=item_type, item_key=item_key)
 
     # Retract whatever the previous install of this item put in the agent config
@@ -220,6 +243,7 @@ def install_item_hooks(
                 f"(e.g. `mv {blocked} {blocked}.bak`) to enable {agent} hooks."
             )
             continue
+        resolved = _resolve_script_commands(hf, item_dir, repo_root, agent)
         entries = translate_to_agent(filtered, agent, resolved_commands=resolved)
         if agent == "claude":
             _install_claude(repo_root, entries, st, item_version)

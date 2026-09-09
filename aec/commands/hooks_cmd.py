@@ -28,7 +28,7 @@ def verify(
 
     State records that a hook was installed; an out-of-band edit can drop the
     entry while leaving state behind. This compares each recorded hook to the
-    settings file by content fingerprint and reports MISSING drift. Exits 1 if
+    settings file by content fingerprint and reports MISSING/STALE drift. Exits 1 if
     drift remains, 0 if all recorded hooks are present. With --repair, re-wires
     drifted hooks (merge, never clobber) and then exits 0 if everything is OK.
     """

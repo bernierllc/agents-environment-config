@@ -457,3 +457,81 @@ class TestReinstallReplacesChangedHooks:
             for hook in entry["hooks"]
         ]
         assert commands == ["echo v2"]
+
+
+class TestRepoLocalScriptRendering:
+    """A repo-local script must not be pinned to this machine's absolute path.
+
+    Claude Code exports $CLAUDE_PROJECT_DIR, so settings.json can address the
+    script portably — the same file then works in a clone, a worktree, or on a
+    teammate's checkout. Git hooks run with cwd at the repo root, so a plain
+    relative path is enough there. gemini/cursor have no verified project-dir
+    variable, so they keep absolute.
+    """
+
+    @staticmethod
+    def _install(repo_root, agents):
+        from aec.lib.hooks.installer import install_item_hooks
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        (item_dir / "scripts").mkdir(parents=True)
+        script = item_dir / "scripts" / "check.sh"
+        script.write_text("#!/bin/sh\necho ok\n")
+        script.chmod(0o755)
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "on_file_edit",
+                "command": "aec run-script skill:demo check.sh --flag",
+                "description": "d",
+            }],
+        }))
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=agents,
+        )
+        return script
+
+    def test_claude_uses_project_dir_variable(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        script = self._install(repo_root, ["claude"])
+        settings = json.loads((repo_root / ".claude/settings.json").read_text())
+        cmd = settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
+        assert cmd == (
+            '"$CLAUDE_PROJECT_DIR"/.claude/skills/demo/scripts/check.sh --flag'
+        )
+        assert str(repo_root) not in cmd
+        assert script.exists()
+
+    def test_gemini_keeps_absolute_path(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        script = self._install(repo_root, ["gemini"])
+        settings = json.loads((repo_root / ".gemini/settings.json").read_text())
+        cmd = json.dumps(settings)
+        assert str(script) in cmd
+        assert "CLAUDE_PROJECT_DIR" not in cmd
+
+    def test_global_item_dir_stays_absolute(self, tmp_path):
+        """An item installed from outside the repo has no relative rendering."""
+        from aec.lib.hooks.installer import install_item_hooks
+        item_dir = tmp_path / "global-item"
+        (item_dir / "scripts").mkdir(parents=True)
+        script = item_dir / "scripts" / "check.sh"
+        script.write_text("#!/bin/sh\n")
+        script.chmod(0o755)
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "on_file_edit",
+                "command": "aec run-script skill:demo check.sh",
+                "description": "d",
+            }],
+        }))
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["claude"],
+        )
+        settings = json.loads((repo_root / ".claude/settings.json").read_text())
+        cmd = settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
+        assert cmd == str(script)
