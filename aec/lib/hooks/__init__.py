@@ -410,14 +410,24 @@ def write_hook_config(
 
 # --- Verification-Playwright pipeline hook ---
 
+# Substring that identifies any generation of this hook's command, so a
+# reinstall can replace a stale entry instead of appending beside it.
+VERIFICATION_PLAYWRIGHT_MARKER = "verification-playwright/sync-tests.js"
+
+# Claude Code delivers hook input as JSON on stdin (`tool_input.file_path`) --
+# it never sets $CLAUDE_FILE_PATH, which is why earlier versions of this hook
+# silently never fired. $CLAUDE_PROJECT_DIR *is* set, so the script path is
+# absolute rather than relative to whatever cwd the hook inherits.
 VERIFICATION_PLAYWRIGHT_HOOK: Dict[str, Any] = {
-    "matcher": "Edit|Write",
+    "matcher": "Edit|Write|MultiEdit",
     "hooks": [{
         "type": "command",
         "command": (
-            'if echo "$CLAUDE_FILE_PATH" | grep -q "docs/verification/"; '
-            'then node scripts/verification-playwright/sync-tests.js '
-            '"$CLAUDE_FILE_PATH" 2>&1 | tail -5; fi'
+            'f=$(python3 -c \'import json,sys; '
+            'print(json.load(sys.stdin).get("tool_input",{}).get("file_path",""))\''
+            ' 2>/dev/null); case "$f" in *docs/verification/*) '
+            'node "$CLAUDE_PROJECT_DIR/scripts/verification-playwright/sync-tests.js" '
+            '"$f" 2>&1 | tail -5;; esac'
         ),
     }],
 }

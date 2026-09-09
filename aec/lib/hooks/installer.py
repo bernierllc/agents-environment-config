@@ -8,6 +8,7 @@ I/O so they can be tested in isolation — this file grows across Tasks 9a-9g.
 from __future__ import annotations
 
 import json
+import os
 import shlex
 from pathlib import Path
 from typing import Dict, List, Sequence
@@ -62,6 +63,14 @@ def _resolve_script_commands(hf, item_dir: Path) -> Dict[str, str]:
                     raise FileNotFoundError(
                         f"hook {h.id!r}: script not found: {script_path}"
                     )
+                # Items ship scripts 0644 out of git; the command we emit
+                # execs the file directly, so make it runnable here the same
+                # way `aec run-script` does.
+                if not os.access(script_path, os.X_OK):
+                    try:
+                        script_path.chmod(script_path.stat().st_mode | 0o111)
+                    except OSError:
+                        pass
                 pieces = [str(script_path), *extra]
                 cmd = shlex.join(pieces) if hasattr(shlex, "join") else " ".join(
                     shlex.quote(p) for p in pieces
@@ -166,6 +175,11 @@ def install_item_hooks(
     st.item_version = item_version
     st.hooks_file_hash = fingerprint_hook(json.loads(hooks_json.read_text()))
     st.agents_targeted = list(agents)
+    # Sweep the entries a previous install of this item recorded. Merging alone
+    # only dedupes byte-identical payloads, so a changed command (version bump,
+    # moved script) would otherwise leave the stale entry firing beside the new
+    # one.
+    _remove_installed(repo_root, st.hooks_installed, item_type, item_key)
     st.hooks_installed = []
     st.hooks_skipped = []
     if allow_custom_check:
@@ -215,12 +229,11 @@ def install_item_hooks(
     hook_state.save_state(repo_root, st)
 
 
-def remove_item_hooks(
-    *, item_type: str, item_key: str, repo_root: Path,
+def _remove_installed(
+    repo_root: Path, installed_entries: List[dict], item_type: str, item_key: str,
 ) -> None:
-    """Remove an item's hooks from all recorded agents, then drop state."""
-    st = hook_state.load_state(repo_root, item_type=item_type, item_key=item_key)
-    for installed in st.hooks_installed:
+    """Strip every recorded hook entry from its agent's config."""
+    for installed in installed_entries:
         agent = installed["agent"]
         event_key = installed["target_json_pointer"].split("/")[2]
         fp = installed["content_fingerprint"]
@@ -232,6 +245,14 @@ def remove_item_hooks(
             _remove_cursor(repo_root, event_key, fp)
         elif agent == "git":
             _remove_git(repo_root, event_key, installed, item_type, item_key)
+
+
+def remove_item_hooks(
+    *, item_type: str, item_key: str, repo_root: Path,
+) -> None:
+    """Remove an item's hooks from all recorded agents, then drop state."""
+    st = hook_state.load_state(repo_root, item_type=item_type, item_key=item_key)
+    _remove_installed(repo_root, st.hooks_installed, item_type, item_key)
     hook_state.remove_state(repo_root, item_type=item_type, item_key=item_key)
 
 

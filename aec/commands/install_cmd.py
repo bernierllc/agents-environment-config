@@ -9,7 +9,10 @@ import subprocess
 from ..lib import Console
 from ..lib.config import get_repo_root
 from ..lib.filesystem import installed_dst_path
-from ..lib.hooks import get_verification_playwright_hook
+from ..lib.hooks import (
+    VERIFICATION_PLAYWRIGHT_MARKER,
+    get_verification_playwright_hook,
+)
 from ..lib.manifest_v2 import (
     load_manifest, save_manifest, record_install, record_mcp_install, record_plugin_install,
 )
@@ -731,15 +734,22 @@ def _post_install_playwright_pipeline(name: str, scope: Scope, yes: bool = False
     existing_post = existing_hooks.setdefault("PostToolUse", [])
     new_hook_entry = hook_config["hooks"]["PostToolUse"][0]
 
-    # Avoid duplicates
-    new_cmd = new_hook_entry["hooks"][0]["command"]
-    already_present = any(
-        h.get("hooks", [{}])[0].get("command") == new_cmd
-        for h in existing_post
-        if isinstance(h, dict)
-    )
-    if not already_present:
-        existing_post.append(new_hook_entry)
+    # Drop any prior generation of this hook (matched by the script it calls,
+    # not by exact command text) so a reinstall replaces rather than appends.
+    def _is_ours(h: object) -> bool:
+        if not isinstance(h, dict):
+            return False
+        return any(
+            VERIFICATION_PLAYWRIGHT_MARKER in (c or "")
+            for c in (
+                e.get("command") for e in h.get("hooks", []) if isinstance(e, dict)
+            )
+        )
+
+    existing_hooks["PostToolUse"] = existing_post = [
+        h for h in existing_post if not _is_ours(h)
+    ]
+    existing_post.append(new_hook_entry)
 
     settings_path.write_text(json.dumps(existing, indent=2) + "\n")
     Console.success(f"Wrote PostToolUse hook to {settings_path}")
