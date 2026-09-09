@@ -301,6 +301,30 @@ class TestUnguardedScriptCommands:
         save_state(repo_root, st)
         return body
 
+    def test_hook_merely_mentioning_the_variable_is_not_stale(self, tmp_path):
+        """Only the generated script-path shape is stale.
+
+        A hand-written hook may reference `$CLAUDE_PROJECT_DIR` for its own
+        reasons. Repair never guards those — it only guards paths it resolves —
+        so flagging one would leave it STALE on every verify, forever.
+        """
+        from aec.lib.hooks.drift import Drift, verify_repo
+        from aec.lib.hooks.fingerprint import fingerprint_hook
+        from aec.lib.hooks.state import load_state, save_state
+
+        repo_root = TestStaleAbsolutePaths._install_repo_local(tmp_path)
+        settings_path = repo_root / ".claude/settings.json"
+        settings = json.loads(settings_path.read_text())
+        entry = settings["hooks"]["PostToolUse"][0]
+        entry["hooks"][0]["command"] = 'printf %s "$CLAUDE_PROJECT_DIR"'
+        settings_path.write_text(json.dumps(settings))
+
+        st = load_state(repo_root, item_type="skill", item_key="demo")
+        st.hooks_installed[0]["content_fingerprint"] = fingerprint_hook(entry)
+        save_state(repo_root, st)
+
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
+
     def test_unguarded_project_dir_reports_stale(self, tmp_path):
         from aec.lib.hooks.drift import Drift, verify_repo
 

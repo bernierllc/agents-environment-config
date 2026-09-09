@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .fingerprint import fingerprint_hook
-from .installer import is_guarded
+from .installer import CLAUDE_PROJECT_DIR_PREFIX, is_guarded
 from .state import list_installed_items, load_state
 
 # Settings-file agents store entries under data["hooks"][<event_key>].
@@ -104,6 +104,10 @@ def _is_stale(repo_root: Path, agent: str, entry: dict) -> bool:
     2. Installs before the missing-script guard pointed a portable path at a
        `.claude/skills/**` script that is typically untracked — settings.json
        IS tracked, so a clone wires the hook and every matching edit exits 127.
+       Keyed on the generated shape — the command STARTS with the project-dir
+       prefix — not on the variable appearing anywhere: repair only guards paths
+       it resolves, so flagging a hand-written hook that merely mentions
+       `$CLAUDE_PROJECT_DIR` would leave it STALE forever.
 
     Either way the command still runs here, so it isn't MISSING. Flagging it
     STALE lets `hooks verify --repair` upgrade it in place: the reinstall
@@ -117,7 +121,7 @@ def _is_stale(repo_root: Path, agent: str, entry: dict) -> bool:
     if str(repo_root) in json.dumps(entry):
         return True
     return any(
-        "$CLAUDE_PROJECT_DIR" in cmd and not is_guarded(cmd)
+        cmd.startswith(CLAUDE_PROJECT_DIR_PREFIX) and not is_guarded(cmd)
         for cmd in _entry_commands(entry)
     )
 

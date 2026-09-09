@@ -61,6 +61,12 @@ def _is_repo_local(script_path: Path, repo_root: Path) -> bool:
 # variable, so they keep the absolute path.
 # ponytail: per-agent rendering, not a plugin registry — add one when a fourth
 # agent needs a third rendering.
+# The rendering claude gets. Also the marker drift detection keys on: a command
+# STARTING with this is a resolved repo-local script path, not just any hook that
+# happens to mention the variable.
+CLAUDE_PROJECT_DIR_PREFIX = '"$CLAUDE_PROJECT_DIR"/'
+
+
 def _render_script_path(script_path: Path, repo_root: Path, agent: str) -> str:
     """Render `script_path` the way `agent` should see it."""
     try:
@@ -70,7 +76,7 @@ def _render_script_path(script_path: Path, repo_root: Path, agent: str) -> str:
         # thing that resolves.
         return shlex.quote(str(script_path))
     if agent == "claude":
-        return '"$CLAUDE_PROJECT_DIR"/' + shlex.quote(str(rel))
+        return CLAUDE_PROJECT_DIR_PREFIX + shlex.quote(str(rel))
     if agent == "git":
         return shlex.quote(str(rel))
     return shlex.quote(str(script_path))
