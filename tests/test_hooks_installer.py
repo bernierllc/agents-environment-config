@@ -496,9 +496,9 @@ class TestRepoLocalScriptRendering:
         script = self._install(repo_root, ["claude"])
         settings = json.loads((repo_root / ".claude/settings.json").read_text())
         cmd = settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
-        assert cmd == (
-            '"$CLAUDE_PROJECT_DIR"/.claude/skills/demo/scripts/check.sh --flag'
-        )
+        target = '"$CLAUDE_PROJECT_DIR"/.claude/skills/demo/scripts/check.sh'
+        # Guarded so a clone that never committed the skill stays quiet.
+        assert cmd == f"if [ -x {target} ]; then {target} --flag; fi"
         assert str(repo_root) not in cmd
         assert script.exists()
 
