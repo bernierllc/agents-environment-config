@@ -1,6 +1,7 @@
 """Tests for aec.lib.hooks.installer end-to-end install/remove."""
 
 import json
+import os
 from pathlib import Path
 
 
@@ -204,6 +205,33 @@ class TestResolveScriptCommands:
         assert cmd.endswith("--flag")
         assert "aec run-script" not in cmd
 
+    def test_non_executable_script_gets_exec_bit(self, tmp_path):
+        """The rendered command execs the script directly, so install must chmod it.
+
+        Git only tracks +x, and skills ship plenty of 0644 scripts; without this
+        the hook fires and dies with EACCES, silently doing nothing.
+        """
+        from aec.lib.hooks.installer import install_item_hooks
+        item_dir = tmp_path / "item"
+        (item_dir / "scripts").mkdir(parents=True)
+        script = item_dir / "scripts" / "check.sh"
+        script.write_text("#!/bin/sh\necho ok\n")
+        script.chmod(0o644)
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "on_file_edit",
+                "command": "aec run-script skill:demo check.sh",
+                "description": "d",
+            }],
+        }))
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["claude"],
+        )
+        assert os.access(script, os.X_OK)
+
     def test_missing_script_raises(self, tmp_path):
         import pytest
         from aec.lib.hooks.installer import install_item_hooks
@@ -383,3 +411,49 @@ class TestInstallGitHusky:
         content = (repo_root / ".husky" / "pre-commit").read_text()
         assert "AEC:BEGIN" not in content
         assert "echo linting" not in content
+
+
+class TestReinstallReplacesChangedHooks:
+    """A changed hook command must replace its predecessor, not stack on it.
+
+    The merge functions dedupe on an exact content fingerprint, so before
+    install started retracting the previously-recorded payloads, every bump
+    that altered a command (a version string in an argument, for instance)
+    left the stale entry in settings.json still firing alongside the new one.
+    """
+
+    def _write_item(self, item_dir, version, arg):
+        item_dir.mkdir(parents=True, exist_ok=True)
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": version, "hooks": [{
+                "id": "scan", "event": "on_file_edit",
+                "command": f"echo {arg}",
+                "description": "d",
+                "match": "**/*.md",
+            }],
+        }))
+
+    def test_second_install_replaces_first(self, tmp_path):
+        from aec.lib.hooks.installer import install_item_hooks
+        item_dir = tmp_path / "item"
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+
+        self._write_item(item_dir, "1.0.0", "v1")
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["claude"],
+        )
+        self._write_item(item_dir, "1.1.0", "v2")
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.1.0", repo_root=repo_root, agents=["claude"],
+        )
+
+        settings = json.loads((repo_root / ".claude/settings.json").read_text())
+        commands = [
+            hook["command"]
+            for entry in settings["hooks"]["PostToolUse"]
+            for hook in entry["hooks"]
+        ]
+        assert commands == ["echo v2"]
