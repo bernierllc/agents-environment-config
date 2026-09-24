@@ -13,6 +13,7 @@ from ..prompt_ids import (
     INSTALL_QUALITY_REPORT_RETENTION_MODE,
     INSTALL_QUALITY_REPORT_VIEWER,
     INSTALL_SETTINGS_PLANS_COMPLETION,
+    INSTALL_SETTINGS_PR_OPEN_MODE,
     INSTALL_SETTINGS_PLANS_DIR,
     INSTALL_SETTINGS_PLANS_DIR_CUSTOM,
     INSTALL_SETTINGS_PLANS_GITIGNORED,
@@ -76,6 +77,17 @@ SPECS: tuple[PromptSpec, ...] = (
         INSTALL_SETTINGS_PLANS_COMPLETION,
         command="install",
         summary="On plan completion: 1=archive, 2=delete.",
+        type="enum",
+        default="1",
+        choices=("1", "2"),
+    ),
+    PromptSpec(
+        INSTALL_SETTINGS_PR_OPEN_MODE,
+        command="install",
+        summary=(
+            "How agents open pull requests: 1=ready for review, 2=draft first. "
+            "Rendered into the installed git workflow rule."
+        ),
         type="enum",
         default="1",
         choices=("1", "2"),

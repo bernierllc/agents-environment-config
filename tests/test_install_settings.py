@@ -19,6 +19,7 @@ class TestPromptSettings:
             "1",                     # .plans/
             "n",                     # not tracked in git (= gitignored)
             "1",                     # archive
+            "1",                     # PRs ready for review
         ])
         monkeypatch.setattr("builtins.input", lambda _: next(inputs))
 
@@ -59,7 +60,7 @@ class TestPromptSettings:
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "prefs.json")
         monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
 
-        inputs = iter(["", "1", "n", "1"])  # empty = accept default
+        inputs = iter(["", "1", "n", "1", "1"])  # empty = accept default
         monkeypatch.setattr("builtins.input", lambda _: next(inputs))
 
         from aec.commands.install import _prompt_settings
@@ -74,7 +75,7 @@ class TestPromptSettings:
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "prefs.json")
         monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
 
-        inputs = iter(["/tmp/projects", "2", "y", "2"])
+        inputs = iter(["/tmp/projects", "2", "y", "2", "1"])
         monkeypatch.setattr("builtins.input", lambda _: next(inputs))
 
         from aec.commands.install import _prompt_settings
@@ -129,7 +130,7 @@ class TestPromptSettings:
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "prefs.json")
         monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
 
-        inputs = iter(["/tmp/projects", "3", "docs", "n", "1"])
+        inputs = iter(["/tmp/projects", "3", "docs", "n", "1", "1"])
         monkeypatch.setattr("builtins.input", lambda _: next(inputs))
 
         from aec.commands.install import _prompt_settings
@@ -144,7 +145,7 @@ class TestPromptSettings:
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "prefs.json")
         monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
 
-        inputs = iter(["/tmp/projects", "my-plans", "3", "my-plans", "n", "1"])
+        inputs = iter(["/tmp/projects", "my-plans", "3", "my-plans", "n", "1", "1"])
         monkeypatch.setattr("builtins.input", lambda _: next(inputs))
 
         from aec.commands.install import _prompt_settings
@@ -158,7 +159,7 @@ class TestPromptSettings:
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "prefs.json")
         monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
 
-        inputs = iter(["/tmp/projects", "1", "yes", "1"])
+        inputs = iter(["/tmp/projects", "1", "yes", "1", "1"])
         monkeypatch.setattr("builtins.input", lambda _: next(inputs))
 
         from aec.commands.install import _prompt_settings
@@ -250,3 +251,22 @@ class TestFindProjects:
         from aec.commands.install import _find_projects
         result = _find_projects(Path("/nonexistent/path"), git_only=False)
         assert result == []
+
+
+class TestPrOpenModeSetting:
+    def _run(self, temp_dir, monkeypatch, answer):
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "prefs.json")
+        monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+        inputs = iter(["/tmp/projects", "1", "n", "1", answer])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+        from aec.commands.install import _prompt_settings
+        _prompt_settings()
+        from aec.lib.preferences import get_setting
+        return get_setting("pr_open_mode")
+
+    def test_enter_means_ready(self, temp_dir, monkeypatch):
+        assert self._run(temp_dir, monkeypatch, "") == "ready"
+
+    def test_option_2_means_draft(self, temp_dir, monkeypatch):
+        assert self._run(temp_dir, monkeypatch, "2") == "draft"
+

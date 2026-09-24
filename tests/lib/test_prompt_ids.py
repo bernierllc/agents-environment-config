@@ -25,6 +25,7 @@ from aec.lib.prompt_ids import (
     INSTALL_QUALITY_REPORT_RETENTION_MODE,
     INSTALL_QUALITY_REPORT_VIEWER,
     INSTALL_SETTINGS_PLANS_COMPLETION,
+    INSTALL_SETTINGS_PR_OPEN_MODE,
     INSTALL_SETTINGS_PLANS_DIR,
     INSTALL_SETTINGS_PLANS_DIR_CUSTOM,
     INSTALL_SETTINGS_PLANS_GITIGNORED,
@@ -49,6 +50,7 @@ def test_static_prompt_ids_have_addendum_values():
         "install.settings.plans_dir.custom": INSTALL_SETTINGS_PLANS_DIR_CUSTOM,
         "install.settings.plans_gitignored": INSTALL_SETTINGS_PLANS_GITIGNORED,
         "install.settings.plans_completion": INSTALL_SETTINGS_PLANS_COMPLETION,
+        "install.settings.pr_open_mode": INSTALL_SETTINGS_PR_OPEN_MODE,
         "install.quality.report_viewer": INSTALL_QUALITY_REPORT_VIEWER,
         "install.quality.report_retention_mode": INSTALL_QUALITY_REPORT_RETENTION_MODE,
         "install.quality.report_retention_days": INSTALL_QUALITY_REPORT_RETENTION_DAYS,
@@ -59,8 +61,8 @@ def test_static_prompt_ids_have_addendum_values():
 
 
 def test_all_static_prompt_ids_tuple_is_complete():
-    assert len(ALL_STATIC_PROMPT_IDS) == 11
-    assert len(set(ALL_STATIC_PROMPT_IDS)) == 11  # no duplicates
+    assert len(ALL_STATIC_PROMPT_IDS) == 12
+    assert len(set(ALL_STATIC_PROMPT_IDS)) == 12  # no duplicates
 
 
 def test_dynamic_prefixes_are_declared():
