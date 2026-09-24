@@ -295,6 +295,85 @@ def _check_and_upgrade_dep_conflicts(
     return True
 
 
+def _upgrade_plugins(
+    manifest: dict,
+    scope: str,
+    source_dir: Path,
+    installed: dict,
+    available: dict,
+    dry_run: bool,
+) -> bool:
+    """Upgrade outdated plugins through their installer, never by copying files.
+
+    A plugin already recorded as a marketplace install is updated with
+    ``claude plugin update``; one recorded under another install type (e.g. an
+    older per-tool catalog entry) is re-installed from the current manifest.
+    Instructions-only plugins are reported and left at their recorded version.
+    The record is only advanced when every command succeeded.
+    """
+    import subprocess
+
+    from ..lib.config import detect_agents
+    from ..lib.loadout import LoadoutError, load_loadout
+    from ..lib.manifest_v2 import record_plugin_install
+    from ..lib.plugin_install import install_plugin
+    from ..lib.preferences import get_setting
+
+    upgraded = False
+    for name, info in installed.items():
+        if name not in available:
+            continue
+        avail_v = available[name].get("version", "0.0.0")
+        inst_v = info.get("version", "0.0.0")
+        if not version_is_newer(avail_v, inst_v):
+            continue
+        if dry_run:
+            Console.print(f"  would upgrade plugin  {name}  {inst_v} -> {avail_v}")
+            upgraded = True
+            continue
+        try:
+            manifest_def = load_loadout(source_dir / available[name].get("path", name))
+        except LoadoutError as exc:
+            Console.warning(f"Invalid plugin '{name}': {exc}; skipping.")
+            continue
+
+        failed = []
+
+        def runner(cmd):
+            Console.print(f"  $ {' '.join(cmd)}")
+            result = subprocess.run(cmd)
+            if result.returncode != 0:
+                failed.append(cmd)
+            return result
+
+        if manifest_def["install_type"] == "marketplace" and info.get("install_type") == "marketplace":
+            runner(["claude", "plugin", "update", manifest_def["install"]["plugin"]])
+            result = {"install_type": "marketplace", "targets": ["claude"], "executed": True}
+        else:
+            result = install_plugin(
+                manifest_def, detect_agents(),
+                runner=runner, confirm=lambda *a: True, printer=Console.print,
+                pref=get_setting("plugins.execution"),
+            )
+            if not result.get("executed"):
+                Console.warning(
+                    f"{name} {inst_v} -> {avail_v} needs manual steps (printed above); "
+                    "left at its recorded version."
+                )
+                continue
+        if failed:
+            Console.error(f"Failed to upgrade plugin {name}: {' '.join(failed[0])} exited non-zero")
+            continue
+        record_plugin_install(
+            manifest, scope, name, avail_v,
+            install_type=result["install_type"], targets=result["targets"],
+        )
+        record_item_install_pertype("plugin", name, avail_v)
+        Console.success(f"Upgraded plugin {name} {inst_v} -> {avail_v}")
+        upgraded = True
+    return upgraded
+
+
 def _upgrade_scope(
     manifest: dict,
     scope: str,
@@ -309,6 +388,11 @@ def _upgrade_scope(
             continue
         available = discover_available(source_dir, item_type)
         installed = get_installed(manifest, scope, item_type)
+        if item_type == "plugins":
+            # Plugins are installed by their own tooling, not copied files.
+            if _upgrade_plugins(manifest, scope, source_dir, installed, available, dry_run):
+                upgraded = True
+            continue
         target = _target_base(scope, item_type)
 
         if item_type == "agents" and target.exists():

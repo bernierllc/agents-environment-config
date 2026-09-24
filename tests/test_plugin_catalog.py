@@ -23,6 +23,13 @@ def test_manifest_validates(path):
 
 
 @pytest.mark.parametrize("path", MANIFESTS, ids=lambda p: p.parent.name)
+def test_manifest_matches_json_schema(path):
+    jsonschema = pytest.importorskip("jsonschema")
+    schema_path = CATALOG.parent / "docs" / "loadout" / "schema" / "plugin.schema.json"
+    jsonschema.validate(json.loads(path.read_text()), json.loads(schema_path.read_text()))
+
+
+@pytest.mark.parametrize("path", MANIFESTS, ids=lambda p: p.parent.name)
 def test_marketplace_plugins_uninstall_with_claude(path):
     """A marketplace plugin is removable by `aec uninstall`, not "manual cleanup"."""
     data = json.loads(path.read_text())

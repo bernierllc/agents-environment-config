@@ -4,7 +4,7 @@ import json
 import shutil
 import pytest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 @pytest.fixture
@@ -590,3 +590,49 @@ class TestUpgradeWithDepConflicts:
         # Nothing should be modified
         dep_md = dep_upgrade_env["dep_installed"] / "SKILL.md"
         assert "1.5.0" in dep_md.read_text()
+
+
+class TestUpgradePlugins:
+    """Plugins upgrade through their installer; never copied like rule files."""
+
+    CATALOG = Path(__file__).resolve().parent.parent / "plugins"
+
+    def _run(self, tmp_path, recorded, returncode=0):
+        from aec.commands.upgrade import _upgrade_scope
+        from aec.lib.manifest_v2 import record_plugin_install
+
+        manifest = {"global": {"plugins": {}}, "repos": {}}
+        record_plugin_install(manifest, "global", "ponytail", recorded["version"],
+                              install_type=recorded["install_type"], targets=["claude"])
+        calls = []
+
+        def fake_run(cmd, *a, **kw):
+            calls.append(cmd)
+            return MagicMock(returncode=returncode)
+
+        with patch("subprocess.run", side_effect=fake_run), \
+             patch("aec.lib.config.detect_agents", return_value={"claude": {}}), \
+             patch("aec.commands.upgrade.record_item_install_pertype"), \
+             patch("aec.commands.upgrade._target_base", return_value=tmp_path / "rules"):
+            upgraded = _upgrade_scope(manifest, "global", {"plugins": self.CATALOG},
+                                      yes=True, dry_run=False)
+        return manifest["global"]["plugins"]["ponytail"], calls, upgraded
+
+    def test_old_per_tool_record_reinstalls_from_marketplace(self, tmp_path):
+        entry, calls, upgraded = self._run(tmp_path, {"version": "1.0.0", "install_type": "per-tool"})
+        assert calls == [
+            ["claude", "plugin", "marketplace", "add", "DietrichGebert/ponytail"],
+            ["claude", "plugin", "install", "ponytail@ponytail"],
+        ]
+        assert upgraded and entry["install_type"] == "marketplace" and entry["version"] != "1.0.0"
+        assert not (tmp_path / "rules").exists(), "plugin must not be copied as a rule"
+
+    def test_marketplace_record_uses_claude_plugin_update(self, tmp_path):
+        entry, calls, _ = self._run(tmp_path, {"version": "0.1.0", "install_type": "marketplace"})
+        assert calls == [["claude", "plugin", "update", "ponytail@ponytail"]]
+        assert entry["version"] != "0.1.0"
+
+    def test_failed_command_keeps_recorded_version(self, tmp_path):
+        entry, _, upgraded = self._run(tmp_path, {"version": "0.1.0", "install_type": "marketplace"},
+                                       returncode=1)
+        assert entry["version"] == "0.1.0" and not upgraded
