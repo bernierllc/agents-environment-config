@@ -208,6 +208,25 @@ class TestRenderedGitEssentials:
         assert "curl" not in ci
         assert {"name": 'Test (npm run "a: b")', "run": 'npm run "a: b"'} in steps
 
+    @pytest.mark.parametrize("cmd", [
+        "npm run test:😀", 'say "hi" # not a comment', "a: b", "*x &y !z", "tab\there", "back\\slash", "é 中",
+        "literal \\ud83d\\ude00 text", "nel\x85 ls\u2028 del\x7f",
+    ])
+    def test_ci_command_round_trips_exactly(self, tmp_path, cmd):
+        import yaml
+        from aec.lib.git_setup import render_ci_workflow
+        steps = yaml.safe_load(render_ci_workflow(tmp_path, [cmd]))["jobs"]["test"]["steps"]
+        assert steps[-1] == {"name": f"Test ({cmd})", "run": cmd}
+
+    def test_dropped_ci_commands_are_reported(self):
+        from aec.commands.repo import _git_essentials_review_notes
+        ctx = {"codeowners_rule": "* @x"}
+        notes = _git_essentials_review_notes(["ci_workflow"], ctx, ["npm test", "bad\nline"])
+        assert any("bad\\nline" in n for n in notes)
+        assert not any("no test suite detected" in n for n in notes)
+        notes = _git_essentials_review_notes(["ci_workflow"], ctx, ["bad\nline"])
+        assert any("no test suite detected" in n for n in notes)
+
     def test_ci_without_tests_warns_instead_of_passing_silently(self, tmp_path):
         from aec.lib.git_setup import render_ci_workflow
         ci = render_ci_workflow(tmp_path, [])

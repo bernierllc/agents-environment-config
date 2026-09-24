@@ -222,9 +222,7 @@ def render_ci_workflow(project_dir: Path, test_commands: List[str]) -> str:
         "    runs-on: ubuntu-latest", "    steps:", "      - uses: actions/checkout@v4",
     ]
     steps: List[str] = []
-    # A test command spanning lines is not something detection produces for a
-    # well-formed project; never write one into a workflow.
-    test_commands = [c for c in test_commands if c.strip() and not re.search(r"[\r\n]", c)]
+    test_commands = ci_safe_commands(test_commands)
     if not test_commands:
         steps += [
             "      - name: Run tests",
@@ -257,10 +255,32 @@ def render_ci_workflow(project_dir: Path, test_commands: List[str]) -> str:
             "          go-version-file: go.mod",
         ]
     for cmd in test_commands:
-        # json.dumps yields a double-quoted scalar YAML parses identically,
-        # so a command can never break out of its own ``run:`` line.
-        steps += [f"      - name: {json.dumps(f'Test ({cmd})')}", f"        run: {json.dumps(cmd)}"]
+        steps += [f"      - name: {yaml_quote(f'Test ({cmd})')}", f"        run: {yaml_quote(cmd)}"]
     return "\n".join(head + steps) + "\n"
+
+
+def ci_safe_commands(test_commands: List[str]) -> List[str]:
+    """Commands that can go into a workflow ``run:`` line. A command spanning
+    lines is not something detection produces for a well-formed project, so it
+    is left out (and reported by the caller) rather than written."""
+    return [c for c in test_commands if c.strip() and not re.search(r"[\r\n]", c)]
+
+
+# Characters YAML does not allow literally inside a double-quoted scalar (or
+# would fold as a line break); all are in the BMP, so \uXXXX escapes them.
+_YAML_UNSAFE = re.compile("[\x7f-\x9f\u2028\u2029\ufeff\ud800-\udfff]")
+
+
+def yaml_quote(value: str) -> str:
+    """``value`` as a YAML double-quoted scalar that parses back identically.
+
+    ``json.dumps`` already escapes quotes, backslashes and C0 controls in a
+    YAML-compatible way. It is used with ``ensure_ascii=False`` because JSON's
+    surrogate-pair escape for non-BMP characters is not understood by YAML;
+    the few characters YAML rejects literally are escaped afterwards.
+    """
+    quoted = json.dumps(value, ensure_ascii=False)
+    return _YAML_UNSAFE.sub(lambda m: "\\u%04x" % ord(m.group()), quoted)
 
 
 def _runtime(command: str) -> str:

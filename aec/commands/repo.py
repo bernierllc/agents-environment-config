@@ -62,6 +62,7 @@ from ..lib.git import clone_repo
 from ..lib.git_providers import detect_git_provider, scan_git_essentials, GIT_PROVIDERS
 from ..lib.git_setup import (
     build_composite_gitignore,
+    ci_safe_commands,
     default_codeowner,
     default_copyright_holder,
     default_git_context,
@@ -1068,11 +1069,19 @@ def _git_essentials_review_notes(items: List[str], context: dict, test_commands:
     notes = []
     if "README.md" in items:
         notes.append("README.md: replace the placeholder description and usage sections")
-    if "ci_workflow" in items and not test_commands:
-        notes.append(
-            ".github/workflows/ci.yml: no test suite detected; add your test command "
-            "(the step currently only emits a warning)"
-        )
+    if "ci_workflow" in items:
+        usable = ci_safe_commands(test_commands)
+        dropped = [c for c in test_commands if c not in usable and c.strip()]
+        if dropped:
+            notes.append(
+                ".github/workflows/ci.yml: left out test command(s) spanning multiple "
+                f"lines: {', '.join(repr(c) for c in dropped)}"
+            )
+        if not usable:
+            notes.append(
+                ".github/workflows/ci.yml: no test suite detected; add your test command "
+                "(the step currently only emits a warning)"
+            )
     if "codeowners" in items and context["codeowners_rule"].startswith("#"):
         notes.append(".github/CODEOWNERS: no owner set; the rule is commented out")
     return notes
