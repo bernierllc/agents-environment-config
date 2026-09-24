@@ -269,6 +269,9 @@ def _coerce_typed(raw: str, type: str, default: Any, choices: Optional[list]) ->
     text = raw.strip()
     if text == "":
         if default is None:
+            if choices and "" not in [str(c) for c in choices]:
+                shown = ", ".join(str(c) for c in choices)
+                raise PromptInvalidAnswer("", text, f"choice (one of {shown})")
             return ""
         text = normalize(default, type)
     else:

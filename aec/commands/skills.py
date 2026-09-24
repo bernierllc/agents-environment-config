@@ -458,8 +458,9 @@ def install_step(dry_run: bool = False) -> None:
             SKILLS_SYNC_CHOICE,
             "Install updates and new skills? [a]ll, [s]elect, s[K]ip: ",
             default="k",
-            choices=["a", "s", "k"],
+            choices=["a", "s", "k", "all", "select", "skip"],
         )
+        response = {"all": "a", "select": "s", "skip": "k"}.get(response, response)
 
         if response == "a":
             if updates:
