@@ -38,8 +38,10 @@ from ..lib import (
 from ..lib.prompt_catalog.install_flow_area import item_prompt_id
 from ..lib.prompt_catalog.repo_area import (
     REPO_DISCOVER_SCAN,
+    REPO_GIT_CODEOWNER,
     REPO_GIT_COMMIT_STRATEGY,
     REPO_GIT_ESSENTIALS,
+    REPO_GIT_LICENSE_HOLDER,
     REPO_GIT_RUN_INIT,
     REPO_GIT_USE_GITHUB,
     REPO_HOOKS_EXISTING_CONFIG_PREFIX,
@@ -58,7 +60,15 @@ import subprocess
 from ..lib.config import load_env_file
 from ..lib.git import clone_repo
 from ..lib.git_providers import detect_git_provider, scan_git_essentials, GIT_PROVIDERS
-from ..lib.git_setup import build_composite_gitignore, write_git_essential, execute_commit_strategy, get_templates_root
+from ..lib.git_setup import (
+    build_composite_gitignore,
+    default_copyright_holder,
+    default_git_context,
+    execute_commit_strategy,
+    get_templates_root,
+    github_owner,
+    write_git_essential,
+)
 
 if HAS_TYPER:
     app = typer.Typer(help="Manage project repositories")
@@ -1010,12 +1020,63 @@ def _detect_gitignore_inputs(project_dir: Path) -> Tuple[List[str], List[str]]:
     return languages, frameworks
 
 
+def _git_essentials_context(project_dir: Path, items: List[str], test_commands: List[str]) -> dict:
+    """Ask for the values only the user knows, then build the template context."""
+    holder = codeowner = None
+    if "license" in items:
+        guess = default_copyright_holder(project_dir)
+        holder = prompt(
+            REPO_GIT_LICENSE_HOLDER,
+            f"  LICENSE copyright holder [{guess}]: ",
+            default=guess,
+        ).strip() or guess
+    if "codeowners" in items:
+        owner = github_owner(project_dir)
+        guess = f"@{owner}" if owner else "none"
+        answer = prompt(
+            REPO_GIT_CODEOWNER,
+            f"  Default code owner for CODEOWNERS ('@user', '@org/team', or 'none') [{guess}]: ",
+            default=guess,
+            validator=_validate_codeowner,
+        ).strip()
+        codeowner = "" if answer.lower() == "none" else answer
+    return default_git_context(
+        project_dir,
+        test_commands=test_commands,
+        copyright_holder=holder,
+        codeowner=codeowner,
+        with_ci="ci_workflow" in items,
+    )
+
+
+def _validate_codeowner(value: str) -> str:
+    value = value.strip()
+    if value.lower() == "none" or re.fullmatch(r"@[\w.-]+(/[\w.-]+)?", value):
+        return value
+    raise ValueError(f"{value!r} is not '@user', '@org/team', or 'none'")
+
+
+def _git_essentials_review_notes(items: List[str], context: dict, test_commands: List[str]) -> List[str]:
+    notes = []
+    if "README.md" in items:
+        notes.append("README.md: replace the placeholder description and usage sections")
+    if "ci_workflow" in items and not test_commands:
+        notes.append(
+            ".github/workflows/ci.yml: no test suite detected; add your test command "
+            "(the step currently only emits a warning)"
+        )
+    if "codeowners" in items and context["codeowners_rule"].startswith("#"):
+        notes.append(".github/CODEOWNERS: no owner set; the rule is commented out")
+    return notes
+
+
 def _create_git_essentials(
     project_dir: Path,
     git_config: dict,
     detected_languages: List[str],
     detected_frameworks: List[str],
     dry_run: bool,
+    test_commands: Optional[List[str]] = None,
 ) -> None:
     """Create selected git essentials and execute the commit strategy."""
     if not git_config.get("git_enabled") or not git_config.get("items_to_create"):
@@ -1045,12 +1106,13 @@ def _create_git_essentials(
             Console.info("Would create/update .gitignore with language-aware patterns")
 
     other_items = [i for i in items if i != ".gitignore"]
+    context = None if dry_run else _git_essentials_context(project_dir, other_items, test_commands or [])
     for key in other_items:
         if dry_run:
             display = GIT_PROVIDERS[provider]["essentials"][key]["display"]
             Console.info(f"Would create: {display}")
             continue
-        written = write_git_essential(project_dir, key, provider, templates_dir)
+        written = write_git_essential(project_dir, key, provider, templates_dir, context)
         if written:
             tpl = GIT_PROVIDERS[provider]["essentials"][key]["template"]
             rel = tpl[len(f"{provider}/"):] if tpl else key
@@ -1059,6 +1121,12 @@ def _create_git_essentials(
 
     if dry_run or not created_files:
         return
+
+    review = _git_essentials_review_notes(other_items, context, test_commands or [])
+    if review:
+        Console.print("\n  Review before committing (AEC can't fill these in for you):")
+        for note in review:
+            Console.print(f"    - {note}")
 
     Console.print("\n  How should AEC handle git commits for files it created?")
     Console.print("    1. One commit at the end [default]")
@@ -1252,6 +1320,11 @@ def setup(
         detected_languages=_detected_languages,
         detected_frameworks=_detected_frameworks,
         dry_run=dry_run,
+        test_commands=[
+            suite["command"]
+            for suite in aec_data.get("test", {}).get("suites", {}).values()
+            if suite.get("command")
+        ],
     )
 
     # Manage .aec.json gitignore

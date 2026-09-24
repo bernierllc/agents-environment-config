@@ -19,6 +19,8 @@ REPO_GIT_USE_GITHUB = "repo.git.use_github"
 REPO_GIT_RUN_INIT = "repo.git.run_init"
 REPO_GIT_ESSENTIALS = "repo.git.essentials"
 REPO_GIT_COMMIT_STRATEGY = "repo.git.commit_strategy"
+REPO_GIT_LICENSE_HOLDER = "repo.git.license_holder"
+REPO_GIT_CODEOWNER = "repo.git.codeowner"
 REPO_SETUP_PROJECT_PATH = "repo.setup.project_path"
 REPO_SETUP_EXISTING_ACTION = "repo.setup.existing_action"
 REPO_SETUP_CREATE_DIRECTORY = "repo.setup.create_directory"
@@ -97,6 +99,26 @@ SPECS: tuple[PromptSpec, ...] = (
         ),
         type="string",
         default="all",
+    ),
+    PromptSpec(
+        REPO_GIT_LICENSE_HOLDER,
+        command="repo setup",
+        summary=(
+            "Copyright holder written into the generated LICENSE. Defaults to "
+            "git user.name, else the GitHub owner of origin."
+        ),
+        type="string",
+        default="",
+    ),
+    PromptSpec(
+        REPO_GIT_CODEOWNER,
+        command="repo setup",
+        summary=(
+            "Default owner for .github/CODEOWNERS ('@user' or '@org/team'). "
+            "Defaults to the GitHub owner of origin; 'none' leaves the rule commented out."
+        ),
+        type="string",
+        default="",
     ),
     PromptSpec(
         REPO_GIT_COMMIT_STRATEGY,

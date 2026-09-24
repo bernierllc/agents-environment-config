@@ -312,22 +312,14 @@ def scan_test_scripts(project_dir: Path) -> List[Dict[str, str]]:
             .get("ini_options", {})
         )
         if ini_options:
-            # Report the addopts or testpaths if present
-            addopts = ini_options.get("addopts", "")
-            testpaths = ini_options.get("testpaths", [])
-            if addopts:
-                results.append({
-                    "name": "pytest",
-                    "command": f"python -m pytest {addopts}",
-                    "source": "pyproject.toml",
-                })
-            elif testpaths:
-                paths_str = " ".join(testpaths) if isinstance(testpaths, list) else str(testpaths)
-                results.append({
-                    "name": "pytest",
-                    "command": f"python -m pytest {paths_str}",
-                    "source": "pyproject.toml",
-                })
+            # pytest applies addopts/testpaths from pyproject.toml itself, so the
+            # command stays bare. Interpolating them duplicated the options and
+            # rendered a TOML list as "['--cov=...', ...]" inside the command.
+            results.append({
+                "name": "pytest",
+                "command": "python -m pytest",
+                "source": "pyproject.toml",
+            })
 
     return results
 
