@@ -222,6 +222,9 @@ def render_ci_workflow(project_dir: Path, test_commands: List[str]) -> str:
         "    runs-on: ubuntu-latest", "    steps:", "      - uses: actions/checkout@v4",
     ]
     steps: List[str] = []
+    # A test command spanning lines is not something detection produces for a
+    # well-formed project; never write one into a workflow.
+    test_commands = [c for c in test_commands if c.strip() and not re.search(r"[\r\n]", c)]
     if not test_commands:
         steps += [
             "      - name: Run tests",
@@ -254,7 +257,9 @@ def render_ci_workflow(project_dir: Path, test_commands: List[str]) -> str:
             "          go-version-file: go.mod",
         ]
     for cmd in test_commands:
-        steps += [f"      - name: Test ({cmd})", f"        run: {cmd}"]
+        # json.dumps yields a double-quoted scalar YAML parses identically,
+        # so a command can never break out of its own ``run:`` line.
+        steps += [f"      - name: {json.dumps(f'Test ({cmd})')}", f"        run: {json.dumps(cmd)}"]
     return "\n".join(head + steps) + "\n"
 
 

@@ -199,6 +199,33 @@ def _batch_project_setup(dry_run: bool = False) -> None:
         repo.setup(str(project), skip_raycast=True, batch=True)
 
 
+def _bare_dirname(value: str) -> str:
+    """A single directory name: no separators, no '..', not absolute, not all digits."""
+    name = value.strip()
+    if not name or "/" in name or "\\" in name or name in (".", "..") or name.isdigit():
+        raise ValueError(f"{name!r} is not a directory name like .plans or docs")
+    return name
+
+
+def _plans_dir_answer(value: str) -> str:
+    """Menu choice 1/2/3, the org-config names dotplans/plans/custom, or a bare
+    directory name (the ``enum[dotplans,plans,custom]_or_bare_dirname`` contract).
+
+    Returns "1"/"2"/"3" or the directory name. All-digit answers other than
+    1-3 are re-asked, so a typo like "4" never becomes a directory.
+    """
+    text = value.strip()
+    named = {"dotplans": "1", "plans": "2", "custom": "3"}
+    if text in ("1", "2", "3"):
+        return text
+    if text.lower() in named:
+        return named[text.lower()]
+    try:
+        return _bare_dirname(text)
+    except ValueError:
+        raise ValueError(f"{text!r} is not 1, 2, 3, or a directory name like docs") from None
+
+
 def _prompt_settings(dry_run: bool = False, show_header: bool = True) -> None:
     """Prompt for settings if not already configured.
 
@@ -271,21 +298,24 @@ def _prompt_settings(dry_run: bool = False, show_header: bool = True) -> None:
             "Choice [1]: ",
             type="enum",
             default="1",
-            choices=["1", "2", "3"],
-        ).strip()
+            validator=_plans_dir_answer,
+        )
 
         if response == "1":
             _save("plans_dir", ".plans")
         elif response == "2":
             _save("plans_dir", "plans")
-        else:
+        elif response == "3":
             custom = _prompt(
                 INSTALL_SETTINGS_PLANS_DIR_CUSTOM,
                 "Plans directory name [.plans]: ",
                 type="bare-dirname",
                 default=".plans",
-            ).strip()
+                validator=_bare_dirname,
+            )
             _save("plans_dir", custom)
+        else:
+            _save("plans_dir", response)  # a directory name answered directly
 
     # 3. Plans gitignored
     current = get_setting("plans_gitignored")

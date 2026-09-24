@@ -2,6 +2,7 @@
 
 import json
 import re
+import shlex
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -299,7 +300,7 @@ def scan_test_scripts(project_dir: Path) -> List[Dict[str, str]]:
             if key.startswith("test"):
                 results.append({
                     "name": key,
-                    "command": f"npm run {key}",
+                    "command": f"npm run {shlex.quote(key)}",
                     "source": "package.json",
                 })
 

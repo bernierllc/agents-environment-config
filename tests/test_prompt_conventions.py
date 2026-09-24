@@ -101,6 +101,11 @@ def test_enter_on_a_choice_prompt_returns_the_default(monkeypatch):
     assert prompt("q", "Choice [2]: ", default="2", choices=["1", "2"]) == "2"
 
 
+def test_enter_without_default_is_checked_against_choices(monkeypatch):
+    _typed(monkeypatch, "", "2")
+    assert prompt("q", "Choice: ", choices=["1", "2"]) == "2"
+
+
 def test_typed_int_is_validated(monkeypatch):
     _typed(monkeypatch, "thirty", "30")
     assert prompt("q", "Days [7]: ", type="int", default=7) == "30"
@@ -144,6 +149,7 @@ class Site:
     default: Any  # _DYNAMIC when not a literal
     has_default: bool
     choices: Any  # list, None, or _DYNAMIC
+    has_validator: bool = False
 
 
 _DYNAMIC = object()
@@ -215,6 +221,7 @@ def _site(path, node, pid, text, hint, kw) -> Site:
         default=_literal(kw["default"]) if "default" in kw else None,
         has_default="default" in kw,
         choices=_literal(kw["choices"]) if "choices" in kw else None,
+        has_validator="validator" in kw,
     )
 
 
@@ -379,7 +386,9 @@ def test_menu_prompts_declare_choices(site):
     """A "Choice [1]:" prompt without choices accepts any typo and routes it
     to whatever branch the callsite uses for "other"."""
     if re.search(r"\bChoo?(se|ice)\b", site.text):
-        assert site.choices is not None, f"{site.where}: menu prompt must pass choices=[...]"
+        assert site.choices is not None or site.has_validator, (
+            f"{site.where}: menu prompt must pass choices=[...] or a validator"
+        )
 
 
 @pytest.mark.parametrize(
