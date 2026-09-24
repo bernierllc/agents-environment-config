@@ -124,6 +124,35 @@ def github_owner(project_dir: Path) -> str:
     return match.group(1) if match else ""
 
 
+def _gh_api(path: str, jq: str) -> str:
+    """One ``gh api`` lookup, or "" when gh is missing, offline, or unauthenticated."""
+    try:
+        out = subprocess.run(
+            ["gh", "api", path, "-q", jq], capture_output=True, text=True, timeout=5
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return out.stdout.strip() if out.returncode == 0 else ""
+
+
+def github_account_type(login: str) -> str:
+    """``"User"``, ``"Organization"``, or "" when it cannot be determined."""
+    return _gh_api(f"users/{login}", ".type") if login else ""
+
+
+def default_codeowner(project_dir: Path) -> str:
+    """A CODEOWNERS owner GitHub will honor, or "" if none can be inferred.
+
+    An organization alone is not a valid owner (it must be a user or an
+    ``@org/team``), so the origin owner is used only when it is a user;
+    otherwise the signed-in ``gh`` user.
+    """
+    owner = github_owner(project_dir)
+    if owner and github_account_type(owner) == "User":
+        return owner
+    return _gh_api("user", ".login")
+
+
 def default_copyright_holder(project_dir: Path) -> str:
     """Best guess for the LICENSE holder: git ``user.name``, else the GitHub
     owner, else "The <project> Authors"."""
@@ -249,7 +278,7 @@ def default_git_context(
     with_ci: bool = False,
 ) -> dict:
     """Everything needed to render the git-essential templates for a project."""
-    owner = github_owner(project_dir) if codeowner is None else codeowner.lstrip("@")
+    owner = default_codeowner(project_dir) if codeowner is None else codeowner.lstrip("@")
     return {
         "year": str(date.today().year),
         "project_name": project_dir.name,

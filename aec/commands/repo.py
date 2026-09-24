@@ -62,8 +62,10 @@ from ..lib.git import clone_repo
 from ..lib.git_providers import detect_git_provider, scan_git_essentials, GIT_PROVIDERS
 from ..lib.git_setup import (
     build_composite_gitignore,
+    default_codeowner,
     default_copyright_holder,
     default_git_context,
+    github_account_type,
     execute_commit_strategy,
     get_templates_root,
     github_owner,
@@ -1031,13 +1033,15 @@ def _git_essentials_context(project_dir: Path, items: List[str], test_commands: 
             default=guess,
         ).strip() or guess
     if "codeowners" in items:
-        owner = github_owner(project_dir)
+        owner = default_codeowner(project_dir)
         guess = f"@{owner}" if owner else "none"
+        org = github_owner(project_dir)
+        org = org if github_account_type(org) == "Organization" else ""
         answer = prompt(
             REPO_GIT_CODEOWNER,
             f"  Default code owner for CODEOWNERS ('@user', '@org/team', or 'none') [{guess}]: ",
             default=guess,
-            validator=_validate_codeowner,
+            validator=lambda v: _validate_codeowner(v, org=org),
         ).strip()
         codeowner = "" if answer.lower() == "none" else answer
     return default_git_context(
@@ -1049,8 +1053,12 @@ def _git_essentials_context(project_dir: Path, items: List[str], test_commands: 
     )
 
 
-def _validate_codeowner(value: str) -> str:
+def _validate_codeowner(value: str, org: str = "") -> str:
     value = value.strip()
+    if org and value.lower() == f"@{org}".lower():
+        raise ValueError(
+            f"@{org} is an organization, which CODEOWNERS ignores; use a user or @{org}/<team>"
+        )
     if value.lower() == "none" or re.fullmatch(r"@[\w.-]+(/[\w.-]+)?", value):
         return value
     raise ValueError(f"{value!r} is not '@user', '@org/team', or 'none'")

@@ -11,6 +11,13 @@ import pytest
 REPO_ROOT = Path(__file__).parent.parent.parent
 
 
+@pytest.fixture(autouse=True)
+def _no_github_api():
+    """Keep tests offline: CODEOWNERS defaults consult `gh api` otherwise."""
+    with patch("aec.lib.git_setup._gh_api", return_value=""):
+        yield
+
+
 class TestBuildCompositeGitignore:
     def test_aec_section_always_present(self, tmp_path):
         from aec.lib.git_setup import build_composite_gitignore
@@ -123,11 +130,33 @@ class TestRenderedGitEssentials:
         write_git_essential(project, "README.md", "github", TEMPLATES)
         assert (project / "README.md").read_text().startswith("# my-api\n")
 
-    def test_codeowners_uses_github_owner(self, tmp_path):
+    def test_codeowners_uses_origin_owner_when_it_is_a_user(self, tmp_path):
         from aec.lib.git_setup import default_git_context, write_git_essential
-        _git_repo(tmp_path, origin="https://github.com/acme/widget.git")
-        write_git_essential(tmp_path, "codeowners", "github", TEMPLATES, default_git_context(tmp_path))
-        assert "\n* @acme\n" in (tmp_path / ".github" / "CODEOWNERS").read_text()
+        _git_repo(tmp_path, origin="https://github.com/ada/widget.git")
+        with patch("aec.lib.git_setup._gh_api", side_effect=lambda path, jq: "User"):
+            ctx = default_git_context(tmp_path)
+        write_git_essential(tmp_path, "codeowners", "github", TEMPLATES, ctx)
+        assert "\n* @ada\n" in (tmp_path / ".github" / "CODEOWNERS").read_text()
+
+    def test_codeowners_never_defaults_to_an_org(self, tmp_path):
+        """GitHub ignores a bare org in CODEOWNERS; fall back to the gh user."""
+        from aec.lib.git_setup import default_codeowner
+        _git_repo(tmp_path, origin="git@github.com:acme/widget.git")
+        answers = {"users/acme": "Organization", "user": "ada"}
+        with patch("aec.lib.git_setup._gh_api", side_effect=lambda path, jq: answers[path]):
+            assert default_codeowner(tmp_path) == "ada"
+
+    def test_codeowners_empty_without_gh(self, tmp_path):
+        from aec.lib.git_setup import default_codeowner
+        _git_repo(tmp_path, origin="git@github.com:acme/widget.git")
+        with patch("aec.lib.git_setup._gh_api", return_value=""):
+            assert default_codeowner(tmp_path) == ""
+
+    def test_bare_org_codeowner_is_rejected(self):
+        from aec.commands.repo import _validate_codeowner
+        with pytest.raises(ValueError, match="organization"):
+            _validate_codeowner("@acme", org="acme")
+        assert _validate_codeowner("@acme/core", org="acme") == "@acme/core"
 
     def test_codeowners_stays_commented_without_owner(self, tmp_path):
         from aec.lib.git_setup import default_git_context, write_git_essential

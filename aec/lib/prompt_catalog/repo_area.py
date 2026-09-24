@@ -115,7 +115,8 @@ SPECS: tuple[PromptSpec, ...] = (
         command="repo setup",
         summary=(
             "Default owner for .github/CODEOWNERS ('@user' or '@org/team'). "
-            "Defaults to the GitHub owner of origin; 'none' leaves the rule commented out."
+            "Defaults to the origin owner when it is a user (an org alone is not a "
+            "valid owner), else the signed-in gh user; 'none' leaves the rule commented out."
         ),
         type="string",
         default="",
