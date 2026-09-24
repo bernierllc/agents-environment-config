@@ -210,7 +210,7 @@ class TestRenderedGitEssentials:
 
     @pytest.mark.parametrize("cmd", [
         "npm run test:😀", 'say "hi" # not a comment', "a: b", "*x &y !z", "tab\there", "back\\slash", "é 中",
-        "literal \\ud83d\\ude00 text", "nel\x85 ls\u2028 del\x7f",
+        "literal \\ud83d\\ude00 text", "nel\x85 ls\u2028 del\x7f", "non\ufffechar\uffff",
     ])
     def test_ci_command_round_trips_exactly(self, tmp_path, cmd):
         import yaml
@@ -224,6 +224,8 @@ class TestRenderedGitEssentials:
         notes = _git_essentials_review_notes(["ci_workflow"], ctx, ["npm test", "bad\nline"])
         assert any("bad\\nline" in n for n in notes)
         assert not any("no test suite detected" in n for n in notes)
+        notes = _git_essentials_review_notes(["ci_workflow"], ctx, ["a\nb", "a\nb"])
+        assert sum(n.count("'a\\nb'") for n in notes) == 1
         notes = _git_essentials_review_notes(["ci_workflow"], ctx, ["bad\nline"])
         assert any("no test suite detected" in n for n in notes)
 
