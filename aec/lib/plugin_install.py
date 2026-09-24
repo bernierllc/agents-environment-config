@@ -133,8 +133,9 @@ def uninstall_plugin(manifest, detected, *, runner, confirm, printer, pref) -> D
             printer(f"download: {ext['download']}")
         printer(ext.get("instructions", ""))
     else:
-        # ponytail: no documented marketplace-uninstall command exists; punt to
-        # manual rather than fabricate a claude command. Add a handler if one ships.
+        # Marketplace plugins declare their uninstall as a `tools` block
+        # (`claude plugin uninstall <plugin>@<marketplace>`, handled above);
+        # any other shape falls back to manual cleanup.
         printer("manual cleanup may be required")
 
     return {"install_type": install_type, "targets": targets, "executed": executed}
