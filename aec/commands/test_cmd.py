@@ -8,6 +8,15 @@ from ..lib.console import Console
 from .test_detect_impl import run_test_detect
 
 
+
+def _validate_hhmm(value: str) -> str:
+    """Accept a 24h ``HH:MM`` time; raise ``ValueError`` otherwise."""
+    hour, sep, minute = value.strip().partition(":")
+    if sep and hour.isdigit() and minute.isdigit() and len(minute) == 2:
+        if 0 <= int(hour) <= 23 and 0 <= int(minute) <= 59:
+            return f"{int(hour):02d}:{minute}"
+    raise ValueError(f"{value.strip()!r} is not a 24h time like 02:00")
+
 def _print_results(result: dict) -> None:
     """Format and print test results to terminal."""
     project_name = result.get("project", "unknown")
@@ -163,8 +172,9 @@ def _run_test_schedule_global() -> None:
         TEST_SCHEDULE_TIME,
         f"Run time (24h format, e.g. 02:00) [{current_time}]: ",
         default=current_time,
+        validator=_validate_hhmm,
     )
-    schedule["time"] = (new_time.strip() or current_time)
+    schedule["time"] = new_time
 
     # 3. Retention settings
     retention = schedule.get("retention_days", 30)

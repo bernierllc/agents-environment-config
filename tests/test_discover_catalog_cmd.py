@@ -484,12 +484,12 @@ class TestDepthPrompt:
         monkeypatch.setattr("builtins.input", lambda _text: "3")
         assert _prompt_depth() == 3
 
-    def test_prompt_depth_invalid(self, monkeypatch):
-        """Invalid input exits."""
+    def test_prompt_depth_invalid_reasks(self, monkeypatch):
+        """An out-of-menu answer re-asks instead of exiting or guessing."""
         from aec.commands.discover_catalog import _prompt_depth
-        monkeypatch.setattr("builtins.input", lambda _text: "7")
-        with pytest.raises(SystemExit):
-            _prompt_depth()
+        answers = iter(["7", "3"])
+        monkeypatch.setattr("builtins.input", lambda _text: next(answers))
+        assert _prompt_depth() == 3
 
     def test_prompt_depth_eof(self, monkeypatch):
         """Closed stdin names the prompt ID instead of silently defaulting."""

@@ -92,12 +92,12 @@ def test_no_static_id_collides_with_dynamic_prefix():
 
 
 def test_prompt_falls_through_to_input(monkeypatch):
-    """Phase 1: prompt() must always delegate to input()."""
+    """With no supplied answer, prompt() asks via input() and normalizes the reply."""
     captured: dict[str, str] = {}
 
     def fake_input(text: str = "") -> str:
         captured["text"] = text
-        return "user-typed-value"
+        return "Yes"
 
     monkeypatch.setattr(builtins, "input", fake_input)
 
@@ -107,7 +107,7 @@ def test_prompt_falls_through_to_input(monkeypatch):
         type="yes_no",
         default=True,
     )
-    assert result == "user-typed-value"
+    assert result == "y"
     assert captured["text"] == "Continue? "
 
 
@@ -146,9 +146,9 @@ def test_prompt_uses_default_on_eof_under_use_defaults(monkeypatch):
         reset_mode()
 
 
-def test_prompt_accepts_validator_argument_without_calling_it(monkeypatch):
-    """Validator parameter is part of the Phase 1 surface but not yet wired."""
-    monkeypatch.setattr(builtins, "input", lambda _t="": "raw")
+def test_prompt_runs_validator_on_typed_answer(monkeypatch):
+    """The validator sees the normalized typed answer, same as a supplied one."""
+    monkeypatch.setattr(builtins, "input", lambda _t="": "YES")
 
     calls: list[str] = []
 
@@ -163,5 +163,5 @@ def test_prompt_accepts_validator_argument_without_calling_it(monkeypatch):
         default=True,
         validator=fake_validator,
     )
-    assert result == "raw"
-    assert calls == []  # Phase 1 does not yet invoke the validator
+    assert result == "y"
+    assert calls == ["y"]

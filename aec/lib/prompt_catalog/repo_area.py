@@ -58,8 +58,8 @@ SPECS: tuple[PromptSpec, ...] = (
         REPO_HOOKS_LANGUAGES,
         command="repo setup",
         summary=(
-            "Which detected language to install lint hooks for, by menu number. "
-            "'all' selects every detected language; 'none' skips lint hooks."
+            "Which detected languages to install lint hooks for: comma-separated "
+            "menu numbers, 'all', or 'none' (skips lint hooks)."
         ),
         type="string",
         default="all",

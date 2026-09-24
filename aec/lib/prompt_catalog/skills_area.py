@@ -50,19 +50,20 @@ SPECS: tuple[PromptSpec, ...] = (
         command="skills sync",
         summary=(
             "What to do with pending updates and new skills: 'a' all, 's' pick "
-            "from a numbered list, anything else skips. The answer is lowercased, "
-            "so the displayed 'S' for skip is not distinguishable from 's'."
+            "from a numbered list, 'k' skip."
         ),
-        default="s",
+        type="enum[a,s,k]",
+        default="k",
+        choices=("a", "s", "k"),
     ),
     PromptSpec(
         SKILLS_SYNC_SELECTION,
         command="skills sync",
         summary=(
             "1-based number selection like '1,3,5-8' over the numbered list of "
-            "updates and new skills. Only asked after choosing 's'."
+            "updates and new skills, or 'none'. Only asked after choosing 's'."
         ),
-        default="",
+        default="none",
     ),
 )
 

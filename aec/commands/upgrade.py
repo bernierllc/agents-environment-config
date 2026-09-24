@@ -99,9 +99,10 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
             if not yes:
                 resp = prompt(
                     UPGRADE_OTHER_REPOS,
-                    "\nUpgrade them too? [y/N/list]: ",
-                    default="n",
-                ).strip().lower()
+                    "\nUpgrade them too? [y/N]: ",
+                    type="yes_no",
+                    default=False,
+                )
                 if resp == "y":
                     for repo_path, _ in outdated_repos:
                         Console.print(f"\nUpgrading {repo_path}...")

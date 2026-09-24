@@ -5,7 +5,7 @@ import re
 import shutil
 import stat
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 try:
     import typer
@@ -53,7 +53,7 @@ from ..lib.prompt_catalog.repo_area import (
     REPO_SETUP_PROJECT_PATH,
     REPO_TEST_SUITES_SELECTION,
 )
-from ..lib.prompts import prompt
+from ..lib.prompts import parse_selection, prompt, selection_validator
 import subprocess
 from ..lib.config import load_env_file
 from ..lib.git import clone_repo
@@ -329,7 +329,7 @@ def _generate_raycast_scripts(
     Console.print()
     response = prompt(
         REPO_RAYCAST_GENERATE,
-        "Generate Raycast scripts for these agents? (Y/n): ",
+        "Generate Raycast scripts for these agents? [Y/n]: ",
         type="yes_no",
         default=True,
     ).strip().lower()
@@ -560,37 +560,19 @@ def _setup_lint_hooks(project_dir: Path, batch: bool = False) -> None:
         for i, lang in enumerate(languages, 1):
             display = LANGUAGE_HOOKS[lang]["display_name"]
             Console.print(f"  {i}) {display}")
-        all_option = len(languages) + 1
-        none_option = len(languages) + 2
-        Console.print(f"  {all_option}) All detected")
-        Console.print(f"  {none_option}) None")
         Console.print()
 
         choice = prompt(
             REPO_HOOKS_LANGUAGES,
-            "Select languages for lint hooks: ",
+            "Select languages for lint hooks (comma-separated numbers, 'all', or 'none') [all]: ",
             default="all",
-        ).strip()
-        if choice == "all":
-            choice = str(all_option)
-        elif choice == "none":
-            choice = str(none_option)
-
-        if choice == str(none_option):
+            validator=selection_validator(len(languages)),
+        )
+        indices = parse_selection(choice, len(languages))
+        if not indices:
             Console.skip("No languages selected, skipping lint hooks")
             return
-        elif choice == str(all_option):
-            selected_languages = languages
-        else:
-            # Single language selection
-            try:
-                idx = int(choice) - 1
-                if 0 <= idx < len(languages):
-                    selected_languages = [languages[idx]]
-                else:
-                    selected_languages = languages
-            except (ValueError, IndexError):
-                selected_languages = languages
+        selected_languages = [languages[i - 1] for i in indices]
 
     # Step 5: Gather commands for selected languages
     commands = [LANGUAGE_HOOKS[lang]["command"] for lang in selected_languages]
@@ -741,24 +723,11 @@ def _detect_and_prompt_test_suites(
 
             choice = prompt(
                 REPO_TEST_SUITES_SELECTION,
-                "Selection (comma-separated numbers, 'all', or 'none'): ",
+                "Selection (comma-separated numbers, 'all', or 'none') [all]: ",
                 default="all",
-            ).strip().lower()
-
-            if choice == "none":
-                selected = []
-            elif choice == "all":
-                selected = candidates
-            else:
-                indices = []
-                for part in choice.split(","):
-                    try:
-                        idx = int(part.strip()) - 1
-                        if 0 <= idx < len(candidates):
-                            indices.append(idx)
-                    except ValueError:
-                        pass
-                selected = [candidates[i] for i in indices]
+                validator=selection_validator(len(candidates)),
+            )
+            selected = [candidates[i - 1] for i in parse_selection(choice, len(candidates))]
         else:
             selected = []
 
@@ -956,7 +925,7 @@ def _run_git_phase(project_dir: Path) -> dict:
         Console.print("\n  Git not detected in this project.")
         response = prompt(
             REPO_GIT_USE_GITHUB,
-            "  Do you intend to use GitHub? (Y/n): ",
+            "  Do you intend to use GitHub? [Y/n]: ",
             type="yes_no",
             default=True,
         ).strip().lower()
@@ -964,7 +933,7 @@ def _run_git_phase(project_dir: Path) -> dict:
         if response in ("", "y", "yes"):
             use_init = prompt(
                 REPO_GIT_RUN_INIT,
-                "  Want AEC to run git init? (Y/n): ",
+                "  Want AEC to run git init? [Y/n]: ",
                 type="yes_no",
                 default=True,
             ).strip().lower()
@@ -1021,24 +990,24 @@ def _run_git_phase(project_dir: Path) -> dict:
         "\n  Select items for AEC to create\n"
         "  (comma-separated numbers, 'all', or 'none') [all]: ",
         default="all",
-    ).strip().lower()
-
-    if response in ("", "all"):
-        items_to_create = missing
-    elif response == "none":
-        items_to_create = []
-    else:
-        selected = []
-        for part in response.split(","):
-            try:
-                idx = int(part.strip()) - 1
-                if 0 <= idx < len(missing):
-                    selected.append(missing[idx])
-            except ValueError:
-                pass
-        items_to_create = selected
+        validator=selection_validator(len(missing)),
+    )
+    items_to_create = [missing[i - 1] for i in parse_selection(response, len(missing))]
 
     return {"git_enabled": True, "provider": provider, "items_to_create": items_to_create}
+
+
+def _detect_gitignore_inputs(project_dir: Path) -> Tuple[List[str], List[str]]:
+    """Return (languages, test framework keys) used to build the composite .gitignore.
+
+    Framework keys match the ``frameworks`` section of gitignore_supported.json.
+    """
+    from ..lib import detect_languages
+    from ..lib.test_detection import detect_test_frameworks
+
+    languages = list(detect_languages(project_dir) or [])
+    frameworks = [fw["key"] for fw in (detect_test_frameworks(project_dir) or [])]
+    return languages, frameworks
 
 
 def _create_git_essentials(
@@ -1223,7 +1192,7 @@ def setup(
         if not cloned:
             response = prompt(
                 REPO_SETUP_CREATE_DIRECTORY,
-                "Create new directory? (y/N): ",
+                "Create new directory? [y/N]: ",
                 type="yes_no",
                 default=False,
             ).strip().lower()
@@ -1273,10 +1242,7 @@ def setup(
 
     # Git essentials creation (runs after test suite detection so language data is available)
     if not dry_run:
-        from ..lib import detect_languages as _detect_languages
-        from ..lib.test_detection import detect_test_frameworks as _detect_test_frameworks
-        _detected_languages = [lang for lang in (_detect_languages(project_dir) or [])]
-        _detected_frameworks = [fw["name"] for fw in (_detect_test_frameworks(project_dir) or [])]
+        _detected_languages, _detected_frameworks = _detect_gitignore_inputs(project_dir)
     else:
         _detected_languages = []
         _detected_frameworks = []
@@ -1309,7 +1275,7 @@ def setup(
             Console.print()
             raycast_response = prompt(
                 REPO_RAYCAST_LAUNCHERS,
-                "Create Raycast launcher scripts? (y/N): ",
+                "Create Raycast launcher scripts? [y/N]: ",
                 type="yes_no",
                 default=False,
             ).strip().lower()
@@ -1419,7 +1385,7 @@ def prune(yes: bool = False, dry_run: bool = False) -> None:
         try:
             answer = prompt(
                 REPO_PRUNE_CONFIRM,
-                "Remove these entries? [y/N] ",
+                "Remove these entries? [y/N]: ",
                 type="yes_no",
                 default=False,
             ).strip().lower()

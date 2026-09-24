@@ -161,8 +161,7 @@ class TestSetupLintHooks:
         from aec.lib.preferences import set_setting
         set_setting("hook_mode", "per-repo")
 
-        # "2" = All detected (1 language + All option is 2, None is 3)
-        monkeypatch.setattr("builtins.input", lambda _: "2")
+        monkeypatch.setattr("builtins.input", lambda _: "all")
 
         from aec.commands.repo import _setup_lint_hooks
         with patch("aec.commands.repo.detect_agents", return_value={
@@ -181,8 +180,7 @@ class TestSetupLintHooks:
         from aec.lib.preferences import set_setting
         set_setting("hook_mode", "per-repo")
 
-        # "3" = None (1 language, 2 = All, 3 = None)
-        monkeypatch.setattr("builtins.input", lambda _: "3")
+        monkeypatch.setattr("builtins.input", lambda _: "none")
 
         from aec.commands.repo import _setup_lint_hooks
         with patch("aec.commands.repo.detect_agents", return_value={

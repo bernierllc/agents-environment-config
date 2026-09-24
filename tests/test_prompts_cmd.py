@@ -38,13 +38,13 @@ def test_template_maps_every_id_to_its_default(capsys):
     run_prompts_template(command="upgrade")
     template = json.loads(capsys.readouterr().out)
     assert template["upgrade.run_update_first"] is True
-    assert template["upgrade.other_repos"] == "n"
+    assert template["upgrade.other_repos"] is False
 
 
 def test_template_writes_a_file(tmp_path):
     out = tmp_path / "answers.json"
     run_prompts_template(command="upgrade", output=str(out))
-    assert json.loads(out.read_text())["upgrade.other_repos"] == "n"
+    assert json.loads(out.read_text())["upgrade.other_repos"] is False
 
 
 def test_check_accepts_valid_answers(tmp_path):

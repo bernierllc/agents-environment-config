@@ -138,12 +138,13 @@ class TestPromptSettings:
         from aec.lib.preferences import get_setting
         assert get_setting("plans_dir") == "docs"
 
-    def test_plans_dir_direct_name(self, temp_dir, monkeypatch):
-        """Should accept a direct name typed instead of 1/2/3."""
+    def test_plans_dir_off_menu_answer_reasks(self, temp_dir, monkeypatch):
+        """A name typed at the 1/2/3 menu is re-asked (a typo like '4' must not
+        become a directory); option 3 then asks for the custom name."""
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "prefs.json")
         monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
 
-        inputs = iter(["/tmp/projects", "my-plans", "n", "1"])
+        inputs = iter(["/tmp/projects", "my-plans", "3", "my-plans", "n", "1"])
         monkeypatch.setattr("builtins.input", lambda _: next(inputs))
 
         from aec.commands.install import _prompt_settings

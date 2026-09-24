@@ -123,7 +123,7 @@ def discover(
     # Interactive mode - prompt for confirmation
     response = prompt(
         DISCOVER_ADD_PATHS,
-        f"Add {len(new_paths)} new path(s) to tracking? (y/N): ",
+        f"Add {len(new_paths)} new path(s) to tracking? [y/N]: ",
         type="yes_no",
         default=False,
     ).strip().lower()

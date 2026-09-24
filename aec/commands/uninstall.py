@@ -198,7 +198,7 @@ def _prompt_repo_selection(item_type: str, name: str, candidates: list[str]) -> 
               f"[s] show where  [g] only globally (default)")
         choice = ask_prompt(
             item_prompt_id(UNINSTALL_MULTI_REPO_CHOICE_PREFIX, name),
-            "  Choice [a/e/s/g]: ",
+            "  Choice [a/e/s/G]: ",
             default="g",
             choices=["a", "e", "s", "g", ""],
         ).strip().lower()

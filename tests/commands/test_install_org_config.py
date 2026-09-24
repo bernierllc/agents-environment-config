@@ -47,7 +47,7 @@ def test_install_org_config_enrolls_and_applies(tmp_path):
     assert (tmp_path / ".aec" / "orgs" / "acme.yaml").exists()
 
 
-def test_install_without_type_name_errors(tmp_path):
-    result = runner.invoke(app, ["install"], env={"HOME": str(tmp_path)})
+def test_install_type_without_name_errors(tmp_path):
+    result = runner.invoke(app, ["install", "skill"], env={"HOME": str(tmp_path)})
     assert result.exit_code == 2
     assert "requires <type> <name>" in result.stdout
