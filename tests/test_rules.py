@@ -225,6 +225,49 @@ class TestRulesCompletionBehavior:
         assert "(if applicable)" in output
 
 
+class TestRulesPrOpenMode:
+    """pr_open_mode renders into the installed git workflow rule."""
+
+    SOURCE = Path(__file__).resolve().parent.parent / ".cursor" / "rules" / "topics" / "git" / "workflow.mdc"
+
+    def _render(self, mock_repo_root, monkeypatch, temp_dir, settings):
+        prefs_file = temp_dir / "preferences.json"
+        prefs_file.write_text(json.dumps({
+            "schema_version": "1.1", "optional_rules": {}, "settings": settings,
+        }))
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
+        target = mock_repo_root / ".cursor" / "rules" / "topics" / "git"
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "workflow.mdc").write_text(self.SOURCE.read_text())
+        monkeypatch.setattr("aec.commands.rules.get_repo_root", lambda: mock_repo_root)
+        from aec.commands.rules import generate
+        generate()
+        return (mock_repo_root / ".agent-rules" / "topics" / "git" / "workflow.md").read_text()
+
+    def test_source_contains_every_phrase_the_draft_mode_replaces(self):
+        """If the rule is reworded, draft mode must not silently stop applying."""
+        from aec.commands.rules import _PR_DRAFT_WORDING
+        text = self.SOURCE.read_text()
+        for ready, _draft in _PR_DRAFT_WORDING:
+            assert ready in text, f"workflow.mdc no longer contains: {ready!r}"
+
+    def test_ready_is_the_default(self, mock_repo_root, monkeypatch, temp_dir):
+        out = self._render(mock_repo_root, monkeypatch, temp_dir, {})
+        assert "ready for review" in out
+        assert "Draft PR" not in out
+
+    def test_ready_mode(self, mock_repo_root, monkeypatch, temp_dir):
+        out = self._render(mock_repo_root, monkeypatch, temp_dir, {"pr_open_mode": "ready"})
+        assert "Draft PR" not in out
+
+    def test_draft_mode(self, mock_repo_root, monkeypatch, temp_dir):
+        from aec.commands.rules import _PR_DRAFT_WORDING
+        out = self._render(mock_repo_root, monkeypatch, temp_dir, {"pr_open_mode": "draft"})
+        for ready, draft in _PR_DRAFT_WORDING:
+            assert draft in out
+            assert ready not in out
+
+
 class TestValidateWithSettings:
     """Test that validate() accounts for settings-rewritten content."""
 

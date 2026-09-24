@@ -41,6 +41,7 @@ PREFERENCES_ALLOW_LIST: dict[str, str] = {
     "plans_dir": "bare-dirname",
     "plans_gitignored": "bool",
     "plans_completion": "enum[archive,delete]",
+    "pr_open_mode": "enum[ready,draft]",
     "hook_mode": "enum[auto,per-repo,never]",
     "aec_json_gitignored": "bool",
     "report_viewer": "enum-from-detect-viewers",
@@ -81,6 +82,7 @@ PROMPTS_ALLOW_LIST: dict[str, str] = {
     "install.settings.plans_dir.custom": "bare-dirname",
     "install.settings.plans_gitignored": "yes_no",
     "install.settings.plans_completion": "enum[archive,delete]",
+    "install.settings.pr_open_mode": "enum[ready,draft]",
     # Quality infrastructure
     "install.quality.report_viewer": "enum-from-detect-viewers",
     "install.quality.report_retention_mode": "enum[auto,manual]",

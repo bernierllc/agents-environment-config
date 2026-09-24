@@ -65,7 +65,7 @@ refactor(models): extract user validation logic
 ## Pull Request Workflow
 
 ### PR Flow
-1. **Open a Draft PR early** to communicate your direction
+1. **Open the PR ready for review** (not as a draft) once the work is complete
 2. Clearly describe:
    - What is being changed
    - Why it's needed
@@ -121,7 +121,7 @@ refactor(models): extract user validation logic
 - Resolve conflicts carefully and test after resolution
 
 ### Collaboration
-- Use Draft PRs for early feedback
+- Open PRs ready for review; do not open drafts unless the user asks for one
 - Request reviews from appropriate team members
 - Respond to review comments promptly
 

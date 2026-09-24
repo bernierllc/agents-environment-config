@@ -59,7 +59,7 @@ Source of truth: `OPTIONAL_FEATURES` registry in `aec/lib/preferences.py:15-60`.
 #### 1.1.2 `settings.*` (arbitrary JSON, written via `set_setting`)
 
 Audited callers: `install.py` (`projects_dir`, `plans_dir`, `plans_gitignored`,
-`plans_completion`, `report_viewer`, `report_retention_mode`,
+`plans_completion`, `pr_open_mode`, `report_viewer`, `report_retention_mode`,
 `report_retention_days`), `repo.py` (`hook_mode`, plus reads of
 `aec_json_gitignored`), `global_install_prompt.py`
 (`global_install_multi_repo_threshold`, `skip_global_install_prompt_for`).
@@ -70,6 +70,7 @@ Audited callers: `install.py` (`projects_dir`, `plans_dir`, `plans_gitignored`,
 | `plans_dir` | string (relative dir name) | `install._prompt_settings`, `install.py:247-258` | **Yes (validated)** | Plain directory name (e.g. `.plans`, `plans`). Validator MUST reject path separators (`/`, `\`), absolute paths, and `..`. |
 | `plans_gitignored` | bool | `install._prompt_settings:272` | **Yes** | Per-repo `.gitignore` behavior toggle. |
 | `plans_completion` | enum: `"archive"` \| `"delete"` | `install._prompt_settings:288` | **Yes (enum)** | Validator enforces enum. |
+| `pr_open_mode` | enum: `"ready"` \| `"draft"` | `install._prompt_settings` | **Yes (enum)** | Rendered into the git workflow rule by `rules._apply_settings`. Unset renders as ready. |
 | `hook_mode` | enum: `"auto"` \| `"per-repo"` \| `"never"` | `repo.py:517` | **Yes (enum)** | Controls lint-hook installation policy. Hooks themselves are still gated by language detection and use AEC-bundled scripts; org cannot point to attacker scripts via this key. |
 | `aec_json_gitignored` | bool | currently only read; no writer found in audit | **Yes** | Read-only today, but harmless to allow. |
 | `report_viewer` | string (command template) OR enum (viewer key) | `install._prompt_quality_settings:450` | **Needs review — restrict** | Today this can be either a viewer key (e.g. `"open"`) detected via `viewers.detect_viewers()` OR a free-form shell command with `{file}` substitution (`install.py:438-448`). A free-form command is **NOT safe** for an org to set: it is executed by `runner.py:511-513`. **Decision: allow-list ONLY the enumerated viewer keys produced by `detect_viewers()`. Free-form command strings are NOT permitted via org overlay.** Validator must reject anything containing whitespace, `{`, `}`, or shell metacharacters. |
@@ -105,6 +106,7 @@ install:
     plans_dir: bare-dirname                # string, no separators, no '..', no abs
     plans_gitignored: bool
     plans_completion: enum[archive, delete]
+    pr_open_mode: enum[ready, draft]
     hook_mode: enum[auto, per-repo, never]
     aec_json_gitignored: bool
     report_viewer: enum-from-detect-viewers   # rejects free-form commands
@@ -163,6 +165,7 @@ constants in a new `aec/lib/prompt_ids.py` module.
 | `install.py:253` | "Plans directory name" (free-form, follow-up to choice 3) | No | `install.settings.plans_dir.custom` | string | **Yes (validated as bare-dirname)** | `settings.plans_dir` |
 | `install.py:268` | "Should {plans_dir}/ be tracked in git?" | No | `install.settings.plans_gitignored` | yes/no | **Yes** | `settings.plans_gitignored` |
 | `install.py:285` | "When a plan is completed: 1 archive / 2 delete" | No | `install.settings.plans_completion` | enum | **Yes** | `settings.plans_completion` |
+| `install.py:335` | "When an agent opens a pull request: 1 ready for review / 2 draft" | No | `install.settings.pr_open_mode` | enum | **Yes** | `settings.pr_open_mode` |
 | `install.py:341` | "Keep for {agent}?" (per-agent, per-instruction) | No | `install.configurable_instructions.<key>.<agent_key>` | yes/no | **Yes** | `configurable_instructions.<key>.<agent_key>` |
 | `install.py:427` | "Choose a viewer [1]" | No | `install.quality.report_viewer` | enum | **Yes (only allow-listed viewer keys)** | `settings.report_viewer` |
 | `install.py:444` | "Viewer command [none]" (fallback when no detected viewers) | No | `install.quality.report_viewer.command` | string | **No — exclude** | Same risk as §1: free-form command. Not allow-listable. |
@@ -190,6 +193,7 @@ install:
     install.settings.plans_dir.custom: <bare-dirname>      # only when plans_dir == custom
     install.settings.plans_gitignored: yes|no
     install.settings.plans_completion: archive|delete
+    install.settings.pr_open_mode: ready|draft
 
     # Configurable instructions (dynamic)
     install.configurable_instructions.<key>.<agent_key>: yes|no
@@ -256,6 +260,7 @@ today** — they are all inline `input(...)` calls. Task 2 must:
    | `install.py:253` | `install.settings.plans_dir.custom` |
    | `install.py:268` | `install.settings.plans_gitignored` |
    | `install.py:285` | `install.settings.plans_completion` |
+   | `install.py:335` | `install.settings.pr_open_mode` |
    | `install.py:341` | `install.configurable_instructions.<key>.<agent_key>` (dynamic) |
    | `install.py:427` | `install.quality.report_viewer` |
    | `install.py:459` | `install.quality.report_retention_mode` |

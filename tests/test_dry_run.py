@@ -223,8 +223,8 @@ class TestInstallDryRun:
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
         monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
 
-        # Provide answers for the 2 missing settings (plans_gitignored, plans_completion)
-        inputs = iter(["n", "1"])
+        # Provide answers for the 3 missing settings (plans_gitignored, plans_completion, pr_open_mode)
+        inputs = iter(["n", "1", "1"])
         monkeypatch.setattr("builtins.input", lambda _: next(inputs))
 
         from aec.commands.install import _prompt_settings
@@ -245,7 +245,7 @@ class TestInstallDryRun:
         monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
 
         # Provide answers for all 4 settings
-        inputs = iter(["/tmp/projects", "1", "n", "1"])
+        inputs = iter(["/tmp/projects", "1", "n", "1", "1"])
         monkeypatch.setattr("builtins.input", lambda _: next(inputs))
 
         from aec.commands.install import _prompt_settings
@@ -265,6 +265,7 @@ class TestInstallDryRun:
                 "plans_dir": ".plans",
                 "plans_gitignored": True,
                 "plans_completion": "archive",
+                "pr_open_mode": "ready",
             },
         }))
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)

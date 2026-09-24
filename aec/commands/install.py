@@ -22,6 +22,7 @@ from ..lib.prompt_ids import (
     INSTALL_SETTINGS_PLANS_DIR,
     INSTALL_SETTINGS_PLANS_DIR_CUSTOM,
     INSTALL_SETTINGS_PLANS_GITIGNORED,
+    INSTALL_SETTINGS_PR_OPEN_MODE,
     INSTALL_SETTINGS_PROJECTS_DIR,
     configurable_instruction_prompt_id,
 )
@@ -350,6 +351,24 @@ def _prompt_settings(dry_run: bool = False, show_header: bool = True) -> None:
             choices=["1", "2"],
         ).strip()
         _save("plans_completion", "archive" if response == "1" else "delete")
+
+    # 5. Pull request open mode (rendered into the git workflow rule)
+    current = get_setting("pr_open_mode")
+    if current is not None:
+        if dry_run:
+            Console.success(f"pr_open_mode = {current}")
+    else:
+        Console.print("\nWhen an agent opens a pull request, should it be:")
+        Console.print("  1) Ready for review (recommended)")
+        Console.print("  2) A draft first, marked ready later")
+        response = _prompt(
+            INSTALL_SETTINGS_PR_OPEN_MODE,
+            "Choice [1]: ",
+            type="enum",
+            default="1",
+            choices=["1", "2"],
+        ).strip()
+        _save("pr_open_mode", "ready" if response == "1" else "draft")
 
 
 def _prompt_configurable_instructions(dry_run: bool = False) -> None:

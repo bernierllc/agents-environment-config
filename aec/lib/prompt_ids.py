@@ -32,6 +32,7 @@ INSTALL_SETTINGS_PLANS_DIR = "install.settings.plans_dir"
 INSTALL_SETTINGS_PLANS_DIR_CUSTOM = "install.settings.plans_dir.custom"
 INSTALL_SETTINGS_PLANS_GITIGNORED = "install.settings.plans_gitignored"
 INSTALL_SETTINGS_PLANS_COMPLETION = "install.settings.plans_completion"
+INSTALL_SETTINGS_PR_OPEN_MODE = "install.settings.pr_open_mode"
 
 # Quality infrastructure (install.py)
 INSTALL_QUALITY_REPORT_VIEWER = "install.quality.report_viewer"
@@ -80,6 +81,7 @@ ALL_STATIC_PROMPT_IDS: tuple[str, ...] = (
     INSTALL_SETTINGS_PLANS_DIR_CUSTOM,
     INSTALL_SETTINGS_PLANS_GITIGNORED,
     INSTALL_SETTINGS_PLANS_COMPLETION,
+    INSTALL_SETTINGS_PR_OPEN_MODE,
     INSTALL_QUALITY_REPORT_VIEWER,
     INSTALL_QUALITY_REPORT_RETENTION_MODE,
     INSTALL_QUALITY_REPORT_RETENTION_DAYS,

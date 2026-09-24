@@ -40,7 +40,7 @@ def _strip_frontmatter(content: str) -> str:
 
 
 def _apply_settings(content: str) -> str:
-    """Apply user settings to rule content (plans dir and completion behavior)."""
+    """Apply user settings to rule content (plans dir, completion behavior, PR open mode)."""
     from ..lib.preferences import get_setting
 
     plans_dir = get_setting("plans_dir")
@@ -62,7 +62,26 @@ def _apply_settings(content: str) -> str:
             "/completed/` directory (if applicable)", "/archive/` directory"
         )
 
+    # Step 3: Pull request open mode. The rule source says "ready for review";
+    # users who chose draft-first get the draft wording instead.
+    if get_setting("pr_open_mode") == "draft":
+        for ready, draft in _PR_DRAFT_WORDING:
+            content = content.replace(ready, draft)
+
     return content
+
+
+# (ready-for-review wording in the rule source, draft-first replacement)
+_PR_DRAFT_WORDING = (
+    (
+        "1. **Open the PR ready for review** (not as a draft) once the work is complete",
+        "1. **Open a Draft PR early** to communicate your direction; mark it ready for review when complete",
+    ),
+    (
+        "- Open PRs ready for review; do not open drafts unless the user asks for one",
+        "- Use Draft PRs for early feedback",
+    ),
+)
 
 
 def _get_cursor_rules(repo_root: Path) -> List[Path]:
