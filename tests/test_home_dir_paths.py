@@ -175,8 +175,18 @@ class TestSetupPrerequisiteCheck:
         # Mock log_setup to prevent writing to real tracking file
         monkeypatch.setattr("aec.commands.repo.log_setup", lambda p, dry_run=False: None)
 
-        # Mock input to avoid interactive prompts
-        monkeypatch.setattr("builtins.input", lambda _: "n")
+        # Isolate from the real ~/.aec preferences (a saved hook_mode there
+        # skips prompts that a clean CI machine is asked).
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "prefs.json")
+        monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+
+        # Decline every yes/no prompt; take the default on menus (answers are
+        # validated, so a blanket "n" is not a valid menu choice).
+        import re
+        monkeypatch.setattr(
+            "builtins.input",
+            lambda text: "n" if re.search(r"\[[yY]/[nN]", text) else "",
+        )
 
         project_dir = temp_dir / "my-project"
         project_dir.mkdir()
