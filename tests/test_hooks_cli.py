@@ -126,3 +126,21 @@ class TestHooksVerifyCLI:
         assert result.exit_code == 0
         settings = json.loads((repo_root / ".claude/settings.json").read_text())
         assert settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"] == "echo hi"
+
+    def test_repair_failure_continues_to_next_repo_and_exits_one(self, tmp_path):
+        from tests.test_hooks_drift import _install_with_source
+
+        broken = _install_with_source(tmp_path / "a")
+        healthy = _install_with_source(tmp_path / "b")
+        for repo_root in (broken, healthy):
+            (repo_root / ".claude/settings.json").write_text(json.dumps({"hooks": {}}))
+        (broken / ".claude/skills/demo/hooks.json").write_text("{not json")
+
+        result = self.runner.invoke(
+            self.app, ["hooks", "verify", str(broken), str(healthy), "--repair"]
+        )
+
+        assert result.exit_code == 1
+        assert "cannot repair" in result.stdout.lower()
+        settings = json.loads((healthy / ".claude/settings.json").read_text())
+        assert settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"] == "echo hi"

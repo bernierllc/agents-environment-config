@@ -212,11 +212,18 @@ def repair_repo(repo_root: Path) -> List[RepairResult]:
             continue
         st = load_state(repo_root, item_type=item_type, item_key=item_key)
         agents = st.agents_targeted or ["claude", "gemini", "cursor", "git"]
-        install_hooks_for_item(
-            item_type=item_type, item_key=item_key,
-            item_version=st.item_version or "0.0.0",
-            item_dir=src, repo_root=repo_root, agents=agents,
-            allow_custom_check=st.allow_custom_check,
-        )
+        # One broken item must not abort the rest of this repo or the
+        # remaining repos; the caller reports it and exits non-zero.
+        try:
+            install_hooks_for_item(
+                item_type=item_type, item_key=item_key,
+                item_version=st.item_version or "0.0.0",
+                item_dir=src, repo_root=repo_root, agents=agents,
+                allow_custom_check=st.allow_custom_check,
+            )
+        except Exception as exc:
+            results.append(RepairResult(item_type, item_key, repaired=False,
+                                        detail=f"{type(exc).__name__}: {exc}"))
+            continue
         results.append(RepairResult(item_type, item_key, repaired=True))
     return results
