@@ -20,11 +20,19 @@ UPGRADE_OVERWRITE_LOCAL_PREFIX = "upgrade.overwrite_local"
 
 UPGRADE_RUN_UPDATE_FIRST = "upgrade.run_update_first"
 UPGRADE_OTHER_REPOS = "upgrade.other_repos"
+UPGRADE_PLUGINS_CONFIRM = "upgrade.plugins.confirm"
 AGENT_TOOLS_MIGRATE_RERUN = "agent_tools.migrate.rerun"
 AGENT_TOOLS_ROLLBACK_CONFIRM = "agent_tools.rollback.confirm"
 
 
 SPECS: tuple[PromptSpec, ...] = (
+    PromptSpec(
+        UPGRADE_PLUGINS_CONFIRM,
+        command="upgrade",
+        summary="Run the plugin install/update commands for outdated plugins. Same decision as -y.",
+        type="yes_no",
+        default=False,
+    ),
     PromptSpec(
         UPGRADE_RUN_UPDATE_FIRST,
         command="upgrade",

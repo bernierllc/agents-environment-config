@@ -597,7 +597,7 @@ class TestUpgradePlugins:
 
     CATALOG = Path(__file__).resolve().parent.parent / "plugins"
 
-    def _run(self, tmp_path, recorded, returncode=0):
+    def _run(self, tmp_path, recorded, returncode=0, yes=True, agents=None, pref=None, answer="n"):
         from aec.commands.upgrade import _upgrade_scope
         from aec.lib.manifest_v2 import record_plugin_install
 
@@ -611,11 +611,13 @@ class TestUpgradePlugins:
             return MagicMock(returncode=returncode)
 
         with patch("subprocess.run", side_effect=fake_run), \
-             patch("aec.lib.config.detect_agents", return_value={"claude": {}}), \
+             patch("aec.lib.config.detect_agents", return_value={"claude": {}} if agents is None else agents), \
+             patch("aec.lib.preferences.get_setting", return_value=pref), \
+             patch("aec.commands.upgrade.prompt", return_value=answer), \
              patch("aec.commands.upgrade.record_item_install_pertype"), \
              patch("aec.commands.upgrade._target_base", return_value=tmp_path / "rules"):
             upgraded = _upgrade_scope(manifest, "global", {"plugins": self.CATALOG},
-                                      yes=True, dry_run=False)
+                                      yes=yes, dry_run=False)
         return manifest["global"]["plugins"]["ponytail"], calls, upgraded
 
     def test_old_per_tool_record_reinstalls_from_marketplace(self, tmp_path):
@@ -636,3 +638,23 @@ class TestUpgradePlugins:
         entry, _, upgraded = self._run(tmp_path, {"version": "0.1.0", "install_type": "marketplace"},
                                        returncode=1)
         assert entry["version"] == "0.1.0" and not upgraded
+
+    def test_without_yes_declining_runs_nothing(self, tmp_path):
+        entry, calls, upgraded = self._run(tmp_path, {"version": "0.1.0", "install_type": "marketplace"},
+                                           yes=False, answer="n")
+        assert calls == [] and entry["version"] == "0.1.0" and not upgraded
+
+    def test_without_yes_confirming_runs(self, tmp_path):
+        _, calls, upgraded = self._run(tmp_path, {"version": "0.1.0", "install_type": "marketplace"},
+                                       yes=False, answer="y")
+        assert calls == [["claude", "plugin", "update", "ponytail@ponytail"]] and upgraded
+
+    def test_instructions_only_preference_never_runs(self, tmp_path):
+        entry, calls, _ = self._run(tmp_path, {"version": "0.1.0", "install_type": "marketplace"},
+                                    pref="instructions-only")
+        assert calls == [] and entry["version"] == "0.1.0"
+
+    def test_missing_claude_is_not_run(self, tmp_path):
+        entry, calls, _ = self._run(tmp_path, {"version": "0.1.0", "install_type": "marketplace"},
+                                    agents={})
+        assert calls == [] and entry["version"] == "0.1.0"
