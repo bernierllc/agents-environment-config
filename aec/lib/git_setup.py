@@ -268,7 +268,7 @@ def ci_safe_commands(test_commands: List[str]) -> List[str]:
 
 # Characters YAML does not allow literally inside a double-quoted scalar (or
 # would fold as a line break); all are in the BMP, so \uXXXX escapes them.
-_YAML_UNSAFE = re.compile("[\x7f-\x9f\u2028\u2029\ufeff\ud800-\udfff]")
+_YAML_UNSAFE = re.compile("[\x7f-\x9f\u2028\u2029\ufeff\ud800-\udfff\ufffe\uffff]")
 
 
 def yaml_quote(value: str) -> str:

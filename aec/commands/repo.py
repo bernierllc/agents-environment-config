@@ -1071,7 +1071,7 @@ def _git_essentials_review_notes(items: List[str], context: dict, test_commands:
         notes.append("README.md: replace the placeholder description and usage sections")
     if "ci_workflow" in items:
         usable = ci_safe_commands(test_commands)
-        dropped = [c for c in test_commands if c not in usable and c.strip()]
+        dropped = list(dict.fromkeys(c for c in test_commands if c not in usable and c.strip()))
         if dropped:
             notes.append(
                 ".github/workflows/ci.yml: left out test command(s) spanning multiple "
