@@ -39,10 +39,11 @@ SPECS: tuple[PromptSpec, ...] = (
         UPGRADE_OTHER_REPOS,
         command="upgrade",
         summary=(
-            "Other tracked repos have outdated items too: 'y' upgrades them all, "
-            "'list' just lists them, anything else skips."
+            "Other tracked repos have outdated items too (they are listed above "
+            "the prompt): 'y' upgrades them all."
         ),
-        default="n",
+        type="yes_no",
+        default=False,
     ),
     PromptSpec(
         AGENT_TOOLS_MIGRATE_RERUN,

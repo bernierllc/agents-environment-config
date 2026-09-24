@@ -132,3 +132,16 @@ class TestRunGitPhase:
 
         assert result["git_enabled"] is True
         assert len(result["items_to_create"]) == 9
+
+
+class TestDetectGitignoreInputs:
+    def test_framework_keys_from_detection(self, tmp_path):
+        """Regression: detection dicts have 'key', not 'name' (KeyError during aec install)."""
+        from aec.commands.repo import _detect_gitignore_inputs
+
+        (tmp_path / "jest.config.js").write_text("module.exports = {};\n")
+        (tmp_path / "package.json").write_text('{"devDependencies": {"jest": "^29"}}\n')
+
+        _, frameworks = _detect_gitignore_inputs(tmp_path)
+
+        assert "jest" in frameworks

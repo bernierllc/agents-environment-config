@@ -22,7 +22,7 @@ from ..lib.prompt_catalog.skills_area import (
     SKILLS_UPDATE_APPLY,
     SKILLS_UPDATE_OVERWRITE_LOCAL_PREFIX,
 )
-from ..lib.prompts import prompt
+from ..lib.prompts import parse_selection, prompt, selection_validator
 from ..lib.skills_manifest import (
     discover_available_skills,
     load_installed_manifest,
@@ -54,31 +54,7 @@ def _default_installed_dir() -> Path:
 
 def _parse_selection(text: str, max_num: int) -> set:
     """Parse user selection input like 'a', 'n', '1,3,5-8' into a set of numbers."""
-    text = text.strip().lower()
-    if text in ("a", "all"):
-        return set(range(1, max_num + 1))
-    if text in ("n", "none", ""):
-        return set()
-
-    result = set()
-    for part in text.split(","):
-        part = part.strip()
-        if "-" in part:
-            try:
-                start, end = part.split("-", 1)
-                for i in range(int(start), int(end) + 1):
-                    if 1 <= i <= max_num:
-                        result.add(i)
-            except ValueError:
-                continue
-        else:
-            try:
-                num = int(part)
-                if 1 <= num <= max_num:
-                    result.add(num)
-            except ValueError:
-                continue
-    return result
+    return set(parse_selection(text, max_num))
 
 
 def list_skills(
@@ -443,9 +419,10 @@ def install_step(dry_run: bool = False) -> None:
         Console.print()
         response = prompt(
             SKILLS_INSTALL_SELECTION,
-            "Install: [a]ll, [n]one, or enter numbers (e.g. 1,3,5-8): ",
+            "Install: [a]ll, [N]one, or enter numbers (e.g. 1,3,5-8): ",
             default="n",
-        ).strip()
+            validator=selection_validator(len(skill_list)),
+        )
 
         selected = _parse_selection(response, len(skill_list))
         names_to_install = [skill_list[i - 1] for i in sorted(selected)]
@@ -479,11 +456,13 @@ def install_step(dry_run: bool = False) -> None:
         Console.print()
         response = prompt(
             SKILLS_SYNC_CHOICE,
-            "Install updates and new skills? [a]ll, [s]elect, [S]kip: ",
-            default="s",
-        ).strip().lower()
+            "Install updates and new skills? [a]ll, [s]elect, s[K]ip: ",
+            default="k",
+            choices=["a", "s", "k", "all", "select", "skip"],
+        )
+        response = {"all": "a", "select": "s", "skip": "k"}.get(response, response)
 
-        if response == "a" or response == "all":
+        if response == "a":
             if updates:
                 update_skills(
                     names=list(updates.keys()),
@@ -500,7 +479,7 @@ def install_step(dry_run: bool = False) -> None:
                     manifest_path=manifest_path,
                     yes=True,
                 )
-        elif response == "s" or response == "select":
+        elif response == "s":
             # Show numbered list of changes
             items = []
             for name, (old_v, new_v) in sorted(updates.items()):
@@ -513,9 +492,10 @@ def install_step(dry_run: bool = False) -> None:
 
             sel = prompt(
                 SKILLS_SYNC_SELECTION,
-                "Enter numbers (e.g. 1,3,5-8): ",
-                default="",
-            ).strip()
+                "Enter numbers (e.g. 1,3,5-8) [none]: ",
+                default="none",
+                validator=selection_validator(len(items)),
+            )
 
             selected = _parse_selection(sel, len(items))
             selected_names = [items[i - 1][0] for i in sorted(selected)]

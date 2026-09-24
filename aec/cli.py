@@ -151,8 +151,12 @@ if HAS_TYPER:
             False, "--allow-dormant-hooks",
             help="Allow installing a hook-bearing skill globally (hooks stay dormant)",
         ),
+        dry_run: bool = typer.Option(
+            False, "--dry-run", help="Preview full setup without making changes (bare `aec install`)",
+        ),
     ):
-        """Install a skill, rule, agent, or MCP server (or apply an org config with --org-config)."""
+        """Run full setup (no arguments), install a skill, rule, agent, or MCP server,
+        or apply an org config with --org-config."""
         if org_config:
             from .commands.org import perform_enroll
             from .lib.org_config import OrgPaths
@@ -162,8 +166,12 @@ if HAS_TYPER:
             confirm = (lambda _policy: True) if yes else None
             apply_org_policy(OrgPaths.default(), confirm=confirm)
             return
+        if not item_type and not name:
+            from .commands.install import install
+            install(dry_run=dry_run)
+            return
         if not item_type or not name:
-            Console.error("install requires <type> <name> (or use --org-config <url|path>)")
+            Console.error("install requires <type> <name> (or no arguments for full setup)")
             raise typer.Exit(code=2)
         from .commands.install_cmd import run_install
         run_install(item_type=item_type, name=name, global_flag=global_flag, yes=yes,
@@ -789,9 +797,10 @@ else:
         upgrade_parser.add_argument("--dry-run", action="store_true", help="Preview without applying")
 
         # install
-        install_new = subparsers.add_parser("install", help="Install a skill, rule, or agent")
-        install_new.add_argument("item_type", help="Type: skill, rule, agent, mcp, or plugin")
-        install_new.add_argument("name", help="Name of the item")
+        install_new = subparsers.add_parser("install", help="Full setup, or install a skill, rule, or agent")
+        install_new.add_argument("item_type", nargs="?", help="Type: skill, rule, agent, mcp, or plugin")
+        install_new.add_argument("name", nargs="?", help="Name of the item")
+        install_new.add_argument("--dry-run", action="store_true", help="Preview full setup without making changes")
         install_new.add_argument("-g", "--global", dest="global_flag", action="store_true", help="Install globally")
         install_new.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
 
@@ -1058,6 +1067,13 @@ else:
             run_upgrade(yes=args.yes, dry_run=args.dry_run)
 
         elif args.command == "install":
+            if not args.item_type and not args.name:
+                from .commands.install import install
+                install(dry_run=args.dry_run)
+                return
+            if not args.item_type or not args.name:
+                Console.error("install requires <type> <name> (or no arguments for full setup)")
+                sys.exit(2)
             from .commands.install_cmd import run_install
             run_install(
                 item_type=args.item_type, name=args.name,

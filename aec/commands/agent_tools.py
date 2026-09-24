@@ -229,7 +229,7 @@ def migrate(dry_run: bool = False) -> None:
 
         response = prompt(
             AGENT_TOOLS_MIGRATE_RERUN,
-            "Re-run migration to update symlinks? (y/N): ",
+            "Re-run migration to update symlinks? [y/N]: ",
             type="yes_no",
             default=False,
         ).strip().lower()
@@ -325,7 +325,7 @@ def rollback(backup_dir: str) -> None:
 
     response = prompt(
         AGENT_TOOLS_ROLLBACK_CONFIRM,
-        "Continue with rollback? (y/N): ",
+        "Continue with rollback? [y/N]: ",
         type="yes_no",
         default=False,
     ).strip().lower()

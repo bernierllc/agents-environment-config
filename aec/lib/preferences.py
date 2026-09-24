@@ -19,7 +19,7 @@ OPTIONAL_FEATURES: Dict[str, Dict[str, Any]] = {
         "prompt": (
             "Enable the 'Leave It Better' rule? This instructs AI agents to\n"
             "track and fix any bugs, lint issues, or broken tests they discover\n"
-            "while working. (Y/n): "
+            "while working. [Y/n]: "
         ),
         "default": True,
     },
@@ -27,7 +27,7 @@ OPTIONAL_FEATURES: Dict[str, Dict[str, Any]] = {
         "description": "Automatic Update Check",
         "prompt": (
             "Enable automatic update checks? AEC will check GitHub weekly\n"
-            "for new releases and show a notification. (Y/n): "
+            "for new releases and show a notification. [Y/n]: "
         ),
         "default": True,
     },
@@ -35,7 +35,7 @@ OPTIONAL_FEATURES: Dict[str, Dict[str, Any]] = {
         "description": "Port Registry",
         "prompt": (
             "Enable the port registry? AEC will track port assignments across\n"
-            "your projects to prevent collisions. (Y/n): "
+            "your projects to prevent collisions. [Y/n]: "
         ),
         "default": True,
     },
@@ -43,7 +43,7 @@ OPTIONAL_FEATURES: Dict[str, Dict[str, Any]] = {
         "description": "Scheduled Test Runs",
         "prompt": (
             "Enable scheduled test runs? AEC can run your test suites on a\n"
-            "schedule and generate reports. (Y/n): "
+            "schedule and generate reports. [y/N]: "
         ),
         "default": False,
     },
@@ -51,10 +51,8 @@ OPTIONAL_FEATURES: Dict[str, Dict[str, Any]] = {
         "description": "Re-compare dismissed items when they change",
         "prompt": (
             "If a skill, agent, or rule you previously dismissed changes or gets updated,\n"
-            "should we compare it to AEC tracked items again?\n"
-            "  1) Yes, re-compare automatically\n"
-            "  2) No, keep dismissed until I run aec discover --rediscover\n\n"
-            "Choose [1]: "
+            "should AEC re-compare automatically against tracked items? If not, it stays\n"
+            "dismissed until you run aec discover --rediscover. [Y/n]: "
         ),
         "default": True,
     },
@@ -262,8 +260,7 @@ def check_pending_preferences() -> None:
             Console.success(f"Enabled: {feature['description']}")
         else:
             Console.info(f"Disabled: {feature['description']}")
-
-    Console.print()
+        Console.print()
 
 
 def get_instruction_config(instruction_key: str) -> Optional[Dict[str, Any]]:

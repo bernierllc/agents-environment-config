@@ -79,9 +79,10 @@ class TestPromptDepUpgradeConflict:
             )
         assert result is False
 
-    def test_cancel_response_returns_false(self):
+    def test_non_yes_no_answer_is_reasked(self):
+        """'cancel' was a synonym for 'n'; it is now re-asked, and 'n' cancels."""
         from aec.lib.dep_approval_prompt import prompt_dep_upgrade_conflict
-        with patch("builtins.input", return_value="cancel"):
+        with patch("builtins.input", side_effect=["cancel", "n"]):
             result = prompt_dep_upgrade_conflict(
                 "target", "3.5.0", "dep-skill", "3.4.0", "3.3.0"
             )

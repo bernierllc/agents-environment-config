@@ -59,10 +59,10 @@ def prompt_dep_install(
 
     resp = prompt(
         item_prompt_id(INSTALL_DEPS_APPROVE_PREFIX, target),
-        "Approve all? [y/n/each]: ",
+        "Approve all? [y/N/each]: ",
         default="n",
         choices=["y", "n", "each"],
-    ).strip().lower()
+    )
 
     if resp == "y":
         return True
@@ -104,9 +104,9 @@ def prompt_dep_upgrade_conflict(
         item_prompt_id(INSTALL_DEPS_UPGRADE_PREFIX, dep_name),
         f"Updating {target} to {target_new_version} requires {dep_name} "
         f">={required_min} (currently {installed_ver}). "
-        f"Update {dep_name} too? [y/n/cancel]: ",
-        default="n",
-        choices=["y", "n", "cancel"],
-    ).strip().lower()
+        f"Update {dep_name} too? (no cancels the upgrade) [y/N]: ",
+        type="yes_no",
+        default=False,
+    )
 
     return resp == "y"

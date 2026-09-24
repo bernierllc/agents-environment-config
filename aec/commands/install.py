@@ -29,7 +29,7 @@ from ..lib.prompt_catalog.install_flow_area import (
     INSTALL_BATCH_PROJECT_SETUP_PER_PROJECT,
     INSTALL_QUALITY_REPORT_VIEWER_COMMAND,
 )
-from ..lib.prompts import prompt as _prompt
+from ..lib.prompts import prompt as _prompt, yes_no_hint
 from . import agent_tools, rules
 
 
@@ -149,7 +149,7 @@ def _batch_project_setup(dry_run: bool = False) -> None:
 
     response = _prompt(
         INSTALL_BATCH_PROJECT_SETUP_START,
-        "\nWould you like to setup your project directories now? (Y/n): ",
+        "\nWould you like to setup your project directories now? [Y/n]: ",
         type="yes_no",
         default=True,
     ).strip().lower()
@@ -165,7 +165,8 @@ def _batch_project_setup(dry_run: bool = False) -> None:
         "Choice [1]: ",
         type="enum",
         default="1",
-    ).strip() or "1"
+        choices=["1", "2"],
+    ).strip()
 
     git_only = scan_choice != "2"
     projects = _find_projects(projects_path, git_only=git_only)
@@ -183,7 +184,7 @@ def _batch_project_setup(dry_run: bool = False) -> None:
             Console.print(f"\n  {Console.dim('─' * 40)}")
         response = _prompt(
             INSTALL_BATCH_PROJECT_SETUP_PER_PROJECT,
-            f"\n  Setup {project.name}? (Y/n/q): ",
+            f"\n  Setup {project.name}? [Y/n/q]: ",
             default="y",
             choices=["y", "n", "q", ""],
         ).strip().lower()
@@ -195,6 +196,33 @@ def _batch_project_setup(dry_run: bool = False) -> None:
             continue
 
         repo.setup(str(project), skip_raycast=True, batch=True)
+
+
+def _bare_dirname(value: str) -> str:
+    """A single directory name: no separators, no '..', not absolute, not all digits."""
+    name = value.strip()
+    if not name or "/" in name or "\\" in name or name in (".", "..") or name.isdigit():
+        raise ValueError(f"{name!r} is not a directory name like .plans or docs")
+    return name
+
+
+def _plans_dir_answer(value: str) -> str:
+    """Menu choice 1/2/3, the org-config names dotplans/plans/custom, or a bare
+    directory name (the ``enum[dotplans,plans,custom]_or_bare_dirname`` contract).
+
+    Returns "1"/"2"/"3" or the directory name. All-digit answers other than
+    1-3 are re-asked, so a typo like "4" never becomes a directory.
+    """
+    text = value.strip()
+    named = {"dotplans": "1", "plans": "2", "custom": "3"}
+    if text in ("1", "2", "3"):
+        return text
+    if text.lower() in named:
+        return named[text.lower()]
+    try:
+        return _bare_dirname(text)
+    except ValueError:
+        raise ValueError(f"{text!r} is not 1, 2, 3, or a directory name like docs") from None
 
 
 def _prompt_settings(dry_run: bool = False, show_header: bool = True) -> None:
@@ -269,23 +297,24 @@ def _prompt_settings(dry_run: bool = False, show_header: bool = True) -> None:
             "Choice [1]: ",
             type="enum",
             default="1",
-        ).strip() or "1"
+            validator=_plans_dir_answer,
+        )
 
         if response == "1":
             _save("plans_dir", ".plans")
         elif response == "2":
             _save("plans_dir", "plans")
-        else:
-            if response == "3":
-                custom = _prompt(
-                    INSTALL_SETTINGS_PLANS_DIR_CUSTOM,
-                    "Plans directory name: ",
-                    type="bare-dirname",
-                    default=".plans",
-                ).strip() or ".plans"
-            else:
-                custom = response  # user typed the name directly
+        elif response == "3":
+            custom = _prompt(
+                INSTALL_SETTINGS_PLANS_DIR_CUSTOM,
+                "Plans directory name [.plans]: ",
+                type="bare-dirname",
+                default=".plans",
+                validator=_bare_dirname,
+            )
             _save("plans_dir", custom)
+        else:
+            _save("plans_dir", response)  # a directory name answered directly
 
     # 3. Plans gitignored
     current = get_setting("plans_gitignored")
@@ -296,7 +325,7 @@ def _prompt_settings(dry_run: bool = False, show_header: bool = True) -> None:
         plans_dir = _get("plans_dir")
         response = _prompt(
             INSTALL_SETTINGS_PLANS_GITIGNORED,
-            f"Should {plans_dir}/ be tracked in git? (y/N): ",
+            f"Should {plans_dir}/ be tracked in git? [y/N]: ",
             type="yes_no",
             default=False,
         ).strip().lower()
@@ -318,7 +347,8 @@ def _prompt_settings(dry_run: bool = False, show_header: bool = True) -> None:
             "Choice [1]: ",
             type="enum",
             default="1",
-        ).strip() or "1"
+            choices=["1", "2"],
+        ).strip()
         _save("plans_completion", "archive" if response == "1" else "delete")
 
 
@@ -365,7 +395,6 @@ def _prompt_configurable_instructions(dry_run: bool = False) -> None:
             if global_file:
                 has_it = scan_file_for_instruction(global_file, key)
 
-            default = "Y" if instruction["default_enabled"] else "n"
             if has_it:
                 hint = " (currently present)"
             else:
@@ -373,7 +402,7 @@ def _prompt_configurable_instructions(dry_run: bool = False) -> None:
 
             response = _prompt(
                 configurable_instruction_prompt_id(key, agent_key),
-                f"  Keep for {display}?{hint} ({default}/{'n' if default == 'Y' else 'Y'}): ",
+                f"  Keep for {display}?{hint} {yes_no_hint(instruction['default_enabled'])}: ",
                 type="yes_no",
                 default=instruction["default_enabled"],
             ).strip().lower()
@@ -462,12 +491,10 @@ def _prompt_quality_settings(dry_run: bool = False) -> None:
                 "Choose a viewer [1]: ",
                 type="enum",
                 default="1",
-            ).strip() or "1"
-            try:
-                idx = int(choice) - 1
-            except ValueError:
-                idx = 0
-            if 0 <= idx < len(viewers):
+                choices=[str(i) for i in range(1, len(viewers) + 2)],
+            ).strip()
+            idx = int(choice) - 1
+            if idx < len(viewers):
                 viewer_value = viewers[idx]["key"]
         else:
             viewer_value = None
@@ -494,10 +521,11 @@ def _prompt_quality_settings(dry_run: bool = False) -> None:
     )
     retention_choice = _prompt(
         INSTALL_QUALITY_REPORT_RETENTION_MODE,
-        "Choice (1/2): ",
+        "Choice [1]: ",
         type="enum",
         default="1",
-    ).strip() or "1"
+        choices=["1", "2"],
+    ).strip()
 
     if retention_choice == "1":
         _save("report_retention_mode", "auto")
@@ -506,12 +534,8 @@ def _prompt_quality_settings(dry_run: bool = False) -> None:
             "Prune reports after how many days? [30]: ",
             type="int",
             default=30,
-        ).strip() or "30"
-        try:
-            days = int(days_str)
-        except ValueError:
-            days = 30
-        _save("report_retention_days", days)
+        )
+        _save("report_retention_days", int(days_str))
     else:
         _save("report_retention_mode", "manual")
 

@@ -1,8 +1,12 @@
 """Single seam every interactive AEC prompt goes through.
 
-Interactive behavior is unchanged for humans: a TTY user sees the same
-question and types the same answer. What this module adds is a way for an
-*agent* to drive AEC unattended:
+A human and an agent get the same contract: a typed answer is validated
+exactly like a supplied one. Yes/no answers accept y/yes/n/no in any case and
+come back as ``"y"``/``"n"``; Enter takes the declared default; an answer that
+is not a valid yes/no, int, or one of ``choices`` re-asks instead of silently
+falling through to whatever branch the callsite happens to use for "other".
+
+What this module also adds is a way for an *agent* to drive AEC unattended:
 
   1. Discover the questions ahead of time — every callsite declares a stable
      ``prompt_id`` catalogued in :mod:`aec.lib.prompt_catalog`, surfaced by
@@ -20,8 +24,13 @@ Answer precedence, highest first:
   3. Interactive ``input()`` — only when attached to a TTY
   4. The declared default — only when ``--defaults``/``--yes`` was passed
 
-``prompt()`` always returns a ``str`` so callsites can keep parsing the raw
-answer exactly as they parse typed input.
+``prompt()`` always returns a ``str``, already normalized: callsites compare
+against canonical values (``"y"``, ``"n"``, a choice) and never see "" for a
+prompt that declares a default.
+
+Hint conventions (enforced by ``tests/test_prompt_conventions.py``): yes/no
+prompts end with ``yes_no_hint(default)`` (``[Y/n]`` / ``[y/N]``), and every
+prompt with a default shows it in brackets, e.g. ``Choice [1]:``.
 """
 from __future__ import annotations
 
@@ -195,6 +204,90 @@ def normalize(value: Any, type: str) -> str:  # noqa: A002 - matches doc surface
     return str(value)
 
 
+# Re-asks before giving up on a human who keeps typing invalid answers (also
+# bounds a pipe that feeds the same bad line forever).
+_MAX_TYPED_ATTEMPTS = 5
+
+
+def yes_no_hint(default: bool) -> str:
+    """The standard hint for a yes/no prompt: ``[Y/n]`` or ``[y/N]``."""
+    return "[Y/n]" if default else "[y/N]"
+
+
+def selection_validator(count: int, *, allow_empty: bool = False) -> Callable[[str], str]:
+    """Validator for "comma-separated numbers, 'all', or 'none'" menus.
+
+    Accepts ``all``/``a``, ``none``/``n``, and comma-separated numbers or
+    ranges (``1,3,5-8``) within ``1..count``. Returns the answer lowercased;
+    raises ``ValueError`` naming the bad token so the user is re-asked rather
+    than having typos silently dropped.
+    """
+
+    def _validate(value: str) -> str:
+        text = value.strip().lower()
+        if text in ("all", "a", "none", "n") or (allow_empty and text == ""):
+            return text
+        if text == "":
+            raise ValueError("enter numbers, 'all', or 'none'")
+        for part in text.split(","):
+            part = part.strip()
+            bounds = part.split("-", 1) if "-" in part else [part, part]
+            try:
+                lo, hi = int(bounds[0]), int(bounds[1])
+            except ValueError:
+                raise ValueError(f"{part!r} is not a number, range, 'all', or 'none'") from None
+            if not (1 <= lo <= hi <= count):
+                raise ValueError(f"{part!r} is out of range (1-{count})")
+        return text
+
+    return _validate
+
+
+def parse_selection(text: str, count: int) -> list:
+    """Parse an answer accepted by ``selection_validator`` into sorted 1-based
+    indices. ``all``/``a`` selects everything; ``none``/``n``/"" selects nothing."""
+    text = text.strip().lower()
+    if text in ("all", "a"):
+        return list(range(1, count + 1))
+    if text in ("none", "n", ""):
+        return []
+    picked = set()
+    for part in text.split(","):
+        part = part.strip()
+        lo, _, hi = part.partition("-")
+        try:
+            span = range(int(lo), int(hi or lo) + 1)
+        except ValueError:
+            continue  # unreachable after selection_validator; tolerated for direct callers
+        picked.update(i for i in span if 1 <= i <= count)
+    return sorted(picked)
+
+
+def _coerce_typed(raw: str, type: str, default: Any, choices: Optional[list]) -> str:  # noqa: A002
+    """Turn a line a human typed into the canonical answer, or raise
+    ``PromptInvalidAnswer`` with a message fit to show before re-asking."""
+    text = raw.strip()
+    if text == "":
+        if default is None:
+            if choices and "" not in [str(c) for c in choices]:
+                shown = ", ".join(str(c) for c in choices)
+                raise PromptInvalidAnswer("", text, f"choice (one of {shown})")
+            return ""
+        text = normalize(default, type)
+    else:
+        text = normalize(text, type)
+    if choices:
+        allowed = [str(c) for c in choices]
+        if text in allowed:
+            return text
+        folded = [c for c in allowed if c.lower() == text.lower()]
+        if len(folded) == 1:
+            return folded[0]
+        shown = ", ".join(c for c in allowed if c != "")
+        raise PromptInvalidAnswer("", text, f"choice (one of {shown})")
+    return text
+
+
 def prompt(
     prompt_id: str,
     prompt_text: str,
@@ -232,20 +325,30 @@ def prompt(
         except PromptInvalidAnswer as exc:
             raise PromptInvalidAnswer(prompt_id, exc.value, exc.expected) from exc
         _check_choices(prompt_id, value, choices)
-        if validator is not None:
-            value = validator(value)
+        value = _run_validator(prompt_id, value, validator)
         from .console import Console
 
         Console.info(f"Pre-answered by {source}: {prompt_id}")
         return value
 
     if not is_non_interactive():
-        try:
-            return input(prompt_text)
-        except EOFError:
-            # stdin closed mid-run. Treat exactly like the non-interactive
-            # path rather than silently returning "" and defaulting.
-            return _unanswered(prompt_id, type, default, sensitive, validator, choices)
+        from .console import Console
+
+        for _attempt in range(_MAX_TYPED_ATTEMPTS):
+            try:
+                raw = input(prompt_text)
+            except EOFError:
+                # stdin closed mid-run. Treat exactly like the non-interactive
+                # path rather than silently returning "" and defaulting.
+                return _unanswered(prompt_id, type, default, sensitive, validator, choices)
+            try:
+                value = _coerce_typed(raw, type, default, choices)
+                return validator(value) if validator is not None else value
+            except PromptInvalidAnswer as exc:
+                Console.warning(f"{exc.value!r} is not a valid {exc.expected}. Try again.")
+            except ValueError as exc:
+                Console.warning(f"{exc}. Try again.")
+        raise PromptInvalidAnswer(prompt_id, raw, f"answer after {_MAX_TYPED_ATTEMPTS} attempts")
 
     return _unanswered(prompt_id, type, default, sensitive, validator, choices)
 
@@ -270,12 +373,23 @@ def _unanswered(prompt_id, type, default, sensitive, validator, choices) -> str:
 
     value = normalize(default, type)
     _check_choices(prompt_id, value, choices)
-    if validator is not None:
-        value = validator(value)
+    value = _run_validator(prompt_id, value, validator)
     from .console import Console
 
     Console.info(f"Defaulted: {prompt_id} = {value}")
     return value
+
+
+def _run_validator(prompt_id: str, value: str, validator: Optional[Callable[[str], Any]]) -> Any:
+    """Run ``validator``; a ``ValueError`` becomes ``PromptInvalidAnswer``."""
+    if validator is None:
+        return value
+    try:
+        return validator(value)
+    except PromptInvalidAnswer:
+        raise
+    except ValueError as exc:
+        raise PromptInvalidAnswer(prompt_id, value, str(exc) or "answer") from exc
 
 
 def _check_choices(prompt_id: str, value: str, choices: Optional[list]) -> None:

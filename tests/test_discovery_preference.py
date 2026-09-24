@@ -37,11 +37,11 @@ class TestDiscoveryRecompareFeatureEntry:
         prompt = OPTIONAL_FEATURES["discovery_recompare"]["prompt"]
         assert "aec discover --rediscover" in prompt
 
-    def test_prompt_contains_numbered_choices(self):
-        """Prompt should present numbered choices 1 and 2."""
+    def test_prompt_is_yes_no(self):
+        """Prompt is parsed as yes/no, so it must present a [Y/n] choice, not a numbered menu."""
         prompt = OPTIONAL_FEATURES["discovery_recompare"]["prompt"]
-        assert "1)" in prompt
-        assert "2)" in prompt
+        assert prompt.rstrip().endswith("[Y/n]:")
+        assert "2)" not in prompt
 
 
 class TestGetRecomparePolicy:
@@ -116,3 +116,12 @@ class TestGetRecomparePolicyIntegration:
         )
 
         assert get_recompare_policy() == "auto"
+
+
+class TestOptionalFeaturePromptHints:
+    """Every optional-feature prompt's [Y/n]/[y/N] hint must match its default."""
+
+    def test_hint_matches_default(self):
+        for key, entry in OPTIONAL_FEATURES.items():
+            hint = "[Y/n]:" if entry["default"] else "[y/N]:"
+            assert entry["prompt"].rstrip().endswith(hint), key

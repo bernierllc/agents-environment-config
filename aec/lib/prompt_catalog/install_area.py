@@ -53,7 +53,10 @@ SPECS: tuple[PromptSpec, ...] = (
     PromptSpec(
         INSTALL_SETTINGS_PLANS_DIR,
         command="install",
-        summary="Plans directory: 1=.plans, 2=plans, 3=custom, or type a name.",
+        summary=(
+            "Plans directory: 1/dotplans=.plans, 2/plans=plans, 3/custom=ask for "
+            "the name, or answer a bare directory name directly."
+        ),
         type="enum",
         default="1",
     ),

@@ -5,7 +5,7 @@ import re
 import shutil
 import stat
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 try:
     import typer
@@ -38,8 +38,10 @@ from ..lib import (
 from ..lib.prompt_catalog.install_flow_area import item_prompt_id
 from ..lib.prompt_catalog.repo_area import (
     REPO_DISCOVER_SCAN,
+    REPO_GIT_CODEOWNER,
     REPO_GIT_COMMIT_STRATEGY,
     REPO_GIT_ESSENTIALS,
+    REPO_GIT_LICENSE_HOLDER,
     REPO_GIT_RUN_INIT,
     REPO_GIT_USE_GITHUB,
     REPO_HOOKS_EXISTING_CONFIG_PREFIX,
@@ -53,12 +55,23 @@ from ..lib.prompt_catalog.repo_area import (
     REPO_SETUP_PROJECT_PATH,
     REPO_TEST_SUITES_SELECTION,
 )
-from ..lib.prompts import prompt
+from ..lib.prompts import parse_selection, prompt, selection_validator
 import subprocess
 from ..lib.config import load_env_file
 from ..lib.git import clone_repo
 from ..lib.git_providers import detect_git_provider, scan_git_essentials, GIT_PROVIDERS
-from ..lib.git_setup import build_composite_gitignore, write_git_essential, execute_commit_strategy, get_templates_root
+from ..lib.git_setup import (
+    build_composite_gitignore,
+    ci_safe_commands,
+    default_codeowner,
+    default_copyright_holder,
+    default_git_context,
+    github_account_type,
+    execute_commit_strategy,
+    get_templates_root,
+    github_owner,
+    write_git_essential,
+)
 
 if HAS_TYPER:
     app = typer.Typer(help="Manage project repositories")
@@ -329,7 +342,7 @@ def _generate_raycast_scripts(
     Console.print()
     response = prompt(
         REPO_RAYCAST_GENERATE,
-        "Generate Raycast scripts for these agents? (Y/n): ",
+        "Generate Raycast scripts for these agents? [Y/n]: ",
         type="yes_no",
         default=True,
     ).strip().lower()
@@ -560,37 +573,19 @@ def _setup_lint_hooks(project_dir: Path, batch: bool = False) -> None:
         for i, lang in enumerate(languages, 1):
             display = LANGUAGE_HOOKS[lang]["display_name"]
             Console.print(f"  {i}) {display}")
-        all_option = len(languages) + 1
-        none_option = len(languages) + 2
-        Console.print(f"  {all_option}) All detected")
-        Console.print(f"  {none_option}) None")
         Console.print()
 
         choice = prompt(
             REPO_HOOKS_LANGUAGES,
-            "Select languages for lint hooks: ",
+            "Select languages for lint hooks (comma-separated numbers, 'all', or 'none') [all]: ",
             default="all",
-        ).strip()
-        if choice == "all":
-            choice = str(all_option)
-        elif choice == "none":
-            choice = str(none_option)
-
-        if choice == str(none_option):
+            validator=selection_validator(len(languages)),
+        )
+        indices = parse_selection(choice, len(languages))
+        if not indices:
             Console.skip("No languages selected, skipping lint hooks")
             return
-        elif choice == str(all_option):
-            selected_languages = languages
-        else:
-            # Single language selection
-            try:
-                idx = int(choice) - 1
-                if 0 <= idx < len(languages):
-                    selected_languages = [languages[idx]]
-                else:
-                    selected_languages = languages
-            except (ValueError, IndexError):
-                selected_languages = languages
+        selected_languages = [languages[i - 1] for i in indices]
 
     # Step 5: Gather commands for selected languages
     commands = [LANGUAGE_HOOKS[lang]["command"] for lang in selected_languages]
@@ -741,24 +736,11 @@ def _detect_and_prompt_test_suites(
 
             choice = prompt(
                 REPO_TEST_SUITES_SELECTION,
-                "Selection (comma-separated numbers, 'all', or 'none'): ",
+                "Selection (comma-separated numbers, 'all', or 'none') [all]: ",
                 default="all",
-            ).strip().lower()
-
-            if choice == "none":
-                selected = []
-            elif choice == "all":
-                selected = candidates
-            else:
-                indices = []
-                for part in choice.split(","):
-                    try:
-                        idx = int(part.strip()) - 1
-                        if 0 <= idx < len(candidates):
-                            indices.append(idx)
-                    except ValueError:
-                        pass
-                selected = [candidates[i] for i in indices]
+                validator=selection_validator(len(candidates)),
+            )
+            selected = [candidates[i - 1] for i in parse_selection(choice, len(candidates))]
         else:
             selected = []
 
@@ -956,7 +938,7 @@ def _run_git_phase(project_dir: Path) -> dict:
         Console.print("\n  Git not detected in this project.")
         response = prompt(
             REPO_GIT_USE_GITHUB,
-            "  Do you intend to use GitHub? (Y/n): ",
+            "  Do you intend to use GitHub? [Y/n]: ",
             type="yes_no",
             default=True,
         ).strip().lower()
@@ -964,7 +946,7 @@ def _run_git_phase(project_dir: Path) -> dict:
         if response in ("", "y", "yes"):
             use_init = prompt(
                 REPO_GIT_RUN_INIT,
-                "  Want AEC to run git init? (Y/n): ",
+                "  Want AEC to run git init? [Y/n]: ",
                 type="yes_no",
                 default=True,
             ).strip().lower()
@@ -1021,24 +1003,88 @@ def _run_git_phase(project_dir: Path) -> dict:
         "\n  Select items for AEC to create\n"
         "  (comma-separated numbers, 'all', or 'none') [all]: ",
         default="all",
-    ).strip().lower()
-
-    if response in ("", "all"):
-        items_to_create = missing
-    elif response == "none":
-        items_to_create = []
-    else:
-        selected = []
-        for part in response.split(","):
-            try:
-                idx = int(part.strip()) - 1
-                if 0 <= idx < len(missing):
-                    selected.append(missing[idx])
-            except ValueError:
-                pass
-        items_to_create = selected
+        validator=selection_validator(len(missing)),
+    )
+    items_to_create = [missing[i - 1] for i in parse_selection(response, len(missing))]
 
     return {"git_enabled": True, "provider": provider, "items_to_create": items_to_create}
+
+
+def _detect_gitignore_inputs(project_dir: Path) -> Tuple[List[str], List[str]]:
+    """Return (languages, test framework keys) used to build the composite .gitignore.
+
+    Framework keys match the ``frameworks`` section of gitignore_supported.json.
+    """
+    from ..lib import detect_languages
+    from ..lib.test_detection import detect_test_frameworks
+
+    languages = list(detect_languages(project_dir) or [])
+    frameworks = [fw["key"] for fw in (detect_test_frameworks(project_dir) or [])]
+    return languages, frameworks
+
+
+def _git_essentials_context(project_dir: Path, items: List[str], test_commands: List[str]) -> dict:
+    """Ask for the values only the user knows, then build the template context."""
+    holder = codeowner = None
+    if "license" in items:
+        guess = default_copyright_holder(project_dir)
+        holder = prompt(
+            REPO_GIT_LICENSE_HOLDER,
+            f"  LICENSE copyright holder [{guess}]: ",
+            default=guess,
+        ).strip() or guess
+    if "codeowners" in items:
+        owner = default_codeowner(project_dir)
+        guess = f"@{owner}" if owner else "none"
+        org = github_owner(project_dir)
+        org = org if github_account_type(org) == "Organization" else ""
+        answer = prompt(
+            REPO_GIT_CODEOWNER,
+            f"  Default code owner for CODEOWNERS ('@user', '@org/team', or 'none') [{guess}]: ",
+            default=guess,
+            validator=lambda v: _validate_codeowner(v, org=org),
+        ).strip()
+        codeowner = "" if answer.lower() == "none" else answer
+    return default_git_context(
+        project_dir,
+        test_commands=test_commands,
+        copyright_holder=holder,
+        codeowner=codeowner,
+        with_ci="ci_workflow" in items,
+    )
+
+
+def _validate_codeowner(value: str, org: str = "") -> str:
+    value = value.strip()
+    if org and value.lower() == f"@{org}".lower():
+        raise ValueError(
+            f"@{org} is an organization, which CODEOWNERS ignores; use a user or @{org}/<team>"
+        )
+    if value.lower() == "none" or re.fullmatch(r"@[\w.-]+(/[\w.-]+)?", value):
+        return value
+    raise ValueError(f"{value!r} is not '@user', '@org/team', or 'none'")
+
+
+def _git_essentials_review_notes(items: List[str], context: dict, test_commands: List[str]) -> List[str]:
+    notes = []
+    if "README.md" in items:
+        notes.append("README.md: replace the placeholder description and usage sections")
+    if "ci_workflow" in items:
+        usable = ci_safe_commands(test_commands)
+        dropped = list(dict.fromkeys(c for c in test_commands if c not in usable and c.strip()))
+        if dropped:
+            notes.append(
+                ".github/workflows/ci.yml: left out test command(s) spanning multiple "
+                f"lines: {', '.join(repr(c) for c in dropped)}"
+            )
+        if not usable:
+            notes.append(
+                ".github/workflows/ci.yml: no test suite detected; add your test command "
+                "(the step currently only emits a warning)"
+            )
+    if "codeowners" in items and context["codeowners_rule"].startswith("#"):
+        notes.append(".github/CODEOWNERS: no owner set; the rule is commented out")
+    return notes
 
 
 def _create_git_essentials(
@@ -1047,6 +1093,7 @@ def _create_git_essentials(
     detected_languages: List[str],
     detected_frameworks: List[str],
     dry_run: bool,
+    test_commands: Optional[List[str]] = None,
 ) -> None:
     """Create selected git essentials and execute the commit strategy."""
     if not git_config.get("git_enabled") or not git_config.get("items_to_create"):
@@ -1076,12 +1123,13 @@ def _create_git_essentials(
             Console.info("Would create/update .gitignore with language-aware patterns")
 
     other_items = [i for i in items if i != ".gitignore"]
+    context = None if dry_run else _git_essentials_context(project_dir, other_items, test_commands or [])
     for key in other_items:
         if dry_run:
             display = GIT_PROVIDERS[provider]["essentials"][key]["display"]
             Console.info(f"Would create: {display}")
             continue
-        written = write_git_essential(project_dir, key, provider, templates_dir)
+        written = write_git_essential(project_dir, key, provider, templates_dir, context)
         if written:
             tpl = GIT_PROVIDERS[provider]["essentials"][key]["template"]
             rel = tpl[len(f"{provider}/"):] if tpl else key
@@ -1090,6 +1138,12 @@ def _create_git_essentials(
 
     if dry_run or not created_files:
         return
+
+    review = _git_essentials_review_notes(other_items, context, test_commands or [])
+    if review:
+        Console.print("\n  Review before committing (AEC can't fill these in for you):")
+        for note in review:
+            Console.print(f"    - {note}")
 
     Console.print("\n  How should AEC handle git commits for files it created?")
     Console.print("    1. One commit at the end [default]")
@@ -1223,7 +1277,7 @@ def setup(
         if not cloned:
             response = prompt(
                 REPO_SETUP_CREATE_DIRECTORY,
-                "Create new directory? (y/N): ",
+                "Create new directory? [y/N]: ",
                 type="yes_no",
                 default=False,
             ).strip().lower()
@@ -1273,10 +1327,7 @@ def setup(
 
     # Git essentials creation (runs after test suite detection so language data is available)
     if not dry_run:
-        from ..lib import detect_languages as _detect_languages
-        from ..lib.test_detection import detect_test_frameworks as _detect_test_frameworks
-        _detected_languages = [lang for lang in (_detect_languages(project_dir) or [])]
-        _detected_frameworks = [fw["name"] for fw in (_detect_test_frameworks(project_dir) or [])]
+        _detected_languages, _detected_frameworks = _detect_gitignore_inputs(project_dir)
     else:
         _detected_languages = []
         _detected_frameworks = []
@@ -1286,6 +1337,11 @@ def setup(
         detected_languages=_detected_languages,
         detected_frameworks=_detected_frameworks,
         dry_run=dry_run,
+        test_commands=[
+            suite["command"]
+            for suite in aec_data.get("test", {}).get("suites", {}).values()
+            if suite.get("command")
+        ],
     )
 
     # Manage .aec.json gitignore
@@ -1309,7 +1365,7 @@ def setup(
             Console.print()
             raycast_response = prompt(
                 REPO_RAYCAST_LAUNCHERS,
-                "Create Raycast launcher scripts? (y/N): ",
+                "Create Raycast launcher scripts? [y/N]: ",
                 type="yes_no",
                 default=False,
             ).strip().lower()
@@ -1419,7 +1475,7 @@ def prune(yes: bool = False, dry_run: bool = False) -> None:
         try:
             answer = prompt(
                 REPO_PRUNE_CONFIRM,
-                "Remove these entries? [y/N] ",
+                "Remove these entries? [y/N]: ",
                 type="yes_no",
                 default=False,
             ).strip().lower()

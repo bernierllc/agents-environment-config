@@ -138,8 +138,22 @@ class TestPromptSettings:
         from aec.lib.preferences import get_setting
         assert get_setting("plans_dir") == "docs"
 
+    def test_plans_dir_off_menu_digit_reasks(self, temp_dir, monkeypatch):
+        """A digit typo like '4' is re-asked, never saved as a directory."""
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "prefs.json")
+        monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+
+        inputs = iter(["/tmp/projects", "4", "2", "n", "1"])
+        monkeypatch.setattr("builtins.input", lambda _: next(inputs))
+
+        from aec.commands.install import _prompt_settings
+        _prompt_settings()
+
+        from aec.lib.preferences import get_setting
+        assert get_setting("plans_dir") == "plans"
+
     def test_plans_dir_direct_name(self, temp_dir, monkeypatch):
-        """Should accept a direct name typed instead of 1/2/3."""
+        """A directory name answered at the menu is accepted (org-config contract)."""
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "prefs.json")
         monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
 
@@ -151,6 +165,19 @@ class TestPromptSettings:
 
         from aec.lib.preferences import get_setting
         assert get_setting("plans_dir") == "my-plans"
+
+    @pytest.mark.parametrize("answer,expected", [
+        ("1", "1"), ("dotplans", "1"), ("plans", "2"), ("CUSTOM", "3"), ("docs", "docs"),
+    ])
+    def test_plans_dir_answer_forms(self, answer, expected):
+        from aec.commands.install import _plans_dir_answer
+        assert _plans_dir_answer(answer) == expected
+
+    @pytest.mark.parametrize("bad", ["4", "a/b", "..", "", "/abs"])
+    def test_plans_dir_answer_rejects(self, bad):
+        from aec.commands.install import _plans_dir_answer
+        with pytest.raises(ValueError):
+            _plans_dir_answer(bad)
 
     def test_plans_gitignored_yes_means_tracked(self, temp_dir, monkeypatch):
         """Should set plans_gitignored=False when user says yes to tracking."""
