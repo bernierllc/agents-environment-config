@@ -139,3 +139,29 @@ def test_aec_update_never_calls_a_scope_with_managed_plugins_up_to_date(capsys):
     assert _report_scope_outdated(manifest, "global", {"plugins": Path(__file__).parent}) == 1
     assert "managed by Claude Code" in capsys.readouterr().out
 
+
+
+def test_aec_update_summary_counts_managed_plugins_in_other_repos(tmp_path, capsys):
+    """Codex P2 on #87: a Claude-managed plugin only in another repo rules out "Everything is up to date"."""
+    from aec.commands import update
+
+    other = tmp_path / "other"
+    other.mkdir()
+    manifest = {"global": {}, "repos": {str(other): {
+        "plugins": {"p": {"install_type": "marketplace", "pluginId": "p@m", "version": "1.0.0"}}}}}
+    with patch.object(update, "get_repo_root", return_value=tmp_path), \
+         patch.object(update, "fetch_latest", return_value=True), \
+         patch.object(update, "load_manifest", return_value=manifest), \
+         patch.object(update, "save_manifest"), \
+         patch.object(update, "get_source_dirs", return_value={}), \
+         patch.object(update, "find_tracked_repo", return_value=None), \
+         patch.object(update, "get_all_tracked_repos", return_value=[other]), \
+         patch.object(update, "refresh_marketplace", return_value=True), \
+         patch.object(update, "_refresh_org_configs"), \
+         patch.object(update, "check_blurb_drift"), \
+         patch("aec.lib.config.detect_agents", return_value={"claude": {}}), \
+         patch("aec.lib.preferences.get_setting", return_value=None):
+        update.run_update()
+    out = capsys.readouterr().out
+    assert "Everything is up to date" not in out
+    assert "Run `aec upgrade` to apply." in out

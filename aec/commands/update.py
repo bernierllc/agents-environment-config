@@ -65,10 +65,14 @@ def run_update() -> None:
             "Run `aec outdated --all` to check."
         )
 
-    _refresh_claude_plugins(manifest, ["global"] + get_all_repo_scopes(manifest))
+    # Claude-managed plugins in any tracked scope are unchecked until
+    # `aec upgrade` asks Claude Code, so they rule out an "up to date" summary.
+    managed = _refresh_claude_plugins(manifest, ["global"] + get_all_repo_scopes(manifest))
 
-    if any_outdated:
+    if any_outdated or managed:
         Console.print("\nRun `aec upgrade` to apply.")
+    elif other_repos:
+        Console.print("\nGlobal and local are up to date.")
     else:
         Console.print("\nEverything is up to date.")
 
