@@ -63,8 +63,8 @@ def test_static_prompt_ids_have_addendum_values():
 
 
 def test_all_static_prompt_ids_tuple_is_complete():
-    assert len(ALL_STATIC_PROMPT_IDS) == 12
-    assert len(set(ALL_STATIC_PROMPT_IDS)) == 12  # no duplicates
+    assert len(ALL_STATIC_PROMPT_IDS) == 13
+    assert len(set(ALL_STATIC_PROMPT_IDS)) == 13  # no duplicates
 
 
 def test_dynamic_prefixes_are_declared():

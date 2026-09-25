@@ -585,6 +585,9 @@ def _prompt_claude_statusline(repo_root: Path, dry_run: bool = False) -> None:
     except (json.JSONDecodeError, OSError) as exc:
         Console.warning(f"Could not read {settings_path} ({exc}) - skipping statusline")
         return
+    if not isinstance(settings, dict):
+        Console.warning(f"{settings_path} is not a JSON object - skipping statusline")
+        return
 
     if "statusLine" in settings:
         Console.success("Claude Code statusline already configured")
@@ -595,7 +598,7 @@ def _prompt_claude_statusline(repo_root: Path, dry_run: bool = False) -> None:
     answer = _prompt(
         INSTALL_CLAUDE_STATUSLINE,
         "Install the Claude Code statusline (model, context %, rate limits, "
-        "git branch, project)? (y/N): ",
+        "git branch, project)? [y/N]: ",
         type="yes_no",
         default=False,
     ).strip().lower()
@@ -620,7 +623,7 @@ def _prompt_claude_statusline(repo_root: Path, dry_run: bool = False) -> None:
         return
 
     settings["statusLine"] = {"type": "command", "command": str(target), "padding": 0}
-    atomic_write_json(settings_path, settings)
+    atomic_write_json(settings_path.resolve(), settings)
     set_setting("claude_statusline", True)
     Console.success(f"Claude Code statusline installed ({Console.path(target)})")
     if shutil.which("jq") is None:

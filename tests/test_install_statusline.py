@@ -106,6 +106,34 @@ def test_unreadable_settings_json_is_not_clobbered(claude_env, monkeypatch):
     assert (claude_env / "settings.json").read_text() == "{not json"
 
 
+@pytest.mark.parametrize("content", ["[]", "3", '"x"'])
+def test_non_object_settings_json_is_not_touched(claude_env, monkeypatch, content):
+    (claude_env / "settings.json").write_text(content)
+    _no_prompt(monkeypatch)
+
+    _prompt_claude_statusline(REPO_ROOT)
+
+    assert (claude_env / "settings.json").read_text() == content
+    assert not (claude_env / "statusline.sh").exists()
+
+
+def test_symlinked_settings_json_stays_a_symlink(claude_env, monkeypatch, temp_dir):
+    real = temp_dir / "dotfiles-settings.json"
+    real.write_text("{}")
+    (claude_env / "settings.json").symlink_to(real)
+    _answer(monkeypatch, "y")
+
+    _prompt_claude_statusline(REPO_ROOT)
+
+    assert (claude_env / "settings.json").is_symlink()
+    assert "statusLine" in json.loads(real.read_text())
+
+
+def test_installed_script_is_executable():
+    import os
+    assert os.access(REPO_ROOT / ".claude" / "statusline.sh", os.X_OK)
+
+
 def test_dry_run_changes_nothing(claude_env, monkeypatch):
     _answer(monkeypatch, "y")
     _prompt_claude_statusline(REPO_ROOT, dry_run=True)
