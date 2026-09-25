@@ -110,6 +110,18 @@ def test_stale_aec_symlink_is_repointed(claude_env, monkeypatch, temp_dir):
     assert get_setting("claude_statusline") is True
 
 
+def test_stale_aec_symlink_is_repointed_when_already_configured(claude_env, monkeypatch, temp_dir):
+    link = claude_env / "statusline.sh"
+    link.symlink_to(temp_dir / "old" / "agents-environment-config" / ".claude" / "statusline.sh")
+    (claude_env / "settings.json").write_text(json.dumps(
+        {"statusLine": {"type": "command", "command": shlex.quote(str(link))}}))
+    _no_prompt(monkeypatch)
+
+    _prompt_claude_statusline(REPO_ROOT)
+
+    assert link.resolve() == (REPO_ROOT / ".claude" / "statusline.sh").resolve()
+
+
 def test_unreadable_settings_json_is_not_clobbered(claude_env, monkeypatch):
     (claude_env / "settings.json").write_text("{not json")
     _no_prompt(monkeypatch)

@@ -590,7 +590,12 @@ def _prompt_claude_statusline(repo_root: Path, dry_run: bool = False) -> None:
         Console.warning(f"{settings_path} is not a JSON object - skipping statusline")
         return
 
+    source = repo_root / ".claude" / "statusline.sh"
+    target = CLAUDE_DIR / "statusline.sh"
     if "statusLine" in settings:
+        if is_our_symlink(target) and target.resolve() != source.resolve():
+            target.unlink()  # repo moved or recloned: repoint the managed link
+            create_symlink(source, target)
         Console.success("Claude Code statusline already configured")
         return
     if get_setting("claude_statusline") is not None:
@@ -613,8 +618,6 @@ def _prompt_claude_statusline(repo_root: Path, dry_run: bool = False) -> None:
         Console.info(f"Skipped statusline (re-offer: {Console.cmd('aec config reset claude_statusline')})")
         return
 
-    source = repo_root / ".claude" / "statusline.sh"
-    target = CLAUDE_DIR / "statusline.sh"
     linked = target.is_symlink() and target.resolve() == source.resolve()
     if not linked and (target.exists() or target.is_symlink()) and not is_our_symlink(target):
         Console.warning(f"{target} exists and isn't AEC's - leaving statusline alone")
