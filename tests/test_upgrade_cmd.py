@@ -653,8 +653,9 @@ class TestUpgradePlugins:
         assert entry["pluginId"] == "ponytail@ponytail"
 
     def test_failed_update_keeps_recorded_version(self, tmp_path):
-        entry, _, upgraded = self._run(tmp_path, self.MANAGED, fail=True)
-        assert entry["version"] == "4.10.0" and not upgraded
+        """A failed check keeps the record, and is not reported as "up to date"."""
+        entry, _, not_known_current = self._run(tmp_path, self.MANAGED, fail=True)
+        assert entry["version"] == "4.10.0" and not_known_current
 
     def test_instructions_only_preference_never_runs(self, tmp_path):
         entry, calls, _ = self._run(tmp_path, self.MANAGED, pref="instructions-only")
@@ -711,3 +712,26 @@ def test_other_repo_with_only_managed_plugins_is_offered(tmp_path):
     catalog = tmp_path / "plugins"
     catalog.mkdir()
     assert _find_outdated_repos(manifest, [repo], {"plugins": catalog}) == [(repo, 1)]
+
+
+def test_yes_upgrades_discovered_other_repos(tmp_path, capsys):
+    """Codex P2 on #87: --yes skips the other-repos confirmation instead of skipping the repos."""
+    from aec.commands import upgrade
+
+    other = tmp_path / "other"
+    other.mkdir()
+    manifest = {"global": {}, "repos": {str(other): {}}}
+    scopes = []
+    with patch.object(upgrade, "get_repo_root", return_value=tmp_path), \
+         patch.object(upgrade, "get_source_dirs", return_value={}), \
+         patch.object(upgrade, "load_manifest", return_value=manifest), \
+         patch.object(upgrade, "save_manifest"), \
+         patch.object(upgrade, "find_tracked_repo", return_value=None), \
+         patch.object(upgrade, "get_all_tracked_repos", return_value=[other]), \
+         patch.object(upgrade, "_find_outdated_repos", return_value=[(other, 1)]), \
+         patch.object(upgrade, "_upgrade_scope", side_effect=lambda m, s, *a, **k: scopes.append(s) or False), \
+         patch.object(upgrade, "prompt") as asked:
+        upgrade.run_upgrade(yes=True)
+    assert str(other) in scopes and not asked.called
+    assert "Everything is up to date" not in capsys.readouterr().out
+

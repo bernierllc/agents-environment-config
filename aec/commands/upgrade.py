@@ -97,24 +97,27 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
             )
             for repo_path, count in outdated_repos:
                 Console.print(f"  {repo_path}    {count} item(s) to upgrade or check")
-            if not yes:
-                resp = prompt(
-                    UPGRADE_OTHER_REPOS,
-                    "\nUpgrade them too? [y/N]: ",
-                    type="yes_no",
-                    default=False,
-                )
-                if resp == "y":
-                    for repo_path, _ in outdated_repos:
-                        Console.print(f"\nUpgrading {repo_path}...")
-                        _upgrade_scope(
-                            manifest,
-                            str(repo_path),
-                            source_dirs,
-                            yes=True,
-                            dry_run=False,
-                        )
-                    save_manifest(manifest, mp)
+            # --yes skips this confirmation like every other one; the repos
+            # are then upgraded rather than only listed.
+            answer = "y" if yes else prompt(
+                UPGRADE_OTHER_REPOS,
+                "\nUpgrade them too? [y/N]: ",
+                type="yes_no",
+                default=False,
+            )
+            if answer == "y":
+                for repo_path, _ in outdated_repos:
+                    Console.print(f"\nUpgrading {repo_path}...")
+                    _upgrade_scope(
+                        manifest,
+                        str(repo_path),
+                        source_dirs,
+                        yes=True,
+                        dry_run=False,
+                    )
+                save_manifest(manifest, mp)
+            # Either way the tree was not "all up to date".
+            any_upgraded = True
 
     if not any_upgraded and not dry_run:
         Console.print("\nEverything is up to date.")
@@ -391,6 +394,7 @@ def _update_claude_plugins(
             Console.error(
                 f"claude plugin update {plugin_id} failed{detail}; left at {info.get('version', '?')}."
             )
+            upgraded = True  # not known to be current; never report "up to date"
             continue
         new_v = result["new"] or info.get("version", "0.0.0")
         if result["outcome"] == "up_to_date":
