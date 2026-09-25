@@ -189,3 +189,12 @@ class TestOutdatedPlugins:
         output = capsys.readouterr().out
         assert "url-plugin" in output
         assert "version unknown" in output
+
+
+def test_managed_plugin_is_never_reported_up_to_date(capsys):
+    """Codex P2 on #87: an unchecked plugin must not yield "Everything is up to date"."""
+    from aec.commands.outdated import _print_outdated
+
+    manifest = {"global": {"plugins": {"p": {"install_type": "marketplace", "version": "1.0.0"}}}, "repos": {}}
+    assert _print_outdated(manifest, "global", {"plugins": Path(__file__).parent}, ("plugins",)) is True
+    assert "managed by Claude Code" in capsys.readouterr().out

@@ -96,7 +96,7 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
                 f"\n{len(outdated_repos)} other tracked repo(s) have upgrades:"
             )
             for repo_path, count in outdated_repos:
-                Console.print(f"  {repo_path}    {count} item(s) outdated")
+                Console.print(f"  {repo_path}    {count} item(s) to upgrade or check")
             if not yes:
                 resp = prompt(
                     UPGRADE_OTHER_REPOS,
@@ -664,7 +664,10 @@ def _find_outdated_repos(
             installed = get_installed(manifest, repo_key, item_type)
             for name, info in installed.items():
                 if item_type == "plugins" and is_claude_managed(info):
-                    continue  # Claude Code tracks these; `aec upgrade` asks it.
+                    # Only `claude plugin update` can tell whether it is
+                    # current, so the repo needs an upgrade pass either way.
+                    count += 1
+                    continue
                 if name in available:
                     if version_is_newer(
                         available[name].get("version", "0.0.0"),

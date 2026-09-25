@@ -82,10 +82,13 @@ def _print_outdated(
         singular = TYPE_SINGULAR[item_type]
         for name, info in sorted(installed.items()):
             if item_type == "plugins" and is_claude_managed(info):
+                # Not checked here (Claude Code has no check-only command), so
+                # it counts as a finding: never report the scope "up to date".
                 Console.print(
                     f"  {singular:<8} {name:<32} {info.get('version', '?')} "
                     "(managed by Claude Code; `aec upgrade` checks it)"
                 )
+                found = True
                 continue
             if name in available:
                 avail_v = available[name].get("version", "0.0.0")

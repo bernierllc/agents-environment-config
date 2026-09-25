@@ -698,3 +698,16 @@ class TestUpgradePlugins:
         self._run(tmp_path, self.MANAGED, fail=True)
         assert "failed" in capsys.readouterr().out
 
+
+
+def test_other_repo_with_only_managed_plugins_is_offered(tmp_path):
+    """Codex P2 on #87: a repo whose only plugins are Claude-managed still needs an upgrade pass."""
+    from aec.commands.upgrade import _find_outdated_repos
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    manifest = {"global": {}, "repos": {str(repo.resolve()): {
+        "plugins": {"p": {"install_type": "marketplace", "version": "1.0.0", "pluginId": "p@m"}}}}}
+    catalog = tmp_path / "plugins"
+    catalog.mkdir()
+    assert _find_outdated_repos(manifest, [repo], {"plugins": catalog}) == [(repo, 1)]
