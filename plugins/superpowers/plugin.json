@@ -1,0 +1,23 @@
+{
+  "schema": "loadout/v1",
+  "item_type": "plugin",
+  "name": "superpowers",
+  "version": "6.4.1",
+  "description": "Core skills library for Claude Code: TDD, systematic debugging, planning, code review, and other proven workflows.",
+  "source": "https://github.com/obra/superpowers",
+  "homepage": "https://github.com/obra/superpowers",
+  "author": { "name": "Jesse Vincent", "url": "https://github.com/obra" },
+  "license": "MIT",
+  "supports": ["claude"],
+  "usage": "Skills load automatically; e.g. /superpowers:requesting-code-review, /superpowers:brainstorming.",
+  "install_type": "marketplace",
+  "install": {
+    "marketplace": "anthropics/claude-plugins-official",
+    "plugin": "superpowers@claude-plugins-official"
+  },
+  "uninstall": {
+    "tools": {
+      "claude": { "run": ["claude", "plugin", "uninstall", "superpowers@claude-plugins-official"] }
+    }
+  }
+}
