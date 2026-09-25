@@ -128,3 +128,14 @@ def test_aec_apply_records_claude_version_and_id(tmp_path):
 
     entry = load_manifest(manifest_path)["global"]["plugins"]["mkt"]
     assert entry["version"] == "1.4.2" and entry["pluginId"] == "mkt@mkt"
+
+
+def test_aec_update_never_calls_a_scope_with_managed_plugins_up_to_date(capsys):
+    """Codex P2 on #87: the per-scope summary must not say "(up to date)" for an unchecked plugin."""
+    from pathlib import Path
+    from aec.commands.update import _report_scope_outdated
+
+    manifest = {"global": {"plugins": {"p": {"install_type": "marketplace", "version": "1.0.0"}}}, "repos": {}}
+    assert _report_scope_outdated(manifest, "global", {"plugins": Path(__file__).parent}) == 1
+    assert "managed by Claude Code" in capsys.readouterr().out
+

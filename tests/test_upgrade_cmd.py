@@ -653,6 +653,13 @@ class TestUpgradePlugins:
         assert ["claude", "plugin", "update", "ponytail@ponytail", "--json"] in calls
         assert entry["pluginId"] == "ponytail@ponytail"
 
+    def test_failed_marketplace_refresh_is_not_confirmation(self, tmp_path):
+        """Codex P2 on #87: up_to_date against a stale catalog cannot confirm "latest"."""
+        with patch("aec.lib.claude_plugins.refresh_marketplace", return_value=False):
+            _, _, not_current = self._run(tmp_path, self.MANAGED, update={
+                "updateOutcome": "up_to_date", "oldVersion": "4.10.0", "newVersion": "4.10.0"})
+        assert not_current
+
     def test_failed_update_keeps_recorded_version(self, tmp_path):
         """A failed check keeps the record, and is not reported as "up to date"."""
         entry, _, not_known_current = self._run(tmp_path, self.MANAGED, fail=True)

@@ -386,6 +386,8 @@ def _update_claude_plugins(
 
     for marketplace in sorted({marketplace_of(pid) for _, _, pid in targets}):
         if not refresh_marketplace(marketplace):
+            # A check against a stale catalog cannot confirm "latest".
+            all_current = False
             Console.warning(f"Could not refresh marketplace {marketplace}; updating from its cached catalog.")
 
     for name, info, plugin_id in targets:

@@ -65,11 +65,11 @@ def run_update() -> None:
             "Run `aec outdated --all` to check."
         )
 
-    managed = _refresh_claude_plugins(manifest, ["global"] + get_all_repo_scopes(manifest))
+    _refresh_claude_plugins(manifest, ["global"] + get_all_repo_scopes(manifest))
 
     if any_outdated:
         Console.print("\nRun `aec upgrade` to apply.")
-    elif not managed:
+    else:
         Console.print("\nEverything is up to date.")
 
     _refresh_org_configs()
@@ -142,9 +142,10 @@ def _refresh_claude_plugins(manifest: dict, scopes: list) -> int:
     """Refresh the marketplaces of every AEC-recorded Claude Code plugin.
 
     Maps `aec update` (fetch sources) onto `claude plugin marketplace update`.
-    Returns how many Claude-managed plugins AEC tracks, and prints their
-    status. Claude Code has no check-only command, so whether they are
-    outdated is learned on upgrade. Honors the same guards as upgrade.
+    Returns how many Claude-managed plugins AEC tracks (each scope's report
+    already lists them as unchecked). Claude Code has no check-only command,
+    so whether they are outdated is learned on upgrade. Honors the same
+    guards as upgrade.
     """
     from ..lib.claude_plugins import commands_blocked
     from ..lib.preferences import get_setting
@@ -170,10 +171,6 @@ def _refresh_claude_plugins(manifest: dict, scopes: list) -> int:
     for marketplace in sorted({marketplace_of(i["pluginId"]) for i in managed if i.get("pluginId")}):
         Console.print(f"Refreshing Claude Code marketplace {marketplace}...", end=" ")
         Console.print("done." if refresh_marketplace(marketplace) else "failed.")
-    Console.print(
-        f"{len(managed)} Claude Code plugin(s): versions are managed by Claude Code; "
-        "`aec upgrade` runs `claude plugin update` for each."
-    )
     return len(managed)
 
 
@@ -187,7 +184,15 @@ def _report_scope_outdated(manifest: dict, scope: str, source_dirs: dict) -> int
         installed = get_installed(manifest, scope, item_type)
         for name, info in installed.items():
             if item_type == "plugins" and is_claude_managed(info):
-                continue  # reported by _refresh_claude_plugins
+                # Claude Code has no check-only command, so this plugin is
+                # unchecked until `aec upgrade`: list it and never call the
+                # scope "up to date".
+                Console.print(
+                    f"  plugin  {name}  {info.get('version', '?')} "
+                    "(managed by Claude Code; `aec upgrade` checks it)"
+                )
+                count += 1
+                continue
             if name in available:
                 avail_v = available[name].get("version", "0.0.0")
                 inst_v = info.get("version", "0.0.0")
