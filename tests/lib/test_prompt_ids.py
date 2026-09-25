@@ -20,6 +20,7 @@ from aec.lib.prompt_ids import (
     DYNAMIC_PROMPT_ID_PREFIXES,
     INSTALL_BATCH_PROJECT_SETUP_SCAN_MODE,
     INSTALL_BATCH_PROJECT_SETUP_START,
+    INSTALL_CLAUDE_STATUSLINE,
     INSTALL_CONFIGURABLE_INSTRUCTIONS_PREFIX,
     INSTALL_QUALITY_REPORT_RETENTION_DAYS,
     INSTALL_QUALITY_REPORT_RETENTION_MODE,
@@ -54,6 +55,7 @@ def test_static_prompt_ids_have_addendum_values():
         "install.quality.report_viewer": INSTALL_QUALITY_REPORT_VIEWER,
         "install.quality.report_retention_mode": INSTALL_QUALITY_REPORT_RETENTION_MODE,
         "install.quality.report_retention_days": INSTALL_QUALITY_REPORT_RETENTION_DAYS,
+        "install.claude.statusline": INSTALL_CLAUDE_STATUSLINE,
         "setup.track_current_repo": SETUP_TRACK_CURRENT_REPO,
     }
     for value, constant in expected.items():

@@ -15,6 +15,7 @@ from ..lib.git import is_git_repo, has_gitmodules, init_submodules, update_submo
 from ..lib.prompt_ids import (
     INSTALL_BATCH_PROJECT_SETUP_SCAN_MODE,
     INSTALL_BATCH_PROJECT_SETUP_START,
+    INSTALL_CLAUDE_STATUSLINE,
     INSTALL_QUALITY_REPORT_RETENTION_DAYS,
     INSTALL_QUALITY_REPORT_RETENTION_MODE,
     INSTALL_QUALITY_REPORT_VIEWER,
@@ -559,6 +560,73 @@ def _prompt_quality_settings(dry_run: bool = False) -> None:
         _save("report_retention_mode", "manual")
 
 
+def _prompt_claude_statusline(repo_root: Path, dry_run: bool = False) -> None:
+    """Offer AEC's Claude Code statusline when Claude Code is installed.
+
+    Asked once: the answer is stored as ``settings.claude_statusline``. An
+    existing ``statusLine`` in ~/.claude/settings.json is never overwritten,
+    and neither is a ~/.claude/statusline.sh that AEC does not own.
+    """
+    import shutil
+
+    from ..lib import CLAUDE_DIR, IS_WINDOWS, create_symlink, is_our_symlink
+    from ..lib.atomic_write import atomic_write_json
+    from ..lib.preferences import get_setting, set_setting
+
+    if IS_WINDOWS or not agent_tools._is_claude_installed():
+        return
+
+    settings_path = CLAUDE_DIR / "settings.json"
+    try:
+        settings = (
+            json.loads(settings_path.read_text(encoding="utf-8"))
+            if settings_path.exists() else {}
+        )
+    except (json.JSONDecodeError, OSError) as exc:
+        Console.warning(f"Could not read {settings_path} ({exc}) - skipping statusline")
+        return
+
+    if "statusLine" in settings:
+        Console.success("Claude Code statusline already configured")
+        return
+    if get_setting("claude_statusline") is not None:
+        return  # already answered; a removed statusLine is the user's choice
+
+    answer = _prompt(
+        INSTALL_CLAUDE_STATUSLINE,
+        "Install the Claude Code statusline (model, context %, rate limits, "
+        "git branch, project)? (y/N): ",
+        type="yes_no",
+        default=False,
+    ).strip().lower()
+    wanted = answer in ("y", "yes")
+
+    if dry_run:
+        Console.info(f"Would {'install' if wanted else 'skip'} the Claude Code statusline")
+        return
+    if not wanted:
+        set_setting("claude_statusline", False)
+        Console.info(f"Skipped statusline (re-offer: {Console.cmd('aec config reset claude_statusline')})")
+        return
+
+    source = repo_root / ".claude" / "statusline.sh"
+    target = CLAUDE_DIR / "statusline.sh"
+    if target.exists() or target.is_symlink():
+        if not is_our_symlink(target):
+            Console.warning(f"{target} exists and isn't AEC's - leaving statusline alone")
+            return
+    elif not create_symlink(source, target):
+        Console.error(f"Failed to link {target} -> {source}")
+        return
+
+    settings["statusLine"] = {"type": "command", "command": str(target), "padding": 0}
+    atomic_write_json(settings_path, settings)
+    set_setting("claude_statusline", True)
+    Console.success(f"Claude Code statusline installed ({Console.path(target)})")
+    if shutil.which("jq") is None:
+        Console.warning("The statusline needs jq - install it (e.g. brew install jq)")
+
+
 def install(dry_run: bool = False) -> None:
     """
     Full setup of agents-environment-config.
@@ -640,6 +708,10 @@ def install(dry_run: bool = False) -> None:
                 Console.print("  During project setup, we'll create instruction files for these agents.")
         else:
             Console.warning("No supported agents detected.")
+
+    # Claude Code statusline (interactive, Claude users only — never collapse)
+    with Console.section("Claude Code Statusline", collapse=False):
+        _prompt_claude_statusline(repo_root, dry_run)
 
     # Prompt for settings (interactive — never collapse)
     with Console.section("Configuration", collapse=False):

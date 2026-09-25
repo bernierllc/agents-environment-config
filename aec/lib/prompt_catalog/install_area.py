@@ -8,6 +8,7 @@ from __future__ import annotations
 from ..prompt_ids import (
     INSTALL_BATCH_PROJECT_SETUP_SCAN_MODE,
     INSTALL_BATCH_PROJECT_SETUP_START,
+    INSTALL_CLAUDE_STATUSLINE,
     INSTALL_CONFIGURABLE_INSTRUCTIONS_PREFIX,
     INSTALL_QUALITY_REPORT_RETENTION_DAYS,
     INSTALL_QUALITY_REPORT_RETENTION_MODE,
@@ -115,6 +116,13 @@ SPECS: tuple[PromptSpec, ...] = (
         summary="Days to keep test reports before pruning.",
         type="int[1..3650]",
         default=30,
+    ),
+    PromptSpec(
+        INSTALL_CLAUDE_STATUSLINE,
+        command="install",
+        summary="Install the AEC Claude Code statusline? (asked only when Claude Code is detected)",
+        type="yes_no",
+        default=False,
     ),
     PromptSpec(
         SETUP_TRACK_CURRENT_REPO,

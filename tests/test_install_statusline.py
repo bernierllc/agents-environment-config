@@ -1,0 +1,115 @@
+"""Tests for the Claude Code statusline step of `aec install`."""
+
+import json
+from pathlib import Path
+
+import pytest
+
+from aec.commands.install import _prompt_claude_statusline
+from aec.lib.preferences import get_setting
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture
+def claude_env(temp_dir, monkeypatch):
+    """A fake ~/.claude plus isolated AEC preferences; Claude detected."""
+    claude_dir = temp_dir / ".claude"
+    claude_dir.mkdir()
+    monkeypatch.setattr("aec.lib.CLAUDE_DIR", claude_dir)
+    monkeypatch.setattr("aec.lib.IS_WINDOWS", False)
+    monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "prefs.json")
+    monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
+    monkeypatch.setattr("aec.commands.agent_tools._is_claude_installed", lambda: True)
+    return claude_dir
+
+
+def _answer(monkeypatch, reply):
+    monkeypatch.setattr("aec.lib.prompts._stdin_is_tty", lambda: True, raising=False)
+    monkeypatch.setattr("builtins.input", lambda _: reply)
+
+
+def _no_prompt(monkeypatch):
+    def fail(_):
+        raise AssertionError("should not prompt")
+    monkeypatch.setattr("builtins.input", fail)
+
+
+def test_yes_links_script_and_merges_settings(claude_env, monkeypatch):
+    (claude_env / "settings.json").write_text(json.dumps({"model": "opus"}))
+    _answer(monkeypatch, "y")
+
+    _prompt_claude_statusline(REPO_ROOT)
+
+    link = claude_env / "statusline.sh"
+    assert link.is_symlink()
+    assert link.resolve() == (REPO_ROOT / ".claude" / "statusline.sh").resolve()
+    settings = json.loads((claude_env / "settings.json").read_text())
+    assert settings["model"] == "opus"  # other keys preserved
+    assert settings["statusLine"] == {"type": "command", "command": str(link), "padding": 0}
+    assert get_setting("claude_statusline") is True
+
+
+def test_no_records_decline_and_is_not_asked_again(claude_env, monkeypatch):
+    _answer(monkeypatch, "n")
+    _prompt_claude_statusline(REPO_ROOT)
+
+    assert not (claude_env / "statusline.sh").exists()
+    assert not (claude_env / "settings.json").exists()
+    assert get_setting("claude_statusline") is False
+
+    _no_prompt(monkeypatch)
+    _prompt_claude_statusline(REPO_ROOT)
+
+
+def test_reset_re_offers_after_decline(claude_env, monkeypatch):
+    from aec.lib.preferences import reset_preference, set_setting
+
+    set_setting("claude_statusline", False)
+    reset_preference("claude_statusline")
+    assert get_setting("claude_statusline") is None
+
+
+def test_skips_when_claude_not_installed(claude_env, monkeypatch):
+    monkeypatch.setattr("aec.commands.agent_tools._is_claude_installed", lambda: False)
+    _no_prompt(monkeypatch)
+    _prompt_claude_statusline(REPO_ROOT)
+    assert get_setting("claude_statusline") is None
+
+
+def test_existing_statusline_is_never_overwritten(claude_env, monkeypatch):
+    mine = {"statusLine": {"type": "command", "command": "~/mine.sh"}}
+    (claude_env / "settings.json").write_text(json.dumps(mine))
+    _no_prompt(monkeypatch)
+
+    _prompt_claude_statusline(REPO_ROOT)
+
+    assert json.loads((claude_env / "settings.json").read_text()) == mine
+
+
+def test_foreign_statusline_script_is_left_alone(claude_env, monkeypatch):
+    (claude_env / "statusline.sh").write_text("#!/bin/sh\necho mine\n")
+    _answer(monkeypatch, "y")
+
+    _prompt_claude_statusline(REPO_ROOT)
+
+    assert (claude_env / "statusline.sh").read_text() == "#!/bin/sh\necho mine\n"
+    assert not (claude_env / "settings.json").exists()
+
+
+def test_unreadable_settings_json_is_not_clobbered(claude_env, monkeypatch):
+    (claude_env / "settings.json").write_text("{not json")
+    _no_prompt(monkeypatch)
+
+    _prompt_claude_statusline(REPO_ROOT)
+
+    assert (claude_env / "settings.json").read_text() == "{not json"
+
+
+def test_dry_run_changes_nothing(claude_env, monkeypatch):
+    _answer(monkeypatch, "y")
+    _prompt_claude_statusline(REPO_ROOT, dry_run=True)
+
+    assert not (claude_env / "statusline.sh").exists()
+    assert not (claude_env / "settings.json").exists()
+    assert get_setting("claude_statusline") is None
