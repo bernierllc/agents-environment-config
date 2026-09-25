@@ -117,6 +117,10 @@ def test_stale_aec_symlink_is_repointed_when_already_configured(claude_env, monk
         {"statusLine": {"type": "command", "command": shlex.quote(str(link))}}))
     _no_prompt(monkeypatch)
 
+    stale = link.readlink()
+    _prompt_claude_statusline(REPO_ROOT, dry_run=True)
+    assert link.readlink() == stale  # dry run previews only
+
     _prompt_claude_statusline(REPO_ROOT)
 
     assert link.resolve() == (REPO_ROOT / ".claude" / "statusline.sh").resolve()

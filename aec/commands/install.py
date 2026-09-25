@@ -594,6 +594,9 @@ def _prompt_claude_statusline(repo_root: Path, dry_run: bool = False) -> None:
     target = CLAUDE_DIR / "statusline.sh"
     if "statusLine" in settings:
         if is_our_symlink(target) and target.resolve() != source.resolve():
+            if dry_run:
+                Console.info(f"Would repoint {target} -> {source}")
+                return
             target.unlink()  # repo moved or recloned: repoint the managed link
             create_symlink(source, target)
         Console.success("Claude Code statusline already configured")
