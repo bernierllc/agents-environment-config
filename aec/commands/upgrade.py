@@ -10,7 +10,6 @@ from ..lib.prompt_catalog.install_flow_area import item_prompt_id
 from ..lib.prompt_catalog.maintenance_area import (
     UPGRADE_OTHER_REPOS,
     UPGRADE_OVERWRITE_LOCAL_PREFIX,
-    UPGRADE_CLAUDE_PLUGINS_CONFIRM,
     UPGRADE_PLUGINS_CONFIRM,
     UPGRADE_RUN_UPDATE_FIRST,
 )
@@ -312,8 +311,8 @@ def _upgrade_plugins(
     - Claude Code marketplace plugins: Claude Code decides what is newer.
       Each one goes through ``claude plugin update`` (a no-op when current)
       and the version Claude Code reports is recorded; the catalog's pinned
-      version is not consulted. One ``[Y/n]`` confirmation (skipped with
-      ``--yes``) covers the batch.
+      version is not consulted. Running ``aec upgrade`` is the request, so
+      there is no extra prompt: this is Claude Code's own update.
     - Plugins recorded under another install type (e.g. ponytail's old
       per-tool entry) are re-installed when the catalog version is newer,
       after one batch confirmation (skipped with ``--yes``).
@@ -330,7 +329,7 @@ def _upgrade_plugins(
         and version_is_newer(available[n].get("version", "0.0.0"), i.get("version", "0.0.0"))
     ]
     upgraded = False
-    if managed and _update_claude_plugins(manifest, scope, source_dir, managed, available, yes, dry_run):
+    if managed and _update_claude_plugins(manifest, scope, source_dir, managed, available, dry_run):
         upgraded = True
     if stale and _reinstall_plugins(manifest, scope, source_dir, stale, available, yes, dry_run):
         upgraded = True
@@ -365,8 +364,7 @@ def _resolve_plugin_id(name: str, info: dict, source_dir: Path, available: dict)
 
 
 def _update_claude_plugins(
-    manifest: dict, scope: str, source_dir: Path, managed: list, available: dict,
-    yes: bool, dry_run: bool,
+    manifest: dict, scope: str, source_dir: Path, managed: list, available: dict, dry_run: bool,
 ) -> bool:
     from ..lib.claude_plugins import marketplace_of, refresh_marketplace, update_plugin
     from ..lib.manifest_v2 import record_plugin_install
@@ -392,17 +390,6 @@ def _update_claude_plugins(
         for _, _, plugin_id in targets:
             Console.print(f"  {blocked}; run manually -> claude plugin update {plugin_id}")
         return False
-    if not yes:
-        names = ", ".join(name for name, _, _ in targets)
-        resp = prompt(
-            UPGRADE_CLAUDE_PLUGINS_CONFIRM,
-            f"Check {len(targets)} Claude Code plugin(s) ({names}) for updates? [Y/n]: ",
-            type="yes_no",
-            default=True,
-        )
-        if resp != "y":
-            Console.info("Skipped Claude Code plugin updates.")
-            return False
 
     for marketplace in sorted({marketplace_of(pid) for _, _, pid in targets}):
         if not refresh_marketplace(marketplace):

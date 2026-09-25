@@ -683,11 +683,9 @@ class TestUpgradePlugins:
                                            yes=False, answer="n")
         assert calls == [] and entry["version"] == "1.0.0" and not upgraded
 
-    def test_managed_update_without_yes_declined_runs_nothing(self, tmp_path):
-        entry, calls, upgraded = self._run(tmp_path, self.MANAGED, yes=False, answer="n")
-        assert calls == [] and not upgraded and entry["version"] == "4.10.0"
-
-    def test_managed_update_without_yes_confirmed_runs(self, tmp_path):
-        _, calls, upgraded = self._run(tmp_path, self.MANAGED, yes=False, answer="y")
+    def test_managed_update_needs_no_extra_confirmation(self, tmp_path):
+        """`aec upgrade` is the request; Claude Code's own update runs without a prompt."""
+        # Every prompt would answer "no"; the update still runs.
+        _, calls, upgraded = self._run(tmp_path, self.MANAGED, yes=False, answer="n")
         assert ["claude", "plugin", "update", "ponytail@ponytail", "--json"] in calls and upgraded
 
