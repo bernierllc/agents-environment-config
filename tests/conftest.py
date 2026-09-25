@@ -8,6 +8,17 @@ from typing import Generator
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolate_preferences(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never read the developer's real ~/.agents-environment-config/preferences.json.
+
+    Tests that need specific preferences monkeypatch AEC_PREFERENCES themselves.
+    """
+    monkeypatch.setattr(
+        "aec.lib.preferences.AEC_PREFERENCES", tmp_path / "preferences.json"
+    )
+
+
 @pytest.fixture
 def temp_dir() -> Generator[Path, None, None]:
     """Create a temporary directory for testing."""

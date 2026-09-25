@@ -260,10 +260,6 @@ class TestGetGitignorePatterns:
         patterns = get_gitignore_patterns()
         assert ".cursor/rules" in patterns
 
-    def test_includes_plans(self):
-        patterns = get_gitignore_patterns()
-        assert "/plans/" in patterns
-
 
 class TestGetGitignorePatternsWithPlansDir:
     """Test that get_gitignore_patterns respects plans_dir setting."""
