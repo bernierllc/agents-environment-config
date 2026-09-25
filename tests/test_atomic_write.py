@@ -112,3 +112,22 @@ def test_atomic_write_preserves_existing_mode(tmp_path):
     atomic_write_json(target, {"a": 1})
 
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
+def test_atomic_write_tmp_file_is_never_wider_than_original(tmp_path, monkeypatch):
+    import os
+    import stat
+    target = tmp_path / "secret.json"
+    target.write_text("{}")
+    os.chmod(target, 0o600)
+    seen = []
+    real_replace = os.replace
+
+    def spy(src, dst):
+        seen.append(stat.S_IMODE(os.stat(src).st_mode))
+        real_replace(src, dst)
+    monkeypatch.setattr(os, "replace", spy)
+
+    atomic_write_json(target, {"a": 1})
+
+    assert seen == [0o600]
