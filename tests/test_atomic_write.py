@@ -100,3 +100,15 @@ class TestAtomicWriteText:
 
         tmp_path = target.with_suffix(".txt.tmp")
         assert not tmp_path.exists()
+
+
+def test_atomic_write_preserves_existing_mode(tmp_path):
+    import os
+    import stat
+    target = tmp_path / "secret.json"
+    target.write_text("{}")
+    os.chmod(target, 0o600)
+
+    atomic_write_json(target, {"a": 1})
+
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600

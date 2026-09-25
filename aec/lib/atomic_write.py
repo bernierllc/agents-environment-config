@@ -8,13 +8,17 @@ from pathlib import Path
 def atomic_write_text(path: Path, content: str) -> None:
     """Write content to path atomically via tmp-then-rename.
 
-    Creates parent directories if needed. Uses os.replace() for an atomic
-    rename that works on both POSIX and Windows.
+    Creates parent directories if needed and preserves an existing file's
+    permission bits. Uses os.replace() for an atomic rename that works on
+    both POSIX and Windows.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     try:
         tmp_path.write_text(content, encoding="utf-8")
+        if path.exists():
+            # Keep the original mode (e.g. 0600 settings) rather than umask's
+            os.chmod(tmp_path, path.stat().st_mode & 0o7777)
         os.replace(tmp_path, path)
     except BaseException:
         # Clean up the tmp file on any failure

@@ -614,18 +614,27 @@ def _prompt_claude_statusline(repo_root: Path, dry_run: bool = False) -> None:
 
     source = repo_root / ".claude" / "statusline.sh"
     target = CLAUDE_DIR / "statusline.sh"
-    if not (target.is_symlink() and target.resolve() == source.resolve()):
-        if target.exists() or target.is_symlink():
-            if not is_our_symlink(target):
-                Console.warning(f"{target} exists and isn't AEC's - leaving statusline alone")
-                return
+    linked = target.is_symlink() and target.resolve() == source.resolve()
+    if not linked and (target.exists() or target.is_symlink()) and not is_our_symlink(target):
+        Console.warning(f"{target} exists and isn't AEC's - leaving statusline alone")
+        return
+
+    # Settings first: if that write fails, nothing has been changed yet.
+    settings["statusLine"] = {"type": "command", "command": str(target), "padding": 0}
+    try:
+        atomic_write_json(settings_path.resolve(), settings)
+    except OSError as e:
+        Console.warning(f"Couldn't write {settings_path} ({e}) - statusline not installed")
+        return
+
+    if not linked:
+        if target.is_symlink():
             target.unlink()  # stale AEC link (repo moved or recloned)
         if not create_symlink(source, target):
             Console.error(f"Failed to link {target} -> {source}")
+            del settings["statusLine"]  # roll back so the next install re-offers
+            atomic_write_json(settings_path.resolve(), settings)
             return
-
-    settings["statusLine"] = {"type": "command", "command": str(target), "padding": 0}
-    atomic_write_json(settings_path.resolve(), settings)
     set_setting("claude_statusline", True)
     Console.success(f"Claude Code statusline installed ({Console.path(target)})")
     if shutil.which("jq") is None:

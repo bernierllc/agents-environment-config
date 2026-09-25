@@ -1,6 +1,7 @@
 """Tests for the Claude Code statusline step of `aec install`."""
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -151,4 +152,29 @@ def test_dry_run_changes_nothing(claude_env, monkeypatch):
 
     assert not (claude_env / "statusline.sh").exists()
     assert not (claude_env / "settings.json").exists()
+    assert get_setting("claude_statusline") is None
+
+
+def test_settings_write_failure_changes_nothing(claude_env, monkeypatch):
+    (claude_env / "settings.json").write_text("{}")
+    _answer(monkeypatch, "y")
+
+    os.chmod(claude_env, 0o500)  # read-only dir: the atomic tmp file can't be created
+    try:
+        _prompt_claude_statusline(REPO_ROOT)  # must not raise
+    finally:
+        os.chmod(claude_env, 0o700)
+
+    assert not (claude_env / "statusline.sh").is_symlink()
+    assert get_setting("claude_statusline") is None
+
+
+def test_link_failure_rolls_back_settings(claude_env, monkeypatch):
+    (claude_env / "settings.json").write_text('{"model": "opus"}')
+    _answer(monkeypatch, "y")
+    monkeypatch.setattr("aec.lib.create_symlink", lambda *_: False)
+
+    _prompt_claude_statusline(REPO_ROOT)
+
+    assert json.loads((claude_env / "settings.json").read_text()) == {"model": "opus"}
     assert get_setting("claude_statusline") is None
