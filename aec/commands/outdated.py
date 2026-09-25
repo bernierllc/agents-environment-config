@@ -58,7 +58,9 @@ def run_outdated(type_filter: Optional[str] = None, show_all: bool = False) -> N
                 continue
             repo_key = str(repo_path.resolve())
             Console.print(f"\n{repo_path}:")
-            if not _print_outdated(manifest, repo_key, source_dirs, types_to_check):
+            if _print_outdated(manifest, repo_key, source_dirs, types_to_check):
+                any_outdated = True
+            else:
                 Console.print("  (up to date)")
 
     if not any_outdated:
