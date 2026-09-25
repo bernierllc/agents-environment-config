@@ -150,6 +150,24 @@ def _install_with_source(tmp_path):
     return repo_root
 
 
+def _add_second_item(repo_root, key):
+    """Install another repo-local skill beside the one _install_with_source made."""
+    from aec.lib.hooks.installer import install_item_hooks
+
+    item_dir = repo_root / ".claude" / "skills" / key
+    item_dir.mkdir(parents=True, exist_ok=True)
+    (item_dir / "hooks.json").write_text(json.dumps({
+        "$schema": "x", "version": "1.0.0", "hooks": [{
+            "id": "fmt", "event": "on_file_edit",
+            "command": "echo fmt", "description": "fmt",
+        }],
+    }))
+    install_item_hooks(
+        item_type="skill", item_key=key, item_version="1.0.0",
+        item_dir=item_dir, repo_root=repo_root, agents=["claude"],
+    )
+
+
 class TestRepairRepo:
     def test_repair_restores_clobbered_hook(self, tmp_path):
         from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
@@ -184,6 +202,21 @@ class TestRepairRepo:
         results = repair_repo(repo_root)
         assert results and not any(r.repaired for r in results)
         assert any("source" in (r.detail or "").lower() for r in results)
+
+    def test_one_broken_item_does_not_abort_the_rest(self, tmp_path):
+        from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
+
+        repo_root = _install_with_source(tmp_path)
+        _add_second_item(repo_root, "broken")
+        (repo_root / ".claude/settings.json").write_text(json.dumps({"hooks": {}}))
+        (repo_root / ".claude/skills/broken/hooks.json").write_text("{not json")
+
+        results = {r.item_key: r for r in repair_repo(repo_root)}
+
+        assert results["demo"].repaired
+        assert not results["broken"].repaired and results["broken"].detail
+        by_key = {s.item_key: s.status for s in verify_repo(repo_root)}
+        assert by_key == {"demo": Drift.OK, "broken": Drift.MISSING}
 
 
 class TestStaleAbsolutePaths:
