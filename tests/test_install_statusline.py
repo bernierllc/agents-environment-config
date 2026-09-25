@@ -97,6 +97,17 @@ def test_foreign_statusline_script_is_left_alone(claude_env, monkeypatch):
     assert not (claude_env / "settings.json").exists()
 
 
+def test_stale_aec_symlink_is_repointed(claude_env, monkeypatch, temp_dir):
+    link = claude_env / "statusline.sh"
+    link.symlink_to(temp_dir / "old" / "agents-environment-config" / ".claude" / "statusline.sh")
+    _answer(monkeypatch, "y")
+
+    _prompt_claude_statusline(REPO_ROOT)
+
+    assert link.resolve() == (REPO_ROOT / ".claude" / "statusline.sh").resolve()
+    assert get_setting("claude_statusline") is True
+
+
 def test_unreadable_settings_json_is_not_clobbered(claude_env, monkeypatch):
     (claude_env / "settings.json").write_text("{not json")
     _no_prompt(monkeypatch)

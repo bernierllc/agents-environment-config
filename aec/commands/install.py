@@ -614,13 +614,15 @@ def _prompt_claude_statusline(repo_root: Path, dry_run: bool = False) -> None:
 
     source = repo_root / ".claude" / "statusline.sh"
     target = CLAUDE_DIR / "statusline.sh"
-    if target.exists() or target.is_symlink():
-        if not is_our_symlink(target):
-            Console.warning(f"{target} exists and isn't AEC's - leaving statusline alone")
+    if not (target.is_symlink() and target.resolve() == source.resolve()):
+        if target.exists() or target.is_symlink():
+            if not is_our_symlink(target):
+                Console.warning(f"{target} exists and isn't AEC's - leaving statusline alone")
+                return
+            target.unlink()  # stale AEC link (repo moved or recloned)
+        if not create_symlink(source, target):
+            Console.error(f"Failed to link {target} -> {source}")
             return
-    elif not create_symlink(source, target):
-        Console.error(f"Failed to link {target} -> {source}")
-        return
 
     settings["statusLine"] = {"type": "command", "command": str(target), "padding": 0}
     atomic_write_json(settings_path.resolve(), settings)
