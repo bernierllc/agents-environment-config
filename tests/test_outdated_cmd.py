@@ -140,9 +140,10 @@ class TestOutdatedPlugins:
         (plugin_dir / "plugin.json").write_text(json.dumps({
             "schema": "loadout/v1", "item_type": "plugin", "name": "old-plugin",
             "version": "2.0.0", "description": "d", "source": "https://example.test",
-            "install_type": "marketplace", "install": {"marketplace": "x", "plugin": "old-plugin"},
+            "install_type": "marketplace", "install": {"marketplace": "x", "plugin": "old-plugin@x"},
         }))
-        _add_plugin_to_manifest(temp_dir, "old-plugin", {"version": "1.0.0", "install_type": "marketplace", "installedAt": ""})
+        # recorded under a non-marketplace install type -> the catalog version is the reference
+        _add_plugin_to_manifest(temp_dir, "old-plugin", {"version": "1.0.0", "install_type": "per-tool", "installedAt": ""})
 
         mock_root.return_value = outdated_env
         mock_dirs.return_value = _make_source_dirs_with_plugins(outdated_env)
@@ -150,6 +151,28 @@ class TestOutdatedPlugins:
         output = capsys.readouterr().out
         assert "old-plugin" in output
         assert "1.0.0" in output and "2.0.0" in output
+
+    @patch("aec.commands.outdated.get_source_dirs")
+    @patch("aec.commands.outdated.get_repo_root")
+    def test_claude_managed_plugin_is_not_compared_to_catalog(self, mock_root, mock_dirs, outdated_env, capsys, temp_dir):
+        """Claude Code owns marketplace plugin versions; the catalog pin would be stale."""
+        from aec.commands.outdated import run_outdated
+
+        plugin_dir = outdated_env / "plugins" / "old-plugin"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text(json.dumps({
+            "schema": "loadout/v1", "item_type": "plugin", "name": "old-plugin",
+            "version": "2.0.0", "description": "d", "source": "https://example.test",
+            "install_type": "marketplace", "install": {"marketplace": "x", "plugin": "old-plugin@x"},
+        }))
+        _add_plugin_to_manifest(temp_dir, "old-plugin", {"version": "1.0.0", "install_type": "marketplace", "installedAt": ""})
+
+        mock_root.return_value = outdated_env
+        mock_dirs.return_value = _make_source_dirs_with_plugins(outdated_env)
+        run_outdated(type_filter="plugin")
+        output = capsys.readouterr().out
+        assert "managed by Claude Code" in output
+        assert "2.0.0" not in output
 
     @patch("aec.commands.outdated.get_source_dirs")
     @patch("aec.commands.outdated.get_repo_root")
@@ -166,3 +189,32 @@ class TestOutdatedPlugins:
         output = capsys.readouterr().out
         assert "url-plugin" in output
         assert "version unknown" in output
+
+
+def test_managed_plugin_is_never_reported_up_to_date(capsys):
+    """Codex P2 on #87: an unchecked plugin must not yield "Everything is up to date"."""
+    from aec.commands.outdated import _print_outdated
+
+    manifest = {"global": {"plugins": {"p": {"install_type": "marketplace", "version": "1.0.0"}}}, "repos": {}}
+    assert _print_outdated(manifest, "global", {"plugins": Path(__file__).parent}, ("plugins",)) is True
+    assert "managed by Claude Code" in capsys.readouterr().out
+
+
+def test_all_counts_findings_in_other_repos(tmp_path, capsys):
+    """Codex P2 on #87: a finding only in a non-current repo must not end in "Everything is up to date"."""
+    from unittest.mock import patch
+    from aec.commands.outdated import run_outdated
+
+    other = tmp_path / "other"
+    other.mkdir()
+    manifest = {"global": {}, "repos": {str(other.resolve()): {
+        "plugins": {"p": {"install_type": "marketplace", "version": "1.0.0"}}}}}
+    with patch("aec.commands.outdated.get_repo_root", return_value=tmp_path), \
+         patch("aec.commands.outdated.get_source_dirs", return_value={"plugins": tmp_path}), \
+         patch("aec.commands.outdated.load_manifest", return_value=manifest), \
+         patch("aec.commands.outdated.find_tracked_repo", return_value=None), \
+         patch("aec.commands.outdated.get_all_tracked_repos", return_value=[other]):
+        run_outdated(show_all=True)
+    out = capsys.readouterr().out
+    assert "managed by Claude Code" in out
+    assert "Everything is up to date" not in out

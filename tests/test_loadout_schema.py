@@ -32,7 +32,7 @@ def test_plugin_missing_install_type_fails() -> None:
         "version": "1.0.0",
         "description": "x",
         "source": "https://example.com",
-        "install": {"marketplace": "example/my-plugin", "plugin": "my-plugin"},
+        "install": {"marketplace": "example/my-plugin", "plugin": "my-plugin@my-marketplace"},
     }
     assert not _plugin_validator().is_valid(instance)
 
@@ -62,7 +62,7 @@ def test_plugin_valid_marketplace_passes() -> None:
         "description": "x",
         "source": "https://example.com",
         "install_type": "marketplace",
-        "install": {"marketplace": "example/my-plugin", "plugin": "my-plugin"},
+        "install": {"marketplace": "example/my-plugin", "plugin": "my-plugin@my-marketplace"},
     }
     assert _plugin_validator().is_valid(instance)
 

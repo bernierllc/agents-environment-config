@@ -20,6 +20,9 @@ ITEM_TYPES = ("plugin", "skill", "agent", "rule")
 INSTALL_TYPES = ("marketplace", "per-tool", "external")
 _BASE_REQUIRED = ("schema", "item_type", "name", "version", "description", "source")
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+# Claude Code plugin id: `<plugin>@<marketplace name>` (the marketplace's name,
+# not its GitHub source).
+_PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]*@[A-Za-z0-9][\w.-]*$")
 # install sub-keys each install_type's consumers index (mirrors plugin.schema.json allOf)
 _INSTALL_REQUIRED = {
     "marketplace": ("marketplace", "plugin"),
@@ -58,6 +61,13 @@ def validate_loadout(data: Dict[str, Any]) -> None:
         for key in _INSTALL_REQUIRED[it]:
             if key not in install:
                 raise LoadoutError(f"{it} install block missing required key: {key}")
+        if it == "marketplace" and not _PLUGIN_ID_RE.match(str(install["plugin"])):
+            # Claude Code identifies installed plugins as `name@marketplace`;
+            # a bare name cannot be matched in `claude plugin list` or updated.
+            raise LoadoutError(
+                f"marketplace install.plugin must be 'name@marketplace' "
+                f"(e.g. 'my-plugin@my-marketplace'), got {install['plugin']!r}"
+            )
 
 
 def _parse(path: Path) -> Dict[str, Any]:

@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Optional
 
+from ..lib.claude_plugins import is_claude_managed
 from ..lib.console import Console
 from ..lib.config import get_repo_root
 from ..lib.manifest_v2 import load_manifest, get_installed
@@ -57,7 +58,9 @@ def run_outdated(type_filter: Optional[str] = None, show_all: bool = False) -> N
                 continue
             repo_key = str(repo_path.resolve())
             Console.print(f"\n{repo_path}:")
-            if not _print_outdated(manifest, repo_key, source_dirs, types_to_check):
+            if _print_outdated(manifest, repo_key, source_dirs, types_to_check):
+                any_outdated = True
+            else:
                 Console.print("  (up to date)")
 
     if not any_outdated:
@@ -80,6 +83,15 @@ def _print_outdated(
         installed = get_installed(manifest, scope, item_type)
         singular = TYPE_SINGULAR[item_type]
         for name, info in sorted(installed.items()):
+            if item_type == "plugins" and is_claude_managed(info):
+                # Not checked here (Claude Code has no check-only command), so
+                # it counts as a finding: never report the scope "up to date".
+                Console.print(
+                    f"  {singular:<8} {name:<32} {info.get('version', '?')} "
+                    "(managed by Claude Code; `aec upgrade` checks it)"
+                )
+                found = True
+                continue
             if name in available:
                 avail_v = available[name].get("version", "0.0.0")
                 inst_v = info.get("version", "0.0.0")

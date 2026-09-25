@@ -593,22 +593,35 @@ class TestUpgradeWithDepConflicts:
 
 
 class TestUpgradePlugins:
-    """Plugins upgrade through their installer; never copied like rule files."""
+    """Plugins upgrade through their installer; never copied like rule files.
+
+    Claude Code marketplace plugins go through `claude plugin update --json`
+    (Claude decides what is newer); older per-tool records are re-installed.
+    """
 
     CATALOG = Path(__file__).resolve().parent.parent / "plugins"
 
-    def _run(self, tmp_path, recorded, returncode=0, yes=True, agents=None, pref=None, answer="n"):
+    def _run(self, tmp_path, recorded, *, update=None, yes=True, agents=None, pref=None,
+             answer="n", fail=False, dry_run=False):
+        import json as _json
         from aec.commands.upgrade import _upgrade_scope
         from aec.lib.manifest_v2 import record_plugin_install
 
         manifest = {"global": {"plugins": {}}, "repos": {}}
         record_plugin_install(manifest, "global", "ponytail", recorded["version"],
-                              install_type=recorded["install_type"], targets=["claude"])
+                              install_type=recorded["install_type"], targets=["claude"],
+                              plugin_id=recorded.get("pluginId", ""))
+        update = update or {"updateOutcome": "updated", "oldVersion": recorded["version"], "newVersion": "9.9.9"}
         calls = []
 
         def fake_run(cmd, *a, **kw):
             calls.append(cmd)
-            return MagicMock(returncode=returncode)
+            out = ""
+            if cmd[:3] == ["claude", "plugin", "update"]:
+                out = _json.dumps({"command": "update", "outcome": "ok", **update})
+            elif cmd[:3] == ["claude", "plugin", "list"]:
+                out = _json.dumps([{"id": "ponytail@ponytail", "version": "9.9.9"}])
+            return MagicMock(returncode=1 if fail else 0, stdout=out, stderr="")
 
         with patch("subprocess.run", side_effect=fake_run), \
              patch("aec.lib.config.detect_agents", return_value={"claude": {}} if agents is None else agents), \
@@ -617,44 +630,118 @@ class TestUpgradePlugins:
              patch("aec.commands.upgrade.record_item_install_pertype"), \
              patch("aec.commands.upgrade._target_base", return_value=tmp_path / "rules"):
             upgraded = _upgrade_scope(manifest, "global", {"plugins": self.CATALOG},
-                                      yes=yes, dry_run=False)
+                                      yes=yes, dry_run=dry_run)
         return manifest["global"]["plugins"]["ponytail"], calls, upgraded
+
+    MANAGED = {"version": "4.10.0", "install_type": "marketplace", "pluginId": "ponytail@ponytail"}
+
+    def test_managed_plugin_asks_claude_even_when_catalog_is_not_newer(self, tmp_path):
+        entry, calls, upgraded = self._run(tmp_path, self.MANAGED)
+        assert ["claude", "plugin", "marketplace", "update", "ponytail"] in calls
+        assert ["claude", "plugin", "update", "ponytail@ponytail", "--json"] in calls
+        assert upgraded and entry["version"] == "9.9.9" and entry["pluginId"] == "ponytail@ponytail"
+        assert not (tmp_path / "rules").exists(), "plugin must not be copied as a rule"
+
+    def test_up_to_date_is_the_only_current_result(self, tmp_path):
+        """Only a confirmed up_to_date lets the caller report "up to date"."""
+        entry, _, not_current = self._run(tmp_path, self.MANAGED, update={
+            "updateOutcome": "up_to_date", "oldVersion": "4.10.0", "newVersion": "4.10.0"})
+        assert not not_current and entry["version"] == "4.10.0"
+
+    def test_record_without_plugin_id_resolves_it_from_catalog(self, tmp_path):
+        entry, calls, _ = self._run(tmp_path, {"version": "4.10.0", "install_type": "marketplace"})
+        assert ["claude", "plugin", "update", "ponytail@ponytail", "--json"] in calls
+        assert entry["pluginId"] == "ponytail@ponytail"
+
+    def test_failed_marketplace_refresh_is_not_confirmation(self, tmp_path):
+        """Codex P2 on #87: up_to_date against a stale catalog cannot confirm "latest"."""
+        with patch("aec.lib.claude_plugins.refresh_marketplace", return_value=False):
+            _, _, not_current = self._run(tmp_path, self.MANAGED, update={
+                "updateOutcome": "up_to_date", "oldVersion": "4.10.0", "newVersion": "4.10.0"})
+        assert not_current
+
+    def test_failed_update_keeps_recorded_version(self, tmp_path):
+        """A failed check keeps the record, and is not reported as "up to date"."""
+        entry, _, not_known_current = self._run(tmp_path, self.MANAGED, fail=True)
+        assert entry["version"] == "4.10.0" and not_known_current
+
+    def test_instructions_only_preference_never_runs(self, tmp_path):
+        entry, calls, not_current = self._run(tmp_path, self.MANAGED, pref="instructions-only")
+        assert calls == [] and entry["version"] == "4.10.0"
+        assert not_current, "an unchecked plugin is never reported current"
+
+    def test_missing_claude_is_not_run(self, tmp_path):
+        entry, calls, not_current = self._run(tmp_path, self.MANAGED, agents={})
+        assert calls == [] and entry["version"] == "4.10.0" and not_current
+
+    def test_dry_run_runs_nothing(self, tmp_path):
+        entry, calls, upgraded = self._run(tmp_path, self.MANAGED, dry_run=True)
+        assert calls == [] and upgraded and entry["version"] == "4.10.0"
 
     def test_old_per_tool_record_reinstalls_from_marketplace(self, tmp_path):
         entry, calls, upgraded = self._run(tmp_path, {"version": "1.0.0", "install_type": "per-tool"})
-        assert calls == [
+        assert calls[:2] == [
             ["claude", "plugin", "marketplace", "add", "DietrichGebert/ponytail"],
             ["claude", "plugin", "install", "ponytail@ponytail"],
         ]
-        assert upgraded and entry["install_type"] == "marketplace" and entry["version"] != "1.0.0"
-        assert not (tmp_path / "rules").exists(), "plugin must not be copied as a rule"
+        assert upgraded and entry["install_type"] == "marketplace"
+        assert entry["version"] == "9.9.9", "records what Claude Code installed"
+        assert entry["pluginId"] == "ponytail@ponytail"
 
-    def test_marketplace_record_uses_claude_plugin_update(self, tmp_path):
-        entry, calls, _ = self._run(tmp_path, {"version": "0.1.0", "install_type": "marketplace"})
-        assert calls == [["claude", "plugin", "update", "ponytail@ponytail"]]
-        assert entry["version"] != "0.1.0"
+    def test_reinstall_without_yes_declining_runs_nothing(self, tmp_path):
+        entry, calls, not_current = self._run(tmp_path, {"version": "1.0.0", "install_type": "per-tool"},
+                                              yes=False, answer="n")
+        assert calls == [] and entry["version"] == "1.0.0"
+        assert not_current, "a declined re-install leaves the plugin outdated"
 
-    def test_failed_command_keeps_recorded_version(self, tmp_path):
-        entry, _, upgraded = self._run(tmp_path, {"version": "0.1.0", "install_type": "marketplace"},
-                                       returncode=1)
-        assert entry["version"] == "0.1.0" and not upgraded
+    def test_managed_update_needs_no_extra_confirmation(self, tmp_path):
+        """`aec upgrade` is the request; Claude Code's own update runs without a prompt."""
+        # Every prompt would answer "no"; the update still runs.
+        _, calls, upgraded = self._run(tmp_path, self.MANAGED, yes=False, answer="n")
+        assert ["claude", "plugin", "update", "ponytail@ponytail", "--json"] in calls and upgraded
 
-    def test_without_yes_declining_runs_nothing(self, tmp_path):
-        entry, calls, upgraded = self._run(tmp_path, {"version": "0.1.0", "install_type": "marketplace"},
-                                           yes=False, answer="n")
-        assert calls == [] and entry["version"] == "0.1.0" and not upgraded
+    def test_dry_run_under_instructions_only_says_manual(self, tmp_path, capsys):
+        _, calls, not_current = self._run(tmp_path, self.MANAGED, dry_run=True, pref="instructions-only")
+        out = capsys.readouterr().out
+        assert calls == [] and not_current and "run manually" in out and "would run" not in out
 
-    def test_without_yes_confirming_runs(self, tmp_path):
-        _, calls, upgraded = self._run(tmp_path, {"version": "0.1.0", "install_type": "marketplace"},
-                                       yes=False, answer="y")
-        assert calls == [["claude", "plugin", "update", "ponytail@ponytail"]] and upgraded
+    def test_failed_update_shows_claudes_message(self, tmp_path, capsys):
+        self._run(tmp_path, self.MANAGED, fail=True)
+        assert "failed" in capsys.readouterr().out
 
-    def test_instructions_only_preference_never_runs(self, tmp_path):
-        entry, calls, _ = self._run(tmp_path, {"version": "0.1.0", "install_type": "marketplace"},
-                                    pref="instructions-only")
-        assert calls == [] and entry["version"] == "0.1.0"
 
-    def test_missing_claude_is_not_run(self, tmp_path):
-        entry, calls, _ = self._run(tmp_path, {"version": "0.1.0", "install_type": "marketplace"},
-                                    agents={})
-        assert calls == [] and entry["version"] == "0.1.0"
+
+def test_other_repo_with_only_managed_plugins_is_offered(tmp_path):
+    """Codex P2 on #87: a repo whose only plugins are Claude-managed still needs an upgrade pass."""
+    from aec.commands.upgrade import _find_outdated_repos
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    manifest = {"global": {}, "repos": {str(repo.resolve()): {
+        "plugins": {"p": {"install_type": "marketplace", "version": "1.0.0", "pluginId": "p@m"}}}}}
+    catalog = tmp_path / "plugins"
+    catalog.mkdir()
+    assert _find_outdated_repos(manifest, [repo], {"plugins": catalog}) == [(repo, 1)]
+
+
+def test_yes_upgrades_discovered_other_repos(tmp_path, capsys):
+    """Codex P2 on #87: --yes skips the other-repos confirmation instead of skipping the repos."""
+    from aec.commands import upgrade
+
+    other = tmp_path / "other"
+    other.mkdir()
+    manifest = {"global": {}, "repos": {str(other): {}}}
+    scopes = []
+    with patch.object(upgrade, "get_repo_root", return_value=tmp_path), \
+         patch.object(upgrade, "get_source_dirs", return_value={}), \
+         patch.object(upgrade, "load_manifest", return_value=manifest), \
+         patch.object(upgrade, "save_manifest"), \
+         patch.object(upgrade, "find_tracked_repo", return_value=None), \
+         patch.object(upgrade, "get_all_tracked_repos", return_value=[other]), \
+         patch.object(upgrade, "_find_outdated_repos", return_value=[(other, 1)]), \
+         patch.object(upgrade, "_upgrade_scope", side_effect=lambda m, s, *a, **k: scopes.append(s) or False), \
+         patch.object(upgrade, "prompt") as asked:
+        upgrade.run_upgrade(yes=True)
+    assert str(other) in scopes and not asked.called
+    assert "Everything is up to date" not in capsys.readouterr().out
+

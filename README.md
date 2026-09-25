@@ -124,7 +124,21 @@ Each plugin declares its `install_type` in a `plugin.json` manifest:
 
 ### Never-auto-install guarantee
 
-AEC never auto-installs any plugin. `marketplace` and `per-tool` commands only run after explicit user confirmation (or `--yes`). `external` plugins are always instructions-only — no execution, ever.
+AEC never auto-installs any plugin. Installing a `marketplace` or `per-tool` plugin only runs its commands after explicit user confirmation (or `--yes`). `external` plugins are always instructions-only — no execution, ever.
+
+The one exception is keeping already-installed `marketplace` plugins current: `aec update` and `aec upgrade` run Claude Code's own plugin commands without an extra prompt (below). They still respect `plugins.execution instructions-only` and `aec upgrade --dry-run`.
+
+### Keeping marketplace plugins current
+
+Claude Code owns the versions of `marketplace` plugins, so AEC asks it rather than trusting the version pinned in the catalog:
+
+| AEC command | Claude Code command it runs |
+|---|---|
+| `aec update` | `claude plugin marketplace update <marketplace>` for each AEC-installed plugin's marketplace |
+| `aec upgrade` | `claude plugin update <plugin>@<marketplace>` for each one (a no-op when already current); records the version Claude Code reports |
+| `aec outdated` | nothing — marketplace plugins are listed as managed by Claude Code, since Claude Code has no check-only command |
+
+Restart Claude Code after an upgrade to load updated plugins. Skills, rules and hooks have no Claude Code manager; AEC keeps updating those itself.
 
 To downgrade every plugin to print-only (no execution even for `marketplace`/`per-tool`):
 

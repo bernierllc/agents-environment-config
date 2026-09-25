@@ -41,18 +41,18 @@ def test_policy_pref_downgrades_to_instructions():
 def test_marketplace_handler_runs_two_commands():
     calls = []
     m = {"install_type": "marketplace",
-         "install": {"marketplace": "DietrichGebert/ponytail", "plugin": "ponytail"}}
+         "install": {"marketplace": "DietrichGebert/ponytail", "plugin": "ponytail@ponytail"}}
     install_marketplace(m, runner=lambda cmd: calls.append(cmd), confirm=lambda _: True)
     assert calls == [
         ["claude", "plugin", "marketplace", "add", "DietrichGebert/ponytail"],
-        ["claude", "plugin", "install", "ponytail"],
+        ["claude", "plugin", "install", "ponytail@ponytail"],
     ]
 
 
 def test_marketplace_handler_respects_declined_confirm():
     calls = []
     m = {"install_type": "marketplace",
-         "install": {"marketplace": "x", "plugin": "y"}}
+         "install": {"marketplace": "x", "plugin": "y@x"}}
     install_marketplace(m, runner=lambda cmd: calls.append(cmd), confirm=lambda _: False)
     assert calls == []
 
@@ -134,7 +134,7 @@ def test_install_plugin_marketplace_without_claude_is_skipped():
     m = {"schema": "loadout/v1", "item_type": "plugin", "name": "p",
          "version": "1.0.0", "description": "x", "source": "https://x",
          "install_type": "marketplace",
-         "install": {"marketplace": "a/b", "plugin": "b"}}
+         "install": {"marketplace": "a/b", "plugin": "b@b"}}
     result = install_plugin(m, {"cursor": {}}, runner=lambda c: None,
                             confirm=lambda *_: True, printer=lambda s: None, pref=None)
     assert result["targets"] == []
@@ -148,7 +148,7 @@ def test_install_plugin_marketplace_instructions_only_never_runs():
     m = {"schema": "loadout/v1", "item_type": "plugin", "name": "p",
          "version": "1.0.0", "description": "x", "source": "https://x",
          "install_type": "marketplace",
-         "install": {"marketplace": "a/b", "plugin": "b"}}
+         "install": {"marketplace": "a/b", "plugin": "b@b"}}
     result = install_plugin(m, {"claude": {}}, runner=lambda c: ran.append(c),
                             confirm=lambda *_: True, printer=lambda s: printed.append(s),
                             pref="instructions-only")
@@ -166,7 +166,7 @@ def test_uninstall_plugin_no_block_prints_manual_cleanup():
     # never fabricate/run a marketplace-uninstall command.
     ran, printed = [], []
     m = {"install_type": "marketplace",
-         "install": {"marketplace": "a/b", "plugin": "b"}}
+         "install": {"marketplace": "a/b", "plugin": "b@b"}}
     result = uninstall_plugin(m, {"claude": {}}, runner=lambda c: ran.append(c),
                               confirm=lambda *_: True, printer=lambda s: printed.append(s),
                               pref=None)

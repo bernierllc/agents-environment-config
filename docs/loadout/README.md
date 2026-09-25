@@ -39,7 +39,7 @@ Plugins extend the base with `install_type` (required) and an `install` block (r
 
 ### `marketplace` — Claude marketplace
 
-AEC runs `claude plugin marketplace add <marketplace>` then `claude plugin install <plugin>`. Implicitly Claude-only.
+AEC runs `claude plugin marketplace add <marketplace>` then `claude plugin install <plugin>`. Implicitly Claude-only. `plugin` must be the full Claude Code plugin id, `name@marketplace`, where `marketplace` is the marketplace's name (from its `marketplace.json`), not the `owner/repo` source; AEC uses it to read and update the installed version.
 
 ```json
 {
@@ -52,7 +52,7 @@ AEC runs `claude plugin marketplace add <marketplace>` then `claude plugin insta
   "install_type": "marketplace",
   "install": {
     "marketplace": "example/my-plugin",
-    "plugin": "my-plugin"
+    "plugin": "my-plugin@my-marketplace"
   }
 }
 ```

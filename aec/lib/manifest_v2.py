@@ -132,16 +132,24 @@ def record_plugin_install(
     install_type: str,
     targets,
     installed_as: str = "explicit",
+    plugin_id: str = "",
 ) -> None:
-    """Record a plugin install with its install_type and resolved targets."""
+    """Record a plugin install with its install_type and resolved targets.
+
+    ``plugin_id`` (``name@marketplace``) is kept for marketplace plugins so
+    upgrades can ask Claude Code about the plugin directly.
+    """
     scope_dict = _get_scope_dict(manifest, scope)
-    scope_dict["plugins"][name] = {
+    entry = {
         "version": version,
         "install_type": install_type,
         "targets": list(targets),
         "installedAs": installed_as,
         "installedAt": _now_iso(),
     }
+    if plugin_id:
+        entry["pluginId"] = plugin_id
+    scope_dict["plugins"][name] = entry
 
 
 def remove_install(manifest: dict, scope: str, item_type: str, name: str) -> None:

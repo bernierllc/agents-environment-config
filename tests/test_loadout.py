@@ -94,3 +94,14 @@ class TestLoad:
         (tmp_path / "plugin.yaml").write_text("name: [unbalanced\n  bad: :\n")
         with pytest.raises(LoadoutError, match="parse"):
             load_loadout(tmp_path)
+
+
+@pytest.mark.parametrize("plugin_id", ["my-plugin", "@market", "my-plugin@", "a b@c"])
+def test_marketplace_plugin_id_must_be_name_at_marketplace(plugin_id):
+    """Codex P2 on #87: a bare id can't be matched in `claude plugin list` or updated."""
+    from aec.lib.loadout import LoadoutError, validate_loadout
+    data = {"schema": "loadout/v1", "item_type": "plugin", "name": "my-plugin", "version": "1.0.0",
+            "description": "d", "source": "https://example.test", "install_type": "marketplace",
+            "install": {"marketplace": "example/my-plugin", "plugin": plugin_id}}
+    with pytest.raises(LoadoutError, match="name@marketplace"):
+        validate_loadout(data)

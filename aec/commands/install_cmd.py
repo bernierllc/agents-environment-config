@@ -611,9 +611,13 @@ def _install_plugin(name_or_url: str, global_flag: bool, yes: bool) -> None:
         runner=runner, confirm=confirm, printer=Console.print, pref=pref,
     )
 
+    from ..lib.claude_plugins import installed_record
+
+    version, plugin_id = installed_record(manifest_def, result)
     record_plugin_install(
         manifest, scope_key, name, version,
         install_type=result["install_type"], targets=result["targets"],
+        plugin_id=plugin_id,
     )
     save_manifest(manifest, manifest_file)
     record_item_install("plugin", name, version)
