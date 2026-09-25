@@ -1,6 +1,7 @@
 """Install command: aec install - Full setup of agents-environment-config."""
 
 import json
+import shlex
 from pathlib import Path
 from typing import Optional
 
@@ -620,7 +621,7 @@ def _prompt_claude_statusline(repo_root: Path, dry_run: bool = False) -> None:
         return
 
     # Settings first: if that write fails, nothing has been changed yet.
-    settings["statusLine"] = {"type": "command", "command": str(target), "padding": 0}
+    settings["statusLine"] = {"type": "command", "command": shlex.quote(str(target)), "padding": 0}
     try:
         atomic_write_json(settings_path.resolve(), settings)
     except OSError as e:

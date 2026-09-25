@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 from pathlib import Path
 
 import pytest
@@ -47,7 +48,7 @@ def test_yes_links_script_and_merges_settings(claude_env, monkeypatch):
     assert link.resolve() == (REPO_ROOT / ".claude" / "statusline.sh").resolve()
     settings = json.loads((claude_env / "settings.json").read_text())
     assert settings["model"] == "opus"  # other keys preserved
-    assert settings["statusLine"] == {"type": "command", "command": str(link), "padding": 0}
+    assert settings["statusLine"] == {"type": "command", "command": shlex.quote(str(link)), "padding": 0}
     assert get_setting("claude_statusline") is True
 
 
@@ -159,11 +160,11 @@ def test_settings_write_failure_changes_nothing(claude_env, monkeypatch):
     (claude_env / "settings.json").write_text("{}")
     _answer(monkeypatch, "y")
 
-    os.chmod(claude_env, 0o500)  # read-only dir: the atomic tmp file can't be created
-    try:
-        _prompt_claude_statusline(REPO_ROOT)  # must not raise
-    finally:
-        os.chmod(claude_env, 0o700)
+    def boom(*_):
+        raise PermissionError("read-only")
+    monkeypatch.setattr("aec.lib.atomic_write.atomic_write_json", boom)
+
+    _prompt_claude_statusline(REPO_ROOT)  # must not raise
 
     assert not (claude_env / "statusline.sh").is_symlink()
     assert get_setting("claude_statusline") is None
