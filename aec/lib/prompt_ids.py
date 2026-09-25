@@ -39,6 +39,9 @@ INSTALL_QUALITY_REPORT_VIEWER = "install.quality.report_viewer"
 INSTALL_QUALITY_REPORT_RETENTION_MODE = "install.quality.report_retention_mode"
 INSTALL_QUALITY_REPORT_RETENTION_DAYS = "install.quality.report_retention_days"
 
+# Claude Code extras (install.py)
+INSTALL_CLAUDE_STATUSLINE = "install.claude.statusline"
+
 # Setup (setup.py)
 SETUP_TRACK_CURRENT_REPO = "setup.track_current_repo"
 
@@ -85,6 +88,7 @@ ALL_STATIC_PROMPT_IDS: tuple[str, ...] = (
     INSTALL_QUALITY_REPORT_VIEWER,
     INSTALL_QUALITY_REPORT_RETENTION_MODE,
     INSTALL_QUALITY_REPORT_RETENTION_DAYS,
+    INSTALL_CLAUDE_STATUSLINE,
     SETUP_TRACK_CURRENT_REPO,
 )
 

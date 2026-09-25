@@ -89,6 +89,7 @@ KNOWN_PREFERENCE_KEYS: frozenset[str] = frozenset({
     "report_retention_mode",
     "report_retention_days",
     "global_install_multi_repo_threshold",
+    "claude_statusline",
     "skip_global_install_prompt_for",
     "plugins.execution",
 })
@@ -195,6 +196,7 @@ def reset_preference(key: str) -> None:
     """
     prefs = load_preferences()
     prefs.get("optional_rules", {}).pop(key, None)
+    prefs.get("settings", {}).pop(key, None)
     save_preferences(prefs)
 
 

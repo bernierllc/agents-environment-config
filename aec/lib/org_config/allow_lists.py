@@ -87,6 +87,8 @@ PROMPTS_ALLOW_LIST: dict[str, str] = {
     "install.quality.report_viewer": "enum-from-detect-viewers",
     "install.quality.report_retention_mode": "enum[auto,manual]",
     "install.quality.report_retention_days": "int[1..3650]",
+    # Claude Code extras
+    "install.claude.statusline": "yes_no",
     # Setup
     "setup.track_current_repo": "yes_no",
 }
