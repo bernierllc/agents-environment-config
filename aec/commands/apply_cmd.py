@@ -95,6 +95,7 @@ def _apply_plugins(plugins: list, *, source_dirs: dict, yes: bool) -> None:
     from ..lib.installed_store import record_item_install
     from ..lib.loadout import LoadoutError, load_loadout
     from ..lib.manifest_v2 import load_manifest, record_plugin_install, save_manifest
+    from ..lib.claude_plugins import installed_record
     from ..lib.plugin_install import install_plugin
     from ..lib.preferences import get_setting
     from ..lib.prompt_catalog.lifecycle_area import APPLY_PLUGINS_CONFIRM
@@ -142,11 +143,12 @@ def _apply_plugins(plugins: list, *, source_dirs: dict, yes: bool) -> None:
             manifest_def, detected,
             runner=runner, confirm=confirm, printer=Console.print, pref=pref,
         )
-        version = manifest_def.get("version", "0.0.0")
+        version, plugin_id = installed_record(manifest_def, result)
         manifest = load_manifest(manifest_path)
         record_plugin_install(
             manifest, scope_key, name, version,
             install_type=result["install_type"], targets=result["targets"],
+            plugin_id=plugin_id,
         )
         save_manifest(manifest, manifest_path)
         record_item_install("plugin", name, version)

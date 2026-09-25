@@ -380,16 +380,15 @@ def _update_claude_plugins(
     if not targets:
         return False
 
-    if dry_run:
-        for _, _, plugin_id in targets:
-            Console.print(f"  would run: claude plugin update {plugin_id}")
-        return True
-
     blocked = _plugin_policy_blocks(get_setting("plugins.execution"))
     if blocked:
         for _, _, plugin_id in targets:
             Console.print(f"  {blocked}; run manually -> claude plugin update {plugin_id}")
         return False
+    if dry_run:
+        for _, _, plugin_id in targets:
+            Console.print(f"  would run: claude plugin update {plugin_id}")
+        return True
 
     for marketplace in sorted({marketplace_of(pid) for _, _, pid in targets}):
         if not refresh_marketplace(marketplace):
@@ -397,9 +396,14 @@ def _update_claude_plugins(
 
     upgraded = False
     for name, info, plugin_id in targets:
+        # A plugin recorded in several scopes is updated once per scope; Claude
+        # Code installs at user scope, so repeats are harmless no-ops.
         result = update_plugin(plugin_id)
-        if result is None:
-            Console.error(f"claude plugin update {plugin_id} failed; left at {info.get('version', '?')}.")
+        if not result["ok"]:
+            detail = f": {result['message']}" if result["message"] else ""
+            Console.error(
+                f"claude plugin update {plugin_id} failed{detail}; left at {info.get('version', '?')}."
+            )
             continue
         new_v = result["new"] or info.get("version", "0.0.0")
         if result["outcome"] == "up_to_date":
@@ -425,7 +429,7 @@ def _reinstall_plugins(
 ) -> bool:
     import subprocess
 
-    from ..lib.claude_plugins import installed_versions
+    from ..lib.claude_plugins import installed_record
     from ..lib.config import detect_agents
     from ..lib.loadout import LoadoutError, load_loadout
     from ..lib.manifest_v2 import record_plugin_install
@@ -490,11 +494,7 @@ def _reinstall_plugins(
         if failed:
             Console.error(f"Failed to upgrade plugin {name}: {' '.join(failed[0])} exited non-zero")
             continue
-        plugin_id = ""
-        new_v = avail_v
-        if result["install_type"] == "marketplace":
-            plugin_id = manifest_def["install"]["plugin"]
-            new_v = installed_versions().get(plugin_id) or avail_v
+        new_v, plugin_id = installed_record(manifest_def, result)
         record_plugin_install(
             manifest, scope, name, new_v,
             install_type=result["install_type"], targets=result["targets"], plugin_id=plugin_id,

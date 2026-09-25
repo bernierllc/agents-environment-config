@@ -611,15 +611,9 @@ def _install_plugin(name_or_url: str, global_flag: bool, yes: bool) -> None:
         runner=runner, confirm=confirm, printer=Console.print, pref=pref,
     )
 
-    plugin_id = ""
-    if result["install_type"] == "marketplace":
-        from ..lib.claude_plugins import installed_versions
+    from ..lib.claude_plugins import installed_record
 
-        plugin_id = manifest_def["install"]["plugin"]
-        # Record what Claude Code actually installed, not the catalog's pin.
-        if result.get("executed"):
-            version = installed_versions().get(plugin_id) or version
-
+    version, plugin_id = installed_record(manifest_def, result)
     record_plugin_install(
         manifest, scope_key, name, version,
         install_type=result["install_type"], targets=result["targets"],

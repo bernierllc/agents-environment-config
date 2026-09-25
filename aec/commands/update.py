@@ -158,8 +158,14 @@ def _refresh_claude_plugins(manifest: dict, scopes: list) -> int:
         for info in get_installed(manifest, scope, "plugins").values()
         if is_claude_managed(info)
     ]
-    if not managed or "claude" not in detect_agents():
-        return len(managed)
+    if not managed:
+        return 0
+    if "claude" not in detect_agents():
+        Console.warning(
+            f"{len(managed)} Claude Code plugin(s) recorded, but `claude` is not installed; "
+            "skipped refreshing their marketplaces."
+        )
+        return 0
     # Records from before pluginId was stored are refreshed by `aec upgrade`,
     # which resolves their id from the catalog.
     for marketplace in sorted({marketplace_of(i["pluginId"]) for i in managed if i.get("pluginId")}):

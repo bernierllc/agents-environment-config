@@ -63,27 +63,48 @@ def installed_versions() -> Dict[str, str]:
     return {e["id"]: e.get("version", "") for e in entries if isinstance(e, dict) and "id" in e}
 
 
+def installed_record(manifest_def: dict, result: dict) -> tuple:
+    """``(version, plugin_id)`` to record after ``install_plugin`` ran.
+
+    For a marketplace plugin that was actually installed, the version is what
+    Claude Code reports (the catalog's pin is only a fallback) and the plugin
+    id is kept so upgrades can ask Claude Code about it directly.
+    """
+    version = manifest_def.get("version", "0.0.0")
+    if result.get("install_type") != "marketplace":
+        return version, ""
+    plugin_id = manifest_def["install"]["plugin"]
+    if result.get("executed"):
+        version = installed_versions().get(plugin_id) or version
+    return version, plugin_id
+
+
 def refresh_marketplace(name: str) -> bool:
     """Pull a marketplace's catalog so ``update`` sees new releases."""
     result = _run(["claude", "plugin", "marketplace", "update", name])
     return result is not None and result.returncode == 0
 
 
-def update_plugin(plugin_id: str) -> Optional[dict]:
-    """Run ``claude plugin update``; returns ``{outcome, old, new, message}`` or None.
+def update_plugin(plugin_id: str) -> dict:
+    """Run ``claude plugin update``; returns ``{ok, outcome, old, new, message}``.
 
     ``outcome`` is Claude Code's ``updateOutcome`` (``up_to_date`` when there
-    was nothing to do). None means the command failed or could not be run.
+    was nothing to do). When ``ok`` is False, ``message`` carries Claude Code's
+    own explanation (e.g. a marketplace-declared command that needs manual
+    confirmation) so the caller can show it instead of a bare "failed".
     """
     result = _run(["claude", "plugin", "update", plugin_id, "--json"])
     if result is None:
-        return None
-    data = _last_json_line(result.stdout)
-    if result.returncode != 0 or not data or data.get("outcome") != "ok":
-        return None
+        return {"ok": False, "outcome": "", "old": "", "new": "",
+                "message": "could not run `claude` (missing or timed out)"}
+    data = _last_json_line(result.stdout) or {}
+    ok = result.returncode == 0 and data.get("outcome") == "ok"
+    stderr_lines = (result.stderr or "").strip().splitlines()
+    message = data.get("message") or (stderr_lines[-1] if stderr_lines else "")
     return {
+        "ok": ok,
         "outcome": data.get("updateOutcome", ""),
         "old": data.get("oldVersion", ""),
         "new": data.get("newVersion", ""),
-        "message": data.get("message", ""),
+        "message": message,
     }

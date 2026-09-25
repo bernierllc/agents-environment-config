@@ -689,3 +689,12 @@ class TestUpgradePlugins:
         _, calls, upgraded = self._run(tmp_path, self.MANAGED, yes=False, answer="n")
         assert ["claude", "plugin", "update", "ponytail@ponytail", "--json"] in calls and upgraded
 
+    def test_dry_run_under_instructions_only_says_manual(self, tmp_path, capsys):
+        _, calls, upgraded = self._run(tmp_path, self.MANAGED, dry_run=True, pref="instructions-only")
+        out = capsys.readouterr().out
+        assert calls == [] and not upgraded and "run manually" in out and "would run" not in out
+
+    def test_failed_update_shows_claudes_message(self, tmp_path, capsys):
+        self._run(tmp_path, self.MANAGED, fail=True)
+        assert "failed" in capsys.readouterr().out
+
