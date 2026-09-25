@@ -642,10 +642,11 @@ class TestUpgradePlugins:
         assert upgraded and entry["version"] == "9.9.9" and entry["pluginId"] == "ponytail@ponytail"
         assert not (tmp_path / "rules").exists(), "plugin must not be copied as a rule"
 
-    def test_up_to_date_is_not_an_upgrade(self, tmp_path):
-        entry, _, upgraded = self._run(tmp_path, self.MANAGED, update={
+    def test_up_to_date_is_the_only_current_result(self, tmp_path):
+        """Only a confirmed up_to_date lets the caller report "up to date"."""
+        entry, _, not_current = self._run(tmp_path, self.MANAGED, update={
             "updateOutcome": "up_to_date", "oldVersion": "4.10.0", "newVersion": "4.10.0"})
-        assert not upgraded and entry["version"] == "4.10.0"
+        assert not not_current and entry["version"] == "4.10.0"
 
     def test_record_without_plugin_id_resolves_it_from_catalog(self, tmp_path):
         entry, calls, _ = self._run(tmp_path, {"version": "4.10.0", "install_type": "marketplace"})
@@ -658,12 +659,13 @@ class TestUpgradePlugins:
         assert entry["version"] == "4.10.0" and not_known_current
 
     def test_instructions_only_preference_never_runs(self, tmp_path):
-        entry, calls, _ = self._run(tmp_path, self.MANAGED, pref="instructions-only")
+        entry, calls, not_current = self._run(tmp_path, self.MANAGED, pref="instructions-only")
         assert calls == [] and entry["version"] == "4.10.0"
+        assert not_current, "an unchecked plugin is never reported current"
 
     def test_missing_claude_is_not_run(self, tmp_path):
-        entry, calls, _ = self._run(tmp_path, self.MANAGED, agents={})
-        assert calls == [] and entry["version"] == "4.10.0"
+        entry, calls, not_current = self._run(tmp_path, self.MANAGED, agents={})
+        assert calls == [] and entry["version"] == "4.10.0" and not_current
 
     def test_dry_run_runs_nothing(self, tmp_path):
         entry, calls, upgraded = self._run(tmp_path, self.MANAGED, dry_run=True)
@@ -680,9 +682,10 @@ class TestUpgradePlugins:
         assert entry["pluginId"] == "ponytail@ponytail"
 
     def test_reinstall_without_yes_declining_runs_nothing(self, tmp_path):
-        entry, calls, upgraded = self._run(tmp_path, {"version": "1.0.0", "install_type": "per-tool"},
-                                           yes=False, answer="n")
-        assert calls == [] and entry["version"] == "1.0.0" and not upgraded
+        entry, calls, not_current = self._run(tmp_path, {"version": "1.0.0", "install_type": "per-tool"},
+                                              yes=False, answer="n")
+        assert calls == [] and entry["version"] == "1.0.0"
+        assert not_current, "a declined re-install leaves the plugin outdated"
 
     def test_managed_update_needs_no_extra_confirmation(self, tmp_path):
         """`aec upgrade` is the request; Claude Code's own update runs without a prompt."""
@@ -691,9 +694,9 @@ class TestUpgradePlugins:
         assert ["claude", "plugin", "update", "ponytail@ponytail", "--json"] in calls and upgraded
 
     def test_dry_run_under_instructions_only_says_manual(self, tmp_path, capsys):
-        _, calls, upgraded = self._run(tmp_path, self.MANAGED, dry_run=True, pref="instructions-only")
+        _, calls, not_current = self._run(tmp_path, self.MANAGED, dry_run=True, pref="instructions-only")
         out = capsys.readouterr().out
-        assert calls == [] and not upgraded and "run manually" in out and "would run" not in out
+        assert calls == [] and not_current and "run manually" in out and "would run" not in out
 
     def test_failed_update_shows_claudes_message(self, tmp_path, capsys):
         self._run(tmp_path, self.MANAGED, fail=True)

@@ -330,12 +330,13 @@ def _upgrade_plugins(
         if not is_claude_managed(i) and n in available
         and version_is_newer(available[n].get("version", "0.0.0"), i.get("version", "0.0.0"))
     ]
-    upgraded = False
+    # True unless every plugin was confirmed current (the caller's "up to date" test).
+    not_current = False
     if managed and _update_claude_plugins(manifest, scope, source_dir, managed, available, dry_run):
-        upgraded = True
+        not_current = True
     if stale and _reinstall_plugins(manifest, scope, source_dir, stale, available, yes, dry_run):
-        upgraded = True
-    return upgraded
+        not_current = True
+    return not_current
 
 
 def _resolve_plugin_id(name: str, info: dict, source_dir: Path, available: dict) -> str:
@@ -367,14 +368,17 @@ def _update_claude_plugins(
             Console.warning(f"Plugin {name}: no Claude Code plugin id recorded or in the catalog; skipping.")
             continue
         targets.append((name, info, plugin_id))
+    # Returns False only when every managed plugin was confirmed current, so
+    # the caller never prints "up to date" for a plugin it could not check.
+    all_current = len(targets) == len(managed)
     if not targets:
-        return False
+        return True
 
     blocked = commands_blocked(get_setting("plugins.execution"))
     if blocked:
         for _, _, plugin_id in targets:
             Console.print(f"  {blocked}; run manually -> claude plugin update {plugin_id}")
-        return False
+        return True
     if dry_run:
         for _, _, plugin_id in targets:
             Console.print(f"  would run: claude plugin update {plugin_id}")
@@ -384,7 +388,6 @@ def _update_claude_plugins(
         if not refresh_marketplace(marketplace):
             Console.warning(f"Could not refresh marketplace {marketplace}; updating from its cached catalog.")
 
-    upgraded = False
     for name, info, plugin_id in targets:
         # A plugin recorded in several scopes is updated once per scope; Claude
         # Code installs at user scope, so repeats are harmless no-ops.
@@ -394,17 +397,17 @@ def _update_claude_plugins(
             Console.error(
                 f"claude plugin update {plugin_id} failed{detail}; left at {info.get('version', '?')}."
             )
-            upgraded = True  # not known to be current; never report "up to date"
+            all_current = False
             continue
         new_v = result["new"] or info.get("version", "0.0.0")
         if result["outcome"] == "up_to_date":
             Console.info(f"Plugin {name} is up to date ({new_v}).")
         else:
+            all_current = False
             Console.success(
                 f"Updated plugin {name} {result['old'] or info.get('version', '?')} -> {new_v} "
                 "(restart Claude Code to apply)"
             )
-            upgraded = True
         if new_v != info.get("version") or not info.get("pluginId"):
             record_plugin_install(
                 manifest, scope, name, new_v,
@@ -412,7 +415,7 @@ def _update_claude_plugins(
                 installed_as=info.get("installedAs", "explicit"), plugin_id=plugin_id,
             )
             record_item_install_pertype("plugin", name, new_v)
-    return upgraded
+    return not all_current
 
 
 def _reinstall_plugins(
@@ -444,11 +447,12 @@ def _reinstall_plugins(
         )
         if resp != "y":
             Console.info("Skipped plugins.")
-            return False
+            return True  # still outdated
 
     pref = get_setting("plugins.execution")
     detected = detect_agents()
-    upgraded = False
+    # Every plugin here is outdated on entry, so the scope is never "up to
+    # date" afterwards: each one is upgraded, left for manual steps, or failed.
     for name, info in stale:
         avail_v = available[name].get("version", "0.0.0")
         inst_v = info.get("version", "0.0.0")
@@ -492,8 +496,7 @@ def _reinstall_plugins(
         )
         record_item_install_pertype("plugin", name, new_v)
         Console.success(f"Upgraded plugin {name} {inst_v} -> {new_v}")
-        upgraded = True
-    return upgraded
+    return True
 
 
 def _upgrade_scope(
