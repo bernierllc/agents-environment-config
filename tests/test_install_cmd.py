@@ -556,7 +556,7 @@ class TestInstallPlugin:
             "description": "Marketplace test plugin.",
             "source": "https://example.test",
             "install_type": "marketplace",
-            "install": {"marketplace": "acme/market", "plugin": "acme-plugin"},
+            "install": {"marketplace": "acme/market", "plugin": "acme-plugin@market"},
         }))
 
     def test_marketplace_confirm_decline_formats_prompt_without_raising(self, install_env):

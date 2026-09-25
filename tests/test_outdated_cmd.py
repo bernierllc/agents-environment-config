@@ -140,7 +140,7 @@ class TestOutdatedPlugins:
         (plugin_dir / "plugin.json").write_text(json.dumps({
             "schema": "loadout/v1", "item_type": "plugin", "name": "old-plugin",
             "version": "2.0.0", "description": "d", "source": "https://example.test",
-            "install_type": "marketplace", "install": {"marketplace": "x", "plugin": "old-plugin"},
+            "install_type": "marketplace", "install": {"marketplace": "x", "plugin": "old-plugin@x"},
         }))
         # recorded under a non-marketplace install type -> the catalog version is the reference
         _add_plugin_to_manifest(temp_dir, "old-plugin", {"version": "1.0.0", "install_type": "per-tool", "installedAt": ""})

@@ -31,7 +31,20 @@
   "allOf": [
     {
       "if": { "properties": { "install_type": { "const": "marketplace" } }, "required": ["install_type"] },
-      "then": { "properties": { "install": { "required": ["marketplace", "plugin"] } } }
+      "then": {
+        "properties": {
+          "install": {
+            "required": ["marketplace", "plugin"],
+            "properties": {
+              "plugin": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][\\w.-]*@[A-Za-z0-9][\\w.-]*$",
+                "description": "Claude Code plugin id: name@marketplace (the marketplace's name, not its source)."
+              }
+            }
+          }
+        }
+      }
     },
     {
       "if": { "properties": { "install_type": { "const": "per-tool" } }, "required": ["install_type"] },
