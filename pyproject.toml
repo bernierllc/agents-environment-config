@@ -32,7 +32,7 @@ dev = [
     "typing_extensions>=4.0",
     "PyYAML>=6.0",
     "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
+    "pytest-cov>=7.1.0",
     "pytest-timeout>=2.0.0",
     "jsonschema>=4.0",
 ]
