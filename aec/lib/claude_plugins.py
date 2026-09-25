@@ -63,6 +63,22 @@ def installed_versions() -> Dict[str, str]:
     return {e["id"]: e.get("version", "") for e in entries if isinstance(e, dict) and "id" in e}
 
 
+def commands_blocked(pref) -> Optional[str]:
+    """Why AEC must not run ``claude plugin`` commands, or None when it may.
+
+    Shared by ``aec update`` and ``aec upgrade`` so both honor the same
+    guarantee: nothing runs without ``claude`` or under ``instructions-only``.
+    """
+    from .config import detect_agents
+    from .plugin_install import effective_policy
+
+    if "claude" not in detect_agents():
+        return "claude is not installed"
+    if effective_policy("marketplace", has_run=True, pref=pref) != "run":
+        return "plugins.execution is instructions-only"
+    return None
+
+
 def installed_record(manifest_def: dict, result: dict) -> tuple:
     """``(version, plugin_id)`` to record after ``install_plugin`` ran.
 

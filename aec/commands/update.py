@@ -66,11 +66,6 @@ def run_update() -> None:
         )
 
     managed = _refresh_claude_plugins(manifest, ["global"] + get_all_repo_scopes(manifest))
-    if managed:
-        Console.print(
-            f"\n{managed} Claude Code plugin(s): versions are managed by Claude Code; "
-            "`aec upgrade` runs `claude plugin update` for each."
-        )
 
     if any_outdated:
         Console.print("\nRun `aec upgrade` to apply.")
@@ -147,10 +142,12 @@ def _refresh_claude_plugins(manifest: dict, scopes: list) -> int:
     """Refresh the marketplaces of every AEC-recorded Claude Code plugin.
 
     Maps `aec update` (fetch sources) onto `claude plugin marketplace update`.
-    Returns how many Claude-managed plugins AEC tracks. Claude Code has no
-    check-only command, so whether they are outdated is learned on upgrade.
+    Returns how many Claude-managed plugins AEC tracks, and prints their
+    status. Claude Code has no check-only command, so whether they are
+    outdated is learned on upgrade. Honors the same guards as upgrade.
     """
-    from ..lib.config import detect_agents
+    from ..lib.claude_plugins import commands_blocked
+    from ..lib.preferences import get_setting
 
     managed = [
         info
@@ -160,17 +157,23 @@ def _refresh_claude_plugins(manifest: dict, scopes: list) -> int:
     ]
     if not managed:
         return 0
-    if "claude" not in detect_agents():
+    blocked = commands_blocked(get_setting("plugins.execution"))
+    if blocked:
         Console.warning(
-            f"{len(managed)} Claude Code plugin(s) recorded, but `claude` is not installed; "
+            f"\n{len(managed)} Claude Code plugin(s) recorded, but {blocked}; "
             "skipped refreshing their marketplaces."
         )
-        return 0
+        return len(managed)
+    Console.print()
     # Records from before pluginId was stored are refreshed by `aec upgrade`,
     # which resolves their id from the catalog.
     for marketplace in sorted({marketplace_of(i["pluginId"]) for i in managed if i.get("pluginId")}):
         Console.print(f"Refreshing Claude Code marketplace {marketplace}...", end=" ")
         Console.print("done." if refresh_marketplace(marketplace) else "failed.")
+    Console.print(
+        f"{len(managed)} Claude Code plugin(s): versions are managed by Claude Code; "
+        "`aec upgrade` runs `claude plugin update` for each."
+    )
     return len(managed)
 
 

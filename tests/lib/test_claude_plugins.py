@@ -2,6 +2,8 @@
 
 import json
 import subprocess
+
+import pytest
 from unittest.mock import MagicMock, patch
 
 from aec.lib import claude_plugins as cp
@@ -78,22 +80,27 @@ def test_aec_update_refreshes_marketplaces_of_managed_plugins():
         "old": {"install_type": "per-tool", "version": "1.0.0"},
     }}, "repos": {}}
     with patch("aec.lib.config.detect_agents", return_value={"claude": {}}), \
+         patch("aec.lib.preferences.get_setting", return_value=None), \
          patch("aec.commands.update.refresh_marketplace", return_value=True) as refresh:
         assert _refresh_claude_plugins(manifest, ["global"]) == 1
     refresh.assert_called_once_with("ponytail")
 
 
-def test_aec_update_says_when_claude_is_missing(capsys):
+@pytest.mark.parametrize("agents,pref,reason", [
+    ({}, None, "not installed"),
+    ({"claude": {}}, "instructions-only", "instructions-only"),
+])
+def test_aec_update_skips_refresh_when_blocked(capsys, agents, pref, reason):
     from aec.commands.update import _refresh_claude_plugins
 
     manifest = {"global": {"plugins": {
         "ponytail": {"install_type": "marketplace", "pluginId": "ponytail@ponytail"}}}, "repos": {}}
-    with patch("aec.lib.config.detect_agents", return_value={}), \
+    with patch("aec.lib.config.detect_agents", return_value=agents), \
+         patch("aec.lib.preferences.get_setting", return_value=pref), \
          patch("aec.commands.update.refresh_marketplace") as refresh:
-        assert _refresh_claude_plugins(manifest, ["global"]) == 0
+        assert _refresh_claude_plugins(manifest, ["global"]) == 1
     refresh.assert_not_called()
-    assert "not installed" in capsys.readouterr().out
-
+    assert reason in capsys.readouterr().out
 
 
 def test_aec_apply_records_claude_version_and_id(tmp_path):

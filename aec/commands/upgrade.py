@@ -2,7 +2,6 @@
 
 import shutil
 from pathlib import Path
-from typing import Optional
 
 from ..lib.claude_plugins import is_claude_managed
 from ..lib.console import Console
@@ -336,18 +335,6 @@ def _upgrade_plugins(
     return upgraded
 
 
-def _plugin_policy_blocks(pref) -> Optional[str]:
-    """Why plugin commands must not run here, or None when they may."""
-    from ..lib.config import detect_agents
-    from ..lib.plugin_install import effective_policy
-
-    if "claude" not in detect_agents():
-        return "claude is not installed"
-    if effective_policy("marketplace", has_run=True, pref=pref) != "run":
-        return "plugins.execution is instructions-only"
-    return None
-
-
 def _resolve_plugin_id(name: str, info: dict, source_dir: Path, available: dict) -> str:
     """The Claude Code plugin id for a recorded plugin (record first, then catalog)."""
     from ..lib.loadout import LoadoutError, load_loadout
@@ -366,7 +353,7 @@ def _resolve_plugin_id(name: str, info: dict, source_dir: Path, available: dict)
 def _update_claude_plugins(
     manifest: dict, scope: str, source_dir: Path, managed: list, available: dict, dry_run: bool,
 ) -> bool:
-    from ..lib.claude_plugins import marketplace_of, refresh_marketplace, update_plugin
+    from ..lib.claude_plugins import commands_blocked, marketplace_of, refresh_marketplace, update_plugin
     from ..lib.manifest_v2 import record_plugin_install
     from ..lib.preferences import get_setting
 
@@ -380,7 +367,7 @@ def _update_claude_plugins(
     if not targets:
         return False
 
-    blocked = _plugin_policy_blocks(get_setting("plugins.execution"))
+    blocked = commands_blocked(get_setting("plugins.execution"))
     if blocked:
         for _, _, plugin_id in targets:
             Console.print(f"  {blocked}; run manually -> claude plugin update {plugin_id}")
