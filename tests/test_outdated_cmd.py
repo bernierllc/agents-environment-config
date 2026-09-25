@@ -142,7 +142,8 @@ class TestOutdatedPlugins:
             "version": "2.0.0", "description": "d", "source": "https://example.test",
             "install_type": "marketplace", "install": {"marketplace": "x", "plugin": "old-plugin"},
         }))
-        _add_plugin_to_manifest(temp_dir, "old-plugin", {"version": "1.0.0", "install_type": "marketplace", "installedAt": ""})
+        # recorded under a non-marketplace install type -> the catalog version is the reference
+        _add_plugin_to_manifest(temp_dir, "old-plugin", {"version": "1.0.0", "install_type": "per-tool", "installedAt": ""})
 
         mock_root.return_value = outdated_env
         mock_dirs.return_value = _make_source_dirs_with_plugins(outdated_env)
@@ -150,6 +151,28 @@ class TestOutdatedPlugins:
         output = capsys.readouterr().out
         assert "old-plugin" in output
         assert "1.0.0" in output and "2.0.0" in output
+
+    @patch("aec.commands.outdated.get_source_dirs")
+    @patch("aec.commands.outdated.get_repo_root")
+    def test_claude_managed_plugin_is_not_compared_to_catalog(self, mock_root, mock_dirs, outdated_env, capsys, temp_dir):
+        """Claude Code owns marketplace plugin versions; the catalog pin would be stale."""
+        from aec.commands.outdated import run_outdated
+
+        plugin_dir = outdated_env / "plugins" / "old-plugin"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text(json.dumps({
+            "schema": "loadout/v1", "item_type": "plugin", "name": "old-plugin",
+            "version": "2.0.0", "description": "d", "source": "https://example.test",
+            "install_type": "marketplace", "install": {"marketplace": "x", "plugin": "old-plugin@x"},
+        }))
+        _add_plugin_to_manifest(temp_dir, "old-plugin", {"version": "1.0.0", "install_type": "marketplace", "installedAt": ""})
+
+        mock_root.return_value = outdated_env
+        mock_dirs.return_value = _make_source_dirs_with_plugins(outdated_env)
+        run_outdated(type_filter="plugin")
+        output = capsys.readouterr().out
+        assert "managed by Claude Code" in output
+        assert "2.0.0" not in output
 
     @patch("aec.commands.outdated.get_source_dirs")
     @patch("aec.commands.outdated.get_repo_root")

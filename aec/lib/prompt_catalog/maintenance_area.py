@@ -21,11 +21,22 @@ UPGRADE_OVERWRITE_LOCAL_PREFIX = "upgrade.overwrite_local"
 UPGRADE_RUN_UPDATE_FIRST = "upgrade.run_update_first"
 UPGRADE_OTHER_REPOS = "upgrade.other_repos"
 UPGRADE_PLUGINS_CONFIRM = "upgrade.plugins.confirm"
+UPGRADE_CLAUDE_PLUGINS_CONFIRM = "upgrade.claude_plugins.confirm"
 AGENT_TOOLS_MIGRATE_RERUN = "agent_tools.migrate.rerun"
 AGENT_TOOLS_ROLLBACK_CONFIRM = "agent_tools.rollback.confirm"
 
 
 SPECS: tuple[PromptSpec, ...] = (
+    PromptSpec(
+        UPGRADE_CLAUDE_PLUGINS_CONFIRM,
+        command="upgrade",
+        summary=(
+            "Run `claude plugin update` for the Claude Code plugins AEC installed "
+            "(a no-op for ones already current). Same decision as -y."
+        ),
+        type="yes_no",
+        default=True,
+    ),
     PromptSpec(
         UPGRADE_PLUGINS_CONFIRM,
         command="upgrade",

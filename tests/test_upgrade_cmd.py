@@ -593,22 +593,35 @@ class TestUpgradeWithDepConflicts:
 
 
 class TestUpgradePlugins:
-    """Plugins upgrade through their installer; never copied like rule files."""
+    """Plugins upgrade through their installer; never copied like rule files.
+
+    Claude Code marketplace plugins go through `claude plugin update --json`
+    (Claude decides what is newer); older per-tool records are re-installed.
+    """
 
     CATALOG = Path(__file__).resolve().parent.parent / "plugins"
 
-    def _run(self, tmp_path, recorded, returncode=0, yes=True, agents=None, pref=None, answer="n"):
+    def _run(self, tmp_path, recorded, *, update=None, yes=True, agents=None, pref=None,
+             answer="n", fail=False, dry_run=False):
+        import json as _json
         from aec.commands.upgrade import _upgrade_scope
         from aec.lib.manifest_v2 import record_plugin_install
 
         manifest = {"global": {"plugins": {}}, "repos": {}}
         record_plugin_install(manifest, "global", "ponytail", recorded["version"],
-                              install_type=recorded["install_type"], targets=["claude"])
+                              install_type=recorded["install_type"], targets=["claude"],
+                              plugin_id=recorded.get("pluginId", ""))
+        update = update or {"updateOutcome": "updated", "oldVersion": recorded["version"], "newVersion": "9.9.9"}
         calls = []
 
         def fake_run(cmd, *a, **kw):
             calls.append(cmd)
-            return MagicMock(returncode=returncode)
+            out = ""
+            if cmd[:3] == ["claude", "plugin", "update"]:
+                out = _json.dumps({"command": "update", "outcome": "ok", **update})
+            elif cmd[:3] == ["claude", "plugin", "list"]:
+                out = _json.dumps([{"id": "ponytail@ponytail", "version": "9.9.9"}])
+            return MagicMock(returncode=1 if fail else 0, stdout=out, stderr="")
 
         with patch("subprocess.run", side_effect=fake_run), \
              patch("aec.lib.config.detect_agents", return_value={"claude": {}} if agents is None else agents), \
@@ -617,44 +630,64 @@ class TestUpgradePlugins:
              patch("aec.commands.upgrade.record_item_install_pertype"), \
              patch("aec.commands.upgrade._target_base", return_value=tmp_path / "rules"):
             upgraded = _upgrade_scope(manifest, "global", {"plugins": self.CATALOG},
-                                      yes=yes, dry_run=False)
+                                      yes=yes, dry_run=dry_run)
         return manifest["global"]["plugins"]["ponytail"], calls, upgraded
+
+    MANAGED = {"version": "4.10.0", "install_type": "marketplace", "pluginId": "ponytail@ponytail"}
+
+    def test_managed_plugin_asks_claude_even_when_catalog_is_not_newer(self, tmp_path):
+        entry, calls, upgraded = self._run(tmp_path, self.MANAGED)
+        assert ["claude", "plugin", "marketplace", "update", "ponytail"] in calls
+        assert ["claude", "plugin", "update", "ponytail@ponytail", "--json"] in calls
+        assert upgraded and entry["version"] == "9.9.9" and entry["pluginId"] == "ponytail@ponytail"
+        assert not (tmp_path / "rules").exists(), "plugin must not be copied as a rule"
+
+    def test_up_to_date_is_not_an_upgrade(self, tmp_path):
+        entry, _, upgraded = self._run(tmp_path, self.MANAGED, update={
+            "updateOutcome": "up_to_date", "oldVersion": "4.10.0", "newVersion": "4.10.0"})
+        assert not upgraded and entry["version"] == "4.10.0"
+
+    def test_record_without_plugin_id_resolves_it_from_catalog(self, tmp_path):
+        entry, calls, _ = self._run(tmp_path, {"version": "4.10.0", "install_type": "marketplace"})
+        assert ["claude", "plugin", "update", "ponytail@ponytail", "--json"] in calls
+        assert entry["pluginId"] == "ponytail@ponytail"
+
+    def test_failed_update_keeps_recorded_version(self, tmp_path):
+        entry, _, upgraded = self._run(tmp_path, self.MANAGED, fail=True)
+        assert entry["version"] == "4.10.0" and not upgraded
+
+    def test_instructions_only_preference_never_runs(self, tmp_path):
+        entry, calls, _ = self._run(tmp_path, self.MANAGED, pref="instructions-only")
+        assert calls == [] and entry["version"] == "4.10.0"
+
+    def test_missing_claude_is_not_run(self, tmp_path):
+        entry, calls, _ = self._run(tmp_path, self.MANAGED, agents={})
+        assert calls == [] and entry["version"] == "4.10.0"
+
+    def test_dry_run_runs_nothing(self, tmp_path):
+        entry, calls, upgraded = self._run(tmp_path, self.MANAGED, dry_run=True)
+        assert calls == [] and upgraded and entry["version"] == "4.10.0"
 
     def test_old_per_tool_record_reinstalls_from_marketplace(self, tmp_path):
         entry, calls, upgraded = self._run(tmp_path, {"version": "1.0.0", "install_type": "per-tool"})
-        assert calls == [
+        assert calls[:2] == [
             ["claude", "plugin", "marketplace", "add", "DietrichGebert/ponytail"],
             ["claude", "plugin", "install", "ponytail@ponytail"],
         ]
-        assert upgraded and entry["install_type"] == "marketplace" and entry["version"] != "1.0.0"
-        assert not (tmp_path / "rules").exists(), "plugin must not be copied as a rule"
+        assert upgraded and entry["install_type"] == "marketplace"
+        assert entry["version"] == "9.9.9", "records what Claude Code installed"
+        assert entry["pluginId"] == "ponytail@ponytail"
 
-    def test_marketplace_record_uses_claude_plugin_update(self, tmp_path):
-        entry, calls, _ = self._run(tmp_path, {"version": "0.1.0", "install_type": "marketplace"})
-        assert calls == [["claude", "plugin", "update", "ponytail@ponytail"]]
-        assert entry["version"] != "0.1.0"
-
-    def test_failed_command_keeps_recorded_version(self, tmp_path):
-        entry, _, upgraded = self._run(tmp_path, {"version": "0.1.0", "install_type": "marketplace"},
-                                       returncode=1)
-        assert entry["version"] == "0.1.0" and not upgraded
-
-    def test_without_yes_declining_runs_nothing(self, tmp_path):
-        entry, calls, upgraded = self._run(tmp_path, {"version": "0.1.0", "install_type": "marketplace"},
+    def test_reinstall_without_yes_declining_runs_nothing(self, tmp_path):
+        entry, calls, upgraded = self._run(tmp_path, {"version": "1.0.0", "install_type": "per-tool"},
                                            yes=False, answer="n")
-        assert calls == [] and entry["version"] == "0.1.0" and not upgraded
+        assert calls == [] and entry["version"] == "1.0.0" and not upgraded
 
-    def test_without_yes_confirming_runs(self, tmp_path):
-        _, calls, upgraded = self._run(tmp_path, {"version": "0.1.0", "install_type": "marketplace"},
-                                       yes=False, answer="y")
-        assert calls == [["claude", "plugin", "update", "ponytail@ponytail"]] and upgraded
+    def test_managed_update_without_yes_declined_runs_nothing(self, tmp_path):
+        entry, calls, upgraded = self._run(tmp_path, self.MANAGED, yes=False, answer="n")
+        assert calls == [] and not upgraded and entry["version"] == "4.10.0"
 
-    def test_instructions_only_preference_never_runs(self, tmp_path):
-        entry, calls, _ = self._run(tmp_path, {"version": "0.1.0", "install_type": "marketplace"},
-                                    pref="instructions-only")
-        assert calls == [] and entry["version"] == "0.1.0"
+    def test_managed_update_without_yes_confirmed_runs(self, tmp_path):
+        _, calls, upgraded = self._run(tmp_path, self.MANAGED, yes=False, answer="y")
+        assert ["claude", "plugin", "update", "ponytail@ponytail", "--json"] in calls and upgraded
 
-    def test_missing_claude_is_not_run(self, tmp_path):
-        entry, calls, _ = self._run(tmp_path, {"version": "0.1.0", "install_type": "marketplace"},
-                                    agents={})
-        assert calls == [] and entry["version"] == "0.1.0"

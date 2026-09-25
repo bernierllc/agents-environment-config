@@ -3,7 +3,7 @@
 import json
 import pytest
 from pathlib import Path
-from unittest.mock import patch, call
+from unittest.mock import MagicMock, call, patch
 
 
 AGENT_FRONTMATTER = (
@@ -597,3 +597,32 @@ class TestInstallPlugin:
         entry = load_manifest(install_env["manifest_path"])["global"]["plugins"]["mkt"]
         assert entry["install_type"] == "marketplace"
         assert entry["targets"] == ["claude"]
+
+    def test_marketplace_plugin_records_claude_version_and_id(self, install_env):
+        """The record holds what Claude Code installed, not the catalog pin."""
+        from aec.commands.install_cmd import run_install
+        from aec.lib.manifest_v2 import load_manifest
+
+        plugins_dir = install_env["repo"] / "plugins"
+        plugin_dir = plugins_dir / "mkt"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text(json.dumps({
+            "schema": "loadout/v1", "item_type": "plugin", "name": "mkt",
+            "version": "1.0.0", "description": "Marketplace test plugin.",
+            "source": "https://example.test", "install_type": "marketplace",
+            "install": {"marketplace": "owner/mkt", "plugin": "mkt@mkt"},
+        }))
+
+        def fake_run(cmd, *a, **k):
+            out = json.dumps([{"id": "mkt@mkt", "version": "1.4.2"}]) if cmd[:3] == ["claude", "plugin", "list"] else ""
+            return MagicMock(returncode=0, stdout=out, stderr="")
+
+        patches = self._patch_repo_with_plugins(install_env, plugins_dir)
+        with patches[0], patches[1], \
+                patch("aec.lib.config.detect_agents", return_value={"claude": {}}), \
+                patch("subprocess.run", side_effect=fake_run):
+            run_install(item_type="plugin", name="mkt", global_flag=True, yes=True)
+
+        entry = load_manifest(install_env["manifest_path"])["global"]["plugins"]["mkt"]
+        assert entry["version"] == "1.4.2"
+        assert entry["pluginId"] == "mkt@mkt"

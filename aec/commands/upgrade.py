@@ -4,11 +4,13 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
+from ..lib.claude_plugins import is_claude_managed
 from ..lib.console import Console
 from ..lib.prompt_catalog.install_flow_area import item_prompt_id
 from ..lib.prompt_catalog.maintenance_area import (
     UPGRADE_OTHER_REPOS,
     UPGRADE_OVERWRITE_LOCAL_PREFIX,
+    UPGRADE_CLAUDE_PLUGINS_CONFIRM,
     UPGRADE_PLUGINS_CONFIRM,
     UPGRADE_RUN_UPDATE_FIRST,
 )
@@ -305,43 +307,156 @@ def _upgrade_plugins(
     yes: bool,
     dry_run: bool,
 ) -> bool:
-    """Upgrade outdated plugins through their installer, never by copying files.
+    """Upgrade plugins through their installer, never by copying files.
 
-    A plugin already recorded as a marketplace install is updated with
-    ``claude plugin update``; one recorded under another install type (e.g. an
-    older per-tool catalog entry) is re-installed from the current manifest.
-    Instructions-only plugins are reported and left at their recorded version.
-    The record is only advanced when every command succeeded. Commands run
-    only after one batch confirmation (skipped with ``--yes``) and never when
-    ``plugins.execution`` is ``instructions-only``, the same guards as install.
+    - Claude Code marketplace plugins: Claude Code decides what is newer.
+      Each one goes through ``claude plugin update`` (a no-op when current)
+      and the version Claude Code reports is recorded; the catalog's pinned
+      version is not consulted. One ``[Y/n]`` confirmation (skipped with
+      ``--yes``) covers the batch.
+    - Plugins recorded under another install type (e.g. ponytail's old
+      per-tool entry) are re-installed when the catalog version is newer,
+      after one batch confirmation (skipped with ``--yes``).
+
+    Both honor ``plugins.execution: instructions-only`` and a missing
+    ``claude``. A record only advances when the commands succeeded.
     """
+    from ..lib.claude_plugins import is_claude_managed
+
+    managed = [(n, i) for n, i in installed.items() if is_claude_managed(i)]
+    stale = [
+        (n, i) for n, i in installed.items()
+        if not is_claude_managed(i) and n in available
+        and version_is_newer(available[n].get("version", "0.0.0"), i.get("version", "0.0.0"))
+    ]
+    upgraded = False
+    if managed and _update_claude_plugins(manifest, scope, source_dir, managed, available, yes, dry_run):
+        upgraded = True
+    if stale and _reinstall_plugins(manifest, scope, source_dir, stale, available, yes, dry_run):
+        upgraded = True
+    return upgraded
+
+
+def _plugin_policy_blocks(pref) -> Optional[str]:
+    """Why plugin commands must not run here, or None when they may."""
+    from ..lib.config import detect_agents
+    from ..lib.plugin_install import effective_policy
+
+    if "claude" not in detect_agents():
+        return "claude is not installed"
+    if effective_policy("marketplace", has_run=True, pref=pref) != "run":
+        return "plugins.execution is instructions-only"
+    return None
+
+
+def _resolve_plugin_id(name: str, info: dict, source_dir: Path, available: dict) -> str:
+    """The Claude Code plugin id for a recorded plugin (record first, then catalog)."""
+    from ..lib.loadout import LoadoutError, load_loadout
+
+    if info.get("pluginId"):
+        return info["pluginId"]
+    if name not in available:
+        return ""
+    try:
+        manifest_def = load_loadout(source_dir / available[name].get("path", name))
+    except LoadoutError:
+        return ""
+    return manifest_def.get("install", {}).get("plugin", "")
+
+
+def _update_claude_plugins(
+    manifest: dict, scope: str, source_dir: Path, managed: list, available: dict,
+    yes: bool, dry_run: bool,
+) -> bool:
+    from ..lib.claude_plugins import marketplace_of, refresh_marketplace, update_plugin
+    from ..lib.manifest_v2 import record_plugin_install
+    from ..lib.preferences import get_setting
+
+    targets = []
+    for name, info in managed:
+        plugin_id = _resolve_plugin_id(name, info, source_dir, available)
+        if not plugin_id:
+            Console.warning(f"Plugin {name}: no Claude Code plugin id recorded or in the catalog; skipping.")
+            continue
+        targets.append((name, info, plugin_id))
+    if not targets:
+        return False
+
+    if dry_run:
+        for _, _, plugin_id in targets:
+            Console.print(f"  would run: claude plugin update {plugin_id}")
+        return True
+
+    blocked = _plugin_policy_blocks(get_setting("plugins.execution"))
+    if blocked:
+        for _, _, plugin_id in targets:
+            Console.print(f"  {blocked}; run manually -> claude plugin update {plugin_id}")
+        return False
+    if not yes:
+        names = ", ".join(name for name, _, _ in targets)
+        resp = prompt(
+            UPGRADE_CLAUDE_PLUGINS_CONFIRM,
+            f"Check {len(targets)} Claude Code plugin(s) ({names}) for updates? [Y/n]: ",
+            type="yes_no",
+            default=True,
+        )
+        if resp != "y":
+            Console.info("Skipped Claude Code plugin updates.")
+            return False
+
+    for marketplace in sorted({marketplace_of(pid) for _, _, pid in targets}):
+        if not refresh_marketplace(marketplace):
+            Console.warning(f"Could not refresh marketplace {marketplace}; updating from its cached catalog.")
+
+    upgraded = False
+    for name, info, plugin_id in targets:
+        result = update_plugin(plugin_id)
+        if result is None:
+            Console.error(f"claude plugin update {plugin_id} failed; left at {info.get('version', '?')}.")
+            continue
+        new_v = result["new"] or info.get("version", "0.0.0")
+        if result["outcome"] == "up_to_date":
+            Console.info(f"Plugin {name} is up to date ({new_v}).")
+        else:
+            Console.success(
+                f"Updated plugin {name} {result['old'] or info.get('version', '?')} -> {new_v} "
+                "(restart Claude Code to apply)"
+            )
+            upgraded = True
+        if new_v != info.get("version") or not info.get("pluginId"):
+            record_plugin_install(
+                manifest, scope, name, new_v,
+                install_type="marketplace", targets=info.get("targets", ["claude"]),
+                installed_as=info.get("installedAs", "explicit"), plugin_id=plugin_id,
+            )
+            record_item_install_pertype("plugin", name, new_v)
+    return upgraded
+
+
+def _reinstall_plugins(
+    manifest: dict, scope: str, source_dir: Path, stale: list, available: dict, yes: bool, dry_run: bool,
+) -> bool:
     import subprocess
 
+    from ..lib.claude_plugins import installed_versions
     from ..lib.config import detect_agents
     from ..lib.loadout import LoadoutError, load_loadout
     from ..lib.manifest_v2 import record_plugin_install
-    from ..lib.plugin_install import effective_policy, install_plugin
+    from ..lib.plugin_install import install_plugin
     from ..lib.preferences import get_setting
 
-    outdated = [
-        (name, info) for name, info in installed.items()
-        if name in available
-        and version_is_newer(available[name].get("version", "0.0.0"), info.get("version", "0.0.0"))
-    ]
-    if not outdated:
-        return False
     if dry_run:
-        for name, info in outdated:
+        for name, info in stale:
             Console.print(
                 f"  would upgrade plugin  {name}  {info.get('version', '0.0.0')} -> "
                 f"{available[name].get('version', '0.0.0')}"
             )
         return True
     if not yes:
-        names = ", ".join(name for name, _ in outdated)
+        names = ", ".join(name for name, _ in stale)
         resp = prompt(
             UPGRADE_PLUGINS_CONFIRM,
-            f"Upgrade {len(outdated)} plugin(s) ({names})? [y/N]: ",
+            f"Re-install {len(stale)} plugin(s) ({names})? [y/N]: ",
             type="yes_no",
             default=False,
         )
@@ -352,7 +467,7 @@ def _upgrade_plugins(
     pref = get_setting("plugins.execution")
     detected = detect_agents()
     upgraded = False
-    for name, info in outdated:
+    for name, info in stale:
         avail_v = available[name].get("version", "0.0.0")
         inst_v = info.get("version", "0.0.0")
         try:
@@ -375,19 +490,10 @@ def _upgrade_plugins(
                 failed.append(cmd)
             return result
 
-        if manifest_def["install_type"] == "marketplace" and info.get("install_type") == "marketplace":
-            cmd = ["claude", "plugin", "update", manifest_def["install"]["plugin"]]
-            if "claude" not in detected or effective_policy("marketplace", has_run=True, pref=pref) != "run":
-                Console.print(f"  run manually -> {' '.join(cmd)}")
-                result = {"install_type": "marketplace", "targets": ["claude"], "executed": False}
-            else:
-                runner(cmd)
-                result = {"install_type": "marketplace", "targets": ["claude"], "executed": True}
-        else:
-            result = install_plugin(
-                manifest_def, detected,
-                runner=runner, confirm=lambda *a: True, printer=Console.print, pref=pref,
-            )
+        result = install_plugin(
+            manifest_def, detected,
+            runner=runner, confirm=lambda *a: True, printer=Console.print, pref=pref,
+        )
         if not result.get("executed"):
             Console.warning(
                 f"{name} {inst_v} -> {avail_v} needs manual steps (printed above); "
@@ -397,12 +503,17 @@ def _upgrade_plugins(
         if failed:
             Console.error(f"Failed to upgrade plugin {name}: {' '.join(failed[0])} exited non-zero")
             continue
+        plugin_id = ""
+        new_v = avail_v
+        if result["install_type"] == "marketplace":
+            plugin_id = manifest_def["install"]["plugin"]
+            new_v = installed_versions().get(plugin_id) or avail_v
         record_plugin_install(
-            manifest, scope, name, avail_v,
-            install_type=result["install_type"], targets=result["targets"],
+            manifest, scope, name, new_v,
+            install_type=result["install_type"], targets=result["targets"], plugin_id=plugin_id,
         )
-        record_item_install_pertype("plugin", name, avail_v)
-        Console.success(f"Upgraded plugin {name} {inst_v} -> {avail_v}")
+        record_item_install_pertype("plugin", name, new_v)
+        Console.success(f"Upgraded plugin {name} {inst_v} -> {new_v}")
         upgraded = True
     return upgraded
 
@@ -578,6 +689,8 @@ def _find_outdated_repos(
             available = discover_available(source_dir, item_type)
             installed = get_installed(manifest, repo_key, item_type)
             for name, info in installed.items():
+                if item_type == "plugins" and is_claude_managed(info):
+                    continue  # Claude Code tracks these; `aec upgrade` asks it.
                 if name in available:
                     if version_is_newer(
                         available[name].get("version", "0.0.0"),
