@@ -615,6 +615,25 @@ class TestUnguardedScriptCommands:
         assert not settings.get("hooks", {}).get("PostToolUse")
         assert verify_repo(repo_root) == []
 
+    def test_skipped_hook_with_missing_script_does_not_blind_drift(self, tmp_path):
+        """An inapplicable run-script hook may lack its script; the rest still counts."""
+        from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
+
+        repo_root = TestStaleAbsolutePaths._install_repo_local(tmp_path)
+        hooks_json = repo_root / ".claude/skills/demo/hooks.json"
+        data = json.loads(hooks_json.read_text())
+        data["hooks"][0]["when"] = {"repo_has": ["package.json"]}
+        data["hooks"].append({
+            "id": "other", "event": "on_file_edit", "description": "d",
+            "command": "aec run-script skill:demo gone.sh",
+            "when": {"repo_has": ["package.json"]},
+        })
+        hooks_json.write_text(json.dumps(data))
+
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.STALE]
+        assert any(r.repaired for r in repair_repo(repo_root))
+        assert verify_repo(repo_root) == []
+
     def test_verify_never_runs_custom_check(self, tmp_path):
         from aec.lib.hooks.drift import Drift, verify_repo
 
@@ -635,7 +654,8 @@ class TestUnguardedScriptCommands:
         wrong_field = {"id": "lint", "event": "on_file_edit", "command": 42,
                        "description": "d"}
         for bad in ({"hooks": ["bad"]}, {"hooks": [], "claude": ["bad"]},
-                    {"hooks": [wrong_field]}):
+                    {"hooks": [wrong_field]},
+                    {"hooks": [], "git": [{"id": "x", "hook_name": "pre-commit"}]}):
             hooks_json.write_text(json.dumps({"version": "1.0.0", **bad}))
             assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
 

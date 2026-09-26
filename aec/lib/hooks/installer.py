@@ -309,7 +309,8 @@ def install_item_hooks(
                 f"(e.g. `mv {blocked} {blocked}.bak`) to enable {agent} hooks."
             )
             continue
-        resolved = _resolve_script_commands(hf, item_dir, repo_root, agent)
+        # Only hooks that apply: a skipped hook's script may legitimately be absent.
+        resolved = _resolve_script_commands(filtered, item_dir, repo_root, agent)
         entries = translate_to_agent(filtered, agent, resolved_commands=resolved)
         if agent == "claude":
             _install_claude(repo_root, entries, st, item_version)

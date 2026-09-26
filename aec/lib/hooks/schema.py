@@ -111,6 +111,11 @@ def load_hooks_file(path: Path) -> HooksFile:
 
     def _overrides(key: str) -> List[AgentOverride]:
         raw_list = data.get(key, []) or []
+        # A git override becomes a hook-script line, so it needs a command.
+        if key == "git":
+            for item in raw_list:
+                if isinstance(item, dict) and not isinstance(item.get("command"), str):
+                    raise HooksSchemaError(f"{path}: git override needs a string 'command'")
         return [
             AgentOverride(agent=key, payload=item, id=item.get("id"))
             for item in raw_list

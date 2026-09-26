@@ -110,7 +110,8 @@ def _rendered(repo_root: Path, item_type: str, item_key: str,
         ])
         entries = translate_to_agent(
             applied, agent,
-            resolved_commands=_resolve_script_commands(hf, src, repo_root, agent),
+            resolved_commands=_resolve_script_commands(
+                applied, src, repo_root, agent),
         )
     except (OSError, ValueError):
         return None
