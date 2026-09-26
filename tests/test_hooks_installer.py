@@ -244,6 +244,8 @@ class TestResolveScriptCommands:
         cases = {
             "#!/usr/bin/env python3\n": ["/usr/bin/env", "python3"],
             "#!/bin/bash -e\n": ["/bin/bash", "-e"],
+            "#!/usr/bin/env -S FOO=\"a b\" sh\r\n":
+                ["/usr/bin/env", '-S FOO="a b" sh'],
             "echo no shebang\n": ["sh"],
             "": ["sh"],
         }

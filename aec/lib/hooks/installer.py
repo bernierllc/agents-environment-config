@@ -119,8 +119,10 @@ def is_guarded(command: str) -> bool:
 def interpreter_for(script_path: Path) -> List[str]:
     """argv prefix that runs `script_path` without relying on its exec bit.
 
-    The shebang's interpreter and its whitespace-split arguments; `sh` when
-    there is none, which is what a POSIX shell does with a shebang-less file.
+    The shebang's interpreter plus its optional argument kept as ONE word, the
+    way the kernel passes it (`#!/usr/bin/env -S FOO="a b" sh` must reach env
+    intact); `sh` when there is none, which is what a POSIX shell does with a
+    shebang-less file.
     """
     # ponytail: assumes a text script; a compiled binary under scripts/ would
     # need to be exec'd directly — detect magic bytes if one ever ships.
@@ -130,7 +132,7 @@ def interpreter_for(script_path: Path) -> List[str]:
     except OSError:
         return ["sh"]
     if first.startswith(b"#!"):
-        return first[2:].decode("utf-8", errors="replace").split() or ["sh"]
+        return first[2:].decode("utf-8", errors="replace").strip().split(None, 1) or ["sh"]
     return ["sh"]
 
 
