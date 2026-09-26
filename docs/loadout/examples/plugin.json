@@ -1,28 +1,28 @@
 {
   "schema": "loadout/v1",
   "item_type": "plugin",
-  "name": "ponytail",
+  "name": "my-plugin",
   "version": "1.0.0",
-  "description": "Lazy-senior-dev review/build discipline for AI coding agents.",
-  "source": "https://github.com/DietrichGebert/ponytail",
-  "homepage": "https://github.com/DietrichGebert/ponytail",
-  "author": { "name": "Dietrich Gebert", "url": "https://github.com/DietrichGebert" },
+  "description": "Example per-tool plugin: one scripted install and two instructions-only installs.",
+  "source": "https://github.com/example/my-plugin",
+  "homepage": "https://github.com/example/my-plugin",
+  "author": { "name": "Example Author", "url": "https://github.com/example" },
   "license": "MIT",
   "supports": ["claude", "cursor", "gemini"],
-  "usage": "Type /ponytail in your agent to toggle modes (lite | full | ultra).",
+  "usage": "Type /my-plugin in your agent.",
   "install_type": "per-tool",
   "install": {
     "tools": {
-      "claude": { "steps": "Follow the Claude install instructions in the ponytail README at https://github.com/DietrichGebert/ponytail" },
-      "cursor": { "steps": "Follow the Cursor install instructions in the ponytail README at https://github.com/DietrichGebert/ponytail" },
-      "gemini": { "steps": "Follow the Gemini install instructions in the ponytail README at https://github.com/DietrichGebert/ponytail" }
+      "claude": { "run": ["npx", "my-plugin", "install", "--agent", "claude"] },
+      "cursor": { "steps": "Copy my-plugin's rules into .cursor/rules/ per https://github.com/example/my-plugin#cursor" },
+      "gemini": { "steps": "Add my-plugin to your Gemini extensions per https://github.com/example/my-plugin#gemini" }
     }
   },
   "uninstall": {
     "tools": {
-      "claude": { "steps": "Remove the ponytail plugin files per the ponytail README." },
-      "cursor": { "steps": "Remove the ponytail plugin files per the ponytail README." },
-      "gemini": { "steps": "Remove the ponytail plugin files per the ponytail README." }
+      "claude": { "run": ["npx", "my-plugin", "uninstall", "--agent", "claude"] },
+      "cursor": { "steps": "Delete the my-plugin files from .cursor/rules/." },
+      "gemini": { "steps": "Remove my-plugin from your Gemini extensions." }
     }
   }
 }

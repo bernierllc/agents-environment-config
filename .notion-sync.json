@@ -27,6 +27,14 @@
       "last_synced": "2026-09-26",
       "status": "Backlog",
       "branch": null
+    },
+    "2026-09-26-agent-rules-per-user-render.md": {
+      "roadmap_page_id": "3e74efec-c95a-81e4-8d6c-f0cfd3fbe4be",
+      "tracker_page_id": null,
+      "source_sha256": "9ccfd28f9a867d3b7a62c2875dc906a8d82027379cf4d85b45907d1812afcfe1",
+      "last_synced": "2026-09-26",
+      "status": "Backlog",
+      "branch": null
     }
   },
   "pending_backfill": {

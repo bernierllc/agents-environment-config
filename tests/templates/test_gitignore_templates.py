@@ -21,7 +21,8 @@ class TestSupportedJson:
 
     def test_all_referenced_templates_exist(self):
         """Every filename in supported.json must exist in gitignore root."""
-        if not TEMPLATES_DIR.exists():
+        # An uninitialized submodule is an empty directory, not a missing one.
+        if not any(TEMPLATES_DIR.glob("*.gitignore")):
             pytest.skip("gitignore submodule not initialized — run: git submodule update --init")
         data = json.loads(SUPPORTED_JSON.read_text())
         missing = []
@@ -36,7 +37,7 @@ class TestSupportedJson:
 class TestCompositeJoin:
     def test_composite_join_single_language(self):
         """Composite join for a single language returns non-empty, deduped content."""
-        if not TEMPLATES_DIR.exists():
+        if not any(TEMPLATES_DIR.glob("*.gitignore")):
             pytest.skip("gitignore submodule not initialized — run: git submodule update --init")
         from aec.lib.git_setup import build_composite_gitignore
 
@@ -49,7 +50,7 @@ class TestCompositeJoin:
 
     def test_composite_join_multi_language(self):
         """Composite join for multiple languages includes content from each."""
-        if not TEMPLATES_DIR.exists():
+        if not any(TEMPLATES_DIR.glob("*.gitignore")):
             pytest.skip("gitignore submodule not initialized — run: git submodule update --init")
         from aec.lib.git_setup import build_composite_gitignore
 
