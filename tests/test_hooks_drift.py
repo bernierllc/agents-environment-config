@@ -457,6 +457,30 @@ class TestUnguardedScriptCommands:
         assert new in hook.read_text()
         assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
 
+    def test_hand_written_exec_bit_guard_in_git_hook_is_not_stale(self, tmp_path):
+        """A raw hooks.json command passes through verbatim; repair can't change it."""
+        from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
+        from aec.lib.hooks.installer import install_item_hooks
+
+        repo_root = tmp_path / "repo"
+        (repo_root / ".git/hooks").mkdir(parents=True)
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        item_dir.mkdir(parents=True)
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "pre_commit",
+                "command": "if [ -x node_modules/.bin/eslint ]; "
+                           "then node_modules/.bin/eslint .; fi",
+                "description": "d",
+            }],
+        }))
+        install_item_hooks(
+            item_type="skill", item_key="demo", item_version="1.0.0",
+            item_dir=item_dir, repo_root=repo_root, agents=["git"],
+        )
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
+        assert not any(r.repaired for r in repair_repo(repo_root))
+
     def test_guarded_command_is_a_no_op_when_the_script_is_absent(
         self, tmp_path
     ):

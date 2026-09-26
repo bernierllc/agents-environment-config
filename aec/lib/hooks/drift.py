@@ -10,6 +10,7 @@ reports OK / MISSING. `verify_repo` runs that over every recorded hook in a repo
 """
 
 import json
+import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -133,6 +134,17 @@ def _is_stale(repo_root: Path, agent: str, entry: dict) -> bool:
     )
 
 
+# The exact line pre-interpreter installs wrote for a resolved script:
+# `if [ -x P ]; then P [args]; fi`, P a repo-relative `.../scripts/...` path.
+# Anchored on that shape, not on `if [ -x ` appearing anywhere: a hand-written
+# hooks.json command passes through verbatim, repair would rewrite it
+# unchanged, and it would stay STALE forever.
+_LEGACY_GIT_LINE = re.compile(
+    r"^" + re.escape(LEGACY_GUARD_PREFIX) + r"(\S*/scripts/\S+) \]; then \1( |;)",
+    re.MULTILINE,
+)
+
+
 def _git_block(repo_root: Path, event_key: str, item_type: str,
                item_key: str, hook_id: str) -> Optional[str]:
     from .git_blocks import read_block
@@ -155,7 +167,7 @@ def classify_hook(repo_root: Path, installed: dict, *,
         block = _git_block(repo_root, event_key, item_type, item_key, hook_id)
         if block is None:
             status = Drift.MISSING
-        elif LEGACY_GUARD_PREFIX in block:
+        elif _LEGACY_GIT_LINE.search(block):
             status = Drift.STALE
         else:
             status = Drift.OK

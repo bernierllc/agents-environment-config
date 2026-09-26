@@ -119,11 +119,6 @@ def read_block(hook_file: Path, *, item_key: str, hook_id: str) -> Optional[str]
     return m.group(0) if m else None
 
 
-def block_present(hook_file: Path, *, item_key: str, hook_id: str) -> bool:
-    """True if a delimited block for this item/hook exists in the hook file."""
-    return read_block(hook_file, item_key=item_key, hook_id=hook_id) is not None
-
-
 def remove_block(hook_file: Path, *, item_key: str, hook_id: str) -> None:
     """Remove the matching delimited block. No-op if absent or file missing."""
     if not hook_file.exists():
