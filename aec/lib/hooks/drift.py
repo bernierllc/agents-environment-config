@@ -121,11 +121,12 @@ def _is_stale(expected: Optional[Dict[Tuple[str, str], Set[str]]],
 
     Covers every older rendering at once — absolute paths, the unguarded
     project-dir path, the `-x` exec-bit guard, gemini/cursor exec'ing the bare
-    path — and a hook whose source changed since install, including its event. Repair reinstalls the
+    path — and a hook whose source changed since install: its command, its
+    event, or its removal from hooks.json altogether. Repair reinstalls the
     current rendering, so a flagged hook is always fixable: a hand-written
     command renders verbatim and never differs.
     """
-    if expected is None or not any(h == hook_id for h, _ in expected):
+    if expected is None:
         return False
     return actual not in expected.get((hook_id, event_key), ())
 

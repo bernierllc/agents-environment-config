@@ -536,6 +536,33 @@ class TestUnguardedScriptCommands:
         assert "AEC:BEGIN" in (repo_root / ".git/hooks/pre-push").read_text()
         assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
 
+    def test_hook_removed_from_source_is_stale_and_repair_retracts_it(
+        self, tmp_path
+    ):
+        from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
+
+        repo_root = TestStaleAbsolutePaths._install_repo_local(tmp_path)
+        hooks_json = repo_root / ".claude/skills/demo/hooks.json"
+        data = json.loads(hooks_json.read_text())
+        data["hooks"][0]["id"] = "renamed"
+        hooks_json.write_text(json.dumps(data))
+
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.STALE]
+        assert any(r.repaired for r in repair_repo(repo_root))
+        settings = json.loads((repo_root / ".claude/settings.json").read_text())
+        assert len(settings["hooks"]["PostToolUse"]) == 1
+        assert [(s.hook_id, s.status) for s in verify_repo(repo_root)] == [
+            ("renamed", Drift.OK)]
+
+    def test_malformed_source_entry_does_not_crash_verify(self, tmp_path):
+        from aec.lib.hooks.drift import Drift, verify_repo
+
+        repo_root = TestStaleAbsolutePaths._install_repo_local(tmp_path)
+        hooks_json = repo_root / ".claude/skills/demo/hooks.json"
+        for bad in ({"hooks": ["bad"]}, {"hooks": [], "claude": ["bad"]}):
+            hooks_json.write_text(json.dumps({"version": "1.0.0", **bad}))
+            assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
+
     def test_hand_written_exec_bit_guard_in_git_hook_is_not_stale(self, tmp_path):
         """A raw hooks.json command passes through verbatim; repair can't change it."""
         from aec.lib.hooks.drift import Drift, repair_repo, verify_repo

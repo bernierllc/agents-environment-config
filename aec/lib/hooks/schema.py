@@ -106,8 +106,6 @@ def load_hooks_file(path: Path) -> HooksFile:
     if "version" not in data:
         raise HooksSchemaError(f"{path}: missing required field 'version'")
 
-    generic = [GenericHook.from_dict(h) for h in data.get("hooks", []) or []]
-
     def _overrides(key: str) -> List[AgentOverride]:
         raw_list = data.get(key, []) or []
         return [
@@ -115,13 +113,18 @@ def load_hooks_file(path: Path) -> HooksFile:
             for item in raw_list
         ]
 
-    return HooksFile(
-        version=str(data["version"]),
-        hooks=generic,
-        claude=_overrides("claude"),
-        cursor=_overrides("cursor"),
-        gemini=_overrides("gemini"),
-        git=_overrides("git"),
-        schema_url=data.get("$schema"),
-        source_path=path,
-    )
+    # A wrong-typed entry (`"hooks": ["x"]`, `"claude": [1]`) surfaces as a
+    # TypeError/AttributeError deep in the parse; callers handle one error type.
+    try:
+        return HooksFile(
+            version=str(data["version"]),
+            hooks=[GenericHook.from_dict(h) for h in data.get("hooks", []) or []],
+            claude=_overrides("claude"),
+            cursor=_overrides("cursor"),
+            gemini=_overrides("gemini"),
+            git=_overrides("git"),
+            schema_url=data.get("$schema"),
+            source_path=path,
+        )
+    except (TypeError, AttributeError) as e:
+        raise HooksSchemaError(f"{path}: malformed hook entry: {e}") from e
