@@ -260,3 +260,43 @@ class TestReviewRegressions:
         agent_tools.setup(dry_run=True)
 
         assert not ms.MANAGED_SYMLINKS_PATH.exists()
+
+    def test_setup_persists_migration_when_nothing_to_create(self, temp_dir, monkeypatch):
+        """An upgrade with every link already present must still retire the
+        heuristic, or a later user symlink matching it would be adopted."""
+        from aec.commands import agent_tools
+
+        agent_tools_dir = temp_dir / ".agent-tools"
+        checkout = temp_dir / "agents-environment-config"
+        (checkout / ".agent-rules").mkdir(parents=True)
+        rules = agent_tools_dir / "rules" / "agents-environment-config"
+        rules.parent.mkdir(parents=True)
+        rules.symlink_to(checkout / ".agent-rules")
+        user_link = temp_dir / "user-link"
+        user_link.symlink_to(temp_dir / "elsewhere" / "agents-environment-config")
+
+        candidates = [rules]
+        monkeypatch.setattr(ms, "_legacy_candidate_paths", lambda: candidates)
+        monkeypatch.setattr(agent_tools, "AGENT_TOOLS_DIR", agent_tools_dir)
+        monkeypatch.setattr(agent_tools, "_is_claude_installed", lambda: False)
+        monkeypatch.setattr(agent_tools, "_is_cursor_installed", lambda: False)
+        monkeypatch.setattr(agent_tools, "get_repo_root", lambda: checkout)
+        agent_tools.setup()
+
+        assert ms.MANAGED_SYMLINKS_PATH.exists()
+        assert is_our_symlink(rules) is True
+        candidates.append(user_link)  # heuristic would claim this if still live
+        assert is_our_symlink(user_link) is False
+
+    def test_concurrent_records_keep_every_entry(self, temp_dir):
+        import multiprocessing as mp
+
+        links = [temp_dir / f"link-{i}" for i in range(16)]
+        ctx = mp.get_context("fork")
+        procs = [ctx.Process(target=ms.record_symlink, args=(l, temp_dir / "src")) for l in links]
+        for p in procs:
+            p.start()
+        for p in procs:
+            p.join()
+
+        assert all(ms.is_recorded(l) for l in links)

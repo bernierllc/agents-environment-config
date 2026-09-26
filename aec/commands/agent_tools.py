@@ -87,6 +87,16 @@ def setup(dry_run: bool = False) -> None:
     Console.print(f"Repository: {Console.path(repo_root)}")
     Console.print(f"Target: {Console.path(AGENT_TOOLS_DIR)}")
 
+    if not dry_run:
+        # Adopt pre-record links before any are touched, so the legacy
+        # heuristic is retired even when nothing below needs creating.
+        from ..lib.managed_symlinks import persist_legacy_migration
+
+        try:
+            persist_legacy_migration()
+        except OSError as exc:
+            Console.warning(f"Could not write symlink ownership record: {exc}")
+
     # Create directory structure
     Console.subheader("Creating ~/.agent-tools/ structure...")
 

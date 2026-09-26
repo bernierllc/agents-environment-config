@@ -11,7 +11,8 @@ Pre-existing links from before this record existed are adopted by
 the fixed set of locations AEC has ever created symlinks at (never an
 arbitrary path). Until the record file exists, reads use that adopted view
 in memory -- lookups never write, so dry runs and read-only state dirs are
-safe. The first real write (``create_symlink()``) persists it, after which
+safe. The first real write (``create_symlink()`` or a non-dry-run
+``agent-tools setup`` via ``persist_legacy_migration()``) persists it, after which
 the heuristic is never consulted again.
 
 See docs/superpowers/plans/2026-09-25-managed-symlink-ownership.md.
@@ -19,9 +20,15 @@ See docs/superpowers/plans/2026-09-25-managed-symlink-ownership.md.
 
 import json
 import os
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Iterator, List, Optional
+
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
 
 from .atomic_write import atomic_write_json
 from .config import AEC_HOME
@@ -60,6 +67,24 @@ def _save(data: dict) -> None:
     atomic_write_json(MANAGED_SYMLINKS_PATH, data)
 
 
+@contextmanager
+def _locked() -> Iterator[None]:
+    """Serialise read-modify-write of the record across AEC processes."""
+    # ponytail: no lock on Windows (no fcntl); use msvcrt.locking if
+    # concurrent installs there ever matter.
+    if fcntl is None:
+        yield
+        return
+    MANAGED_SYMLINKS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = MANAGED_SYMLINKS_PATH.with_name(MANAGED_SYMLINKS_PATH.name + ".lock")
+    with open(lock_path, "w") as lock_fp:
+        fcntl.flock(lock_fp.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_fp.fileno(), fcntl.LOCK_UN)
+
+
 def _key(link_path: Path) -> str:
     """Normalise a link path to the record's key.
 
@@ -72,19 +97,32 @@ def _key(link_path: Path) -> str:
 
 def record_symlink(link_path: Path, source_path: Path) -> None:
     """Record that AEC created/owns the symlink at ``link_path -> source_path``."""
-    data = _load()  # first write persists the adopted legacy links too
-    data["links"][_key(link_path)] = {
-        "source": str(Path(source_path).expanduser().absolute()),
-        "recordedAt": _now_iso(),
-    }
-    _save(data)
+    with _locked():
+        data = _load()  # first write persists the adopted legacy links too
+        data["links"][_key(link_path)] = {
+            "source": str(Path(source_path).expanduser().absolute()),
+            "recordedAt": _now_iso(),
+        }
+        _save(data)
 
 
 def forget_symlink(link_path: Path) -> None:
     """Drop ``link_path`` from the record. No-op if it isn't recorded."""
-    data = _load()
-    if data["links"].pop(_key(link_path), None) is not None:
-        _save(data)
+    with _locked():
+        data = _load()
+        if data["links"].pop(_key(link_path), None) is not None:
+            _save(data)
+
+
+def persist_legacy_migration() -> None:
+    """Write the adopted legacy links if the record doesn't exist yet.
+
+    Called by non-dry-run setup so the heuristic stops being consulted even
+    when no new link needs creating. Raises OSError if the store is unwritable.
+    """
+    with _locked():
+        if not MANAGED_SYMLINKS_PATH.exists():
+            _save(_legacy_store())
 
 
 def is_recorded(link_path: Path) -> bool:
