@@ -41,6 +41,15 @@ def _isolate_preferences(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_managed_symlinks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never read/write the developer's real ~/.agents-environment-config/managed-symlinks.json."""
+    monkeypatch.setattr(
+        "aec.lib.managed_symlinks.MANAGED_SYMLINKS_PATH",
+        tmp_path / "managed-symlinks.json",
+    )
+
+
 @pytest.fixture
 def temp_dir() -> Generator[Path, None, None]:
     """Create a temporary directory for testing."""

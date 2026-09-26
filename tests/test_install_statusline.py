@@ -126,6 +126,38 @@ def test_stale_aec_symlink_is_repointed_when_already_configured(claude_env, monk
     assert link.resolve() == (REPO_ROOT / ".claude" / "statusline.sh").resolve()
 
 
+def test_non_standard_checkout_name_link_repairs_after_move(claude_env, monkeypatch, temp_dir):
+    """A checkout NOT named agents-environment-config still gets its stale
+    statusline link repaired after being moved/recloned.
+
+    The old is_our_symlink() substring-matched the link's target for
+    "agents-environment-config" / ".agent-tools". A checkout cloned under
+    any other name (e.g. "my-checkout") never matched that heuristic, so
+    once it moved, the dangling link was treated as foreign and left
+    broken forever. Ownership is now recorded at link-creation time
+    (create_symlink), independent of the checkout's name.
+    """
+    old_repo = temp_dir / "my-checkout"
+    (old_repo / ".claude").mkdir(parents=True)
+    (old_repo / ".claude" / "statusline.sh").write_text("#!/bin/sh\necho old\n")
+
+    _answer(monkeypatch, "y")
+    _prompt_claude_statusline(old_repo)
+
+    link = claude_env / "statusline.sh"
+    assert link.resolve() == (old_repo / ".claude" / "statusline.sh").resolve()
+
+    # Simulate moving/recloning the checkout to a new path.
+    new_repo = temp_dir / "my-checkout-moved"
+    old_repo.rename(new_repo)
+    (new_repo / ".claude" / "statusline.sh").write_text("#!/bin/sh\necho new\n")
+
+    _no_prompt(monkeypatch)  # already answered; must not re-prompt
+    _prompt_claude_statusline(new_repo)
+
+    assert link.resolve() == (new_repo / ".claude" / "statusline.sh").resolve()
+
+
 def test_unreadable_settings_json_is_not_clobbered(claude_env, monkeypatch):
     (claude_env / "settings.json").write_text("{not json")
     _no_prompt(monkeypatch)
