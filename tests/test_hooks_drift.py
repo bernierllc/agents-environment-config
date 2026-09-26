@@ -506,6 +506,36 @@ class TestUnguardedScriptCommands:
         assert [json.dumps(e) for e in arr] == [current]
         assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
 
+    def test_hook_moved_to_another_event_is_stale(self, tmp_path):
+        """Same id and command, new event: the old block fires on the wrong op."""
+        from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
+        from aec.lib.hooks.installer import install_item_hooks
+
+        repo_root = tmp_path / "repo"
+        (repo_root / ".git/hooks").mkdir(parents=True)
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        item_dir.mkdir(parents=True)
+
+        def write(event):
+            (item_dir / "hooks.json").write_text(json.dumps({
+                "$schema": "x", "version": "1.0.0", "hooks": [{
+                    "id": "lint", "event": event, "command": "true",
+                    "description": "d",
+                }],
+            }))
+
+        write("pre_commit")
+        install_item_hooks(
+            item_type="skill", item_key="demo", item_version="1.0.0",
+            item_dir=item_dir, repo_root=repo_root, agents=["git"],
+        )
+        write("pre_push")
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.STALE]
+        assert any(r.repaired for r in repair_repo(repo_root))
+        assert "AEC:BEGIN" not in (repo_root / ".git/hooks/pre-commit").read_text()
+        assert "AEC:BEGIN" in (repo_root / ".git/hooks/pre-push").read_text()
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
+
     def test_hand_written_exec_bit_guard_in_git_hook_is_not_stale(self, tmp_path):
         """A raw hooks.json command passes through verbatim; repair can't change it."""
         from aec.lib.hooks.drift import Drift, repair_repo, verify_repo

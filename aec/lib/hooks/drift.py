@@ -14,7 +14,7 @@ import json
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 from .fingerprint import fingerprint_hook
 from .installer import _resolve_script_commands
@@ -87,8 +87,8 @@ def _locate_settings(repo_root: Path, agent: str, event_key: str, fp: str):
 
 
 def _rendered(repo_root: Path, item_type: str, item_key: str,
-              agent: str) -> Optional[Dict[str, Set[str]]]:
-    """hook_id -> the entries this item's source renders for `agent` today.
+              agent: str) -> Optional[Dict[Tuple[str, str], Set[str]]]:
+    """(hook_id, event_key) -> the entries this item's source renders for `agent` today.
 
     Settings agents map to payload fingerprints (what install records); git maps
     to command lines (what the block holds). None when the source can't be
@@ -107,27 +107,27 @@ def _rendered(repo_root: Path, item_type: str, item_key: str,
         )
     except (OSError, ValueError):
         return None
-    out: Dict[str, Set[str]] = {}
+    out: Dict[Tuple[str, str], Set[str]] = {}
     for e in entries:
         key = (e["payload"]["command"] if agent == "git"
                else fingerprint_hook(e["payload"]))
-        out.setdefault(e["source_hook_id"], set()).add(key)
+        out.setdefault((e["source_hook_id"], e["event_key"]), set()).add(key)
     return out
 
 
-def _is_stale(expected: Optional[Dict[str, Set[str]]], hook_id: str,
-              actual: str) -> bool:
+def _is_stale(expected: Optional[Dict[Tuple[str, str], Set[str]]],
+              hook_id: str, event_key: str, actual: str) -> bool:
     """True if the installed hook isn't what its source renders today.
 
     Covers every older rendering at once — absolute paths, the unguarded
     project-dir path, the `-x` exec-bit guard, gemini/cursor exec'ing the bare
-    path — and a hook whose source changed since install. Repair reinstalls the
+    path — and a hook whose source changed since install, including its event. Repair reinstalls the
     current rendering, so a flagged hook is always fixable: a hand-written
     command renders verbatim and never differs.
     """
-    if expected is None or hook_id not in expected:
+    if expected is None or not any(h == hook_id for h, _ in expected):
         return False
-    return actual not in expected[hook_id]
+    return actual not in expected.get((hook_id, event_key), ())
 
 
 def _git_block(repo_root: Path, event_key: str, item_type: str,
@@ -157,7 +157,7 @@ def classify_hook(repo_root: Path, installed: dict, *,
         else:
             # The block is marker, command line(s), END marker.
             actual = "\n".join(block.rstrip("\n").split("\n")[1:-1])
-            status = (Drift.STALE if _is_stale(expected, hook_id, actual)
+            status = (Drift.STALE if _is_stale(expected, hook_id, event_key, actual)
                       else Drift.OK)
     else:
         fp = installed["content_fingerprint"]
@@ -166,7 +166,7 @@ def classify_hook(repo_root: Path, installed: dict, *,
             status, idx = Drift.MISSING, None
         else:
             idx = found[0]
-            status = (Drift.STALE if _is_stale(expected, hook_id, fp)
+            status = (Drift.STALE if _is_stale(expected, hook_id, event_key, fp)
                       else Drift.OK)
 
     return HookStatus(
