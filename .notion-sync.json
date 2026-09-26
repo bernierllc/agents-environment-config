@@ -16,9 +16,17 @@
       "roadmap_page_id": "3c14efec-c95a-8156-9a65-e9cb8fcd51e9",
       "tracker_page_id": "3c14efec-c95a-8164-ac73-d7f15590ccac",
       "source_sha256": "d96c1ce7a35b2894bf2acec62cf7df2c60a9d71a08c79e0d2f57e359a1aeba28",
-      "last_synced": "2026-08-18",
-      "status": "In Progress",
-      "branch": "feat/headless-prompts"
+      "last_synced": "2026-09-26",
+      "status": "Done",
+      "branch": null
+    },
+    "2026-09-25-managed-symlink-ownership.md": {
+      "roadmap_page_id": "3e74efec-c95a-81c1-8486-f584fd6e03f6",
+      "tracker_page_id": null,
+      "source_sha256": "594502305d307a6e7d15bf1a62cdf6b67d9250ee976c003d210e33899982d140",
+      "last_synced": "2026-09-26",
+      "status": "Backlog",
+      "branch": null
     }
   },
   "pending_backfill": {
