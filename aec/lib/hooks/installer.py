@@ -95,9 +95,6 @@ def _render_script_path(script_path: Path, repo_root: Path, agent: str) -> str:
 # lands non-executable in every clone; a `-x` guard kept those hooks silently
 # dormant everywhere but the installing machine.
 GUARD_PREFIX = "if [ -f "
-# What installs before the interpreter rendering wrote. Drift flags it STALE so
-# `hooks verify --repair` rewrites it.
-LEGACY_GUARD_PREFIX = "if [ -x "
 
 # Agents whose command string is evaluated by a POSIX shell. claude runs hooks
 # through `sh -c`; git hooks ARE shell scripts. cursor/gemini render absolute

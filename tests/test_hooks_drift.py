@@ -336,29 +336,34 @@ class TestUnguardedScriptCommands:
         save_state(repo_root, st)
         return body
 
-    def test_hook_merely_mentioning_the_variable_is_not_stale(self, tmp_path):
-        """Only the generated script-path shape is stale.
+    def test_hand_written_command_is_not_stale(self, tmp_path):
+        """A hooks.json command is installed verbatim, so it never differs.
 
-        A hand-written hook may reference `$CLAUDE_PROJECT_DIR` for its own
-        reasons. Repair never guards those — it only guards paths it resolves —
-        so flagging one would leave it STALE on every verify, forever.
+        Neither mentioning `$CLAUDE_PROJECT_DIR` nor an `-x` guard on the
+        item's own script makes it STALE — repair would rewrite it unchanged.
         """
-        from aec.lib.hooks.drift import Drift, verify_repo
-        from aec.lib.hooks.fingerprint import fingerprint_hook
-        from aec.lib.hooks.state import load_state, save_state
+        from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
+        from aec.lib.hooks.installer import install_item_hooks
 
-        repo_root = TestStaleAbsolutePaths._install_repo_local(tmp_path)
-        settings_path = repo_root / ".claude/settings.json"
-        settings = json.loads(settings_path.read_text())
-        entry = settings["hooks"]["PostToolUse"][0]
-        entry["hooks"][0]["command"] = 'printf %s "$CLAUDE_PROJECT_DIR"'
-        settings_path.write_text(json.dumps(settings))
+        repo_root = tmp_path / "repo"
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        (item_dir / "scripts").mkdir(parents=True)
+        own = ".claude/skills/demo/scripts/custom.sh"
+        hooks = [
+            {"id": "a", "event": "on_file_edit", "description": "d",
+             "command": 'printf %s "$CLAUDE_PROJECT_DIR"'},
+            {"id": "b", "event": "on_file_edit", "description": "d",
+             "command": f"if [ -x {own} ]; then {own}; fi"},
+        ]
+        (item_dir / "hooks.json").write_text(json.dumps(
+            {"$schema": "x", "version": "1.0.0", "hooks": hooks}))
+        install_item_hooks(
+            item_type="skill", item_key="demo", item_version="1.0.0",
+            item_dir=item_dir, repo_root=repo_root, agents=["claude"],
+        )
 
-        st = load_state(repo_root, item_type="skill", item_key="demo")
-        st.hooks_installed[0]["content_fingerprint"] = fingerprint_hook(entry)
-        save_state(repo_root, st)
-
-        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK] * 2
+        assert not any(r.repaired for r in repair_repo(repo_root))
 
     def test_unguarded_project_dir_reports_stale(self, tmp_path):
         from aec.lib.hooks.drift import Drift, verify_repo
@@ -457,32 +462,49 @@ class TestUnguardedScriptCommands:
         assert new in hook.read_text()
         assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
 
-    def test_legacy_guard_shape_matcher(self):
-        from aec.lib.hooks.drift import _is_legacy_guard, _scripts_rel
-        own = _scripts_rel("skill", "demo")
-        assert own == ".claude/skills/demo/scripts/"
-        rel = ".claude/skills/demo/scripts/check.sh"
-        quoted = "'.claude/skills/demo/scripts/check me.sh'"
-        pd = '"$CLAUDE_PROJECT_DIR"/'
-        for line in (
-            f"if [ -x {rel} ]; then {rel}; fi",
-            f"if [ -x {quoted} ]; then {quoted} --x; fi",
-            f"if [ -x {pd}{rel} ]; then {pd}{rel}; fi",
-            f"if [ -x {pd}{quoted} ]; then {pd}{quoted}; fi",
-        ):
-            assert _is_legacy_guard(line, own), line
-        # Hand-written commands: not ours, repair can't change them.
-        for line in (
-            f"if [ -x {pd}bin/tool ]; then {pd}bin/tool; fi",
-            "if [ -x ./tool ]; then ./tool; fi",
-            "if [ -x ./scripts/tool ]; then ./scripts/tool; fi",
-            # another item's script is that item's hook, not this one's
-            "if [ -x .claude/skills/other/scripts/a.sh ]; then "
-            ".claude/skills/other/scripts/a.sh; fi",
-            # the current rendering
-            f"if [ -f {rel} ]; then /bin/sh {rel}; fi",
-        ):
-            assert not _is_legacy_guard(line, own), line
+    def test_gemini_direct_exec_is_stale_and_repairs(self, tmp_path):
+        """gemini/cursor used to exec the bare path, which needs +x."""
+        from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
+        from aec.lib.hooks.fingerprint import fingerprint_hook
+        from aec.lib.hooks.installer import install_item_hooks
+        from aec.lib.hooks.state import load_state, save_state
+
+        repo_root = tmp_path / "repo"
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        (item_dir / "scripts").mkdir(parents=True)
+        script = item_dir / "scripts" / "check.sh"
+        script.write_text("#!/bin/sh\necho ok\n")
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "on_file_edit",
+                "command": "aec run-script skill:demo check.sh",
+                "description": "d",
+            }],
+        }))
+        install_item_hooks(
+            item_type="skill", item_key="demo", item_version="1.0.0",
+            item_dir=item_dir, repo_root=repo_root, agents=["gemini"],
+        )
+        settings_path = repo_root / ".gemini/settings.json"
+        settings = json.loads(settings_path.read_text())
+        event = next(iter(settings["hooks"]))
+        entry = settings["hooks"][event][0]
+        current = json.dumps(entry)
+        assert f"/bin/sh {script}" in current
+
+        # What the pre-interpreter install wrote: the bare path.
+        entry = json.loads(current.replace(f"/bin/sh {script}", str(script)))
+        settings["hooks"][event] = [entry]
+        settings_path.write_text(json.dumps(settings))
+        st = load_state(repo_root, item_type="skill", item_key="demo")
+        st.hooks_installed[0]["content_fingerprint"] = fingerprint_hook(entry)
+        save_state(repo_root, st)
+
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.STALE]
+        assert any(r.repaired for r in repair_repo(repo_root))
+        arr = json.loads(settings_path.read_text())["hooks"][event]
+        assert [json.dumps(e) for e in arr] == [current]
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
 
     def test_hand_written_exec_bit_guard_in_git_hook_is_not_stale(self, tmp_path):
         """A raw hooks.json command passes through verbatim; repair can't change it."""
