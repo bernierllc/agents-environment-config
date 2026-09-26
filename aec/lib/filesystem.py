@@ -51,9 +51,15 @@ def create_symlink(
         return False
 
     if IS_WINDOWS:
-        return _create_windows_link(source, target, is_directory)
+        created = _create_windows_link(source, target, is_directory)
     else:
-        return _create_unix_symlink(source, target)
+        created = _create_unix_symlink(source, target)
+
+    if created:
+        from .managed_symlinks import record_symlink
+        record_symlink(target, source)
+
+    return created
 
 
 def _create_windows_link(source: Path, target: Path, is_directory: bool) -> bool:
@@ -116,6 +122,7 @@ def remove_symlink(path: Path) -> bool:
                     ["cmd", "/c", "rmdir", str(path)],
                     capture_output=True,
                 )
+                _forget_symlink(path)
                 return True
             except Exception:
                 pass
@@ -124,10 +131,17 @@ def remove_symlink(path: Path) -> bool:
     try:
         if path.is_symlink():
             path.unlink()
+            _forget_symlink(path)
             return True
         return False
     except Exception:
         return False
+
+
+def _forget_symlink(path: Path) -> None:
+    """Drop path from AEC's managed-symlink ownership record, if present."""
+    from .managed_symlinks import forget_symlink
+    forget_symlink(path)
 
 
 def is_symlink(path: Path) -> bool:
@@ -158,29 +172,33 @@ def is_symlink(path: Path) -> bool:
 
 def is_our_symlink(path: Path) -> bool:
     """
-    Check if a symlink was created by us (points to aec content).
+    Check if a symlink was created by AEC.
+
+    Ownership is a lookup in AEC's managed-symlink record
+    (~/.agents-environment-config/managed-symlinks.json), written by
+    create_symlink() at creation time -- not a heuristic on the link's
+    target. A checkout cloned under a non-standard name, or moved/recloned
+    after linking, is still recognised as ours because the record is keyed
+    by the link's own path, not by what it points to.
+
+    Pre-existing links from before this record existed are adopted once,
+    the first time this is called, by a one-time migration against the
+    retired substring heuristic (see aec.lib.managed_symlinks). After that
+    the heuristic is never consulted again.
 
     Args:
         path: The path to check
 
     Returns:
-        True if it's a symlink pointing to agents-environment-config content
+        True if AEC's record shows it owns this symlink.
     """
     if not is_symlink(path):
         return False
 
-    try:
-        target = get_symlink_target(path)
-        if target is None:
-            return False
+    from .managed_symlinks import is_recorded, migrate_legacy_links_once
 
-        target_str = str(target)
-        return (
-            "agents-environment-config" in target_str
-            or ".agent-tools" in target_str
-        )
-    except Exception:
-        return False
+    migrate_legacy_links_once()
+    return is_recorded(path)
 
 
 def get_symlink_target(path: Path) -> Optional[Path]:
