@@ -11,13 +11,14 @@ renders today, else OK. `verify_repo` runs that over every recorded hook in a re
 """
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 from .fingerprint import fingerprint_hook
 from .installer import _resolve_script_commands
+from .predicates import evaluate_when
 from .schema import load_hooks_file
 from .state import list_installed_items, load_state
 from .translator import translate_to_agent
@@ -99,10 +100,16 @@ def _rendered(repo_root: Path, item_type: str, item_key: str,
         return None
     try:
         hf = load_hooks_file(src / "hooks.json")
-        # Every hook, not just the `when`-applied ones: an applicability change
-        # is install's call, not drift.
+        # Drop what install would skip, so a hook whose `when` turned false is
+        # retracted. A custom_check is never run here — verify and doctor must
+        # not execute item shell — so those hooks count as applicable.
+        applied = replace(hf, hooks=[
+            h for h in hf.hooks
+            if (h.when and h.when.custom_check)
+            or evaluate_when(h.when, repo_root).applied
+        ])
         entries = translate_to_agent(
-            hf, agent,
+            applied, agent,
             resolved_commands=_resolve_script_commands(hf, src, repo_root, agent),
         )
     except (OSError, ValueError):

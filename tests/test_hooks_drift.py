@@ -600,6 +600,33 @@ class TestUnguardedScriptCommands:
         assert [(s.hook_id, s.status) for s in verify_repo(repo_root)] == [
             ("renamed", Drift.OK)]
 
+    def test_hook_whose_when_turned_false_is_stale_and_retracted(self, tmp_path):
+        from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
+
+        repo_root = TestStaleAbsolutePaths._install_repo_local(tmp_path)
+        hooks_json = repo_root / ".claude/skills/demo/hooks.json"
+        data = json.loads(hooks_json.read_text())
+        data["hooks"][0]["when"] = {"repo_has": ["package.json"]}
+        hooks_json.write_text(json.dumps(data))
+
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.STALE]
+        assert any(r.repaired for r in repair_repo(repo_root))
+        settings = json.loads((repo_root / ".claude/settings.json").read_text())
+        assert not settings.get("hooks", {}).get("PostToolUse")
+        assert verify_repo(repo_root) == []
+
+    def test_verify_never_runs_custom_check(self, tmp_path):
+        from aec.lib.hooks.drift import Drift, verify_repo
+
+        repo_root = TestStaleAbsolutePaths._install_repo_local(tmp_path)
+        hooks_json = repo_root / ".claude/skills/demo/hooks.json"
+        data = json.loads(hooks_json.read_text())
+        data["hooks"][0]["when"] = {"custom_check": "touch ran"}
+        hooks_json.write_text(json.dumps(data))
+
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
+        assert not (repo_root / "ran").exists()
+
     def test_malformed_source_entry_does_not_crash_verify(self, tmp_path):
         from aec.lib.hooks.drift import Drift, verify_repo
 
