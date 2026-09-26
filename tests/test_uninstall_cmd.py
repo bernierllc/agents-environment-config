@@ -197,3 +197,30 @@ class TestUninstall:
 
         run_uninstall(item_type="plugin", name="nope", global_flag=True, yes=True)
         assert "not found" in capsys.readouterr().out.lower()
+
+
+def test_uninstall_marketplace_plugin_asks_once_and_shows_the_command(uninstall_env, monkeypatch):
+    """One confirmation that names the command, not "Remove?" then "Run: ...?"."""
+    import subprocess
+    from aec.commands.uninstall import run_uninstall
+    from aec.lib.manifest_v2 import load_manifest
+
+    mp = uninstall_env["aec_home"] / "installed-manifest.json"
+    m = json.loads(mp.read_text())
+    m["global"]["plugins"] = {"ponytail": {
+        "version": "4.10.0", "install_type": "marketplace", "targets": ["claude"],
+        "pluginId": "ponytail@ponytail", "installedAt": "",
+    }}
+    mp.write_text(json.dumps(m))
+
+    asked, ran = [], []
+    monkeypatch.setattr("builtins.input", lambda text: asked.append(text) or "y")
+    monkeypatch.setattr(subprocess, "run", lambda cmd, *a, **k: ran.append(cmd))
+    monkeypatch.setattr("aec.lib.config.detect_agents", lambda: {"claude": {}})
+
+    run_uninstall(item_type="plugin", name="ponytail", global_flag=True, yes=False)
+
+    assert len(asked) == 1, asked
+    assert "claude plugin uninstall ponytail@ponytail" in asked[0]
+    assert ran == [["claude", "plugin", "uninstall", "ponytail@ponytail"]]
+    assert "ponytail" not in load_manifest(mp)["global"].get("plugins", {})

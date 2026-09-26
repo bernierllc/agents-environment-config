@@ -114,6 +114,19 @@ def install_plugin(manifest, detected, *, runner, confirm, printer, pref) -> Dic
     return {"install_type": install_type, "targets": targets, "executed": executed}
 
 
+def uninstall_commands(manifest, detected, *, pref) -> List[List[str]]:
+    """The commands ``uninstall_plugin`` would run, for showing before asking."""
+    block = manifest.get("uninstall") or {}
+    if "tools" not in block:
+        return []
+    cmds = []
+    for tool in resolve_targets(manifest, detected):
+        spec = block["tools"].get(tool) or {}
+        if "run" in spec and effective_policy(manifest["install_type"], has_run=True, pref=pref) == "run":
+            cmds.append(spec["run"])
+    return cmds
+
+
 def uninstall_plugin(manifest, detected, *, runner, confirm, printer, pref) -> Dict[str, Any]:
     install_type = manifest["install_type"]
     targets = resolve_targets(manifest, detected)

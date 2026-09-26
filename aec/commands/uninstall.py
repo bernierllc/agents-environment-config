@@ -13,7 +13,6 @@ from ..lib.prompt_catalog.lifecycle_area import (
     UNINSTALL_MULTI_REPO_CHOICE_PREFIX,
     UNINSTALL_MULTI_REPO_EACH_PREFIX,
     UNINSTALL_PLUGIN_REMOVE_PREFIX,
-    UNINSTALL_PLUGIN_RUN_COMMAND_PREFIX,
     UNINSTALL_SCOPE_GLOBAL_PREFIX,
     UNINSTALL_SCOPE_REPO_PREFIX,
 )
@@ -116,20 +115,8 @@ def _uninstall_plugin(name: str, global_flag: bool, yes: bool) -> None:
         Console.warning(f"Plugin not found in manifest: {name}")
         return
 
-    if not yes:
-        scope_label = "global" if scope.is_global else str(scope.repo_path)
-        resp = ask_prompt(
-            item_prompt_id(UNINSTALL_PLUGIN_REMOVE_PREFIX, name),
-            f"  Remove {name} from {scope_label}? [y/N]: ",
-            type="yes_no",
-            default=False,
-        ).strip().lower()
-        if resp != "y":
-            Console.info("Skipped.")
-            return
-
     from ..lib.loadout import LoadoutError, load_loadout
-    from ..lib.plugin_install import uninstall_plugin
+    from ..lib.plugin_install import uninstall_commands, uninstall_plugin
     from ..lib.config import detect_agents
     from ..lib.preferences import get_setting
     from ..lib.sources import get_source_dirs
@@ -144,6 +131,24 @@ def _uninstall_plugin(name: str, global_flag: bool, yes: bool) -> None:
         except LoadoutError:
             manifest_def = None
 
+    detected = detect_agents()
+    pref = get_setting("plugins.execution")
+    if not yes:
+        # One confirmation that shows the commands, instead of "Remove?" and
+        # then a second "Run: ...?" for the same decision.
+        scope_label = "global" if scope.is_global else str(scope.repo_path)
+        cmds = uninstall_commands(manifest_def, detected, pref=pref) if manifest_def else []
+        runs = f" This runs: {'; '.join(' '.join(c) for c in cmds)}." if cmds else ""
+        resp = ask_prompt(
+            item_prompt_id(UNINSTALL_PLUGIN_REMOVE_PREFIX, name),
+            f"  Remove {name} from {scope_label}?{runs} [y/N]: ",
+            type="yes_no",
+            default=False,
+        ).strip().lower()
+        if resp != "y":
+            Console.info("Skipped.")
+            return
+
     if manifest_def is None:
         # ponytail: registry loadout gone — drop the record and warn; no documented
         # command to fabricate. Add a stored-uninstall-block fallback if one ships.
@@ -152,26 +157,10 @@ def _uninstall_plugin(name: str, global_flag: bool, yes: bool) -> None:
         def runner(cmd):
             return subprocess.run(cmd)
 
-        def confirm(*args) -> bool:
-            if yes:
-                return True
-            cmds = args[-1] if args else []
-            if cmds and isinstance(cmds[0], list):
-                shown = "; ".join(" ".join(c) for c in cmds)
-            else:
-                shown = " ".join(cmds)
-            text = f"  Run: {shown}? [y/N]: " if shown else "  Proceed? [y/N]: "
-            return ask_prompt(
-                item_prompt_id(UNINSTALL_PLUGIN_RUN_COMMAND_PREFIX, name),
-                text,
-                type="yes_no",
-                default=False,
-            ).strip().lower() == "y"
-
         uninstall_plugin(
-            manifest_def, detect_agents(),
-            runner=runner, confirm=confirm, printer=Console.print,
-            pref=get_setting("plugins.execution"),
+            manifest_def, detected,
+            runner=runner, confirm=lambda *a: True,  # approved above (or --yes)
+            printer=Console.print, pref=pref,
         )
 
     remove_install(manifest, scope_key, "plugins", name)

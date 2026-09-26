@@ -19,7 +19,6 @@ from .spec import DynamicPromptFamily, PromptSpec
 UNINSTALL_MCP_REMOVE_ENTRY_PREFIX = "uninstall.mcp.remove_entry"
 UNINSTALL_MCP_PIP_UNINSTALL_PREFIX = "uninstall.mcp.pip_uninstall"
 UNINSTALL_PLUGIN_REMOVE_PREFIX = "uninstall.plugin.remove"
-UNINSTALL_PLUGIN_RUN_COMMAND_PREFIX = "uninstall.plugin.run_command"
 UNINSTALL_SCOPE_GLOBAL_PREFIX = "uninstall.scope.global"
 UNINSTALL_SCOPE_REPO_PREFIX = "uninstall.scope.repo"
 UNINSTALL_MULTI_REPO_CHOICE_PREFIX = "uninstall.multi_repo.choice"
@@ -69,12 +68,7 @@ FAMILIES: tuple[DynamicPromptFamily, ...] = (
     DynamicPromptFamily(
         UNINSTALL_PLUGIN_REMOVE_PREFIX,
         command="uninstall",
-        summary="Remove a plugin from the current scope.",
-    ),
-    DynamicPromptFamily(
-        UNINSTALL_PLUGIN_RUN_COMMAND_PREFIX,
-        command="uninstall",
-        summary="Run a plugin's uninstall command(s).",
+        summary="Remove a plugin from the current scope; the prompt lists any uninstall commands it will run.",
     ),
     DynamicPromptFamily(
         UNINSTALL_SCOPE_GLOBAL_PREFIX,
