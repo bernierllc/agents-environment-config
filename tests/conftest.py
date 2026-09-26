@@ -1,11 +1,29 @@
 """Pytest fixtures for aec tests."""
 
 import os
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Generator
 
-import pytest
+# Point HOME at a throwaway directory before anything imports aec.
+# aec.lib.config derives every state path (~/.agents-environment-config,
+# ~/.agent-tools, ~/.claude, ...) from Path.home() at import time and 17
+# modules import those paths by value, so this must happen here, first.
+# Without it, tests wrote fixtures such as "dep-skill" into the developer's
+# real installed-*.json, and concurrent runs raced on the same temp files.
+_REAL_HOME = os.environ.get("HOME", "")
+# realpath: on macOS /var is a symlink to /private/var, and code that resolves
+# paths must agree with Path.home().
+_TEST_HOME = os.path.realpath(tempfile.mkdtemp(prefix="aec-test-home-"))
+os.environ["HOME"] = _TEST_HOME
+os.environ["USERPROFILE"] = _TEST_HOME  # Windows equivalent
+
+import pytest  # noqa: E402
+
+
+def pytest_sessionfinish(session, exitstatus):
+    shutil.rmtree(_TEST_HOME, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
