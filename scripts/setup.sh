@@ -80,61 +80,6 @@ update_submodules() {
     return 0
 }
 
-# Function to create symlink with safety checks (for statusline only)
-create_symlink() {
-    local source="$1"
-    local target="$2"
-    local description="$3"
-    local skip_if_exists="${4:-false}"
-
-    # Check if source exists
-    if [ ! -e "$source" ]; then
-        echo -e "  ${YELLOW}⚠${NC} Skipping $description: source not found ($source)"
-        return 1
-    fi
-
-    # Check if target already exists
-    if [ -e "$target" ] || [ -L "$target" ]; then
-        if [ "$skip_if_exists" = "true" ]; then
-            echo -e "  ${YELLOW}⚠${NC} $description already exists (preserving existing file)"
-            return 0
-        fi
-
-        if [ -L "$target" ]; then
-            local current_target=$(readlink "$target")
-            if [ "$current_target" = "$source" ]; then
-                echo -e "  ${GREEN}✓${NC} $description (already linked)"
-                return 0
-            else
-                echo -e "  ${YELLOW}⚠${NC} $description already exists as symlink to different location"
-                echo -e "     Current: $current_target"
-                echo -e "     Desired: $source"
-                read -p "     Replace? (y/N): " -n 1 -r
-                echo
-                if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                    echo -e "     ${YELLOW}Skipped${NC}"
-                    return 1
-                fi
-                rm "$target"
-            fi
-        else
-            echo -e "  ${YELLOW}⚠${NC} $description already exists (not a symlink)"
-            read -p "     Backup and replace? (y/N): " -n 1 -r
-            echo
-            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                echo -e "     ${YELLOW}Skipped${NC}"
-                return 1
-            fi
-            mv "$target" "${target}.backup.$(date +%Y%m%d_%H%M%S)"
-        fi
-    fi
-
-    mkdir -p "$(dirname "$target")"
-    ln -s "$source" "$target"
-    echo -e "  ${GREEN}✓${NC} $description"
-    return 0
-}
-
 # --- Helper: Detect old directory structure ---
 has_old_structure() {
     # Check for old-style symlinks that point directly to the repo
@@ -376,35 +321,9 @@ else
     echo "     Please run: ./scripts/setup-agent-tools.sh manually"
 fi
 
-# --- Step 4: Claude statusline (optional) ---
-if [ ! -f "$HOME/.claude/statusline.sh" ] && [ ! -f "$HOME/.claude/statusline-command.sh" ]; then
-    echo ""
-    echo -e "${BLUE}Claude Code Statusline${NC}"
-    echo -e "This repository includes a fancy statusline for Claude Code that shows:"
-    echo -e "  • Model name, token usage, git branch, and project name"
-    echo -e "  • Color-coded progress bars and visual indicators"
-    echo ""
-    read -p "Would you like to install the Claude Code statusline? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        create_symlink "$REPO_ROOT/.claude/statusline.sh" "$HOME/.claude/statusline.sh" "Claude statusline script"
-        create_symlink "$REPO_ROOT/.claude/statusline-command.sh" "$HOME/.claude/statusline-command.sh" "Claude statusline command script"
-        echo ""
-        echo -e "${BLUE}Statusline installed!${NC} To use it, add this to your ~/.claude/settings.json:"
-        echo -e "${GREEN}{${NC}"
-        echo -e "${GREEN}  \"statusLine\": {${NC}"
-        echo -e "${GREEN}    \"type\": \"command\",${NC}"
-        echo -e "${GREEN}    \"command\": \"~/.claude/statusline.sh\",${NC}"
-        echo -e "${GREEN}    \"padding\": 0${NC}"
-        echo -e "${GREEN}  }${NC}"
-        echo -e "${GREEN}}${NC}"
-        echo ""
-    else
-        echo -e "  ${YELLOW}Skipped${NC} statusline installation"
-    fi
-else
-    echo -e "  ${YELLOW}⚠${NC} Claude statusline files already exist (skipping)"
-fi
+# --- Step 4: Claude statusline ---
+# Offered by `aec install` (only when Claude Code is installed).
+echo -e "\n${BLUE}Claude Code statusline:${NC} run ${GREEN}aec install${NC} to be offered it"
 
 # --- Summary ---
 echo ""
