@@ -129,20 +129,29 @@ def _is_stale(repo_root: Path, agent: str, entry: dict) -> bool:
         return True
     return any(
         (cmd.startswith(CLAUDE_PROJECT_DIR_PREFIX) and not is_guarded(cmd))
-        or cmd.startswith(LEGACY_GUARD_PREFIX + CLAUDE_PROJECT_DIR_PREFIX)
+        or _is_legacy_guard(cmd)
         for cmd in _entry_commands(entry)
     )
 
 
 # The exact line pre-interpreter installs wrote for a resolved script:
-# `if [ -x P ]; then P [args]; fi`, P a repo-relative `.../scripts/...` path.
-# Anchored on that shape, not on `if [ -x ` appearing anywhere: a hand-written
-# hooks.json command passes through verbatim, repair would rewrite it
-# unchanged, and it would stay STALE forever.
-_LEGACY_GIT_LINE = re.compile(
-    r"^" + re.escape(LEGACY_GUARD_PREFIX) + r"(\S*/scripts/\S+) \]; then \1( |;)",
+# `if [ -x P ]; then P [args]; fi`, P a `.../scripts/...` path rendered by
+# `_render_script_path` (bare or shlex-quoted, `"$CLAUDE_PROJECT_DIR"/`-prefixed
+# for claude). Anchored on that shape, not on `if [ -x ` appearing anywhere: a
+# hand-written hooks.json command passes through verbatim, repair would rewrite
+# it unchanged, and it would stay STALE forever.
+# ponytail: a path containing a single quote renders as '...'"'"'...' and isn't
+# matched — extend the alternation if a skill ever ships one.
+_LEGACY_GUARD_LINE = re.compile(
+    r"^" + re.escape(LEGACY_GUARD_PREFIX)
+    + r"((?:" + re.escape(CLAUDE_PROJECT_DIR_PREFIX) + r")?(?:'[^']*'|\S+))"
+    + r" \]; then \1(?: |;)",
     re.MULTILINE,
 )
+
+
+def _is_legacy_guard(text: str) -> bool:
+    return any("/scripts/" in m.group(1) for m in _LEGACY_GUARD_LINE.finditer(text))
 
 
 def _git_block(repo_root: Path, event_key: str, item_type: str,
@@ -167,7 +176,7 @@ def classify_hook(repo_root: Path, installed: dict, *,
         block = _git_block(repo_root, event_key, item_type, item_key, hook_id)
         if block is None:
             status = Drift.MISSING
-        elif _LEGACY_GIT_LINE.search(block):
+        elif _is_legacy_guard(block):
             status = Drift.STALE
         else:
             status = Drift.OK

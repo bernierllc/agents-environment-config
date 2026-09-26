@@ -457,6 +457,21 @@ class TestUnguardedScriptCommands:
         assert new in hook.read_text()
         assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
 
+    def test_legacy_guard_shape_matcher(self):
+        from aec.lib.hooks.drift import _is_legacy_guard
+        rel = ".claude/skills/demo/scripts/check.sh"
+        quoted = "'.claude/skills/demo/scripts/check me.sh'"
+        pd = '"$CLAUDE_PROJECT_DIR"/'
+        assert _is_legacy_guard(f"if [ -x {rel} ]; then {rel}; fi")
+        assert _is_legacy_guard(f"if [ -x {quoted} ]; then {quoted} --x; fi")
+        assert _is_legacy_guard(f"if [ -x {pd}{rel} ]; then {pd}{rel}; fi")
+        assert _is_legacy_guard(f"if [ -x {pd}{quoted} ]; then {pd}{quoted}; fi")
+        # Hand-written commands: not ours, repair can't change them.
+        assert not _is_legacy_guard(f"if [ -x {pd}bin/tool ]; then {pd}bin/tool; fi")
+        assert not _is_legacy_guard("if [ -x ./tool ]; then ./tool; fi")
+        # The current rendering.
+        assert not _is_legacy_guard(f"if [ -f {rel} ]; then /bin/sh {rel}; fi")
+
     def test_hand_written_exec_bit_guard_in_git_hook_is_not_stale(self, tmp_path):
         """A raw hooks.json command passes through verbatim; repair can't change it."""
         from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
