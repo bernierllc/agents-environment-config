@@ -27,8 +27,11 @@ from typing import Iterator, List, Optional
 
 try:
     import fcntl
+
+    msvcrt = None
 except ImportError:  # Windows
     fcntl = None
+    import msvcrt
 
 from .atomic_write import atomic_write_json
 from .config import AEC_HOME
@@ -70,19 +73,23 @@ def _save(data: dict) -> None:
 @contextmanager
 def _locked() -> Iterator[None]:
     """Serialise read-modify-write of the record across AEC processes."""
-    # ponytail: no lock on Windows (no fcntl); use msvcrt.locking if
-    # concurrent installs there ever matter.
-    if fcntl is None:
-        yield
-        return
     MANAGED_SYMLINKS_PATH.parent.mkdir(parents=True, exist_ok=True)
     lock_path = MANAGED_SYMLINKS_PATH.with_name(MANAGED_SYMLINKS_PATH.name + ".lock")
-    with open(lock_path, "w") as lock_fp:
-        fcntl.flock(lock_fp.fileno(), fcntl.LOCK_EX)
+    with open(lock_path, "a+") as lock_fp:
+        if fcntl is not None:
+            fcntl.flock(lock_fp.fileno(), fcntl.LOCK_EX)
+        else:
+            lock_fp.seek(0)
+            # LK_LOCK retries for ~10s, then raises OSError (callers handle it).
+            msvcrt.locking(lock_fp.fileno(), msvcrt.LK_LOCK, 1)
         try:
             yield
         finally:
-            fcntl.flock(lock_fp.fileno(), fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(lock_fp.fileno(), fcntl.LOCK_UN)
+            else:
+                lock_fp.seek(0)
+                msvcrt.locking(lock_fp.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def _key(link_path: Path) -> str:

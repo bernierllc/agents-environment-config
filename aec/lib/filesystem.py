@@ -125,12 +125,13 @@ def remove_symlink(path: Path) -> bool:
         if path.is_dir():
             try:
                 # Use rmdir for junctions
-                subprocess.run(
+                result = subprocess.run(
                     ["cmd", "/c", "rmdir", str(path)],
                     capture_output=True,
                 )
-                _forget_symlink(path)
-                return True
+                if result.returncode == 0:
+                    _forget_symlink(path)
+                    return True
             except Exception:
                 pass
 

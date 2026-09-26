@@ -288,15 +288,27 @@ class TestReviewRegressions:
         candidates.append(user_link)  # heuristic would claim this if still live
         assert is_our_symlink(user_link) is False
 
-    def test_concurrent_records_keep_every_entry(self, temp_dir):
-        import multiprocessing as mp
+    def test_concurrent_records_keep_every_entry(self, temp_dir, monkeypatch):
+        """Threads share the monkeypatched store path (spawned processes
+        would not); each _locked() opens its own handle, so the OS lock
+        serialises them just as it does separate processes."""
+        import threading
+        import time
 
-        links = [temp_dir / f"link-{i}" for i in range(16)]
-        ctx = mp.get_context("fork")
-        procs = [ctx.Process(target=ms.record_symlink, args=(l, temp_dir / "src")) for l in links]
-        for p in procs:
-            p.start()
-        for p in procs:
-            p.join()
+        real_load = ms._load
 
+        def slow_load():  # widen the read-modify-write window
+            data = real_load()
+            time.sleep(0.01)
+            return data
+
+        monkeypatch.setattr(ms, "_load", slow_load)
+        links = [temp_dir / f"link-{i}" for i in range(8)]
+        threads = [threading.Thread(target=ms.record_symlink, args=(l, temp_dir / "src")) for l in links]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        monkeypatch.setattr(ms, "_load", real_load)
         assert all(ms.is_recorded(l) for l in links)
