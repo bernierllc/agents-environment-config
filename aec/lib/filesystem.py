@@ -192,10 +192,9 @@ def is_our_symlink(path: Path) -> bool:
     link's own path, and the link must still point at the recorded source
     (so a user's replacement link at the same path is not claimed).
 
-    Pre-existing links from before this record existed are adopted once,
-    the first time this is called, by a one-time migration against the
-    retired substring heuristic (see aec.lib.managed_symlinks). After that
-    the heuristic is never consulted again.
+    Pre-existing links from before this record existed are adopted via the
+    retired substring heuristic until the first record write persists them
+    (see aec.lib.managed_symlinks). This check never writes.
 
     Args:
         path: The path to check

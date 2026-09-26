@@ -138,46 +138,45 @@ class TestUnrelatedLinkNotAdopted:
 
 
 class TestLegacyMigration:
-    def test_migration_adopts_matching_legacy_link_once(self, temp_dir, monkeypatch):
+    def test_migration_adopts_matching_legacy_link(self, temp_dir, monkeypatch):
         legacy_link = temp_dir / "legacy-link"
         legacy_link.symlink_to(temp_dir / "somewhere" / "agents-environment-config" / "thing")
         monkeypatch.setattr(ms, "_legacy_candidate_paths", lambda: [legacy_link])
 
-        assert not ms.MANAGED_SYMLINKS_PATH.exists()
-
         assert is_our_symlink(legacy_link) is True
-        assert ms.MANAGED_SYMLINKS_PATH.exists()
         assert ms.is_recorded(legacy_link) is True
 
-    def test_migration_writes_record_even_with_no_matches(self, temp_dir, monkeypatch):
-        """The record file must exist after the first check even when
-        nothing matched, so the heuristic is never consulted again."""
-        monkeypatch.setattr(ms, "_legacy_candidate_paths", lambda: [])
-        source = temp_dir / "source.txt"
-        source.write_text("x")
-        unrelated_link = temp_dir / "unrelated-link"
-        unrelated_link.symlink_to(source)  # a symlink, but not AEC's
-
-        assert is_our_symlink(unrelated_link) is False
-        assert ms.MANAGED_SYMLINKS_PATH.exists()
-
-    def test_migration_runs_only_once(self, temp_dir, monkeypatch):
+    def test_ownership_lookup_never_writes(self, temp_dir, monkeypatch):
+        """Reads must not create the record: dry runs promise no changes."""
         legacy_link = temp_dir / "legacy-link"
         legacy_link.symlink_to(temp_dir / "somewhere" / "agents-environment-config" / "thing")
+        monkeypatch.setattr(ms, "_legacy_candidate_paths", lambda: [legacy_link])
 
-        calls = {"n": 0}
+        assert is_our_symlink(legacy_link) is True
+        assert not ms.MANAGED_SYMLINKS_PATH.exists()
 
-        def counting_candidates():
-            calls["n"] += 1
-            return [legacy_link]
+    def test_first_record_write_persists_adopted_links(self, temp_dir, monkeypatch):
+        """Once the file exists the heuristic is never consulted again, so
+        the first write must carry the adopted legacy links with it."""
+        legacy_link = temp_dir / "legacy-link"
+        legacy_link.symlink_to(temp_dir / "somewhere" / "agents-environment-config" / "thing")
+        monkeypatch.setattr(ms, "_legacy_candidate_paths", lambda: [legacy_link])
 
-        monkeypatch.setattr(ms, "_legacy_candidate_paths", counting_candidates)
+        ms.record_symlink(temp_dir / "new-link", temp_dir / "source")
 
-        is_our_symlink(legacy_link)
-        is_our_symlink(legacy_link)
-        is_our_symlink(legacy_link)
+        monkeypatch.setattr(ms, "_legacy_candidate_paths", lambda: [])
+        assert is_our_symlink(legacy_link) is True
 
-        assert calls["n"] == 1
+    def test_unwritable_store_does_not_break_ownership_check(self, temp_dir, monkeypatch):
+        def fail(_data):
+            raise OSError("read-only state dir")
+
+        monkeypatch.setattr(ms, "_save", fail)
+        legacy_link = temp_dir / "legacy-link"
+        legacy_link.symlink_to(temp_dir / "somewhere" / "agents-environment-config" / "thing")
+        monkeypatch.setattr(ms, "_legacy_candidate_paths", lambda: [legacy_link])
+
+        assert is_our_symlink(legacy_link) is True
 
 
 class TestReviewRegressions:
@@ -242,3 +241,22 @@ class TestReviewRegressions:
 
         rules = agent_tools_dir / "rules" / "agents-environment-config"
         assert rules.resolve() == (moved / ".agent-rules").resolve()
+
+    def test_setup_dry_run_does_not_create_record(self, temp_dir, monkeypatch):
+        from aec.commands import agent_tools
+
+        agent_tools_dir = temp_dir / ".agent-tools"
+        checkout = temp_dir / "agents-environment-config"
+        (checkout / ".agent-rules").mkdir(parents=True)
+        rules = agent_tools_dir / "rules" / "agents-environment-config"
+        rules.parent.mkdir(parents=True)
+        rules.symlink_to(temp_dir / "old" / "agents-environment-config" / ".agent-rules")
+
+        monkeypatch.setattr(agent_tools, "AGENT_TOOLS_DIR", agent_tools_dir)
+        monkeypatch.setattr(agent_tools, "_is_claude_installed", lambda: False)
+        monkeypatch.setattr(agent_tools, "_is_cursor_installed", lambda: False)
+        monkeypatch.setattr(agent_tools, "get_repo_root", lambda: checkout)
+        monkeypatch.setattr(ms, "_legacy_candidate_paths", lambda: [rules])
+        agent_tools.setup(dry_run=True)
+
+        assert not ms.MANAGED_SYMLINKS_PATH.exists()

@@ -6,11 +6,13 @@ not a heuristic on the link's target. A checkout cloned under a
 non-standard name, or moved/recloned after linking, is still recognised as
 ours.
 
-Pre-existing links from before this record existed are adopted once, the
-first time ``is_our_symlink()`` runs, by ``migrate_legacy_links_once()``,
-which matches the retired substring heuristic against the fixed set of
-locations AEC has ever created symlinks at (never an arbitrary path).
-After that the heuristic is never consulted again.
+Pre-existing links from before this record existed are adopted by
+``_legacy_store()``, which matches the retired substring heuristic against
+the fixed set of locations AEC has ever created symlinks at (never an
+arbitrary path). Until the record file exists, reads use that adopted view
+in memory -- lookups never write, so dry runs and read-only state dirs are
+safe. The first real write (``create_symlink()``) persists it, after which
+the heuristic is never consulted again.
 
 See docs/superpowers/plans/2026-09-25-managed-symlink-ownership.md.
 """
@@ -28,7 +30,7 @@ MANAGED_SYMLINKS_PATH = AEC_HOME / "managed-symlinks.json"
 SCHEMA_VERSION = 1
 
 # Substrings the retired heuristic matched against a link's raw target.
-# Consulted only by migrate_legacy_links_once(), and only for the fixed
+# Consulted only by _legacy_store(), and only for the fixed
 # set of locations in _legacy_candidate_paths() -- never for an arbitrary
 # path passed to is_our_symlink().
 _LEGACY_SUBSTRINGS = ("agents-environment-config", ".agent-tools")
@@ -44,7 +46,7 @@ def _empty_store() -> dict:
 
 def _load() -> dict:
     if not MANAGED_SYMLINKS_PATH.exists():
-        return _empty_store()
+        return _legacy_store()
     try:
         data = json.loads(MANAGED_SYMLINKS_PATH.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
@@ -70,8 +72,7 @@ def _key(link_path: Path) -> str:
 
 def record_symlink(link_path: Path, source_path: Path) -> None:
     """Record that AEC created/owns the symlink at ``link_path -> source_path``."""
-    migrate_legacy_links_once()  # before the first write creates the file
-    data = _load()
+    data = _load()  # first write persists the adopted legacy links too
     data["links"][_key(link_path)] = {
         "source": str(Path(source_path).expanduser().absolute()),
         "recordedAt": _now_iso(),
@@ -93,7 +94,6 @@ def is_recorded(link_path: Path) -> bool:
 
 def recorded_source(link_path: Path) -> Optional[str]:
     """The source AEC recorded for ``link_path``, or None if not recorded."""
-    migrate_legacy_links_once()
     entry = _load()["links"].get(_key(link_path))
     return entry.get("source") if isinstance(entry, dict) else None
 
@@ -106,7 +106,7 @@ def normalize_target(link_path: Path, target: str) -> str:
 def _legacy_candidate_paths() -> List[Path]:
     """Locations AEC has historically created managed symlinks at.
 
-    Used only by the one-time migration below. New links never need this
+    Used only by _legacy_store() below. New links never need this
     list: create_symlink() records them directly at creation time.
     """
     # Deferred import: aec.lib re-exports these from aec.lib.config, and
@@ -128,18 +128,11 @@ def _legacy_candidate_paths() -> List[Path]:
     ]
 
 
-def migrate_legacy_links_once() -> None:
-    """One-time adoption of pre-existing links into the record.
+def _legacy_store() -> dict:
+    """In-memory store adopting pre-record links via the retired heuristic.
 
-    Runs only when the record file does not exist yet. Scans the fixed
-    set of locations AEC has ever created symlinks at and adopts any
-    whose target matches the retired substring heuristic. Writes the
-    record file even if nothing matched, so this never runs twice and the
-    heuristic is never consulted again after the first call.
+    Only consulted while the record file does not exist yet; never writes.
     """
-    if MANAGED_SYMLINKS_PATH.exists():
-        return
-
     # Deferred import to avoid a top-level cycle (filesystem imports this
     # module for record_symlink/forget_symlink/is_our_symlink support).
     from .filesystem import get_symlink_target, is_symlink
@@ -157,4 +150,4 @@ def migrate_legacy_links_once() -> None:
                 "source": target_str,
                 "recordedAt": _now_iso(),
             }
-    _save(data)
+    return data
