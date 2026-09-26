@@ -22,10 +22,10 @@
     },
     "2026-09-25-managed-symlink-ownership.md": {
       "roadmap_page_id": "3e74efec-c95a-81c1-8486-f584fd6e03f6",
-      "tracker_page_id": null,
-      "source_sha256": "594502305d307a6e7d15bf1a62cdf6b67d9250ee976c003d210e33899982d140",
+      "tracker_page_id": "3e74efec-c95a-81d5-9bcf-f4707d38eb6d",
+      "source_sha256": "73b953dda3e082550abb854b89cd975af62b6253949dbec00f0625dd44b656cb",
       "last_synced": "2026-09-26",
-      "status": "Backlog",
+      "status": "Done",
       "branch": null
     },
     "2026-09-26-agent-rules-per-user-render.md": {
