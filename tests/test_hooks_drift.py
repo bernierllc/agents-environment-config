@@ -673,7 +673,7 @@ class TestUnguardedScriptCommands:
         assert [s.status for s in verify_repo(repo_root)] == [Drift.OK] * 2
 
     def test_hook_skipped_by_custom_check_is_not_missing(self, tmp_path):
-        from aec.lib.hooks.drift import verify_repo
+        from aec.lib.hooks.drift import Drift, verify_repo
         from aec.lib.hooks.installer import install_item_hooks
 
         repo_root = tmp_path / "repo"
@@ -691,6 +691,69 @@ class TestUnguardedScriptCommands:
             allow_custom_check=True,
         )
         assert verify_repo(repo_root) == []
+
+        # Its custom_check dropped from the source: judged on today's source,
+        # not the last install's skip.
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "on_file_edit", "command": "true",
+                "description": "d"}],
+        }))
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.MISSING]
+
+    def test_agent_unblocked_since_install_is_missing(self, tmp_path):
+        from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
+        from aec.lib.hooks.installer import install_item_hooks
+
+        repo_root = tmp_path / "repo"
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        item_dir.mkdir(parents=True)
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "on_file_edit", "command": "true",
+                "description": "d"}],
+        }))
+        (repo_root / ".gemini").write_text("not a dir")
+        install_item_hooks(
+            item_type="skill", item_key="demo", item_version="1.0.0",
+            item_dir=item_dir, repo_root=repo_root, agents=["gemini"],
+        )
+        assert verify_repo(repo_root) == []
+
+        (repo_root / ".gemini").unlink()
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.MISSING]
+        assert any(r.repaired for r in repair_repo(repo_root))
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
+
+    def test_second_idless_override_on_an_event_is_missing(self, tmp_path):
+        from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
+        from aec.lib.hooks.installer import install_item_hooks
+
+        repo_root = tmp_path / "repo"
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        item_dir.mkdir(parents=True)
+
+        def override(cmd):
+            return {"event": "PostToolUse", "matcher": "Edit",
+                    "hooks": [{"type": "command", "command": cmd}]}
+
+        def write(*cmds):
+            (item_dir / "hooks.json").write_text(json.dumps({
+                "$schema": "x", "version": "1.0.0", "hooks": [],
+                "claude": [override(c) for c in cmds]}))
+
+        write("echo one")
+        install_item_hooks(
+            item_type="skill", item_key="demo", item_version="1.0.0",
+            item_dir=item_dir, repo_root=repo_root, agents=["claude"],
+        )
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
+
+        write("echo one", "echo two")
+        assert sorted(s.status for s in verify_repo(repo_root)) == [
+            Drift.MISSING, Drift.OK]
+        assert any(r.repaired for r in repair_repo(repo_root))
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK] * 2
 
     def test_malformed_source_entry_does_not_crash_verify(self, tmp_path):
         from aec.lib.hooks.drift import Drift, verify_repo

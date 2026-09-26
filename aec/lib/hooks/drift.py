@@ -11,13 +11,14 @@ renders today, else OK. `verify_repo` runs that over every recorded hook in a re
 """
 
 import json
+from collections import Counter
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 from .fingerprint import fingerprint_hook
-from .installer import _resolve_script_commands
+from .installer import _resolve_script_commands, config_dir_blocked
 from .predicates import evaluate_when
 from .schema import load_hooks_file
 from .state import list_installed_items, load_state
@@ -126,6 +127,16 @@ def _rendered(repo_root: Path, item_type: str, item_key: str,
     return out
 
 
+def _custom_checked(repo_root: Path, item_type: str, item_key: str) -> Set[str]:
+    """Ids of the source's hooks gated by a custom_check."""
+    src = _item_source_dir(repo_root, item_type, item_key)
+    try:
+        hf = load_hooks_file(src / "hooks.json")
+    except Exception:  # untrusted input; _rendered already has no opinion
+        return set()
+    return {h.id for h in hf.hooks if h.when and h.when.custom_check}
+
+
 def _is_stale(expected: Optional[Dict[Tuple[str, str], Set[str]]],
               hook_id: str, event_key: str, actual: str) -> bool:
     """True if the installed hook isn't what its source renders today.
@@ -192,29 +203,29 @@ def verify_repo(repo_root: Path) -> List[HookStatus]:
     statuses: List[HookStatus] = []
     for item_type, item_key in list_installed_items(repo_root):
         st = load_state(repo_root, item_type=item_type, item_key=item_key)
-        recorded = set()
+        recorded: Counter = Counter()
         for installed in st.hooks_installed:
             statuses.append(
                 classify_hook(repo_root, installed,
                               item_type=item_type, item_key=item_key)
             )
-            recorded.add((installed["agent"], installed["hook_id"],
-                          _event_key(installed["target_json_pointer"])))
+            recorded[(installed["agent"], installed["hook_id"],
+                      _event_key(installed["target_json_pointer"]))] += 1
         # The other direction: a hook the source renders but state never
-        # recorded (added to hooks.json, or its `when` turned true). Not what
-        # install deliberately left out — an agent whose config dir is blocked,
-        # or a hook its custom_check skipped (verify doesn't run those).
-        blocked = {s["agent"] for s in st.hooks_skipped if "agent" in s}
-        checked_out = {s["hook_id"] for s in st.hooks_skipped
-                       if s.get("reason", "").startswith("custom_check")}
+        # recorded (added to hooks.json, its `when` turned true, or one more
+        # id-less override on an event). Counted per key, so a changed hook
+        # reads as STALE, not STALE plus MISSING. Judged on today's source and
+        # filesystem, never on the skips of the last install — except a hook
+        # gated by custom_check, which verify can't run, so has no opinion on.
+        gated = _custom_checked(repo_root, item_type, item_key)
         for agent in st.agents_targeted:
-            if agent in blocked:
+            if config_dir_blocked(repo_root, agent):
                 continue
-            for hook_id, event_key in _rendered(
-                repo_root, item_type, item_key, agent
-            ) or {}:
-                if (hook_id not in checked_out
-                        and (agent, hook_id, event_key) not in recorded):
+            for (hook_id, event_key), keys in (_rendered(
+                    repo_root, item_type, item_key, agent) or {}).items():
+                if hook_id in gated:
+                    continue
+                for _ in range(len(keys) - recorded[(agent, hook_id, event_key)]):
                     statuses.append(HookStatus(
                         item_type=item_type, item_key=item_key,
                         hook_id=hook_id, agent=agent, status=Drift.MISSING,
