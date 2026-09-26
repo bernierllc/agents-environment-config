@@ -755,6 +755,36 @@ class TestUnguardedScriptCommands:
         assert any(r.repaired for r in repair_repo(repo_root))
         assert [s.status for s in verify_repo(repo_root)] == [Drift.OK] * 2
 
+    def test_changed_one_of_two_identical_idless_overrides_is_missing(
+        self, tmp_path
+    ):
+        """Identical overrides share one entry but record twice; a count hides the change."""
+        from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
+        from aec.lib.hooks.installer import install_item_hooks
+
+        repo_root = tmp_path / "repo"
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        item_dir.mkdir(parents=True)
+
+        def write(*cmds):
+            (item_dir / "hooks.json").write_text(json.dumps({
+                "$schema": "x", "version": "1.0.0", "hooks": [],
+                "claude": [{"event": "PostToolUse", "matcher": "Edit",
+                            "hooks": [{"type": "command", "command": c}]}
+                           for c in cmds]}))
+
+        write("echo one", "echo one")
+        install_item_hooks(
+            item_type="skill", item_key="demo", item_version="1.0.0",
+            item_dir=item_dir, repo_root=repo_root, agents=["claude"],
+        )
+        write("echo one", "echo two")
+        assert Drift.MISSING in {s.status for s in verify_repo(repo_root)}
+        assert any(r.repaired for r in repair_repo(repo_root))
+        settings = json.loads((repo_root / ".claude/settings.json").read_text())
+        cmds = {h["hooks"][0]["command"] for h in settings["hooks"]["PostToolUse"]}
+        assert cmds == {"echo one", "echo two"}
+
     def test_malformed_source_entry_does_not_crash_verify(self, tmp_path):
         from aec.lib.hooks.drift import Drift, verify_repo
 

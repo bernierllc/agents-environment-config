@@ -11,7 +11,6 @@ renders today, else OK. `verify_repo` runs that over every recorded hook in a re
 """
 
 import json
-from collections import Counter
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
@@ -137,6 +136,22 @@ def _custom_checked(repo_root: Path, item_type: str, item_key: str) -> Set[str]:
     return {h.id for h in hf.hooks if h.when and h.when.custom_check}
 
 
+def _unrecorded(agent: str, expected: Set[str],
+                recorded: List[Optional[str]]) -> int:
+    """How many of `expected` no recorded hook accounts for.
+
+    Settings agents compare fingerprints — identical id-less overrides share
+    one entry but record twice, so a count would hide the one that changed.
+    Each recorded fingerprint that isn't expected is a STALE hook repair
+    replaces, so it covers one unmatched expectation. Git blocks are keyed by
+    hook_id and hold one command each, so a count is exact there.
+    """
+    if agent == "git":
+        return max(0, len(expected) - len(recorded))
+    have = set(recorded)
+    return max(0, len(expected - have) - len(have - expected))
+
+
 def _is_stale(expected: Optional[Dict[Tuple[str, str], Set[str]]],
               hook_id: str, event_key: str, actual: str) -> bool:
     """True if the installed hook isn't what its source renders today.
@@ -203,18 +218,19 @@ def verify_repo(repo_root: Path) -> List[HookStatus]:
     statuses: List[HookStatus] = []
     for item_type, item_key in list_installed_items(repo_root):
         st = load_state(repo_root, item_type=item_type, item_key=item_key)
-        recorded: Counter = Counter()
+        recorded: Dict[Tuple[str, str, str], List[Optional[str]]] = {}
         for installed in st.hooks_installed:
             statuses.append(
                 classify_hook(repo_root, installed,
                               item_type=item_type, item_key=item_key)
             )
-            recorded[(installed["agent"], installed["hook_id"],
-                      _event_key(installed["target_json_pointer"]))] += 1
+            recorded.setdefault((installed["agent"], installed["hook_id"],
+                                 _event_key(installed["target_json_pointer"])),
+                                []).append(installed.get("content_fingerprint"))
         # The other direction: a hook the source renders but state never
         # recorded (added to hooks.json, its `when` turned true, or one more
-        # id-less override on an event). Counted per key, so a changed hook
-        # reads as STALE, not STALE plus MISSING. Judged on today's source and
+        # id-less override on an event). A changed hook reads as STALE, not
+        # STALE plus MISSING. Judged on today's source and
         # filesystem, never on the skips of the last install — except a hook
         # gated by custom_check, which verify can't run, so has no opinion on.
         gated = _custom_checked(repo_root, item_type, item_key)
@@ -225,7 +241,8 @@ def verify_repo(repo_root: Path) -> List[HookStatus]:
                     repo_root, item_type, item_key, agent) or {}).items():
                 if hook_id in gated:
                     continue
-                for _ in range(len(keys) - recorded[(agent, hook_id, event_key)]):
+                for _ in range(_unrecorded(
+                        agent, keys, recorded.get((agent, hook_id, event_key), []))):
                     statuses.append(HookStatus(
                         item_type=item_type, item_key=item_key,
                         hook_id=hook_id, agent=agent, status=Drift.MISSING,
