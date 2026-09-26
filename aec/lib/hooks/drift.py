@@ -228,9 +228,12 @@ def repair_repo(repo_root: Path) -> List[RepairResult]:
         # One broken item must not abort the rest of this repo or the
         # remaining repos; the caller reports it and exits non-zero.
         try:
+            # The repo-local source is the truth repair converges on, version
+            # included: an item updated in place (new hooks.json, bumped
+            # version) is drift the recorded version would refuse to install.
             install_hooks_for_item(
                 item_type=item_type, item_key=item_key,
-                item_version=st.item_version or "0.0.0",
+                item_version=load_hooks_file(src / "hooks.json").version,
                 item_dir=src, repo_root=repo_root, agents=agents,
                 allow_custom_check=st.allow_custom_check,
             )

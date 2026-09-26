@@ -609,6 +609,46 @@ class TestUnguardedScriptCommands:
             hooks_json.write_text(json.dumps({"version": "1.0.0", **bad}))
             assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
 
+    def test_command_containing_the_end_marker_is_read_whole(self, tmp_path):
+        from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
+        from aec.lib.hooks.installer import install_item_hooks
+
+        repo_root = tmp_path / "repo"
+        (repo_root / ".git/hooks").mkdir(parents=True)
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        item_dir.mkdir(parents=True)
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "pre_commit",
+                "command": "echo '# <<< AEC:END'", "description": "d",
+            }],
+        }))
+        install_item_hooks(
+            item_type="skill", item_key="demo", item_version="1.0.0",
+            item_dir=item_dir, repo_root=repo_root, agents=["git"],
+        )
+        before = (repo_root / ".git/hooks/pre-commit").read_text()
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
+        assert not any(r.repaired for r in repair_repo(repo_root))
+        assert (repo_root / ".git/hooks/pre-commit").read_text() == before
+
+    def test_repair_installs_an_item_updated_with_a_version_bump(self, tmp_path):
+        from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
+        from aec.lib.hooks.state import load_state
+
+        repo_root = TestStaleAbsolutePaths._install_repo_local(tmp_path)
+        hooks_json = repo_root / ".claude/skills/demo/hooks.json"
+        data = json.loads(hooks_json.read_text())
+        data["version"] = "1.1.0"
+        data["hooks"][0]["command"] += " --strict"
+        hooks_json.write_text(json.dumps(data))
+
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.STALE]
+        assert all(r.repaired for r in repair_repo(repo_root))
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
+        st = load_state(repo_root, item_type="skill", item_key="demo")
+        assert st.item_version == "1.1.0"
+
     def test_hand_written_exec_bit_guard_in_git_hook_is_not_stale(self, tmp_path):
         """A raw hooks.json command passes through verbatim; repair can't change it."""
         from aec.lib.hooks.drift import Drift, repair_repo, verify_repo

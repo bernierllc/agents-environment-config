@@ -24,10 +24,12 @@ def _block_regex(item_key: str, hook_id: str) -> re.Pattern:
     begin = re.escape(_begin_marker(item_key, hook_id))
     end = re.escape(END_MARKER)
     # Match from marker line through the END line (inclusive), including a
-    # trailing newline if present. DOTALL so `.` spans newlines.
+    # trailing newline if present. DOTALL so `.` spans newlines; the END marker
+    # must be a whole line, so a command that merely contains it can't end the
+    # block early.
     return re.compile(
-        rf"{begin}[^\n]*\n.*?{end}\n?",
-        flags=re.DOTALL,
+        rf"{begin}[^\n]*\n.*?^{end}$\n?",
+        flags=re.DOTALL | re.MULTILINE,
     )
 
 
