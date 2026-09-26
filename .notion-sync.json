@@ -16,9 +16,25 @@
       "roadmap_page_id": "3c14efec-c95a-8156-9a65-e9cb8fcd51e9",
       "tracker_page_id": "3c14efec-c95a-8164-ac73-d7f15590ccac",
       "source_sha256": "d96c1ce7a35b2894bf2acec62cf7df2c60a9d71a08c79e0d2f57e359a1aeba28",
-      "last_synced": "2026-08-18",
-      "status": "In Progress",
-      "branch": "feat/headless-prompts"
+      "last_synced": "2026-09-26",
+      "status": "Done",
+      "branch": null
+    },
+    "2026-09-25-managed-symlink-ownership.md": {
+      "roadmap_page_id": "3e74efec-c95a-81c1-8486-f584fd6e03f6",
+      "tracker_page_id": "3e74efec-c95a-81d5-9bcf-f4707d38eb6d",
+      "source_sha256": "73b953dda3e082550abb854b89cd975af62b6253949dbec00f0625dd44b656cb",
+      "last_synced": "2026-09-26",
+      "status": "Done",
+      "branch": null
+    },
+    "2026-09-26-agent-rules-per-user-render.md": {
+      "roadmap_page_id": "3e74efec-c95a-81e4-8d6c-f0cfd3fbe4be",
+      "tracker_page_id": null,
+      "source_sha256": "9ccfd28f9a867d3b7a62c2875dc906a8d82027379cf4d85b45907d1812afcfe1",
+      "last_synced": "2026-09-26",
+      "status": "Backlog",
+      "branch": null
     }
   },
   "pending_backfill": {

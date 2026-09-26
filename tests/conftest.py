@@ -1,11 +1,33 @@
 """Pytest fixtures for aec tests."""
 
 import os
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Generator
 
-import pytest
+# Point HOME at a throwaway directory before anything imports aec.
+# aec.lib.config derives every state path (~/.agents-environment-config,
+# ~/.agent-tools, ~/.claude, ...) from Path.home() at import time and 17
+# modules import those paths by value, so this must happen here, first.
+# Without it, tests wrote fixtures such as "dep-skill" into the developer's
+# real installed-*.json, and concurrent runs raced on the same temp files.
+_REAL_HOME = os.environ.get("HOME", "")
+# realpath: on macOS /var is a symlink to /private/var, and code that resolves
+# paths must agree with Path.home().
+_TEST_HOME = os.path.realpath(tempfile.mkdtemp(prefix="aec-test-home-"))
+os.environ["HOME"] = _TEST_HOME
+os.environ["USERPROFILE"] = _TEST_HOME  # Windows equivalent
+# CLI tests register an atexit update check; it must never reach GitHub.
+os.environ["AEC_NO_UPDATE_CHECK"] = "1"
+
+import atexit  # noqa: E402
+
+import pytest  # noqa: E402
+
+# Registered first, so it runs last: after any atexit handler the CLI tests
+# registered, which may still read or write under the test home.
+atexit.register(shutil.rmtree, _TEST_HOME, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
@@ -16,6 +38,15 @@ def _isolate_preferences(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     """
     monkeypatch.setattr(
         "aec.lib.preferences.AEC_PREFERENCES", tmp_path / "preferences.json"
+    )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_managed_symlinks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never read/write the developer's real ~/.agents-environment-config/managed-symlinks.json."""
+    monkeypatch.setattr(
+        "aec.lib.managed_symlinks.MANAGED_SYMLINKS_PATH",
+        tmp_path / "managed-symlinks.json",
     )
 
 

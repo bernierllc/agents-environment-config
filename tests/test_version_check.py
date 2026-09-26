@@ -276,6 +276,7 @@ class TestCLIIntegration:
 
     def test_maybe_check_for_update_runs_when_enabled(self, temp_dir, monkeypatch):
         """When update_check preference is True or unset, run the check."""
+        monkeypatch.delenv("AEC_NO_UPDATE_CHECK", raising=False)
         monkeypatch.setattr("aec.lib.version_check.VERSION_CACHE_FILE", temp_dir / "vc.json")
         monkeypatch.setattr("aec.lib.preferences.AEC_HOME", temp_dir)
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", temp_dir / "preferences.json")
@@ -284,3 +285,11 @@ class TestCLIIntegration:
         with patch("aec.lib.version_check.check_for_update", return_value=None) as mock_check:
             maybe_check_for_update()
             mock_check.assert_called_once()
+
+    def test_maybe_check_for_update_respects_env_opt_out(self, monkeypatch):
+        """AEC_NO_UPDATE_CHECK=1 skips the network check (CI, scripts, tests)."""
+        monkeypatch.setenv("AEC_NO_UPDATE_CHECK", "1")
+        from aec.lib.version_check import maybe_check_for_update
+        with patch("aec.lib.version_check.check_for_update") as mock_check:
+            maybe_check_for_update()
+            mock_check.assert_not_called()

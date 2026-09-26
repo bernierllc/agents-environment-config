@@ -43,17 +43,31 @@ def create_symlink(
     # Ensure parent directory exists
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    # Remove existing target if it's a symlink
-    if target.is_symlink():
-        target.unlink()
+    # Remove existing target if it's a symlink (or junction, even a broken one)
+    if is_symlink(target):
+        if not remove_symlink(target):
+            return False
     elif target.exists():
         # Target exists and is not a symlink - don't overwrite
         return False
 
     if IS_WINDOWS:
-        return _create_windows_link(source, target, is_directory)
+        created = _create_windows_link(source, target, is_directory)
     else:
-        return _create_unix_symlink(source, target)
+        created = _create_unix_symlink(source, target)
+
+    if created:
+        from .managed_symlinks import record_symlink
+        try:
+            record_symlink(target, source)
+        except OSError:
+            # An unrecorded link is one AEC can never recognise or repair:
+            # undo it and report failure rather than leave it half-managed.
+            if not remove_symlink(target):
+                target.unlink(missing_ok=True)  # Windows copy fallback
+            return False
+
+    return created
 
 
 def _create_windows_link(source: Path, target: Path, is_directory: bool) -> bool:
@@ -104,19 +118,21 @@ def remove_symlink(path: Path) -> bool:
     """
     path = Path(path)
 
-    if not path.exists() and not path.is_symlink():
+    if not path.exists() and not is_symlink(path):
         return False
 
     if IS_WINDOWS:
         # On Windows, junctions are removed differently
-        if path.is_dir():
+        if _is_junction(path):
             try:
                 # Use rmdir for junctions
-                subprocess.run(
+                result = subprocess.run(
                     ["cmd", "/c", "rmdir", str(path)],
                     capture_output=True,
                 )
-                return True
+                if result.returncode == 0:
+                    _forget_symlink(path)
+                    return True
             except Exception:
                 pass
 
@@ -124,10 +140,20 @@ def remove_symlink(path: Path) -> bool:
     try:
         if path.is_symlink():
             path.unlink()
+            _forget_symlink(path)
             return True
         return False
     except Exception:
         return False
+
+
+def _forget_symlink(path: Path) -> None:
+    """Drop path from AEC's managed-symlink ownership record, if present."""
+    from .managed_symlinks import forget_symlink
+    try:
+        forget_symlink(path)
+    except OSError:
+        pass  # link is gone; a leftover entry can't match a new link's target
 
 
 def is_symlink(path: Path) -> bool:
@@ -136,51 +162,59 @@ def is_symlink(path: Path) -> bool:
     """
     path = Path(path)
 
-    if path.is_symlink():
-        return True
+    return path.is_symlink() or _is_junction(path)
 
-    # On Windows, also check for junctions
-    if IS_WINDOWS and path.is_dir():
-        try:
-            # Check if it's a reparse point (junction)
-            import ctypes
-            from ctypes import wintypes
 
-            FILE_ATTRIBUTE_REPARSE_POINT = 0x400
-            attrs = ctypes.windll.kernel32.GetFileAttributesW(str(path))
-            if attrs != -1:
-                return bool(attrs & FILE_ATTRIBUTE_REPARSE_POINT)
-        except Exception:
-            pass
+def _is_junction(path: Path) -> bool:
+    """True for a Windows reparse point (junction), even one whose target is gone.
 
-    return False
+    lstat doesn't follow the link, so a junction left dangling by a moved
+    checkout is still detected -- path.is_dir() would follow it and say no.
+    """
+    if not IS_WINDOWS:
+        return False
+    try:
+        attrs = getattr(os.lstat(path), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(attrs & 0x400)  # FILE_ATTRIBUTE_REPARSE_POINT
 
 
 def is_our_symlink(path: Path) -> bool:
     """
-    Check if a symlink was created by us (points to aec content).
+    Check if a symlink was created by AEC.
+
+    Ownership is a lookup in AEC's managed-symlink record
+    (~/.agents-environment-config/managed-symlinks.json), written by
+    create_symlink() at creation time -- not a heuristic on the link's
+    target. A checkout cloned under a non-standard name, or moved/recloned
+    after linking, is still recognised as ours: the record is keyed by the
+    link's own path, and the link must still point at the recorded source
+    (so a user's replacement link at the same path is not claimed).
+
+    Pre-existing links from before this record existed are adopted via the
+    retired substring heuristic until the first record write persists them
+    (see aec.lib.managed_symlinks). This check never writes.
 
     Args:
         path: The path to check
 
     Returns:
-        True if it's a symlink pointing to agents-environment-config content
+        True if AEC's record shows it owns this symlink.
     """
     if not is_symlink(path):
         return False
 
-    try:
-        target = get_symlink_target(path)
-        if target is None:
-            return False
+    from .managed_symlinks import normalize_target, recorded_source
 
-        target_str = str(target)
-        return (
-            "agents-environment-config" in target_str
-            or ".agent-tools" in target_str
-        )
-    except Exception:
+    source = recorded_source(path)
+    target = get_symlink_target(path)
+    if source is None or target is None:
         return False
+    # Path-only membership isn't enough: a user may have replaced AEC's link
+    # with their own at the same path. It's ours only if it still points
+    # where we pointed it (even if that checkout has since moved away).
+    return normalize_target(path, str(target)) == normalize_target(path, source)
 
 
 def get_symlink_target(path: Path) -> Optional[Path]:
@@ -202,7 +236,13 @@ def get_symlink_target(path: Path) -> Optional[Path]:
             pass
 
     # On Windows, try to read junction target
-    if IS_WINDOWS and path.is_dir():
+    if _is_junction(path):
+        try:
+            # os.readlink reads junctions (Python 3.8+); strip the \\?\ prefix.
+            target = os.readlink(path)
+            return Path(target[4:] if target.startswith("\\\\?\\") else target)
+        except OSError:
+            pass
         try:
             result = subprocess.run(
                 ["cmd", "/c", "dir", "/al", str(path.parent)],

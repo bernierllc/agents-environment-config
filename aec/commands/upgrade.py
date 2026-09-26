@@ -508,7 +508,12 @@ def _upgrade_scope(
     yes: bool,
     dry_run: bool,
 ) -> bool:
-    """Upgrade all items in a scope. Returns True if anything was upgraded."""
+    """Upgrade all items in a scope.
+
+    Returns True unless the scope is known to be current: something was
+    upgraded, or an outdated item was left as-is (a declined overwrite or
+    dependency upgrade), so the caller must not report "up to date".
+    """
     upgraded = False
     for item_type, source_dir in source_dirs.items():
         if not source_dir or not source_dir.exists():
@@ -557,6 +562,7 @@ def _upgrade_scope(
                     name, avail_v, manifest, scope, available,
                     source_dir, target, yes, dry_run=False,
                 ):
+                    upgraded = True  # still outdated; never report "up to date"
                     continue
 
             do_prompt = False
@@ -601,7 +607,8 @@ def _upgrade_scope(
                     default=False,
                 ).strip().lower()
                 if resp != "y":
-                    Console.info(f"  Skipped: {name}")
+                    Console.info(f"  Skipped: {name} (still {inst_v}; {avail_v} available)")
+                    upgraded = True  # still outdated; never report "up to date"
                     continue
 
             if existing_path.exists():

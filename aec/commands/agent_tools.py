@@ -60,6 +60,14 @@ def _is_cursor_installed() -> bool:
     return False
 
 
+def _is_stale_managed_link(source: Path, target: Path) -> bool:
+    """AEC's own link at target, but pointing somewhere other than source (repo moved or recloned).
+
+    create_symlink() replaces an existing symlink, so the caller just re-creates it.
+    """
+    return is_our_symlink(target) and target.resolve() != source.resolve()
+
+
 def setup(dry_run: bool = False) -> None:
     """Create ~/.agent-tools/ structure and symlinks.
 
@@ -78,6 +86,16 @@ def setup(dry_run: bool = False) -> None:
 
     Console.print(f"Repository: {Console.path(repo_root)}")
     Console.print(f"Target: {Console.path(AGENT_TOOLS_DIR)}")
+
+    if not dry_run:
+        # Adopt pre-record links before any are touched, so the legacy
+        # heuristic is retired even when nothing below needs creating.
+        from ..lib.managed_symlinks import persist_legacy_migration
+
+        try:
+            persist_legacy_migration()
+        except OSError as exc:
+            Console.warning(f"Could not write symlink ownership record: {exc}")
 
     # Create directory structure
     Console.subheader("Creating ~/.agent-tools/ structure...")
@@ -122,7 +140,7 @@ def setup(dry_run: bool = False) -> None:
             Console.warning(f"{name}: source not found ({source})")
             continue
 
-        if is_symlink(target):
+        if is_symlink(target) and not _is_stale_managed_link(source, target):
             Console.success(f"{name} (agents-environment-config) (already linked)")
         elif dry_run:
             Console.info(f"Would create symlink: {target} -> {source}")
@@ -153,7 +171,7 @@ def setup(dry_run: bool = False) -> None:
         ]
 
         for source, target, name in claude_links:
-            if is_symlink(target):
+            if is_symlink(target) and not _is_stale_managed_link(source, target):
                 Console.success(f"{name} (already linked)")
             elif dry_run:
                 Console.info(f"Would create symlink: {target} -> {source}")
@@ -176,7 +194,7 @@ def setup(dry_run: bool = False) -> None:
         cursor_rules_src = repo_root / ".cursor" / "rules"
         cursor_rules_dst = CURSOR_DIR / "rules" / "agents-environment-config"
 
-        if is_symlink(cursor_rules_dst):
+        if is_symlink(cursor_rules_dst) and not _is_stale_managed_link(cursor_rules_src, cursor_rules_dst):
             Console.success("Cursor rules (with frontmatter) (already linked)")
         elif dry_run:
             Console.info(f"Would create symlink: {cursor_rules_dst} -> {cursor_rules_src}")

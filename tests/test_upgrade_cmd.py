@@ -745,3 +745,24 @@ def test_yes_upgrades_discovered_other_repos(tmp_path, capsys):
     assert str(other) in scopes and not asked.called
     assert "Everything is up to date" not in capsys.readouterr().out
 
+
+
+def test_declined_overwrite_is_not_reported_current(tmp_path, monkeypatch):
+    """A skill left outdated by a declined overwrite must not read as "up to date"."""
+    from aec.commands import upgrade
+
+    source = tmp_path / "repo" / ".claude" / "skills" / "s"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text(_skill_md("s", "2.0.0"))
+    installed = tmp_path / "installed"
+    (installed / "s").mkdir(parents=True)
+    (installed / "s" / "SKILL.md").write_text(_skill_md("s", "1.0.0") + "\nlocal edit\n")
+    manifest = {"global": {"skills": {"s": {"version": "1.0.0", "contentHash": "sha256:stale"}}}, "repos": {}}
+
+    monkeypatch.setattr(upgrade, "_target_base", lambda scope, item_type: installed)
+    monkeypatch.setattr(upgrade, "prompt", lambda *a, **k: "n")
+    not_current = upgrade._upgrade_scope(
+        manifest, "global", {"skills": tmp_path / "repo" / ".claude" / "skills"}, yes=False, dry_run=False)
+
+    assert "1.0.0" in (installed / "s" / "SKILL.md").read_text()
+    assert not_current

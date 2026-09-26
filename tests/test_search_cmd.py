@@ -26,6 +26,9 @@ def search_env(temp_dir, monkeypatch):
     (repo / ".git").mkdir()
     (repo / "aec").mkdir()
     (repo / ".agent-rules").mkdir()
+    # Source dirs come from aec.lib.sources.get_repo_root, not the command's own
+    # import; without this, search reads the real checkout's skills submodule.
+    monkeypatch.setattr("aec.lib.sources.get_repo_root", lambda: repo)
     return repo
 
 
