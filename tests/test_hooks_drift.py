@@ -458,19 +458,31 @@ class TestUnguardedScriptCommands:
         assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
 
     def test_legacy_guard_shape_matcher(self):
-        from aec.lib.hooks.drift import _is_legacy_guard
+        from aec.lib.hooks.drift import _is_legacy_guard, _scripts_rel
+        own = _scripts_rel("skill", "demo")
+        assert own == ".claude/skills/demo/scripts/"
         rel = ".claude/skills/demo/scripts/check.sh"
         quoted = "'.claude/skills/demo/scripts/check me.sh'"
         pd = '"$CLAUDE_PROJECT_DIR"/'
-        assert _is_legacy_guard(f"if [ -x {rel} ]; then {rel}; fi")
-        assert _is_legacy_guard(f"if [ -x {quoted} ]; then {quoted} --x; fi")
-        assert _is_legacy_guard(f"if [ -x {pd}{rel} ]; then {pd}{rel}; fi")
-        assert _is_legacy_guard(f"if [ -x {pd}{quoted} ]; then {pd}{quoted}; fi")
+        for line in (
+            f"if [ -x {rel} ]; then {rel}; fi",
+            f"if [ -x {quoted} ]; then {quoted} --x; fi",
+            f"if [ -x {pd}{rel} ]; then {pd}{rel}; fi",
+            f"if [ -x {pd}{quoted} ]; then {pd}{quoted}; fi",
+        ):
+            assert _is_legacy_guard(line, own), line
         # Hand-written commands: not ours, repair can't change them.
-        assert not _is_legacy_guard(f"if [ -x {pd}bin/tool ]; then {pd}bin/tool; fi")
-        assert not _is_legacy_guard("if [ -x ./tool ]; then ./tool; fi")
-        # The current rendering.
-        assert not _is_legacy_guard(f"if [ -f {rel} ]; then /bin/sh {rel}; fi")
+        for line in (
+            f"if [ -x {pd}bin/tool ]; then {pd}bin/tool; fi",
+            "if [ -x ./tool ]; then ./tool; fi",
+            "if [ -x ./scripts/tool ]; then ./scripts/tool; fi",
+            # another item's script is that item's hook, not this one's
+            "if [ -x .claude/skills/other/scripts/a.sh ]; then "
+            ".claude/skills/other/scripts/a.sh; fi",
+            # the current rendering
+            f"if [ -f {rel} ]; then /bin/sh {rel}; fi",
+        ):
+            assert not _is_legacy_guard(line, own), line
 
     def test_hand_written_exec_bit_guard_in_git_hook_is_not_stale(self, tmp_path):
         """A raw hooks.json command passes through verbatim; repair can't change it."""

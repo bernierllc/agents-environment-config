@@ -97,7 +97,8 @@ def _entry_commands(entry: dict) -> List[str]:
     return cmds
 
 
-def _is_stale(repo_root: Path, agent: str, entry: dict) -> bool:
+def _is_stale(repo_root: Path, agent: str, entry: dict,
+              scripts_rel: Optional[str]) -> bool:
     """True if the entry runs, but not in anyone else's checkout.
 
     Two generations of that:
@@ -129,15 +130,15 @@ def _is_stale(repo_root: Path, agent: str, entry: dict) -> bool:
         return True
     return any(
         (cmd.startswith(CLAUDE_PROJECT_DIR_PREFIX) and not is_guarded(cmd))
-        or _is_legacy_guard(cmd)
+        or _is_legacy_guard(cmd, scripts_rel)
         for cmd in _entry_commands(entry)
     )
 
 
 # The exact line pre-interpreter installs wrote for a resolved script:
-# `if [ -x P ]; then P [args]; fi`, P a `.../scripts/...` path rendered by
-# `_render_script_path` (bare or shlex-quoted, `"$CLAUDE_PROJECT_DIR"/`-prefixed
-# for claude). Anchored on that shape, not on `if [ -x ` appearing anywhere: a
+# `if [ -x P ]; then P [args]; fi`, P the item's OWN `<item dir>/scripts/...`
+# path rendered by `_render_script_path` (bare or shlex-quoted,
+# `"$CLAUDE_PROJECT_DIR"/`-prefixed for claude). Anchored on that shape, not on `if [ -x ` appearing anywhere: a
 # hand-written hooks.json command passes through verbatim, repair would rewrite
 # it unchanged, and it would stay STALE forever.
 # ponytail: a path containing a single quote renders as '...'"'"'...' and isn't
@@ -150,8 +151,23 @@ _LEGACY_GUARD_LINE = re.compile(
 )
 
 
-def _is_legacy_guard(text: str) -> bool:
-    return any("/scripts/" in m.group(1) for m in _LEGACY_GUARD_LINE.finditer(text))
+def _is_legacy_guard(text: str, scripts_rel: Optional[str]) -> bool:
+    """True if `text` has the old guard line for a script under `scripts_rel`."""
+    if scripts_rel is None:
+        return False
+    for m in _LEGACY_GUARD_LINE.finditer(text):
+        path = m.group(1)
+        if path.startswith(CLAUDE_PROJECT_DIR_PREFIX):
+            path = path[len(CLAUDE_PROJECT_DIR_PREFIX):]
+        if path.strip("'").startswith(scripts_rel):
+            return True
+    return False
+
+
+def _scripts_rel(item_type: str, item_key: str) -> Optional[str]:
+    """Repo-relative `<item dir>/scripts/` prefix the installer renders."""
+    sub = _REPO_ITEM_DIR.get(item_type)
+    return None if sub is None else f"{(sub / item_key).as_posix()}/scripts/"
 
 
 def _git_block(repo_root: Path, event_key: str, item_type: str,
@@ -176,7 +192,7 @@ def classify_hook(repo_root: Path, installed: dict, *,
         block = _git_block(repo_root, event_key, item_type, item_key, hook_id)
         if block is None:
             status = Drift.MISSING
-        elif _is_legacy_guard(block):
+        elif _is_legacy_guard(block, _scripts_rel(item_type, item_key)):
             status = Drift.STALE
         else:
             status = Drift.OK
@@ -188,7 +204,8 @@ def classify_hook(repo_root: Path, installed: dict, *,
             status, idx = Drift.MISSING, None
         else:
             idx, entry = found
-            status = (Drift.STALE if _is_stale(repo_root, agent, entry)
+            status = (Drift.STALE if _is_stale(repo_root, agent, entry,
+                                              _scripts_rel(item_type, item_key))
                       else Drift.OK)
 
     return HookStatus(
