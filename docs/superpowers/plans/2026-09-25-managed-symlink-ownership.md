@@ -1,7 +1,7 @@
 # Managed symlink ownership by record, not by path name
 
-**Status:** Proposed (found in PR #86 review, Codex round 8)
-**Priority:** Tier 2 — proposed; placement awaiting Matt's confirmation
+**Status:** Implemented
+**Priority:** Tier 2
 
 ## Root cause
 
