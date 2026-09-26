@@ -646,6 +646,12 @@ class TestUnguardedScriptCommands:
         assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
         assert not (repo_root / "ran").exists()
 
+        # Its file predicates still count.
+        data["hooks"][0]["when"]["repo_has"] = ["package.json"]
+        hooks_json.write_text(json.dumps(data))
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.STALE]
+        assert not (repo_root / "ran").exists()
+
     def test_malformed_source_entry_does_not_crash_verify(self, tmp_path):
         from aec.lib.hooks.drift import Drift, verify_repo
 

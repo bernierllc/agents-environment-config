@@ -102,11 +102,11 @@ def _rendered(repo_root: Path, item_type: str, item_key: str,
         hf = load_hooks_file(src / "hooks.json")
         # Drop what install would skip, so a hook whose `when` turned false is
         # retracted. A custom_check is never run here — verify and doctor must
-        # not execute item shell — so those hooks count as applicable.
+        # not execute item shell — so it alone counts as passing.
         applied = replace(hf, hooks=[
             h for h in hf.hooks
-            if (h.when and h.when.custom_check)
-            or evaluate_when(h.when, repo_root).applied
+            if h.when is None or evaluate_when(
+                replace(h.when, custom_check=None), repo_root).applied
         ])
         entries = translate_to_agent(
             applied, agent,
