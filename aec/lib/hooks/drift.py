@@ -192,11 +192,34 @@ def verify_repo(repo_root: Path) -> List[HookStatus]:
     statuses: List[HookStatus] = []
     for item_type, item_key in list_installed_items(repo_root):
         st = load_state(repo_root, item_type=item_type, item_key=item_key)
+        recorded = set()
         for installed in st.hooks_installed:
             statuses.append(
                 classify_hook(repo_root, installed,
                               item_type=item_type, item_key=item_key)
             )
+            recorded.add((installed["agent"], installed["hook_id"],
+                          _event_key(installed["target_json_pointer"])))
+        # The other direction: a hook the source renders but state never
+        # recorded (added to hooks.json, or its `when` turned true). Not what
+        # install deliberately left out — an agent whose config dir is blocked,
+        # or a hook its custom_check skipped (verify doesn't run those).
+        blocked = {s["agent"] for s in st.hooks_skipped if "agent" in s}
+        checked_out = {s["hook_id"] for s in st.hooks_skipped
+                       if s.get("reason", "").startswith("custom_check")}
+        for agent in st.agents_targeted:
+            if agent in blocked:
+                continue
+            for hook_id, event_key in _rendered(
+                repo_root, item_type, item_key, agent
+            ) or {}:
+                if (hook_id not in checked_out
+                        and (agent, hook_id, event_key) not in recorded):
+                    statuses.append(HookStatus(
+                        item_type=item_type, item_key=item_key,
+                        hook_id=hook_id, agent=agent, status=Drift.MISSING,
+                        recorded_pointer="",
+                    ))
     return statuses
 
 

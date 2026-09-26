@@ -576,7 +576,9 @@ class TestUnguardedScriptCommands:
             item_dir=item_dir, repo_root=repo_root, agents=["git"],
         )
         write("pre_push")
-        assert [s.status for s in verify_repo(repo_root)] == [Drift.STALE]
+        # The old record is stale; its new rendering was never installed.
+        assert [s.status for s in verify_repo(repo_root)] == [
+            Drift.STALE, Drift.MISSING]
         assert any(r.repaired for r in repair_repo(repo_root))
         assert "AEC:BEGIN" not in (repo_root / ".git/hooks/pre-commit").read_text()
         assert "AEC:BEGIN" in (repo_root / ".git/hooks/pre-push").read_text()
@@ -593,7 +595,8 @@ class TestUnguardedScriptCommands:
         data["hooks"][0]["id"] = "renamed"
         hooks_json.write_text(json.dumps(data))
 
-        assert [s.status for s in verify_repo(repo_root)] == [Drift.STALE]
+        assert [(s.hook_id, s.status) for s in verify_repo(repo_root)] == [
+            ("lint", Drift.STALE), ("renamed", Drift.MISSING)]
         assert any(r.repaired for r in repair_repo(repo_root))
         settings = json.loads((repo_root / ".claude/settings.json").read_text())
         assert len(settings["hooks"]["PostToolUse"]) == 1
@@ -651,6 +654,43 @@ class TestUnguardedScriptCommands:
         hooks_json.write_text(json.dumps(data))
         assert [s.status for s in verify_repo(repo_root)] == [Drift.STALE]
         assert not (repo_root / "ran").exists()
+
+    def test_hook_added_to_source_is_missing_and_repair_installs_it(
+        self, tmp_path
+    ):
+        from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
+
+        repo_root = TestStaleAbsolutePaths._install_repo_local(tmp_path)
+        hooks_json = repo_root / ".claude/skills/demo/hooks.json"
+        data = json.loads(hooks_json.read_text())
+        data["hooks"].append({"id": "new", "event": "on_file_edit",
+                              "command": "true", "description": "d"})
+        hooks_json.write_text(json.dumps(data))
+
+        assert sorted((s.hook_id, s.status) for s in verify_repo(repo_root)) == [
+            ("lint", Drift.OK), ("new", Drift.MISSING)]
+        assert any(r.repaired for r in repair_repo(repo_root))
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK] * 2
+
+    def test_hook_skipped_by_custom_check_is_not_missing(self, tmp_path):
+        from aec.lib.hooks.drift import verify_repo
+        from aec.lib.hooks.installer import install_item_hooks
+
+        repo_root = tmp_path / "repo"
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        item_dir.mkdir(parents=True)
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "on_file_edit", "command": "true",
+                "description": "d", "when": {"custom_check": "false"},
+            }],
+        }))
+        install_item_hooks(
+            item_type="skill", item_key="demo", item_version="1.0.0",
+            item_dir=item_dir, repo_root=repo_root, agents=["claude"],
+            allow_custom_check=True,
+        )
+        assert verify_repo(repo_root) == []
 
     def test_malformed_source_entry_does_not_crash_verify(self, tmp_path):
         from aec.lib.hooks.drift import Drift, verify_repo
