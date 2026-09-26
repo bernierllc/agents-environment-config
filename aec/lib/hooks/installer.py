@@ -328,11 +328,27 @@ def install_item_hooks(
 def _remove_recorded_hooks(
     repo_root: Path, hooks_installed: List[dict], *, item_type: str, item_key: str,
 ) -> None:
-    """Delete every hook payload recorded in state from its agent config file."""
+    """Delete every hook payload recorded in state from its agent config file.
+
+    Settings entries are deduped by fingerprint on merge, so two items that
+    render the same payload share one entry; it stays while another item's
+    state still records it. Git blocks are keyed per item and never shared.
+    """
+    co_owned = {
+        (h["agent"], h["target_json_pointer"].split("/")[2],
+         h["content_fingerprint"])
+        for other in hook_state.list_installed_items(repo_root)
+        if other != (item_type, item_key)
+        for h in hook_state.load_state(
+            repo_root, item_type=other[0], item_key=other[1]
+        ).hooks_installed
+    }
     for installed in hooks_installed:
         agent = installed["agent"]
         event_key = installed["target_json_pointer"].split("/")[2]
         fp = installed["content_fingerprint"]
+        if agent != "git" and (agent, event_key, fp) in co_owned:
+            continue
         if agent == "claude":
             _remove_claude(repo_root, event_key, fp)
         elif agent == "gemini":

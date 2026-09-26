@@ -219,6 +219,52 @@ class TestRepairRepo:
         assert by_key == {"demo": Drift.OK, "broken": Drift.MISSING}
 
 
+class TestCoOwnedEntries:
+    """Two items rendering the same payload share one deduped settings entry."""
+
+    @staticmethod
+    def _two_items_same_payload(tmp_path):
+        from aec.lib.hooks.installer import install_item_hooks
+
+        repo_root = tmp_path / "repo"
+        for key in ("a", "b"):
+            item_dir = repo_root / ".claude" / "skills" / key
+            item_dir.mkdir(parents=True)
+            (item_dir / "hooks.json").write_text(json.dumps({
+                "$schema": "x", "version": "1.0.0", "hooks": [{
+                    "id": "lint", "event": "on_file_edit",
+                    "command": "echo same", "description": "d",
+                }],
+            }))
+            install_item_hooks(
+                item_type="skill", item_key=key, item_version="1.0.0",
+                item_dir=item_dir, repo_root=repo_root, agents=["claude"],
+            )
+        return repo_root
+
+    def test_repairing_one_owner_leaves_the_other_intact(self, tmp_path):
+        from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
+
+        repo_root = self._two_items_same_payload(tmp_path)
+        hooks_json = repo_root / ".claude/skills/a/hooks.json"
+        data = json.loads(hooks_json.read_text())
+        data["hooks"][0]["command"] = "echo changed"
+        hooks_json.write_text(json.dumps(data))
+
+        repair_repo(repo_root)
+        assert {s.item_key: s.status for s in verify_repo(repo_root)} == {
+            "a": Drift.OK, "b": Drift.OK}
+
+    def test_uninstalling_one_owner_keeps_the_shared_entry(self, tmp_path):
+        from aec.lib.hooks.drift import Drift, verify_repo
+        from aec.lib.hooks.installer import remove_item_hooks
+
+        repo_root = self._two_items_same_payload(tmp_path)
+        remove_item_hooks(item_type="skill", item_key="a", repo_root=repo_root)
+        assert [(s.item_key, s.status) for s in verify_repo(repo_root)] == [
+            ("b", Drift.OK)]
+
+
 class TestStaleAbsolutePaths:
     """Repos installed before the $CLAUDE_PROJECT_DIR rendering.
 
