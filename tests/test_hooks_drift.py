@@ -324,8 +324,10 @@ class TestUnguardedScriptCommands:
         entry = settings["hooks"]["PostToolUse"][0]
         inner = entry["hooks"][0]
         guarded = inner["command"]
-        # "if [ -x P ]; then P args; fi" -> "P args"
+        # "if [ -f P ]; then sh P args; fi" -> "P args" (pre-guard installs
+        # also exec'd the path directly, with no interpreter in front).
         body = guarded.split("; then ", 1)[1].rsplit("; fi", 1)[0]
+        body = body[body.index('"$CLAUDE_PROJECT_DIR"'):]
         inner["command"] = body
         settings_path.write_text(json.dumps(settings))
 
@@ -382,6 +384,77 @@ class TestUnguardedScriptCommands:
         arr = settings["hooks"]["PostToolUse"]
         assert len(arr) == 1, "the unguarded entry must be retracted"
         assert is_guarded(arr[0]["hooks"][0]["command"])
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
+
+    def test_legacy_exec_bit_guard_reports_stale_and_repairs(self, tmp_path):
+        """`if [ -x P ]; then P; fi` was the previous rendering.
+
+        Git tracks +x itself, so a script committed at 0644 is non-executable
+        in every clone and that guard kept the hook silently off. Repair must
+        rewrite it to the interpreter rendering.
+        """
+        from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
+
+        repo_root = TestStaleAbsolutePaths._install_repo_local(tmp_path)
+        body = self._drop_guard(repo_root)
+        self._set_command(repo_root, f"if [ -x {body.split()[0]} ]; then {body}; fi")
+
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.STALE]
+        assert any(r.repaired for r in repair_repo(repo_root))
+        settings = json.loads(
+            (repo_root / ".claude/settings.json").read_text()
+        )
+        arr = settings["hooks"]["PostToolUse"]
+        assert len(arr) == 1
+        assert arr[0]["hooks"][0]["command"].startswith("if [ -f ")
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
+
+    @staticmethod
+    def _set_command(repo_root: Path, command: str) -> None:
+        from aec.lib.hooks.fingerprint import fingerprint_hook
+        from aec.lib.hooks.state import load_state, save_state
+
+        settings_path = repo_root / ".claude/settings.json"
+        settings = json.loads(settings_path.read_text())
+        entry = settings["hooks"]["PostToolUse"][0]
+        entry["hooks"][0]["command"] = command
+        settings_path.write_text(json.dumps(settings))
+        st = load_state(repo_root, item_type="skill", item_key="demo")
+        st.hooks_installed[0]["content_fingerprint"] = fingerprint_hook(entry)
+        save_state(repo_root, st)
+
+    def test_git_block_with_legacy_exec_bit_guard_is_stale(self, tmp_path):
+        from aec.lib.hooks.drift import Drift, repair_repo, verify_repo
+        from aec.lib.hooks.installer import install_item_hooks
+
+        repo_root = tmp_path / "repo"
+        (repo_root / ".git/hooks").mkdir(parents=True)
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        (item_dir / "scripts").mkdir(parents=True)
+        (item_dir / "scripts" / "check.sh").write_text("#!/bin/sh\necho ok\n")
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "pre_commit",
+                "command": "aec run-script skill:demo check.sh",
+                "description": "d",
+            }],
+        }))
+        install_item_hooks(
+            item_type="skill", item_key="demo", item_version="1.0.0",
+            item_dir=item_dir, repo_root=repo_root, agents=["git"],
+        )
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
+
+        hook = repo_root / ".git/hooks/pre-commit"
+        rel = ".claude/skills/demo/scripts/check.sh"
+        text = hook.read_text()
+        new = f"if [ -f {rel} ]; then /bin/sh {rel}; fi"
+        assert new in text
+        hook.write_text(text.replace(new, f"if [ -x {rel} ]; then {rel}; fi"))
+        assert [s.status for s in verify_repo(repo_root)] == [Drift.STALE]
+
+        assert any(r.repaired for r in repair_repo(repo_root))
+        assert new in hook.read_text()
         assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
 
     def test_guarded_command_is_a_no_op_when_the_script_is_absent(

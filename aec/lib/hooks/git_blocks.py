@@ -8,6 +8,7 @@ content untouched. See spec §1.7.
 import re
 import stat
 from pathlib import Path
+from typing import Optional
 
 SHEBANG = "#!/usr/bin/env bash"
 
@@ -109,12 +110,18 @@ def write_block(
     _try_chmod_exec(hook_file)
 
 
+def read_block(hook_file: Path, *, item_key: str, hook_id: str) -> Optional[str]:
+    """The delimited block for this item/hook, or None if absent."""
+    if not hook_file.exists():
+        return None
+    text = hook_file.read_text(encoding="utf-8")
+    m = _block_regex(item_key, hook_id).search(text)
+    return m.group(0) if m else None
+
+
 def block_present(hook_file: Path, *, item_key: str, hook_id: str) -> bool:
     """True if a delimited block for this item/hook exists in the hook file."""
-    if not hook_file.exists():
-        return False
-    text = hook_file.read_text(encoding="utf-8")
-    return _block_regex(item_key, hook_id).search(text) is not None
+    return read_block(hook_file, item_key=item_key, hook_id=hook_id) is not None
 
 
 def remove_block(hook_file: Path, *, item_key: str, hook_id: str) -> None:

@@ -374,10 +374,12 @@ ship and invoke them.
 ```
 
 Scripts must:
-- Be executable on POSIX systems (AEC's validator checks the executable bit at
-  install time on macOS/Linux). On Windows, AEC checks for a shebang line
-  (`#!/usr/bin/env bash` or similar) and resolves execution through the
-  appropriate interpreter (bash via Git for Windows, `py` for Python scripts).
+- Start with a shebang (`#!/usr/bin/env bash`, `#!/usr/bin/env python3`, …).
+  The installed command runs the script through that interpreter
+  (`<interpreter> <path>`); a script with no shebang runs through `sh`. The
+  exec bit is not required: git tracks it itself, so a script committed at
+  `100644` is non-executable in every clone, and an install-time chmod would
+  only be an unstaged local change (#67).
 - Be referenced from `hooks.json` via `aec run-script <item> <script>`.
 - Exit 0 for success, non-zero for failure. `blocking: true` hooks propagate the
   exit code; `blocking: false` hooks log the failure and continue.

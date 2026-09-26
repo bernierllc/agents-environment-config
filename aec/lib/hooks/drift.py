@@ -16,7 +16,9 @@ from pathlib import Path
 from typing import List, Optional
 
 from .fingerprint import fingerprint_hook
-from .installer import CLAUDE_PROJECT_DIR_PREFIX, is_guarded
+from .installer import (
+    CLAUDE_PROJECT_DIR_PREFIX, LEGACY_GUARD_PREFIX, is_guarded,
+)
 from .state import list_installed_items, load_state
 
 # Settings-file agents store entries under data["hooks"][<event_key>].
@@ -108,11 +110,15 @@ def _is_stale(repo_root: Path, agent: str, entry: dict) -> bool:
        prefix — not on the variable appearing anywhere: repair only guards paths
        it resolves, so flagging a hand-written hook that merely mentions
        `$CLAUDE_PROJECT_DIR` would leave it STALE forever.
+    3. Installs before the interpreter rendering guarded on `-x` and exec'd the
+       script directly. Git tracks +x itself, so a script committed at 0644 is
+       non-executable in every clone and the guard kept the hook silently off.
 
-    Either way the command still runs here, so it isn't MISSING. Flagging it
+    In every case the command still runs here, so it isn't MISSING. Flagging it
     STALE lets `hooks verify --repair` upgrade it in place: the reinstall
     retracts the old entry and writes the current rendering. Only claude has a
-    project-dir variable, so only claude can be stale.
+    project-dir variable, so only claude can be stale in settings; git blocks
+    go stale only through generation 3 (see `classify_hook`).
     """
     if agent != "claude":
         return False
@@ -121,19 +127,20 @@ def _is_stale(repo_root: Path, agent: str, entry: dict) -> bool:
     if str(repo_root) in json.dumps(entry):
         return True
     return any(
-        cmd.startswith(CLAUDE_PROJECT_DIR_PREFIX) and not is_guarded(cmd)
+        (cmd.startswith(CLAUDE_PROJECT_DIR_PREFIX) and not is_guarded(cmd))
+        or cmd.startswith(LEGACY_GUARD_PREFIX + CLAUDE_PROJECT_DIR_PREFIX)
         for cmd in _entry_commands(entry)
     )
 
 
-def _git_present(repo_root: Path, event_key: str, item_type: str,
-                 item_key: str, hook_id: str) -> bool:
-    from .git_blocks import block_present
+def _git_block(repo_root: Path, event_key: str, item_type: str,
+               item_key: str, hook_id: str) -> Optional[str]:
+    from .git_blocks import read_block
     from .git_hooks_path import resolve_hooks_dir
 
     hook_file = resolve_hooks_dir(repo_root).hooks_dir / event_key
-    return block_present(hook_file, item_key=f"{item_type}:{item_key}",
-                         hook_id=hook_id)
+    return read_block(hook_file, item_key=f"{item_type}:{item_key}",
+                      hook_id=hook_id)
 
 
 def classify_hook(repo_root: Path, installed: dict, *,
@@ -145,8 +152,14 @@ def classify_hook(repo_root: Path, installed: dict, *,
     hook_id = installed["hook_id"]
 
     if agent == "git":
-        present = _git_present(repo_root, event_key, item_type, item_key, hook_id)
-        status, idx = (Drift.OK, None) if present else (Drift.MISSING, None)
+        block = _git_block(repo_root, event_key, item_type, item_key, hook_id)
+        if block is None:
+            status = Drift.MISSING
+        elif LEGACY_GUARD_PREFIX in block:
+            status = Drift.STALE
+        else:
+            status = Drift.OK
+        idx = None
     else:
         found = _locate_settings(repo_root, agent, event_key,
                                  installed["content_fingerprint"])

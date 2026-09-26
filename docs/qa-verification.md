@@ -52,6 +52,15 @@ relevant subsystems before merging.
 1. Repeat the clobber from the section above in a tracked repo.
 2. Run `aec doctor`; verify it counts the drifted hook and points at `aec hooks verify --repair`.
 
+## Hook scripts run without their exec bit (#67)
+
+1. In a git repo, install a skill whose `hooks.json` targets `git` (e.g. `pre_commit`) and whose script is committed at `100644` (`git ls-files -s <script>`).
+2. Verify the script's mode is unchanged after install (`git status` shows no mode change).
+3. Open `.git/hooks/pre-commit`; the AEC block reads `if [ -f <rel> ]; then <shebang interpreter> <rel>; fi`.
+4. Commit something; verify the hook runs (no `Permission denied`, no exit 126).
+5. Repeat in a fresh `git worktree add` checkout after `aec install` there — the hook still runs.
+6. Hand-edit the block back to the old shape `if [ -x <rel> ]; then <rel>; fi`; `aec hooks verify` reports STALE, `--repair` restores the interpreter form.
+
 ## Dormant-hook guard (global install of a hook-bearing skill)
 
 1. Run `aec install skill <hooked-skill> --global` interactively.
