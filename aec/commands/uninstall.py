@@ -12,6 +12,7 @@ from ..lib.prompt_catalog.lifecycle_area import (
     UNINSTALL_MCP_REMOVE_ENTRY_PREFIX,
     UNINSTALL_MULTI_REPO_CHOICE_PREFIX,
     UNINSTALL_MULTI_REPO_EACH_PREFIX,
+    UNINSTALL_PLUGIN_REMOVE_AND_RUN_PREFIX,
     UNINSTALL_PLUGIN_REMOVE_PREFIX,
     UNINSTALL_SCOPE_GLOBAL_PREFIX,
     UNINSTALL_SCOPE_REPO_PREFIX,
@@ -139,8 +140,12 @@ def _uninstall_plugin(name: str, global_flag: bool, yes: bool) -> None:
         scope_label = "global" if scope.is_global else str(scope.repo_path)
         cmds = uninstall_commands(manifest_def, detected, pref=pref) if manifest_def else []
         runs = f" This runs: {'; '.join(' '.join(c) for c in cmds)}." if cmds else ""
+        # Removing the record and running third-party commands are different
+        # authorizations: a pre-supplied answer to the remove-only prompt must
+        # never be read as consent to run commands.
+        prefix = UNINSTALL_PLUGIN_REMOVE_AND_RUN_PREFIX if cmds else UNINSTALL_PLUGIN_REMOVE_PREFIX
         resp = ask_prompt(
-            item_prompt_id(UNINSTALL_PLUGIN_REMOVE_PREFIX, name),
+            item_prompt_id(prefix, name),
             f"  Remove {name} from {scope_label}?{runs} [y/N]: ",
             type="yes_no",
             default=False,

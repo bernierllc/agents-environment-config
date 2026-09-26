@@ -224,3 +224,55 @@ def test_uninstall_marketplace_plugin_asks_once_and_shows_the_command(uninstall_
     assert "claude plugin uninstall ponytail@ponytail" in asked[0]
     assert ran == [["claude", "plugin", "uninstall", "ponytail@ponytail"]]
     assert "ponytail" not in load_manifest(mp)["global"].get("plugins", {})
+
+
+def _marketplace_record(uninstall_env):
+    mp = uninstall_env["aec_home"] / "installed-manifest.json"
+    m = json.loads(mp.read_text())
+    m["global"]["plugins"] = {"ponytail": {
+        "version": "4.10.0", "install_type": "marketplace", "targets": ["claude"],
+        "pluginId": "ponytail@ponytail", "installedAt": "",
+    }}
+    mp.write_text(json.dumps(m))
+    return mp
+
+
+def test_remove_only_answer_never_authorizes_commands(uninstall_env, monkeypatch):
+    """Codex P1 on #92: an existing uninstall.plugin.remove=yes answer must not run commands."""
+    import subprocess
+    from aec.commands.uninstall import run_uninstall
+    from aec.lib import prompts
+
+    _marketplace_record(uninstall_env)
+    ran = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, *a, **k: ran.append(cmd))
+    monkeypatch.setattr("aec.lib.config.detect_agents", lambda: {"claude": {}})
+    prompts.set_answers({"uninstall.plugin.remove.ponytail": "yes"})
+    prompts.set_mode(non_interactive=True)
+    try:
+        with pytest.raises(prompts.PromptUnanswered) as exc:
+            run_uninstall(item_type="plugin", name="ponytail", global_flag=True, yes=False)
+    finally:
+        prompts.clear_answers()
+        prompts.reset_mode()
+    assert exc.value.prompt_id == "uninstall.plugin.remove_and_run.ponytail"
+    assert ran == []
+
+
+def test_combined_answer_runs_commands(uninstall_env, monkeypatch):
+    import subprocess
+    from aec.commands.uninstall import run_uninstall
+    from aec.lib import prompts
+
+    mp = _marketplace_record(uninstall_env)
+    ran = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, *a, **k: ran.append(cmd))
+    monkeypatch.setattr("aec.lib.config.detect_agents", lambda: {"claude": {}})
+    prompts.set_answers({"uninstall.plugin.remove_and_run.ponytail": "yes"})
+    prompts.set_mode(non_interactive=True)
+    try:
+        run_uninstall(item_type="plugin", name="ponytail", global_flag=True, yes=False)
+    finally:
+        prompts.clear_answers()
+        prompts.reset_mode()
+    assert ran == [["claude", "plugin", "uninstall", "ponytail@ponytail"]]
