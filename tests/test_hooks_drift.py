@@ -655,7 +655,9 @@ class TestUnguardedScriptCommands:
                        "description": "d"}
         for bad in ({"hooks": ["bad"]}, {"hooks": [], "claude": ["bad"]},
                     {"hooks": [wrong_field]},
-                    {"hooks": [], "git": [{"id": "x", "hook_name": "pre-commit"}]}):
+                    {"hooks": [], "git": [{"id": "x", "hook_name": "pre-commit"}]},
+                    {"hooks": [dict(wrong_field, command="true",
+                                    when={"repo_has": [42]})]}):
             hooks_json.write_text(json.dumps({"version": "1.0.0", **bad}))
             assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
 
@@ -681,6 +683,16 @@ class TestUnguardedScriptCommands:
         assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
         assert not any(r.repaired for r in repair_repo(repo_root))
         assert (repo_root / ".git/hooks/pre-commit").read_text() == before
+
+    def test_command_with_the_end_marker_as_a_line_is_refused(self, tmp_path):
+        import pytest
+        from aec.lib.hooks.git_blocks import END_MARKER, write_block
+
+        hook = tmp_path / "pre-commit"
+        with pytest.raises(ValueError, match="AEC:END"):
+            write_block(hook, item_key="skill:demo", hook_id="lint",
+                        version="1", command=f"cat <<'X'\n{END_MARKER}\nX")
+        assert not hook.exists()
 
     def test_repair_installs_an_item_updated_with_a_version_bump(self, tmp_path):
         from aec.lib.hooks.drift import Drift, repair_repo, verify_repo

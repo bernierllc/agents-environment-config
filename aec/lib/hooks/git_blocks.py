@@ -90,6 +90,10 @@ def write_block(
     `header_line`, if given, is injected once below the shebang (used to add
     husky v8's `. "$(dirname -- "$0")/_/husky.sh"` bootstrap).
     """
+    # The END marker is how the block is found again; a command carrying it as
+    # a line of its own would end the block early and corrupt the next rewrite.
+    if END_MARKER in command.splitlines():
+        raise ValueError(f"hook {hook_id!r}: command may not contain the line {END_MARKER!r}")
     existing = hook_file.read_text(encoding="utf-8") if hook_file.exists() else ""
     existing = _ensure_shebang(existing)
     if header_line:

@@ -113,7 +113,10 @@ def _rendered(repo_root: Path, item_type: str, item_key: str,
             resolved_commands=_resolve_script_commands(
                 applied, src, repo_root, agent),
         )
-    except (OSError, ValueError):
+    # Broad on purpose: item content is untrusted input, and verify/doctor must
+    # report on every other hook rather than crash on one bad file. Install
+    # (and so repair) surfaces the real error.
+    except Exception:
         return None
     out: Dict[Tuple[str, str], Set[str]] = {}
     for e in entries:
