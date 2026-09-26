@@ -178,3 +178,67 @@ class TestLegacyMigration:
         is_our_symlink(legacy_link)
 
         assert calls["n"] == 1
+
+
+class TestReviewRegressions:
+    """Regressions from the PR #93 review."""
+
+    def test_migration_runs_before_first_new_record(self, temp_dir, monkeypatch):
+        """A new link recorded before any ownership check (install's setup
+        step runs first) must not skip adopting pre-existing legacy links."""
+        legacy_link = temp_dir / "legacy-statusline.sh"
+        legacy_link.symlink_to(temp_dir / "old" / "agents-environment-config" / "statusline.sh")
+        monkeypatch.setattr(ms, "_legacy_candidate_paths", lambda: [legacy_link])
+
+        source = temp_dir / "source.txt"
+        source.write_text("x")
+        assert create_symlink(source, temp_dir / "new-link")
+
+        assert is_our_symlink(legacy_link) is True
+
+    def test_user_replacement_at_recorded_path_is_not_ours(self, temp_dir):
+        source = temp_dir / "source.txt"
+        source.write_text("x")
+        link = temp_dir / "link"
+        assert create_symlink(source, link)
+
+        link.unlink()
+        users_own = temp_dir / "users-own.txt"
+        users_own.write_text("mine")
+        link.symlink_to(users_own)
+
+        assert is_our_symlink(link) is False
+
+    def test_record_failure_rolls_back_link(self, temp_dir, monkeypatch):
+        def fail(*_args):
+            raise OSError("read-only state dir")
+
+        monkeypatch.setattr(ms, "record_symlink", fail)
+        source = temp_dir / "source.txt"
+        source.write_text("x")
+        link = temp_dir / "link"
+
+        assert create_symlink(source, link) is False
+        assert not link.is_symlink() and not link.exists()
+
+    def test_setup_repoints_managed_links_after_checkout_move(self, temp_dir, monkeypatch):
+        from aec.commands import agent_tools
+
+        agent_tools_dir = temp_dir / ".agent-tools"
+        checkout = temp_dir / "my-checkout"  # not named agents-environment-config
+        for sub in (".agent-rules", ".claude/agents", ".cursor/commands"):
+            (checkout / sub).mkdir(parents=True)
+
+        monkeypatch.setattr(agent_tools, "AGENT_TOOLS_DIR", agent_tools_dir)
+        monkeypatch.setattr(agent_tools, "_is_claude_installed", lambda: False)
+        monkeypatch.setattr(agent_tools, "_is_cursor_installed", lambda: False)
+        monkeypatch.setattr(agent_tools, "get_repo_root", lambda: checkout)
+        agent_tools.setup()
+
+        moved = temp_dir / "moved-checkout"
+        checkout.rename(moved)
+        monkeypatch.setattr(agent_tools, "get_repo_root", lambda: moved)
+        agent_tools.setup()
+
+        rules = agent_tools_dir / "rules" / "agents-environment-config"
+        assert rules.resolve() == (moved / ".agent-rules").resolve()

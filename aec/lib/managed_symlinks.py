@@ -16,9 +16,10 @@ See docs/superpowers/plans/2026-09-25-managed-symlink-ownership.md.
 """
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from .atomic_write import atomic_write_json
 from .config import AEC_HOME
@@ -69,6 +70,7 @@ def _key(link_path: Path) -> str:
 
 def record_symlink(link_path: Path, source_path: Path) -> None:
     """Record that AEC created/owns the symlink at ``link_path -> source_path``."""
+    migrate_legacy_links_once()  # before the first write creates the file
     data = _load()
     data["links"][_key(link_path)] = {
         "source": str(Path(source_path).expanduser().absolute()),
@@ -86,7 +88,19 @@ def forget_symlink(link_path: Path) -> None:
 
 def is_recorded(link_path: Path) -> bool:
     """True iff ``link_path`` is in the ownership record."""
-    return _key(link_path) in _load()["links"]
+    return recorded_source(link_path) is not None
+
+
+def recorded_source(link_path: Path) -> Optional[str]:
+    """The source AEC recorded for ``link_path``, or None if not recorded."""
+    migrate_legacy_links_once()
+    entry = _load()["links"].get(_key(link_path))
+    return entry.get("source") if isinstance(entry, dict) else None
+
+
+def normalize_target(link_path: Path, target: str) -> str:
+    """Absolute form of a link target (relative targets resolve against the link's dir)."""
+    return os.path.normpath(os.path.join(os.path.dirname(_key(link_path)), target))
 
 
 def _legacy_candidate_paths() -> List[Path]:

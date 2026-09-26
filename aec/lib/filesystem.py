@@ -57,7 +57,14 @@ def create_symlink(
 
     if created:
         from .managed_symlinks import record_symlink
-        record_symlink(target, source)
+        try:
+            record_symlink(target, source)
+        except OSError:
+            # An unrecorded link is one AEC can never recognise or repair:
+            # undo it and report failure rather than leave it half-managed.
+            if not remove_symlink(target):
+                target.unlink(missing_ok=True)  # Windows copy fallback
+            return False
 
     return created
 
@@ -141,7 +148,10 @@ def remove_symlink(path: Path) -> bool:
 def _forget_symlink(path: Path) -> None:
     """Drop path from AEC's managed-symlink ownership record, if present."""
     from .managed_symlinks import forget_symlink
-    forget_symlink(path)
+    try:
+        forget_symlink(path)
+    except OSError:
+        pass  # link is gone; a leftover entry can't match a new link's target
 
 
 def is_symlink(path: Path) -> bool:
@@ -178,8 +188,9 @@ def is_our_symlink(path: Path) -> bool:
     (~/.agents-environment-config/managed-symlinks.json), written by
     create_symlink() at creation time -- not a heuristic on the link's
     target. A checkout cloned under a non-standard name, or moved/recloned
-    after linking, is still recognised as ours because the record is keyed
-    by the link's own path, not by what it points to.
+    after linking, is still recognised as ours: the record is keyed by the
+    link's own path, and the link must still point at the recorded source
+    (so a user's replacement link at the same path is not claimed).
 
     Pre-existing links from before this record existed are adopted once,
     the first time this is called, by a one-time migration against the
@@ -195,10 +206,16 @@ def is_our_symlink(path: Path) -> bool:
     if not is_symlink(path):
         return False
 
-    from .managed_symlinks import is_recorded, migrate_legacy_links_once
+    from .managed_symlinks import normalize_target, recorded_source
 
-    migrate_legacy_links_once()
-    return is_recorded(path)
+    source = recorded_source(path)
+    target = get_symlink_target(path)
+    if source is None or target is None:
+        return False
+    # Path-only membership isn't enough: a user may have replaced AEC's link
+    # with their own at the same path. It's ours only if it still points
+    # where we pointed it (even if that checkout has since moved away).
+    return normalize_target(path, str(target)) == normalize_target(path, source)
 
 
 def get_symlink_target(path: Path) -> Optional[Path]:
