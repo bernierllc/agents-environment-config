@@ -43,9 +43,10 @@ def create_symlink(
     # Ensure parent directory exists
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    # Remove existing target if it's a symlink
-    if target.is_symlink():
-        target.unlink()
+    # Remove existing target if it's a symlink (or junction, even a broken one)
+    if is_symlink(target):
+        if not remove_symlink(target):
+            return False
     elif target.exists():
         # Target exists and is not a symlink - don't overwrite
         return False
@@ -117,12 +118,12 @@ def remove_symlink(path: Path) -> bool:
     """
     path = Path(path)
 
-    if not path.exists() and not path.is_symlink():
+    if not path.exists() and not is_symlink(path):
         return False
 
     if IS_WINDOWS:
         # On Windows, junctions are removed differently
-        if path.is_dir():
+        if _is_junction(path):
             try:
                 # Use rmdir for junctions
                 result = subprocess.run(
@@ -161,24 +162,22 @@ def is_symlink(path: Path) -> bool:
     """
     path = Path(path)
 
-    if path.is_symlink():
-        return True
+    return path.is_symlink() or _is_junction(path)
 
-    # On Windows, also check for junctions
-    if IS_WINDOWS and path.is_dir():
-        try:
-            # Check if it's a reparse point (junction)
-            import ctypes
-            from ctypes import wintypes
 
-            FILE_ATTRIBUTE_REPARSE_POINT = 0x400
-            attrs = ctypes.windll.kernel32.GetFileAttributesW(str(path))
-            if attrs != -1:
-                return bool(attrs & FILE_ATTRIBUTE_REPARSE_POINT)
-        except Exception:
-            pass
+def _is_junction(path: Path) -> bool:
+    """True for a Windows reparse point (junction), even one whose target is gone.
 
-    return False
+    lstat doesn't follow the link, so a junction left dangling by a moved
+    checkout is still detected -- path.is_dir() would follow it and say no.
+    """
+    if not IS_WINDOWS:
+        return False
+    try:
+        attrs = getattr(os.lstat(path), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(attrs & 0x400)  # FILE_ATTRIBUTE_REPARSE_POINT
 
 
 def is_our_symlink(path: Path) -> bool:
@@ -237,7 +236,13 @@ def get_symlink_target(path: Path) -> Optional[Path]:
             pass
 
     # On Windows, try to read junction target
-    if IS_WINDOWS and path.is_dir():
+    if _is_junction(path):
+        try:
+            # os.readlink reads junctions (Python 3.8+); strip the \\?\ prefix.
+            target = os.readlink(path)
+            return Path(target[4:] if target.startswith("\\\\?\\") else target)
+        except OSError:
+            pass
         try:
             result = subprocess.run(
                 ["cmd", "/c", "dir", "/al", str(path.parent)],

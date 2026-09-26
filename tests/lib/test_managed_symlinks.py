@@ -312,3 +312,27 @@ class TestReviewRegressions:
 
         monkeypatch.setattr(ms, "_load", real_load)
         assert all(ms.is_recorded(l) for l in links)
+
+    def test_broken_windows_junction_is_detected(self, temp_dir, monkeypatch):
+        """A junction left dangling by a checkout move must still count as a
+        link, or setup can't remove and recreate it (mklink fails)."""
+        import os
+        import types
+
+        from aec.lib import filesystem
+
+        junction = temp_dir / "junction"
+        junction.symlink_to(temp_dir / "moved-away")  # stand-in: dangling reparse point
+        real_lstat = os.lstat
+        monkeypatch.setattr(filesystem, "IS_WINDOWS", True)
+        monkeypatch.setattr(
+            filesystem.os,
+            "lstat",
+            lambda p, **kw: types.SimpleNamespace(st_file_attributes=0x400)
+            if str(p) == str(junction)
+            else real_lstat(p, **kw),
+        )
+        monkeypatch.setattr(filesystem.Path, "is_symlink", lambda self: False)
+
+        assert not junction.is_dir()
+        assert filesystem.is_symlink(junction) is True
