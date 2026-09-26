@@ -1,6 +1,7 @@
 """Version check: detect when a newer AEC release is available on GitHub."""
 
 import json
+import os
 import urllib.request
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -135,10 +136,14 @@ def print_update_banner(update_info: Optional[dict]) -> None:
 
 def maybe_check_for_update() -> None:
     """
-    Check for updates if the user hasn't disabled the preference.
+    Check for updates if the user hasn't disabled it.
 
+    Disabled by the ``update_check`` preference, or by ``AEC_NO_UPDATE_CHECK=1``
+    (CI, scripts, and the test suite, where no network call should happen).
     Safe to call from CLI callback — never raises, never blocks long.
     """
+    if os.environ.get("AEC_NO_UPDATE_CHECK", "").strip().lower() in ("1", "true", "yes"):
+        return
     try:
         from .preferences import get_preference
         pref = get_preference("update_check")

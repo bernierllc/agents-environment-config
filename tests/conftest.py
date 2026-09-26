@@ -18,12 +18,16 @@ _REAL_HOME = os.environ.get("HOME", "")
 _TEST_HOME = os.path.realpath(tempfile.mkdtemp(prefix="aec-test-home-"))
 os.environ["HOME"] = _TEST_HOME
 os.environ["USERPROFILE"] = _TEST_HOME  # Windows equivalent
+# CLI tests register an atexit update check; it must never reach GitHub.
+os.environ["AEC_NO_UPDATE_CHECK"] = "1"
+
+import atexit  # noqa: E402
 
 import pytest  # noqa: E402
 
-
-def pytest_sessionfinish(session, exitstatus):
-    shutil.rmtree(_TEST_HOME, ignore_errors=True)
+# Registered first, so it runs last: after any atexit handler the CLI tests
+# registered, which may still read or write under the test home.
+atexit.register(shutil.rmtree, _TEST_HOME, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
