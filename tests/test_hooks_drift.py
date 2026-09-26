@@ -605,7 +605,10 @@ class TestUnguardedScriptCommands:
 
         repo_root = TestStaleAbsolutePaths._install_repo_local(tmp_path)
         hooks_json = repo_root / ".claude/skills/demo/hooks.json"
-        for bad in ({"hooks": ["bad"]}, {"hooks": [], "claude": ["bad"]}):
+        wrong_field = {"id": "lint", "event": "on_file_edit", "command": 42,
+                       "description": "d"}
+        for bad in ({"hooks": ["bad"]}, {"hooks": [], "claude": ["bad"]},
+                    {"hooks": [wrong_field]}):
             hooks_json.write_text(json.dumps({"version": "1.0.0", **bad}))
             assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
 

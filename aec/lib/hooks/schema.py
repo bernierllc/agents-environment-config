@@ -59,6 +59,9 @@ class GenericHook:
 
     @classmethod
     def from_dict(cls, data: dict) -> "GenericHook":
+        for name in ("id", "event", "command", "description"):
+            if name in data and not isinstance(data[name], str):
+                raise HooksSchemaError(f"GenericHook field {name!r} must be a string")
         try:
             return cls(
                 id=data["id"],
