@@ -205,12 +205,14 @@ class TestResolveScriptCommands:
         assert cmd.endswith("--flag")
         assert "aec run-script" not in cmd
 
-    def test_non_executable_script_gets_exec_bit(self, tmp_path):
-        """The rendered command execs the script directly, so install must chmod it.
+    def test_non_executable_script_runs_through_its_interpreter(self, tmp_path):
+        """A 0644 script must run in every checkout, not just this one.
 
-        Git only tracks +x, and skills ship plenty of 0644 scripts; without this
-        the hook fires and dies with EACCES, silently doing nothing.
+        Git tracks +x itself, so a chmod at install time is an unstaged mode
+        change a clone never sees. The rendered command names the shebang's
+        interpreter instead, and install leaves the mode alone.
         """
+        import subprocess
         from aec.lib.hooks.installer import install_item_hooks
         item_dir = tmp_path / "item"
         (item_dir / "scripts").mkdir(parents=True)
@@ -230,7 +232,55 @@ class TestResolveScriptCommands:
             item_dir=item_dir, item_type="skill", item_key="demo",
             item_version="1.0.0", repo_root=repo_root, agents=["claude"],
         )
-        assert os.access(script, os.X_OK)
+        assert not os.access(script, os.X_OK), "install must not chmod"
+        settings = json.loads((repo_root / ".claude/settings.json").read_text())
+        cmd = settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
+        assert cmd.startswith("/bin/sh ")
+        out = subprocess.run(["sh", "-c", cmd], capture_output=True, text=True)
+        assert (out.returncode, out.stdout) == (0, "ok\n")
+
+    def test_interpreter_comes_from_shebang_or_defaults_to_sh(self, tmp_path):
+        from aec.lib.hooks.installer import interpreter_for
+        cases = {
+            "#!/usr/bin/env python3\n": ["/usr/bin/env", "python3"],
+            "#!/bin/bash -e\n": ["/bin/bash", "-e"],
+            "#!/usr/bin/env -S FOO=\"a b\" sh\r\n":
+                ["/usr/bin/env", '-S FOO="a b" sh'],
+            "echo no shebang\n": ["sh"],
+            "": ["sh"],
+        }
+        for body, expected in cases.items():
+            script = tmp_path / "s"
+            script.write_text(body)
+            assert interpreter_for(script) == expected, body
+
+    def test_git_hook_runs_a_non_executable_script(self, tmp_path):
+        """The #67 repro: a 0644 script behind a git hook must still run."""
+        import subprocess
+        from aec.lib.hooks.installer import install_item_hooks
+        repo_root = tmp_path / "repo"
+        subprocess.run(["git", "init", "-q", str(repo_root)], check=True)
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        (item_dir / "scripts").mkdir(parents=True)
+        script = item_dir / "scripts" / "check.py"
+        script.write_text("#!/usr/bin/env python3\nprint('ran')\n")
+        script.chmod(0o644)
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "pre_commit",
+                "command": "aec run-script skill:demo check.py",
+                "description": "d",
+            }],
+        }))
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["git"],
+        )
+        out = subprocess.run(
+            [str(repo_root / ".git/hooks/pre-commit")],
+            cwd=repo_root, capture_output=True, text=True,
+        )
+        assert (out.returncode, out.stdout) == (0, "ran\n"), out.stderr
 
     def test_missing_script_raises(self, tmp_path):
         import pytest
@@ -498,7 +548,7 @@ class TestRepoLocalScriptRendering:
         cmd = settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
         target = '"$CLAUDE_PROJECT_DIR"/.claude/skills/demo/scripts/check.sh'
         # Guarded so a clone that never committed the skill stays quiet.
-        assert cmd == f"if [ -x {target} ]; then {target} --flag; fi"
+        assert cmd == f"if [ -f {target} ]; then /bin/sh {target} --flag; fi"
         assert str(repo_root) not in cmd
         assert script.exists()
 
@@ -534,4 +584,4 @@ class TestRepoLocalScriptRendering:
         )
         settings = json.loads((repo_root / ".claude/settings.json").read_text())
         cmd = settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
-        assert cmd == str(script)
+        assert cmd == f"/bin/sh {script}"

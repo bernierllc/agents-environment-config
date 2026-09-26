@@ -4,7 +4,6 @@ Lives in its own module to avoid the circular import that would arise from
 registering the command inside `hooks_cmd.py` (which `aec/cli.py` imports).
 """
 
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -13,6 +12,7 @@ from typing import List, Optional
 import typer
 
 from ..lib.console import Console
+from ..lib.hooks.installer import interpreter_for
 from ..lib.scope import find_tracked_repo
 
 _TYPE_TO_PLURAL = {"skill": "skills", "rule": "rules", "agent": "agents"}
@@ -78,12 +78,7 @@ def run_script(
         Console.error(f"script not found: {script_path}")
         raise typer.Exit(2)
 
-    if not os.access(script_path, os.X_OK):
-        try:
-            script_path.chmod(script_path.stat().st_mode | 0o111)
-        except OSError:
-            pass
-
-    cmd = [str(script_path), *(extra or [])]
+    # Through the interpreter, never a chmod: git tracks +x itself (#67).
+    cmd = [*interpreter_for(script_path), str(script_path), *(extra or [])]
     proc = subprocess.run(cmd)
     sys.exit(proc.returncode)

@@ -8,7 +8,6 @@ I/O so they can be tested in isolation — this file grows across Tasks 9a-9g.
 from __future__ import annotations
 
 import json
-import os
 import shlex
 from pathlib import Path
 from typing import Dict, List, Sequence
@@ -88,9 +87,14 @@ def _render_script_path(script_path: Path, repo_root: Path, agent: str) -> str:
 # there and every matching edit fails with 127. Guarding on the interpreter's
 # own terms keeps the hook dormant instead of broken.
 #
-# `if ...; then ...; fi` rather than `[ -x P ] && P`: the latter exits 1 when
+# `if ...; then ...; fi` rather than `[ -f P ] && P`: the latter exits 1 when
 # the file is absent, which Claude Code reports as a failed hook.
-GUARD_PREFIX = "if [ -x "
+#
+# `-f`, not `-x`: the command names its interpreter (`interpreter_for`), so the
+# exec bit is irrelevant. Git tracks +x itself, so a script committed at 0644
+# lands non-executable in every clone; a `-x` guard kept those hooks silently
+# dormant everywhere but the installing machine.
+GUARD_PREFIX = "if [ -f "
 
 # Agents whose command string is evaluated by a POSIX shell. claude runs hooks
 # through `sh -c`; git hooks ARE shell scripts. cursor/gemini render absolute
@@ -100,13 +104,33 @@ _SHELL_GUARD_AGENTS = frozenset({"claude", "git"})
 
 
 def guard_script_command(rendered_path: str, command: str) -> str:
-    """Wrap `command` so it only runs when `rendered_path` is executable."""
+    """Wrap `command` so it only runs when `rendered_path` exists."""
     return f"{GUARD_PREFIX}{rendered_path} ]; then {command}; fi"
 
 
 def is_guarded(command: str) -> bool:
     """True if `command` already carries the missing-script guard."""
     return command.startswith(GUARD_PREFIX)
+
+
+def interpreter_for(script_path: Path) -> List[str]:
+    """argv prefix that runs `script_path` without relying on its exec bit.
+
+    The shebang's interpreter plus its optional argument kept as ONE word, the
+    way the kernel passes it (`#!/usr/bin/env -S FOO="a b" sh` must reach env
+    intact); `sh` when there is none, which is what a POSIX shell does with a
+    shebang-less file.
+    """
+    # ponytail: assumes a text script; a compiled binary under scripts/ would
+    # need to be exec'd directly — detect magic bytes if one ever ships.
+    try:
+        with script_path.open("rb") as f:
+            first = f.readline(512)
+    except OSError:
+        return ["sh"]
+    if first.startswith(b"#!"):
+        return first[2:].decode("utf-8", errors="replace").strip().split(None, 1) or ["sh"]
+    return ["sh"]
 
 
 def _resolve_script_commands(
@@ -131,17 +155,12 @@ def _resolve_script_commands(
                     raise FileNotFoundError(
                         f"hook {h.id!r}: script not found: {script_path}"
                     )
-                # The rendered command execs the script directly, so it has to
-                # carry its exec bit. `aec run-script` chmods on the way through;
-                # this path has to do the same or a 0644 script (git only tracks
-                # +x, and skills ship plenty of 0644 ones) fails with EACCES.
-                if not os.access(script_path, os.X_OK):
-                    try:
-                        script_path.chmod(script_path.stat().st_mode | 0o111)
-                    except OSError:
-                        pass
+                # Run through the interpreter rather than exec'ing the path: git
+                # tracks +x itself, so a chmod here is an unstaged mode change
+                # that every clone, worktree and CI checkout lacks.
                 rendered = _render_script_path(script_path, repo_root, agent)
-                pieces = [rendered]
+                pieces = [shlex.quote(p) for p in interpreter_for(script_path)]
+                pieces.append(rendered)
                 pieces += [shlex.quote(p) for p in extra]
                 cmd = " ".join(pieces)
                 if agent in _SHELL_GUARD_AGENTS and _is_repo_local(
@@ -290,7 +309,8 @@ def install_item_hooks(
                 f"(e.g. `mv {blocked} {blocked}.bak`) to enable {agent} hooks."
             )
             continue
-        resolved = _resolve_script_commands(hf, item_dir, repo_root, agent)
+        # Only hooks that apply: a skipped hook's script may legitimately be absent.
+        resolved = _resolve_script_commands(filtered, item_dir, repo_root, agent)
         entries = translate_to_agent(filtered, agent, resolved_commands=resolved)
         if agent == "claude":
             _install_claude(repo_root, entries, st, item_version)
@@ -309,11 +329,27 @@ def install_item_hooks(
 def _remove_recorded_hooks(
     repo_root: Path, hooks_installed: List[dict], *, item_type: str, item_key: str,
 ) -> None:
-    """Delete every hook payload recorded in state from its agent config file."""
+    """Delete every hook payload recorded in state from its agent config file.
+
+    Settings entries are deduped by fingerprint on merge, so two items that
+    render the same payload share one entry; it stays while another item's
+    state still records it. Git blocks are keyed per item and never shared.
+    """
+    co_owned = {
+        (h["agent"], h["target_json_pointer"].split("/")[2],
+         h["content_fingerprint"])
+        for other in hook_state.list_installed_items(repo_root)
+        if other != (item_type, item_key)
+        for h in hook_state.load_state(
+            repo_root, item_type=other[0], item_key=other[1]
+        ).hooks_installed
+    }
     for installed in hooks_installed:
         agent = installed["agent"]
         event_key = installed["target_json_pointer"].split("/")[2]
         fp = installed["content_fingerprint"]
+        if agent != "git" and (agent, event_key, fp) in co_owned:
+            continue
         if agent == "claude":
             _remove_claude(repo_root, event_key, fp)
         elif agent == "gemini":

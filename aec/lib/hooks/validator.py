@@ -158,6 +158,14 @@ def validate_hooks_file(
                 hook_id=ov.id or "",
             ))
 
+    # Rule 7b: a git override needs an id — it keys the delimited block, so
+    # two id-less overrides on one hook would overwrite each other's block.
+    for ov in hf.git:
+        if not ov.id:
+            errors.append(ValidationError(
+                message="git hook override missing required 'id' field",
+            ))
+
     # Rule 8: script existence is NOT checked here (deferred to install time)
 
     return errors, warnings

@@ -59,6 +59,9 @@ class GenericHook:
 
     @classmethod
     def from_dict(cls, data: dict) -> "GenericHook":
+        for name in ("id", "event", "command", "description"):
+            if name in data and not isinstance(data[name], str):
+                raise HooksSchemaError(f"GenericHook field {name!r} must be a string")
         try:
             return cls(
                 id=data["id"],
@@ -106,22 +109,30 @@ def load_hooks_file(path: Path) -> HooksFile:
     if "version" not in data:
         raise HooksSchemaError(f"{path}: missing required field 'version'")
 
-    generic = [GenericHook.from_dict(h) for h in data.get("hooks", []) or []]
-
     def _overrides(key: str) -> List[AgentOverride]:
         raw_list = data.get(key, []) or []
+        # A git override becomes a hook-script line, so it needs a command.
+        if key == "git":
+            for item in raw_list:
+                if isinstance(item, dict) and not isinstance(item.get("command"), str):
+                    raise HooksSchemaError(f"{path}: git override needs a string 'command'")
         return [
             AgentOverride(agent=key, payload=item, id=item.get("id"))
             for item in raw_list
         ]
 
-    return HooksFile(
-        version=str(data["version"]),
-        hooks=generic,
-        claude=_overrides("claude"),
-        cursor=_overrides("cursor"),
-        gemini=_overrides("gemini"),
-        git=_overrides("git"),
-        schema_url=data.get("$schema"),
-        source_path=path,
-    )
+    # A wrong-typed entry (`"hooks": ["x"]`, `"claude": [1]`) surfaces as a
+    # TypeError/AttributeError deep in the parse; callers handle one error type.
+    try:
+        return HooksFile(
+            version=str(data["version"]),
+            hooks=[GenericHook.from_dict(h) for h in data.get("hooks", []) or []],
+            claude=_overrides("claude"),
+            cursor=_overrides("cursor"),
+            gemini=_overrides("gemini"),
+            git=_overrides("git"),
+            schema_url=data.get("$schema"),
+            source_path=path,
+        )
+    except (TypeError, AttributeError) as e:
+        raise HooksSchemaError(f"{path}: malformed hook entry: {e}") from e

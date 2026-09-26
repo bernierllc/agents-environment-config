@@ -87,7 +87,8 @@ class TestRunScriptCommand:
         marker = tmp_path / "marker.txt"
         script = scripts / "echo.sh"
         script.write_text(f"#!/usr/bin/env bash\necho hello-$1 > {marker}\n")
-        script.chmod(0o755)
+        # 0644 on purpose: git tracks +x, so clones get this mode (#67).
+        script.chmod(0o644)
 
         monkeypatch.setattr(
             "aec.commands.run_script_cmd.find_tracked_repo",
@@ -97,6 +98,7 @@ class TestRunScriptCommand:
         result = CliRunner().invoke(app, ["run-script", "skill:demo", "echo.sh", "world"])
         assert result.exit_code == 0, result.output
         assert marker.read_text().strip() == "hello-world"
+        assert script.stat().st_mode & 0o111 == 0, "run-script must not chmod"
 
     def test_run_script_errors_when_item_missing(self, tmp_path, monkeypatch):
         from typer.testing import CliRunner

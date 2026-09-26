@@ -8,6 +8,7 @@ content untouched. See spec §1.7.
 import re
 import stat
 from pathlib import Path
+from typing import Optional
 
 SHEBANG = "#!/usr/bin/env bash"
 
@@ -23,10 +24,12 @@ def _block_regex(item_key: str, hook_id: str) -> re.Pattern:
     begin = re.escape(_begin_marker(item_key, hook_id))
     end = re.escape(END_MARKER)
     # Match from marker line through the END line (inclusive), including a
-    # trailing newline if present. DOTALL so `.` spans newlines.
+    # trailing newline if present. DOTALL so `.` spans newlines; the END marker
+    # must be a whole line, so a command that merely contains it can't end the
+    # block early.
     return re.compile(
-        rf"{begin}[^\n]*\n.*?{end}\n?",
-        flags=re.DOTALL,
+        rf"{begin}[^\n]*\n.*?^{end}$\n?",
+        flags=re.DOTALL | re.MULTILINE,
     )
 
 
@@ -87,6 +90,10 @@ def write_block(
     `header_line`, if given, is injected once below the shebang (used to add
     husky v8's `. "$(dirname -- "$0")/_/husky.sh"` bootstrap).
     """
+    # The END marker is how the block is found again; a command carrying it as
+    # a line of its own would end the block early and corrupt the next rewrite.
+    if END_MARKER in command.splitlines():
+        raise ValueError(f"hook {hook_id!r}: command may not contain the line {END_MARKER!r}")
     existing = hook_file.read_text(encoding="utf-8") if hook_file.exists() else ""
     existing = _ensure_shebang(existing)
     if header_line:
@@ -109,12 +116,13 @@ def write_block(
     _try_chmod_exec(hook_file)
 
 
-def block_present(hook_file: Path, *, item_key: str, hook_id: str) -> bool:
-    """True if a delimited block for this item/hook exists in the hook file."""
+def read_block(hook_file: Path, *, item_key: str, hook_id: str) -> Optional[str]:
+    """The delimited block for this item/hook, or None if absent."""
     if not hook_file.exists():
-        return False
+        return None
     text = hook_file.read_text(encoding="utf-8")
-    return _block_regex(item_key, hook_id).search(text) is not None
+    m = _block_regex(item_key, hook_id).search(text)
+    return m.group(0) if m else None
 
 
 def remove_block(hook_file: Path, *, item_key: str, hook_id: str) -> None:

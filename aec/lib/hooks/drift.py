@@ -5,19 +5,23 @@ index is only a cache — when another tool (a tsc bootstrap, an older pipeline,
 a hand edit) inserts or removes entries, the index shifts while the hook itself
 is still present. So identity is the **content fingerprint**, never the index.
 
-`classify_hook` locates a recorded hook in its settings file by fingerprint and
-reports OK / MISSING. `verify_repo` runs that over every recorded hook in a repo.
+`classify_hook` locates a recorded hook by fingerprint (git: by its block) and
+reports MISSING if it's gone, STALE if it differs from what the item's source
+renders today, else OK. `verify_repo` runs that over every recorded hook in a repo.
 """
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 from .fingerprint import fingerprint_hook
-from .installer import CLAUDE_PROJECT_DIR_PREFIX, is_guarded
+from .installer import _resolve_script_commands, config_dir_blocked
+from .predicates import evaluate_when
+from .schema import load_hooks_file
 from .state import list_installed_items, load_state
+from .translator import translate_to_agent
 
 # Settings-file agents store entries under data["hooks"][<event_key>].
 _AGENT_SETTINGS = {
@@ -83,57 +87,96 @@ def _locate_settings(repo_root: Path, agent: str, event_key: str, fp: str):
     return None
 
 
-def _entry_commands(entry: dict) -> List[str]:
-    """Every command string in a settings entry, whatever the nesting."""
-    cmds: List[str] = []
-    if isinstance(entry.get("command"), str):
-        cmds.append(entry["command"])
-    for inner in entry.get("hooks", []) or []:
-        if isinstance(inner, dict) and isinstance(inner.get("command"), str):
-            cmds.append(inner["command"])
-    return cmds
+def _rendered(repo_root: Path, item_type: str, item_key: str,
+              agent: str) -> Optional[Dict[Tuple[str, str], Set[str]]]:
+    """(hook_id, event_key) -> the entries this item's source renders for `agent` today.
 
-
-def _is_stale(repo_root: Path, agent: str, entry: dict) -> bool:
-    """True if the entry runs, but not in anyone else's checkout.
-
-    Two generations of that:
-
-    1. Installs before the `$CLAUDE_PROJECT_DIR` rendering baked the machine's
-       absolute repo path into settings.json.
-    2. Installs before the missing-script guard pointed a portable path at a
-       `.claude/skills/**` script that is typically untracked — settings.json
-       IS tracked, so a clone wires the hook and every matching edit exits 127.
-       Keyed on the generated shape — the command STARTS with the project-dir
-       prefix — not on the variable appearing anywhere: repair only guards paths
-       it resolves, so flagging a hand-written hook that merely mentions
-       `$CLAUDE_PROJECT_DIR` would leave it STALE forever.
-
-    Either way the command still runs here, so it isn't MISSING. Flagging it
-    STALE lets `hooks verify --repair` upgrade it in place: the reinstall
-    retracts the old entry and writes the current rendering. Only claude has a
-    project-dir variable, so only claude can be stale.
+    Settings agents map to payload fingerprints (what install records); git maps
+    to command lines (what the block holds). None when the source can't be
+    rendered — missing hooks.json, a script gone — so drift has no opinion.
     """
-    if agent != "claude":
+    src = _item_source_dir(repo_root, item_type, item_key)
+    if src is None or not (src / "hooks.json").exists():
+        return None
+    try:
+        hf = load_hooks_file(src / "hooks.json")
+        # Drop what install would skip, so a hook whose `when` turned false is
+        # retracted. A custom_check is never run here — verify and doctor must
+        # not execute item shell — so it alone counts as passing.
+        applied = replace(hf, hooks=[
+            h for h in hf.hooks
+            if h.when is None or evaluate_when(
+                replace(h.when, custom_check=None), repo_root).applied
+        ])
+        entries = translate_to_agent(
+            applied, agent,
+            resolved_commands=_resolve_script_commands(
+                applied, src, repo_root, agent),
+        )
+    # Broad on purpose: item content is untrusted input, and verify/doctor must
+    # report on every other hook rather than crash on one bad file. Install
+    # (and so repair) surfaces the real error.
+    except Exception:
+        return None
+    out: Dict[Tuple[str, str], Set[str]] = {}
+    for e in entries:
+        key = (e["payload"]["command"] if agent == "git"
+               else fingerprint_hook(e["payload"]))
+        out.setdefault((e["source_hook_id"], e["event_key"]), set()).add(key)
+    return out
+
+
+def _custom_checked(repo_root: Path, item_type: str, item_key: str) -> Set[str]:
+    """Ids of the source's hooks gated by a custom_check."""
+    src = _item_source_dir(repo_root, item_type, item_key)
+    try:
+        hf = load_hooks_file(src / "hooks.json")
+    except Exception:  # untrusted input; _rendered already has no opinion
+        return set()
+    return {h.id for h in hf.hooks if h.when and h.when.custom_check}
+
+
+def _unrecorded(agent: str, expected: Set[str],
+                recorded: List[Optional[str]]) -> int:
+    """How many of `expected` no recorded hook accounts for.
+
+    Settings agents compare fingerprints — identical id-less overrides share
+    one entry but record twice, so a count would hide the one that changed.
+    Each recorded fingerprint that isn't expected is a STALE hook repair
+    replaces, so it covers one unmatched expectation. Git blocks are keyed by
+    hook_id, which validation requires and keeps unique, so one block holds
+    one command and a count is exact there.
+    """
+    if agent == "git":
+        return max(0, len(expected) - len(recorded))
+    have = set(recorded)
+    return max(0, len(expected - have) - len(have - expected))
+
+
+def _is_stale(expected: Optional[Dict[Tuple[str, str], Set[str]]],
+              hook_id: str, event_key: str, actual: str) -> bool:
+    """True if the installed hook isn't what its source renders today.
+
+    Covers every older rendering at once — absolute paths, the unguarded
+    project-dir path, the `-x` exec-bit guard, gemini/cursor exec'ing the bare
+    path — and a hook whose source changed since install: its command, its
+    event, or its removal from hooks.json altogether. Repair reinstalls the
+    current rendering, so a flagged hook is always fixable: a hand-written
+    command renders verbatim and never differs.
+    """
+    if expected is None:
         return False
-    # Claude entries nest the command under a matcher object; scan the whole
-    # serialized entry rather than reaching into a shape that may grow.
-    if str(repo_root) in json.dumps(entry):
-        return True
-    return any(
-        cmd.startswith(CLAUDE_PROJECT_DIR_PREFIX) and not is_guarded(cmd)
-        for cmd in _entry_commands(entry)
-    )
+    return actual not in expected.get((hook_id, event_key), ())
 
 
-def _git_present(repo_root: Path, event_key: str, item_type: str,
-                 item_key: str, hook_id: str) -> bool:
-    from .git_blocks import block_present
+def _git_block(repo_root: Path, event_key: str, item_type: str,
+               item_key: str, hook_id: str) -> Optional[str]:
+    from .git_blocks import read_block
     from .git_hooks_path import resolve_hooks_dir
 
     hook_file = resolve_hooks_dir(repo_root).hooks_dir / event_key
-    return block_present(hook_file, item_key=f"{item_type}:{item_key}",
-                         hook_id=hook_id)
+    return read_block(hook_file, item_key=f"{item_type}:{item_key}",
+                      hook_id=hook_id)
 
 
 def classify_hook(repo_root: Path, installed: dict, *,
@@ -144,17 +187,25 @@ def classify_hook(repo_root: Path, installed: dict, *,
     event_key = _event_key(pointer)
     hook_id = installed["hook_id"]
 
+    expected = _rendered(repo_root, item_type, item_key, agent)
     if agent == "git":
-        present = _git_present(repo_root, event_key, item_type, item_key, hook_id)
-        status, idx = (Drift.OK, None) if present else (Drift.MISSING, None)
+        block = _git_block(repo_root, event_key, item_type, item_key, hook_id)
+        idx = None
+        if block is None:
+            status = Drift.MISSING
+        else:
+            # The block is marker, command line(s), END marker.
+            actual = "\n".join(block.rstrip("\n").split("\n")[1:-1])
+            status = (Drift.STALE if _is_stale(expected, hook_id, event_key, actual)
+                      else Drift.OK)
     else:
-        found = _locate_settings(repo_root, agent, event_key,
-                                 installed["content_fingerprint"])
+        fp = installed["content_fingerprint"]
+        found = _locate_settings(repo_root, agent, event_key, fp)
         if found is None:
             status, idx = Drift.MISSING, None
         else:
-            idx, entry = found
-            status = (Drift.STALE if _is_stale(repo_root, agent, entry)
+            idx = found[0]
+            status = (Drift.STALE if _is_stale(expected, hook_id, event_key, fp)
                       else Drift.OK)
 
     return HookStatus(
@@ -168,11 +219,36 @@ def verify_repo(repo_root: Path) -> List[HookStatus]:
     statuses: List[HookStatus] = []
     for item_type, item_key in list_installed_items(repo_root):
         st = load_state(repo_root, item_type=item_type, item_key=item_key)
+        recorded: Dict[Tuple[str, str, str], List[Optional[str]]] = {}
         for installed in st.hooks_installed:
             statuses.append(
                 classify_hook(repo_root, installed,
                               item_type=item_type, item_key=item_key)
             )
+            recorded.setdefault((installed["agent"], installed["hook_id"],
+                                 _event_key(installed["target_json_pointer"])),
+                                []).append(installed.get("content_fingerprint"))
+        # The other direction: a hook the source renders but state never
+        # recorded (added to hooks.json, its `when` turned true, or one more
+        # id-less override on an event). A changed hook reads as STALE, not
+        # STALE plus MISSING. Judged on today's source and
+        # filesystem, never on the skips of the last install — except a hook
+        # gated by custom_check, which verify can't run, so has no opinion on.
+        gated = _custom_checked(repo_root, item_type, item_key)
+        for agent in st.agents_targeted:
+            if config_dir_blocked(repo_root, agent):
+                continue
+            for (hook_id, event_key), keys in (_rendered(
+                    repo_root, item_type, item_key, agent) or {}).items():
+                if hook_id in gated:
+                    continue
+                for _ in range(_unrecorded(
+                        agent, keys, recorded.get((agent, hook_id, event_key), []))):
+                    statuses.append(HookStatus(
+                        item_type=item_type, item_key=item_key,
+                        hook_id=hook_id, agent=agent, status=Drift.MISSING,
+                        recorded_pointer="",
+                    ))
     return statuses
 
 
@@ -215,9 +291,12 @@ def repair_repo(repo_root: Path) -> List[RepairResult]:
         # One broken item must not abort the rest of this repo or the
         # remaining repos; the caller reports it and exits non-zero.
         try:
+            # The repo-local source is the truth repair converges on, version
+            # included: an item updated in place (new hooks.json, bumped
+            # version) is drift the recorded version would refuse to install.
             install_hooks_for_item(
                 item_type=item_type, item_key=item_key,
-                item_version=st.item_version or "0.0.0",
+                item_version=load_hooks_file(src / "hooks.json").version,
                 item_dir=src, repo_root=repo_root, agents=agents,
                 allow_custom_check=st.allow_custom_check,
             )
