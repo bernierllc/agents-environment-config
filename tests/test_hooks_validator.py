@@ -53,6 +53,16 @@ class TestValidateHooksFile:
         errs, _ = validate_hooks_file(hf, expected_version="1.0.0")
         assert any("git hook" in e.message.lower() for e in errs)
 
+    def test_git_override_without_id_is_error(self):
+        """The id keys the git block; id-less overrides would overwrite each other."""
+        from aec.lib.hooks.validator import validate_hooks_file
+        from aec.lib.hooks.schema import HooksFile
+        override = AgentOverride(
+            agent="git", payload={"hook_name": "pre-commit", "command": "c"})
+        errs, _ = validate_hooks_file(
+            HooksFile(version="1.0.0", git=[override]), expected_version="1.0.0")
+        assert any("'id'" in e.message for e in errs)
+
     def test_agent_override_mirroring_generic_is_warning(self):
         from aec.lib.hooks.validator import validate_hooks_file
         override = AgentOverride(

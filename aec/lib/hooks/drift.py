@@ -144,7 +144,8 @@ def _unrecorded(agent: str, expected: Set[str],
     one entry but record twice, so a count would hide the one that changed.
     Each recorded fingerprint that isn't expected is a STALE hook repair
     replaces, so it covers one unmatched expectation. Git blocks are keyed by
-    hook_id and hold one command each, so a count is exact there.
+    hook_id, which validation requires and keeps unique, so one block holds
+    one command and a count is exact there.
     """
     if agent == "git":
         return max(0, len(expected) - len(recorded))
