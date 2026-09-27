@@ -57,7 +57,7 @@ refactor(models): extract user validation logic
 ## Project Setup
 
 ### New Projects
-- **Port Management**: Use Project Setup CLI for port management
+- **Port Management**: Declare ports in `.aec.json` and register them with `aec ports register` (see `port-management.mdc`)
 - **Cursor Rules**: Copy cursor rules to new projects
 - **Documentation**: Initialize with proper documentation structure
 
