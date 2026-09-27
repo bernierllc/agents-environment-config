@@ -39,8 +39,8 @@ HOME_PATH = re.compile(
     r"(?:(?:/(?:Users|home)/|\b[A-Za-z]:" + SEP + r"Users" + SEP + r")"
     # the username ends at a separator or at the end of the path
     r"(?P<user>[A-Za-z][\w.-]*)(?:" + SEP + r"|(?![\w.-]))"
-    # ... or ~/
-    r"|(?<![\w.])~" + SEP + r")"
+    # ... or ~/ or /root/ (homes without a username)
+    r"|(?<![\w.])(?:~|/root)" + SEP + r")"
     # ... optionally followed by <project root>/<name>, any case (AEC's
     # Windows default is ~/Projects)
     r"(?:(?i:projects|src|code|repos|dev|workspace|git|github)" + SEP + r"(?P<project>[A-Za-z0-9._-]+))?"
@@ -95,10 +95,12 @@ BAD = [
     "~/projects/secret-app", "~/Projects/secret-app",
     "/Users/realname", "/home/realname", r"C:\Users\realname", "cd /Users/realname && ls",
     "/Users/me/src/secret-app", "/home/user/code/secret-app", r"C:\Users\user\Repos\secret-app",
+    "/root/projects/secret-app",
 ]
 OK = [
     "/Users/me/projects/my-app/", "/home/user/", r"C:\Users\example\projects\my-api",
     r"C:\Users\user\Projects\my-app", "~/projects/my-app", "~/.claude/skills", "a~/b",
+    "/root/.bashrc", "/srv/root/projects/x",
 ]
 
 
