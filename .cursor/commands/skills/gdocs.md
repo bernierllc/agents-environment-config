@@ -651,7 +651,7 @@ requests = [{
 ## Technical Implementation
 
 ### Location
-The skill files are in: `/Users/mattbernier/projects/claude-skills/document-skills/gdocs/`
+The skill files are in this skill's own directory (the one containing this SKILL.md).
 
 ### Setup Required (One-Time)
 User must complete OAuth setup first:

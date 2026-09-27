@@ -38,7 +38,6 @@ Always-apply rules that apply universally across all projects:
 - `documentation.mdc` - Documentation standards, file organization, and content guidelines
 - `security.mdc` - Security standards, authentication, authorization, and data protection
 - `port-management.mdc` - Centralized port management system to prevent conflicts
-- `project-setup-cli.mdc` - Project Setup CLI tool usage for consistent environments
 - `plans-checklists.mdc` - Plans and checklist usage standards
 - `rules-about-rules.mdc` - Rules for managing and maintaining cursor rules files
 

@@ -140,13 +140,13 @@ class TestSubprocessFailureLogging:
 class TestFriendlyMessages:
     def test_friendly_message_points_to_issue_url(self, fresh_debug):
         msg = fresh_debug.friendly_error_message()
-        assert "github.com/mattbernier/agents-environment-config" in msg
+        assert "github.com/bernierllc/agents-environment-config" in msg
         assert "--debug" in msg
 
     def test_debug_message_includes_log_path(self, fresh_debug, tmp_path):
         msg = fresh_debug.debug_error_message(tmp_path / "foo.log")
         assert "foo.log" in msg
-        assert "github.com/mattbernier/agents-environment-config" in msg
+        assert "github.com/bernierllc/agents-environment-config" in msg
 
 
 class TestCLIIntegration:
@@ -176,7 +176,7 @@ class TestCLIIntegration:
         combined = captured.out + captured.err
         assert "aec encountered an error" in combined
         assert "--debug" in combined
-        assert "github.com/mattbernier/agents-environment-config" in combined
+        assert "github.com/bernierllc/agents-environment-config" in combined
         assert "Traceback (most recent call last)" not in combined
         assert "synthetic crash for tests" not in combined
 

@@ -79,6 +79,6 @@ project/
 
 ## References
 - **Port Management**: See `port-management.mdc`
-- **CLI Tools**: See `project-setup-cli.mdc`
+- **Ports**: See `port-management.mdc`
 - **Documentation**: See `/docs/` directory
 - **Planning**: See `/plans/` directory

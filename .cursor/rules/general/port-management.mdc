@@ -98,11 +98,12 @@ Centralized port management system to prevent conflicts across all projects on t
 
 ## Port Management Tools
 
-### CLI Tool
-- **Path**: `/Users/mattbernier/projects/ports/index.js`
-- **Setup**: `node index.js setup [project-dir] -t [tech-stack]`
-- **Validate**: `node index.js validate`
-- **Help**: `node index.js --help`
+### AEC port registry
+Ports declared in a project's `.aec.json` are tracked in AEC's registry:
+- **List**: `aec ports list` (all registered ports, grouped by project)
+- **Check**: `aec ports check` (a project's ports against the registry)
+- **Register**: `aec ports register` / `aec ports unregister`
+- **Validate**: `aec ports validate` (stale entries with dead paths)
 
 ### Validation Scripts
 ```bash
@@ -181,6 +182,6 @@ jq '.projects | keys[]' ~/projects/ports.json
 - [ ] Review and optimize port allocations
 
 ## References
-- **CLI Tool**: See `project-setup-cli.mdc`
+- **Port registry**: `aec ports --help`
 - **Architecture**: See `architecture.mdc`
 - **Documentation**: See `/docs/port-management.md`
