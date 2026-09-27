@@ -34,7 +34,7 @@ the maintainer (the PM-agent environment had no shell access to `git mv`):
 To complete the archive:
 
 ```bash
-cd /Users/mattbernier/projects/agents-environment-config
+cd ~/projects/agents-environment-config
 git mv docs/superpowers/plans/2026-03-30-plan-review-skill.md            docs/superpowers/plans/archive/
 git mv docs/superpowers/plans/2026-04-04-brew-aligned-cli-redesign.md    docs/superpowers/plans/archive/
 git mv docs/superpowers/plans/2026-05-02-git-setup-phase.md              docs/superpowers/plans/archive/

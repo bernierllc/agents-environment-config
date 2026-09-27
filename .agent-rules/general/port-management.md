@@ -1,22 +1,22 @@
 # Port Management Rules
 
 ## Objective
-Centralized port management system to prevent conflicts across all projects on this machine.
+Prevent port conflicts across all projects on this machine using AEC's port registry.
 
 ## Port Management System
 
-### Central Port Registry
-- **File**: `~/projects/ports.json`
-- **Format**: JSON with project-specific port allocations
-- **Updates**: Required before adding new services or changing ports
+### Where ports live
+- **Per project**: the `ports` section of the project's `.aec.json` (source of truth for that project)
+- **Across projects**: AEC's registry, maintained by `aec ports` (never edit it by hand)
+- **Updates**: Declare a port in `.aec.json` and register it before adding a service or changing a port
 
 ### Port Allocation Rules
 
 #### Port Registration Requirements
-- **MANDATORY**: All projects MUST register ports in `~/projects/ports.json`
-- **BEFORE**: Adding new services or changing existing ports
-- **VERIFY**: Check for conflicts before committing port changes
-- **UPDATE**: Registry immediately after port changes
+- **MANDATORY**: Declare every service port in the project's `.aec.json` and register it with `aec ports register`
+- **BEFORE**: Adding new services or changing existing ports, run `aec ports check`
+- **VERIFY**: Resolve every conflict `aec ports check` reports before committing
+- **UPDATE**: Re-run `aec ports register` immediately after port changes
 
 #### Port Range Allocations
 - **System Ports**: 1-1023 (reserved for system)
@@ -28,34 +28,31 @@ Centralized port management system to prevent conflicts across all projects on t
 - **Cache Range**: 6300-6399 (Redis, Memcached)
 - **Webhook Range**: 34000-34999 (test webhooks)
 
-#### Port Naming Convention
+#### Declaring ports in `.aec.json`
 ```json
 {
-  "service-type": {
-    "service-name": {
-      "port": 3536,
-      "description": "Clear description of service purpose",
-      "environment": "production|development|testing",
-      "protocol": "http|tcp|udp",
-      "required": true|false
-    }
+  "ports": {
+    "web": { "port": 3000, "protocol": "http", "description": "Next.js dev server" },
+    "db":  { "port": 5432, "protocol": "tcp",  "description": "Postgres" }
   }
 }
 ```
+Name each entry for the service it serves; `protocol` and `description` are shown by `aec ports list`.
 
 ## Port Management Workflow
 
 ### Adding New Ports
-1. **Check Registry**: Review `~/projects/ports.json` for conflicts
+1. **Check Registry**: `aec ports list` to see what is taken
 2. **Select Port**: Choose from appropriate range
-3. **Update Registry**: Add new port entry
-4. **Update Project**: Modify project configuration
-5. **Test**: Verify no conflicts
-6. **Commit**: Include both registry and project changes
+3. **Declare**: Add the entry to the project's `.aec.json` `ports` section
+4. **Check**: `aec ports check` must report no conflicts
+5. **Register**: `aec ports register`
+6. **Update Project**: Modify project configuration to use the port
+7. **Commit**: Include `.aec.json` and the project changes together
 
 ### Changing Existing Ports
 1. **Identify Impact**: Check all projects using the port
-2. **Update Registry**: Modify port entry
+2. **Update `.aec.json`**: Change the entry, then `aec ports check` and `aec ports register`
 3. **Update All Projects**: Change all references
 4. **Test**: Verify all services work
 5. **Commit**: Include all changes together
@@ -104,11 +101,11 @@ Ports declared in a project's `.aec.json` are tracked in AEC's registry:
 # Check if port is available
 lsof -i:<port>
 
-# Validate port configuration
-bash validate-ports.sh
+# Check this project's ports against every other project
+aec ports check
 
-# Check for conflicts
-jq '.projects | keys[]' ~/projects/ports.json
+# Find registry entries whose projects no longer exist
+aec ports validate
 ```
 
 ## Best Practices
@@ -142,33 +139,34 @@ jq '.projects | keys[]' ~/projects/ports.json
 6. **Document**: Record conflict and resolution
 
 ### Port Registry Recovery
-1. **Backup**: Restore from version control
-2. **Validate**: Check registry integrity
-3. **Reconcile**: Align with actual port usage
-4. **Update**: Fix any inconsistencies
+The registry is rebuilt from each project's `.aec.json`, which is the source of truth:
+1. **Validate**: `aec ports validate` to find entries for projects that no longer exist
+2. **Clean**: `aec ports unregister` for each stale project
+3. **Rebuild**: run `aec ports register` in each active project
+4. **Check**: `aec ports check` in each project
 5. **Test**: Verify all services work
 
 ## Checklist
 
 ### Before Adding New Service
-- [ ] Check `~/projects/ports.json` for conflicts
+- [ ] `aec ports list` / `aec ports check` for conflicts
 - [ ] Select appropriate port from correct range
-- [ ] Update port registry with new entry
+- [ ] Declare it in `.aec.json` and run `aec ports register`
 - [ ] Modify project configuration
 - [ ] Test port availability
 - [ ] Verify service works on assigned port
-- [ ] Commit both registry and project changes
+- [ ] Commit `.aec.json` and the project changes together
 
 ### Before Changing Existing Port
 - [ ] Identify all projects using the port
-- [ ] Update port registry
+- [ ] Update the entry in `.aec.json`, then `aec ports check` and `aec ports register`
 - [ ] Update all affected project configurations
 - [ ] Test all affected services
 - [ ] Verify no new conflicts introduced
 - [ ] Commit all changes together
 
 ### Regular Maintenance
-- [ ] Validate port registry format
+- [ ] `aec ports validate` for stale entries
 - [ ] Check for port conflicts
 - [ ] Verify all registered ports are in use
 - [ ] Clean up unused port entries

@@ -220,7 +220,7 @@ class TestScopeTargetPaths:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/mattbernier/projects/agents-environment-config && python -m pytest tests/test_scope.py -v`
+Run: `cd ~/projects/agents-environment-config && python -m pytest tests/test_scope.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'aec.lib.scope'`
 
 - [ ] **Step 3: Implement scope.py**
@@ -355,7 +355,7 @@ def _load_tracked_paths() -> set[Path]:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/mattbernier/projects/agents-environment-config && python -m pytest tests/test_scope.py -v`
+Run: `cd ~/projects/agents-environment-config && python -m pytest tests/test_scope.py -v`
 Expected: All PASS
 
 - [ ] **Step 5: Commit**
@@ -531,7 +531,7 @@ class TestMigrateV1:
 
 - [ ] **Step 3: Run tests to verify they fail**
 
-Run: `cd /Users/mattbernier/projects/agents-environment-config && python -m pytest tests/test_manifest_v2.py -v`
+Run: `cd ~/projects/agents-environment-config && python -m pytest tests/test_manifest_v2.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'aec.lib.manifest_v2'`
 
 - [ ] **Step 4: Implement manifest_v2.py**
@@ -685,7 +685,7 @@ def is_stale(manifest: dict, max_age_hours: int = 24) -> bool:
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd /Users/mattbernier/projects/agents-environment-config && python -m pytest tests/test_manifest_v2.py -v`
+Run: `cd ~/projects/agents-environment-config && python -m pytest tests/test_manifest_v2.py -v`
 Expected: All PASS
 
 - [ ] **Step 6: Commit**
@@ -779,7 +779,7 @@ class TestStalenessCheck:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/mattbernier/projects/agents-environment-config && python -m pytest tests/test_sources.py -v`
+Run: `cd ~/projects/agents-environment-config && python -m pytest tests/test_sources.py -v`
 Expected: FAIL
 
 - [ ] **Step 3: Implement sources.py**
@@ -919,7 +919,7 @@ def fetch_latest(repo_path: Optional[Path] = None) -> bool:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/mattbernier/projects/agents-environment-config && python -m pytest tests/test_sources.py -v`
+Run: `cd ~/projects/agents-environment-config && python -m pytest tests/test_sources.py -v`
 Expected: All PASS
 
 - [ ] **Step 5: Commit**
@@ -1017,7 +1017,7 @@ class TestUpdateCommand:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/mattbernier/projects/agents-environment-config && python -m pytest tests/test_update_cmd.py -v`
+Run: `cd ~/projects/agents-environment-config && python -m pytest tests/test_update_cmd.py -v`
 Expected: FAIL
 
 - [ ] **Step 3: Implement update.py**
@@ -1118,7 +1118,7 @@ def _report_scope_outdated(manifest: dict, scope: str, source_dirs: dict) -> int
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/mattbernier/projects/agents-environment-config && python -m pytest tests/test_update_cmd.py -v`
+Run: `cd ~/projects/agents-environment-config && python -m pytest tests/test_update_cmd.py -v`
 Expected: All PASS
 
 - [ ] **Step 5: Commit**
@@ -1247,7 +1247,7 @@ class TestUpgradeCommand:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/mattbernier/projects/agents-environment-config && python -m pytest tests/test_upgrade_cmd.py -v`
+Run: `cd ~/projects/agents-environment-config && python -m pytest tests/test_upgrade_cmd.py -v`
 Expected: FAIL
 
 - [ ] **Step 3: Implement upgrade.py**
@@ -1467,7 +1467,7 @@ def _find_outdated_repos(
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/mattbernier/projects/agents-environment-config && python -m pytest tests/test_upgrade_cmd.py -v`
+Run: `cd ~/projects/agents-environment-config && python -m pytest tests/test_upgrade_cmd.py -v`
 Expected: All PASS
 
 - [ ] **Step 5: Commit**
@@ -1588,7 +1588,7 @@ class TestInstallSkill:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/mattbernier/projects/agents-environment-config && python -m pytest tests/test_install_cmd.py -v`
+Run: `cd ~/projects/agents-environment-config && python -m pytest tests/test_install_cmd.py -v`
 Expected: FAIL
 
 - [ ] **Step 3: Implement install_cmd.py**
@@ -1696,7 +1696,7 @@ def run_install(
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd /Users/mattbernier/projects/agents-environment-config && python -m pytest tests/test_install_cmd.py -v`
+Run: `cd ~/projects/agents-environment-config && python -m pytest tests/test_install_cmd.py -v`
 Expected: All PASS
 
 - [ ] **Step 5: Commit**
@@ -1773,7 +1773,7 @@ class TestUninstall:
 
 - [ ] **Step 2: Run tests, verify fail**
 
-Run: `cd /Users/mattbernier/projects/agents-environment-config && python -m pytest tests/test_uninstall_cmd.py -v`
+Run: `cd ~/projects/agents-environment-config && python -m pytest tests/test_uninstall_cmd.py -v`
 
 - [ ] **Step 3: Implement uninstall.py**
 
@@ -1844,7 +1844,7 @@ def run_uninstall(
 
 - [ ] **Step 4: Run tests, verify pass**
 
-Run: `cd /Users/mattbernier/projects/agents-environment-config && python -m pytest tests/test_uninstall_cmd.py -v`
+Run: `cd ~/projects/agents-environment-config && python -m pytest tests/test_uninstall_cmd.py -v`
 
 - [ ] **Step 5: Commit**
 
@@ -2934,7 +2934,7 @@ Key structure:
 
 - [ ] **Step 5: Verify existing tests still pass**
 
-Run: `cd /Users/mattbernier/projects/agents-environment-config && python -m pytest tests/ -v`
+Run: `cd ~/projects/agents-environment-config && python -m pytest tests/ -v`
 Expected: All existing tests still pass (deprecation shims preserve old behavior)
 
 - [ ] **Step 6: Commit**
@@ -3142,7 +3142,7 @@ Update `_get_readme_content()` in `aec/lib/tracking.py` to reference the new com
 
 - [ ] **Step 3: Run full test suite**
 
-Run: `cd /Users/mattbernier/projects/agents-environment-config && python -m pytest tests/ -v`
+Run: `cd ~/projects/agents-environment-config && python -m pytest tests/ -v`
 Expected: All tests pass
 
 - [ ] **Step 4: Commit**

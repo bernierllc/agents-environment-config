@@ -23,7 +23,7 @@
 - [ ] **Step 1: Run the skill-creator init script**
 
 ```bash
-python3 /Users/mattbernier/projects/agents-environment-config/.claude/skills/skill-creator/scripts/init_skill.py plan-review --path /Users/mattbernier/projects/agents-environment-config/.claude/skills/plan-review
+python3 ~/projects/agents-environment-config/.claude/skills/skill-creator/scripts/init_skill.py plan-review --path ~/projects/agents-environment-config/.claude/skills/plan-review
 ```
 
 Expected: Directory created with template SKILL.md and example subdirectories.
@@ -35,7 +35,7 @@ Delete the example files in `scripts/` and `assets/` directories that the init s
 - [ ] **Step 3: Verify directory structure**
 
 ```bash
-find /Users/mattbernier/projects/agents-environment-config/.claude/skills/plan-review -type f
+find ~/projects/agents-environment-config/.claude/skills/plan-review -type f
 ```
 
 Expected:
@@ -422,7 +422,7 @@ git commit -m "feat(skills): add plan-review report, cleanup, and next steps sec
 - [ ] **Step 1: Run the skill-creator validation script**
 
 ```bash
-python3 /Users/mattbernier/projects/agents-environment-config/.claude/skills/skill-creator/scripts/quick_validate.py /Users/mattbernier/projects/agents-environment-config/.claude/skills/plan-review
+python3 ~/projects/agents-environment-config/.claude/skills/skill-creator/scripts/quick_validate.py ~/projects/agents-environment-config/.claude/skills/plan-review
 ```
 
 Expected: Validation passes. If it reports errors, fix them before proceeding.
@@ -444,7 +444,7 @@ Verify all placeholder variables are present and the markdown renders correctly.
 - [ ] **Step 4: Run the package script**
 
 ```bash
-python3 /Users/mattbernier/projects/agents-environment-config/.claude/skills/skill-creator/scripts/package_skill.py /Users/mattbernier/projects/agents-environment-config/.claude/skills/plan-review
+python3 ~/projects/agents-environment-config/.claude/skills/skill-creator/scripts/package_skill.py ~/projects/agents-environment-config/.claude/skills/plan-review
 ```
 
 Expected: Validation passes and a `plan-review.zip` is created.

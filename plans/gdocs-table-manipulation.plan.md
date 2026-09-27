@@ -4,7 +4,7 @@
 
 ## Overview
 
-Implement comprehensive table manipulation capabilities for the gdocs skill (`/Users/mattbernier/projects/claude-skills/document-skills/gdocs/`), enabling programmatic creation, modification, and deletion of tables in Google Docs. This transforms the skill from text-only editing to full document structure manipulation, supporting intelligent synthesis of meeting notes and data into professional tables.
+Implement comprehensive table manipulation capabilities for the gdocs skill (`~/projects/claude-skills/document-skills/gdocs/`), enabling programmatic creation, modification, and deletion of tables in Google Docs. This transforms the skill from text-only editing to full document structure manipulation, supporting intelligent synthesis of meeting notes and data into professional tables.
 
 **Current State:** Read-only table support (can search text within tables only)
 **Target State:** Full CRUD operations on tables, rows, columns, and cells
@@ -775,7 +775,7 @@ agents-environment-config/plans/
 ## Getting Started
 
 ### Prerequisites
-1. Clone repository: `/Users/mattbernier/projects/claude-skills/document-skills/gdocs/`
+1. Clone repository: `~/projects/claude-skills/document-skills/gdocs/`
 2. Verify OAuth credentials configured
 3. Have test Google Doc ready with edit permissions
 4. Ensure all Phase 1-5 tests passing
@@ -789,7 +789,7 @@ agents-environment-config/plans/
 
 ### First Steps
 ```bash
-cd /Users/mattbernier/projects/claude-skills/document-skills/gdocs/
+cd ~/projects/claude-skills/document-skills/gdocs/
 
 # Create new file
 touch scripts/table_manager.py

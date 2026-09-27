@@ -1,4 +1,4 @@
-"""Guard: nothing AEC ships contains a specific person's home directory.
+"""Guard: nothing committed to AEC contains a specific person's home directory.
 
 AEC is installed by anyone. A path like /Users/<someone>/projects/... in a
 rule, command, script or module only works on that one machine, and tells
@@ -13,15 +13,16 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-SHIPPED = (".cursor/rules", ".cursor/commands", ".agent-rules", "aec", "templates",
-           "plugins", "scripts", "README.md", "agents.json")
-EXCLUDE = ("aec/templates/gitignore/",)  # upstream github/gitignore submodule
-PLACEHOLDERS = ("me", "you", "user", "username", "example", "name", "yourname", "runner")
+# Every tracked file (docs and plans too: they are part of the product repo),
+# except upstream content AEC vendors but does not author.
+EXCLUDE = ("aec/templates/gitignore/",)  # github/gitignore submodule
+PLACEHOLDERS = ("me", "you", "user", "username", "example", "name", "yourname", "runner",
+                "test", "dev", "alice", "bob")
 HOME_PATH = re.compile(r"/(?:Users|home)/([A-Za-z][\w.-]*)/")
 
 
 def _shipped_files():
-    out = subprocess.run(["git", "ls-files", "--", *SHIPPED], cwd=REPO,
+    out = subprocess.run(["git", "ls-files"], cwd=REPO,
                          capture_output=True, text=True, check=True).stdout.split()
     return [f for f in out if not f.startswith(EXCLUDE) and (REPO / f).is_file()]
 
@@ -30,7 +31,7 @@ def test_scanner_finds_shipped_files():
     assert len(_shipped_files()) > 100
 
 
-def test_no_personal_home_paths_in_shipped_files():
+def test_no_personal_home_paths_in_tracked_files():
     hits = []
     for rel in _shipped_files():
         try:
@@ -41,4 +42,4 @@ def test_no_personal_home_paths_in_shipped_files():
             for m in HOME_PATH.finditer(line):
                 if m.group(1).lower() not in PLACEHOLDERS:
                     hits.append(f"{rel}:{n}: {m.group(0)}")
-    assert not hits, "personal home paths in shipped files:\n" + "\n".join(hits[:40])
+    assert not hits, "personal home paths in tracked files:\n" + "\n".join(hits[:40])
