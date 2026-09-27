@@ -35,7 +35,7 @@ matt     12349  1.5  2.5 150000 25000 ?        S    10:04   0:03 npm run test
 """
 
 DOCKER_PS_OUTPUT = """\
-earnlearn-test-db
+my-app-test-db
 redis-cache
 """
 
@@ -161,7 +161,7 @@ class TestSnapshotDocker:
         monkeypatch.setattr(subprocess, "run", fake_run)
 
         result = profiler.snapshot_docker()
-        assert result == ["earnlearn-test-db", "redis-cache"]
+        assert result == ["my-app-test-db", "redis-cache"]
 
     def test_returns_empty_when_docker_unavailable(self, monkeypatch):
         """Should return empty list when docker is not available."""

@@ -48,8 +48,8 @@ class TestWriteSuiteOutput:
         """Should create {project}_test_output.txt."""
         from aec.lib.reports import write_suite_output
 
-        result = write_suite_output(temp_dir, "earnlearn", "test output here")
-        assert result.name == "earnlearn_test_output.txt"
+        result = write_suite_output(temp_dir, "my-app", "test output here")
+        assert result.name == "my-app_test_output.txt"
         assert result.parent == temp_dir
 
     def test_writes_content_correctly(self, temp_dir):
@@ -74,7 +74,7 @@ class TestGenerateSummary:
         """Return sample results for testing."""
         return [
             {
-                "project": "barevents",
+                "project": "my-events",
                 "suite": "unit",
                 "status": "passed",
                 "duration_seconds": 23.4,
@@ -82,7 +82,7 @@ class TestGenerateSummary:
                 "skip_reason": None,
             },
             {
-                "project": "barevents",
+                "project": "my-events",
                 "suite": "integration",
                 "status": "skipped",
                 "duration_seconds": None,
@@ -90,7 +90,7 @@ class TestGenerateSummary:
                 "skip_reason": "prerequisite: docker not available",
             },
             {
-                "project": "earnlearn",
+                "project": "my-app",
                 "suite": "unit",
                 "status": "passed",
                 "duration_seconds": 45.2,
@@ -98,7 +98,7 @@ class TestGenerateSummary:
                 "skip_reason": None,
             },
             {
-                "project": "earnlearn",
+                "project": "my-app",
                 "suite": "integration",
                 "status": "failed",
                 "duration_seconds": 12.1,
@@ -113,7 +113,7 @@ class TestGenerateSummary:
 
         report_dir = self._make_report_dir(temp_dir)
         result = generate_summary(
-            report_dir, self._sample_results(), [], [], ["barevents", "earnlearn"],
+            report_dir, self._sample_results(), [], [], ["my-events", "my-app"],
             42, "auto", 0,
         )
         assert result.name == "summary.txt"
@@ -125,12 +125,12 @@ class TestGenerateSummary:
 
         report_dir = self._make_report_dir(temp_dir)
         generate_summary(
-            report_dir, self._sample_results(), [], [], ["barevents", "earnlearn"],
+            report_dir, self._sample_results(), [], [], ["my-events", "my-app"],
             42, "auto", 0,
         )
         content = (report_dir / "summary.txt").read_text()
-        assert "barevents" in content
-        assert "earnlearn" in content
+        assert "my-events" in content
+        assert "my-app" in content
         assert "unit" in content
         assert "integration" in content
 
@@ -140,7 +140,7 @@ class TestGenerateSummary:
 
         report_dir = self._make_report_dir(temp_dir)
         generate_summary(
-            report_dir, self._sample_results(), [], [], ["barevents", "earnlearn"],
+            report_dir, self._sample_results(), [], [], ["my-events", "my-app"],
             42, "auto", 0,
         )
         content = (report_dir / "summary.txt").read_text()
@@ -154,7 +154,7 @@ class TestGenerateSummary:
 
         report_dir = self._make_report_dir(temp_dir)
         generate_summary(
-            report_dir, self._sample_results(), [], [], ["barevents"],
+            report_dir, self._sample_results(), [], [], ["my-events"],
             42, "manual", 12,
         )
         content = (report_dir / "summary.txt").read_text()
@@ -166,7 +166,7 @@ class TestGenerateSummary:
 
         report_dir = self._make_report_dir(temp_dir)
         generate_summary(
-            report_dir, self._sample_results(), [], [], ["barevents"],
+            report_dir, self._sample_results(), [], [], ["my-events"],
             42, "auto", 12,
         )
         content = (report_dir / "summary.txt").read_text()
@@ -177,9 +177,9 @@ class TestGenerateSummary:
         from aec.lib.reports import generate_summary
 
         report_dir = self._make_report_dir(temp_dir)
-        port_obs = [{"project": "earnlearn", "ports": [9229, 9230]}]
+        port_obs = [{"project": "my-app", "ports": [9229, 9230]}]
         generate_summary(
-            report_dir, self._sample_results(), port_obs, [], ["barevents"],
+            report_dir, self._sample_results(), port_obs, [], ["my-events"],
             42, "auto", 0,
         )
         content = (report_dir / "summary.txt").read_text()
@@ -194,7 +194,7 @@ class TestGenerateSummary:
 
         report_dir = self._make_report_dir(temp_dir)
         generate_summary(
-            report_dir, self._sample_results(), [], [], ["barevents"],
+            report_dir, self._sample_results(), [], [], ["my-events"],
             42, "auto", 0,
         )
         content = (report_dir / "summary.txt").read_text()
@@ -207,19 +207,19 @@ class TestGenerateSummary:
         report_dir = self._make_report_dir(temp_dir)
         generate_summary(
             report_dir, self._sample_results(), [], [],
-            ["barevents", "earnlearn", "mbernier.com"], 42, "auto", 0,
+            ["my-events", "my-app", "example.com"], 42, "auto", 0,
         )
         content = (report_dir / "summary.txt").read_text()
-        assert "Execution order: barevents, earnlearn, mbernier.com (seed: 42)" in content
+        assert "Execution order: my-events, my-app, example.com (seed: 42)" in content
 
     def test_includes_process_observations_when_present(self, temp_dir):
         """Should include process observations section when list is non-empty."""
         from aec.lib.reports import generate_summary
 
         report_dir = self._make_report_dir(temp_dir)
-        proc_obs = [{"label": "earnlearn integration", "count": 3, "pids": [42310, 42311, 42312]}]
+        proc_obs = [{"label": "my-app integration", "count": 3, "pids": [42310, 42311, 42312]}]
         generate_summary(
-            report_dir, self._sample_results(), [], proc_obs, ["barevents"],
+            report_dir, self._sample_results(), [], proc_obs, ["my-events"],
             42, "auto", 0,
         )
         content = (report_dir / "summary.txt").read_text()
@@ -233,7 +233,7 @@ class TestGenerateSummary:
 
         report_dir = self._make_report_dir(temp_dir)
         generate_summary(
-            report_dir, self._sample_results(), [], [], ["barevents"],
+            report_dir, self._sample_results(), [], [], ["my-events"],
             42, "auto", 0,
         )
         content = (report_dir / "summary.txt").read_text()
@@ -245,11 +245,11 @@ class TestGenerateSummary:
 
         report_dir = self._make_report_dir(temp_dir)
         generate_summary(
-            report_dir, self._sample_results(), [], [], ["barevents", "earnlearn"],
+            report_dir, self._sample_results(), [], [], ["my-events", "my-app"],
             42, "auto", 0,
         )
         content = (report_dir / "summary.txt").read_text()
-        assert "→ see earnlearn_test_output.txt" in content
+        assert "→ see my-app_test_output.txt" in content
 
 
 class TestCountReportDays:
@@ -335,7 +335,7 @@ class TestPruneOldProfiles:
         from aec.lib.reports import prune_old_profiles
 
         # Create project subdirectory with an old profile
-        project_dir = temp_dir / "earnlearn"
+        project_dir = temp_dir / "my-app"
         project_dir.mkdir()
         old_profile = project_dir / "profile_old.json"
         old_profile.write_text('{"data": "old"}')
@@ -354,7 +354,7 @@ class TestPruneOldProfiles:
         """Should keep profile JSON files newer than max_days."""
         from aec.lib.reports import prune_old_profiles
 
-        project_dir = temp_dir / "earnlearn"
+        project_dir = temp_dir / "my-app"
         project_dir.mkdir()
         recent_profile = project_dir / "profile_recent.json"
         recent_profile.write_text('{"data": "recent"}')

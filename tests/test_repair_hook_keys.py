@@ -151,12 +151,12 @@ class TestRepairHookKeys:
         results = repair_hook_keys(project)
         assert results["claude"] == "ok"
 
-    def test_real_world_barevents_config(self, temp_dir):
+    def test_real_world_my_events_config(self, temp_dir):
         """Test with the exact config that caused the original bug."""
         project = temp_dir / "project"
         project.mkdir()
 
-        # This is the exact config from the barevents repo
+        # This is the exact config from the my-events repo
         bad_config = {
             "hooks": {
                 "postToolUse": [{

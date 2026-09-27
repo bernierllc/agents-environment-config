@@ -6,7 +6,7 @@
 
 ## Problem Statement
 
-Manual QA by a human tester found 23 bugs in the barevents project in one day — bugs that the existing verification-writer / browser-verification loop should have caught. Root causes:
+Manual QA by a human tester found 23 bugs in the my-events project in one day — bugs that the existing verification-writer / browser-verification loop should have caught. Root causes:
 
 1. **Missing state dependency coverage** — verification-writer generates per-field validation items but not cross-field state interaction items (e.g., "change event type after setting flyer config" → FK error)
 2. **No automated regression testing** — browser-verification runs manually via Claude, one instance at a time, with browser contention between concurrent Claude sessions
@@ -674,7 +674,7 @@ When the skill or hook logic updates, `aec upgrade` propagates changes to hooks 
 
 ## What This Prevents
 
-Mapping back to the original 23 bugs found in barevents:
+Mapping back to the original 23 bugs found in my-events:
 
 | Bug class | Example | Prevention mechanism |
 |---|---|---|

@@ -44,3 +44,25 @@ def test_no_personal_home_paths_in_tracked_files():
                 if m.group(1).lower() not in PLACEHOLDERS:
                     hits.append(f"{rel}:{n}: {m.group(0)}")
     assert not hits, "personal home paths in tracked files:\n" + "\n".join(hits[:40])
+
+
+# Example project directories must be placeholders (or AEC's own public repos),
+# not the names of someone's real projects.
+EXAMPLE_PROJECT = re.compile(r"/Users/example/projects/([A-Za-z0-9._-]+)")
+EXAMPLE_PROJECT_OK = {"my-app", "my-api", "my-project", "my-plugin", "my-repo", "my-site",
+                      "my-events", "my-forms", "my-hub", "my-demo", "my-crm",
+                      "agents-environment-config", "claude-skills"}
+
+
+def test_example_paths_use_placeholder_project_names():
+    hits = []
+    for rel in _shipped_files():
+        try:
+            text = (REPO / rel).read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for n, line in enumerate(text.splitlines(), 1):
+            for m in EXAMPLE_PROJECT.finditer(line):
+                if m.group(1) not in EXAMPLE_PROJECT_OK:
+                    hits.append(f"{rel}:{n}: {m.group(0)}")
+    assert not hits, "example paths naming real projects:\n" + "\n".join(hits[:40])

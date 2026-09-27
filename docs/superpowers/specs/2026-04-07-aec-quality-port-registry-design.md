@@ -71,8 +71,8 @@ Located at the project root. Created/updated during `aec setup`.
   "$schema": "https://aec.bernier.dev/schema/aec.json",
   "version": "1.0.0",
   "project": {
-    "name": "earnlearn",
-    "description": "EarnLearn platform - Next.js application"
+    "name": "my-app",
+    "description": "MyApp platform - Next.js application"
   },
   "ports": {
     "dev-server": {
@@ -169,16 +169,16 @@ Located at `~/.agents-environment-config/ports-registry.json`.
   "version": "1.0.0",
   "ports": {
     "3333": {
-      "project": "earnlearn",
-      "project_path": "/Users/example/projects/earnlearn",
+      "project": "my-app",
+      "project_path": "/Users/example/projects/my-app",
       "key": "dev-server",
       "protocol": "http",
       "description": "Next.js dev server",
       "registered_at": "2026-04-07T14:00:00Z"
     },
     "5433": {
-      "project": "earnlearn",
-      "project_path": "/Users/example/projects/earnlearn",
+      "project": "my-app",
+      "project_path": "/Users/example/projects/my-app",
       "key": "test-database",
       "protocol": "postgresql",
       "description": "Docker test DB",
@@ -209,7 +209,7 @@ Located at `~/.agents-environment-config/ports-registry.json`.
 
 ```
 $ aec setup ~/projects/new-project
-  ⚠ Port conflict: port 3000 is already registered to "mbernier.com"
+  ⚠ Port conflict: port 3000 is already registered to "example.com"
     (registered 2026-03-15T10:00:00Z)
     Your .aec.json assigns 3000 to "dev-server"
     → Update your .aec.json to use a different port, or run

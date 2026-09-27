@@ -1,10 +1,10 @@
-> Status: OUT OF SCOPE for AEC — plan describes a UI audit skill targeting SCF-Neue / Vibe-Kanban integration, not AEC CLI surface. Flagged for relocation or deletion by maintainer.
+> Status: OUT OF SCOPE for AEC — plan describes a UI audit skill targeting my-project / Vibe-Kanban integration, not AEC CLI surface. Flagged for relocation or deletion by maintainer.
 
 # UI Audit Skill and Command Implementation Plan
 
 ## Overview
 
-Create a reusable UI audit system as both a Claude skill (`.claude/skills/ui-audit/`) and Cursor command (`.cursor/commands/skills/ui-audit.md`) that automates the UI testing workflow from SCF-Neue. The system will discover routes, detect auth methods, create helpers, and manage tasks in Vibe-Kanban with a clear action-then-pass workflow.
+Create a reusable UI audit system as both a Claude skill (`.claude/skills/ui-audit/`) and Cursor command (`.cursor/commands/skills/ui-audit.md`) that automates the UI testing workflow from my-project. The system will discover routes, detect auth methods, create helpers, and manage tasks in Vibe-Kanban with a clear action-then-pass workflow.
 
 ## Key Design Decisions
 
@@ -71,7 +71,7 @@ agents-environment-config/
    - Create `.claude/skills/ui-audit/` directory
    - Set up `templates/` and `scripts/` subdirectories
 
-2. **Copy and adapt files from SCF-Neue**
+2. **Copy and adapt files from my-project**
    - Copy `CONTEXT_CACHE/ui-audit-bootstrap.mjs` → adapt for generic use
    - Copy `CONTEXT_CACHE/schema.sql` → keep as-is (SQLite schema)
    - Copy `tests/AUDIT-TASKS-GUIDANCE.md` → adapt as reference documentation
@@ -202,7 +202,7 @@ agents-environment-config/
     - Common mistakes section: "Don't skip task creation", "Agents create TEST tasks during exploration"
 
 16. **Update existing files**
-    - Adapt guidance docs from SCF-Neue for generic use
+    - Adapt guidance docs from my-project for generic use
     - Update references to project-specific paths
     - Make templates project-agnostic
 
@@ -236,7 +236,7 @@ Following project-manager-senior agent criteria, each task must include:
 
 ## Files to Copy and Adapt
 
-From `/Users/example/projects/SCF-Neue/`:
+From `/Users/example/projects/my-project/`:
 - `CONTEXT_CACHE/ui-audit-bootstrap.mjs` → Generic bootstrap script
 - `CONTEXT_CACHE/schema.sql` → Keep as-is
 - `tests/AUDIT-TASKS-GUIDANCE.md` → Reference documentation
