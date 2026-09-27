@@ -9,8 +9,6 @@ Before running any package command, find how this repository manages its package
 3. **Never publish by hand** (`npm publish` straight from a package directory) when the repo defines a release flow; hand publishing skips its version, changelog and validation steps.
 4. **If there is no tooling**, use the package manager the lockfile implies (`package-lock.json` → npm, `pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn) and do not mix managers.
 
-ecks
-
 ## Package Design
 
 Follow the architecture this repository already uses; do not impose one.
