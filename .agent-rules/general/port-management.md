@@ -16,7 +16,7 @@ Prevent port conflicts across all projects on this machine using AEC's port regi
 - **MANDATORY**: Declare every service port in the project's `.aec.json` and register it with `aec ports register`
 - **BEFORE**: Adding new services or changing existing ports, run `aec ports check`
 - **VERIFY**: Resolve every conflict `aec ports check` reports before committing
-- **UPDATE**: Re-run `aec ports register` immediately after port changes
+- **UPDATE**: After a port change, run `aec ports unregister` then `aec ports register` (register only adds)
 
 #### Port Range Allocations
 - **System Ports**: 1-1023 (reserved for system)
