@@ -275,13 +275,13 @@ def discover_from_scripts(raycast_dir: Path) -> List[Path]:
     # Only match paths starting with / or ~ to avoid matching shell
     # script internals like cd "$(dirname ...)" or cd $VARIABLE;
     # Matches: cd ~/projects/tools/; claude
-    # Matches: cd /Users/me/projects/tools/; claude
+    # Matches: cd /Users/me/projects/my-app/; claude
     terminal_pattern = re.compile(r'cd\s+([/~][^;]+?)/?\s*;')
 
     # Pattern 2: Direct launch - cursor /path or code /path
     # Matches: cursor ~/projects/tools/
-    # Matches: cursor /Users/me/projects/tools/
-    # Matches: code /Users/me/projects/tools/
+    # Matches: cursor /Users/me/projects/my-app/
+    # Matches: code /Users/me/projects/my-app/
     direct_pattern = re.compile(r'^(?:cursor|code)\s+(.+?)/?\s*$', re.MULTILINE)
 
     discovered: set[str] = set()

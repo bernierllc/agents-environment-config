@@ -28,7 +28,7 @@ def fresh_debug(monkeypatch, tmp_path):
 class TestRedaction:
     def test_redacts_unix_user_paths(self, fresh_debug):
         d = fresh_debug
-        assert "/Users/USER" in d.redact("/Users/alice/projects/foo.py")
+        assert "/Users/USER" in d.redact("/Users/alice/projects/my-app/foo.py")
         assert "/home/USER" in d.redact("/home/bob/repos/x")
 
     def test_redacts_windows_user_paths(self, fresh_debug):
