@@ -70,7 +70,7 @@ Small, well-understood items waiting for a verification or cleanup pass.
 | Item | What's left | Source |
 |---|---|---|
 | Skill versioning verification + archive | Code is shipped (`aec/lib/skills_manifest.py`, `aec/commands/skills.py`, doctor checks). Need to confirm legacy-symlink cleanup is wired into `aec install` and run a real install/update/uninstall smoke. ~1h. | `docs/superpowers/plans/2026-03-30-skill-versioning-implementation.md` |
-| Legacy `plans/` cleanup | Decide fate of `gdocs-table-manipulation*.plan.md` and `ui-audit-skill-command.plan.md` — both target other repos. Move out of AEC or delete. | `plans/` (legacy dir) |
+| Legacy `plans/` cleanup | Decide fate of `gdocs-table-manipulation*.plan.md` (targets another repo): move out of AEC or delete. (`ui-audit-skill-command.plan.md` was removed: its skill ships as `.claude/skills/ui-audit/`.) | `plans/` (legacy dir) |
 | Physical archive of shipped plans | Five plans have shipping-status headers but still live in `docs/superpowers/plans/`. Run the `git mv` block in `docs/superpowers/plans/archive/README.md`. | `docs/superpowers/plans/archive/README.md` |
 
 ---
