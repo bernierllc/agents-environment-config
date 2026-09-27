@@ -85,7 +85,7 @@ Cross-cutting topic rules:
 
 ### packages/
 Package-specific rules (for tools/):
-- `package-management.mdc` - Package management rules using ./manager CLI
+- `package-management.mdc` - Use the project's own package tooling; quality gates before publishing
 - `package-reuse.mdc` - Guidelines for reusing existing packages
 
 ## Usage Guidelines

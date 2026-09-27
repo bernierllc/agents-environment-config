@@ -1,38 +1,15 @@
 # Package Management Rules
 
-## Mandatory Use of ./manager CLI
+## Use the project's own package tooling
 
-**NEVER use basic npm commands or legacy tools for package management.** Always use the comprehensive `./manager` CLI system:
+Before running any package command, find how this repository manages its packages and use that, not an ad-hoc command:
 
-### Primary Package Management Tool
+1. **Look for project scripts first**: `package.json` `scripts`, a `Makefile`, a `scripts/` directory, or a repo CLI (e.g. `./manager`, `./scripts/release`). If one exists for building, testing, versioning or publishing, it is the only supported path.
+2. **Identify the workspace tool**: npm/pnpm/yarn workspaces, Turborepo, Nx, Lerna, Changesets. Run commands through it so the whole workspace stays consistent.
+3. **Never publish by hand** (`npm publish` straight from a package directory) when the repo defines a release flow; hand publishing skips its version, changelog and validation steps.
+4. **If there is no tooling**, use the package manager the lockfile implies (`package-lock.json` → npm, `pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn) and do not mix managers.
 
-**`./manager`** - The ONLY way to manage packages in this repository
-
-```bash
-# Use ./manager for ALL package operations
-./manager publish [package] [bump] [message]
-./manager validate
-./manager check
-./manager build
-./manager test
-./manager status
-./manager list [filter]
-./manager track [package]
-```
-
-### Forbidden Commands
-
-**DO NOT USE:**
-- `npm publish` directly
-- `npm version` manually
-- Manual version bumping in package.json
-- `development-cli` (legacy tool)
-- Any other publishing tools
-
-**ALWAYS USE:**
-- `./manager publish` for publishing
-- `./manager validate` for validation
-- `./manager check` for development checks
+ecks
 
 ## Package Development Rules
 
@@ -65,10 +42,10 @@
 ## Quality Gates
 
 ### Before Publishing
-- [ ] Package validation: `./manager validate`
-- [ ] Development checks: `./manager check`
-- [ ] Build success: `./manager build`
-- [ ] Tests passing: `./manager test`
+- [ ] Validation/lint passes (the project's validate or lint script)
+- [ ] Build succeeds (the project's build script)
+- [ ] Tests pass (the project's test script)
+- [ ] Version bump and changelog follow the project's release flow
 - [ ] Documentation complete: README.md, API docs, examples
 
 ### Package Requirements
