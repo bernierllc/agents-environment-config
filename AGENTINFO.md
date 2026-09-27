@@ -11,7 +11,7 @@ AEC is a product for anyone who installs it, not the maintainer's personal setup
 - **The generic user wins conflicts.** When the current maintainer's personal instructions (their global `CLAUDE.md`/`AGENTS.md`) would shape this repo for them alone, follow what a generic user needs, and say so in the PR.
 - **Personal preferences become settings, not hard-coded behavior.** Ship a safe default for a first-time user and make the rest opt-in. For example, `pr_open_mode` lets users choose draft or ready-for-review PRs instead of AEC forcing either.
 - **Examples use placeholders** (`my-project`, `my-app`, `my-plugin`); see README guidelines.
-- **Enforced where a check can:** `tests/test_no_maintainer_specifics.py` fails on personal home paths (macOS, Linux, Windows, `~/`) and on real project names under any home, in every tracked file. It is a heuristic: names written without a path still need review.
+- **Enforced where a check can:** `tests/test_no_maintainer_specifics.py` fails on personal home paths (macOS, Linux, Windows, `~/`) and on real project names under a home's common project folders (`projects/`, `src/`, `code/`, `repos/`, ...), in every tracked file. It is a heuristic: names written without a path still need review.
 
 ## Stack Information
 

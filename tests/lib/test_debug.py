@@ -29,7 +29,7 @@ class TestRedaction:
     def test_redacts_unix_user_paths(self, fresh_debug):
         d = fresh_debug
         assert "/Users/USER" in d.redact("/Users/alice/projects/my-app/foo.py")
-        assert "/home/USER" in d.redact("/home/bob/repos/x")
+        assert "/home/USER" in d.redact("/home/bob/repos/my-app")
 
     def test_redacts_windows_user_paths(self, fresh_debug):
         d = fresh_debug

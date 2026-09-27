@@ -48,7 +48,7 @@ Name each entry for the service it serves; `protocol` and `description` are show
 4. **Check**: `aec ports check` must report no conflicts
 5. **Register**: `aec ports register`
 6. **Update Project**: Modify project configuration to use the port
-7. **Commit**: Include `.aec.json` and the project changes together
+7. **Commit**: Include the project changes, plus `.aec.json` if the repo tracks it (some users gitignore it)
 
 ### Changing Existing Ports
 1. **Identify Impact**: Check all projects using the port
@@ -156,7 +156,7 @@ The registry is rebuilt from each project's `.aec.json`, which is the source of 
 - [ ] Modify project configuration
 - [ ] Test port availability
 - [ ] Verify service works on assigned port
-- [ ] Commit `.aec.json` and the project changes together
+- [ ] Commit the project changes, plus `.aec.json` if the repo tracks it
 
 ### Before Changing Existing Port
 - [ ] Identify all projects using the port
