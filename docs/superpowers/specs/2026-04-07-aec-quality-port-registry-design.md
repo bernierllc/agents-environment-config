@@ -12,7 +12,7 @@ that AEC is well-positioned to solve:
 
 1. **Port collisions** — Projects silently claim the same ports. Developers discover conflicts
    at runtime when a dev server or database fails to bind. The current workaround is a
-   manually maintained `~/projects/ports.json` file that agents are told to check, but it
+   manually maintained `ports.json` file that agents are told to check, but it
    has no enforcement and already contains conflicts (port 3000 is claimed by 5 projects).
 
 2. **No per-project AEC metadata** — AEC tracks installed skills/rules/agents in a central
@@ -599,7 +599,7 @@ This keeps the local copy in sync without requiring a separate command.
 
 ## Migration: Existing `ports.json`
 
-The existing `~/projects/ports.json` on this machine contains ~15 projects with ~80+
+An existing hand-maintained `ports.json` contains ~15 projects with ~80+
 port assignments. This is a one-time manual migration task during implementation, not
 a CLI feature.
 

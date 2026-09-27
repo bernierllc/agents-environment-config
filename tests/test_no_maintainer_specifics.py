@@ -1,16 +1,19 @@
-"""Guard: nothing committed to AEC contains a specific person's home directory.
+"""Guard: nothing committed to AEC contains a specific person's paths or projects.
 
 AEC is installed by anyone. A path like /Users/<someone>/projects/... in a
 rule, command, script or module only works on that one machine, and tells
 every other user's agents to run tools that do not exist. Examples must use
-placeholders (/Users/me/, /home/user/, ~/). See "Product scope" in AGENTINFO.md.
+placeholders (/Users/me/, /home/user/, ~/projects/my-app). See "Product scope"
+in AGENTINFO.md.
+
+This is a heuristic, not a proof: it catches home-directory paths and the
+project names under them. Personal names written without a path still need
+review.
 """
 
 import re
 import subprocess
 from pathlib import Path
-
-import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 # Every tracked file (docs and plans too: they are part of the product repo),
@@ -21,20 +24,34 @@ EXCLUDE = (
 )
 PLACEHOLDERS = ("me", "you", "user", "username", "example", "name", "yourname", "runner",
                 "test", "dev", "alice", "bob", "carol")
-# Example project directories must be placeholders (or AEC's own public repos),
-# not the names of someone's real projects.
-PROJECT_PLACEHOLDERS = {"my-app", "my-api", "my-project", "my-plugin", "my-repo", "my-site",
-                        "my-events", "my-forms", "my-hub", "my-demo", "my-crm",
-                        "agents-environment-config", "claude-skills"}
+# Example project directories must be placeholders (or AEC-related public
+# repos), not the names of someone's real projects.
+PROJECT_PLACEHOLDERS = {
+    "my-app", "my-api", "my-project", "my-plugin", "my-repo", "my-site", "my-events",
+    "my-forms", "my-hub", "my-demo", "my-crm", "dashboard", "api-server", "mobile-app",
+    "new-project", "test", "foo",
+    "agents-environment-config", "claude-skills", "loadout",
+}
 
-# A home directory on macOS/Linux (/Users/<u>/, /home/<u>/) or Windows
-# (C:\Users\<u>\ or C:/Users/<u>/), optionally followed by projects/<name>.
+SEP = r"[\\/]+"  # one or more separators: also matches escaped "\\" in source strings
 HOME_PATH = re.compile(
-    # [\\/]+ also matches escaped backslashes inside source strings ("C:\\\\Users").
-    r"(?:/(?:Users|home)/|\b[A-Za-z]:[\\/]+Users[\\/]+)"
-    r"(?P<user>[A-Za-z][\w.-]*)[\\/]+"
-    r"(?:projects[\\/]+(?P<project>[A-Za-z0-9._-]+))?"
+    # /Users/<u>/, /home/<u>/, C:\Users\<u>\, C:/Users/<u>/ ...
+    r"(?:(?:/(?:Users|home)/|\b[A-Za-z]:" + SEP + r"Users" + SEP + r")"
+    r"(?P<user>[A-Za-z][\w.-]*)" + SEP +
+    # ... or ~/
+    r"|(?<![\w.])~" + SEP + r")"
+    # ... optionally followed by projects/<name> (AEC's Windows default is ~/Projects)
+    r"(?:(?i:projects)" + SEP + r"(?P<project>[A-Za-z0-9._-]+))?"
 )
+
+
+def _flagged(match) -> str:
+    user, project = match.group("user"), match.group("project")
+    if user and user.lower() not in PLACEHOLDERS:
+        return "personal home"
+    if project and project not in PROJECT_PLACEHOLDERS:
+        return "real project name"
+    return ""
 
 
 def _shipped_files():
@@ -53,10 +70,9 @@ def _findings():
             continue
         for n, line in enumerate(text.splitlines(), 1):
             for m in HOME_PATH.finditer(line):
-                if m.group("user").lower() not in PLACEHOLDERS:
-                    hits.append(f"{rel}:{n}: personal home {m.group(0)}")
-                elif m.group("project") and m.group("project") not in PROJECT_PLACEHOLDERS:
-                    hits.append(f"{rel}:{n}: real project name {m.group(0)}")
+                why = _flagged(m)
+                if why:
+                    hits.append(f"{rel}:{n}: {why} {m.group(0)}")
     return hits
 
 
@@ -69,15 +85,22 @@ def test_no_personal_paths_or_project_names_in_tracked_files():
     assert not hits, "maintainer-specific paths in tracked files:\n" + "\n".join(hits[:40])
 
 
+BAD = [
+    "/Users/realname/x/", "/home/realname/x/", "C:/Users/realname/x/",
+    r"C:\Users\realname\x", r"C:\\Users\\realname\\x",
+    "/Users/me/projects/secret-app/", "/home/user/projects/secret-app/",
+    r"D:\Users\user\projects\secret-app", r"C:\Users\user\Projects\secret-app",
+    "~/projects/secret-app", "~/Projects/secret-app",
+]
+OK = [
+    "/Users/me/projects/my-app/", "/home/user/", r"C:\Users\example\projects\my-api",
+    r"C:\Users\user\Projects\my-app", "~/projects/my-app", "~/.claude/skills", "a~/b",
+]
+
+
 def test_pattern_covers_every_home_form():
-    bad = ["/Users/realname/x/", "/home/realname/x/", "C:\\Users\\realname\\x",
-           "C:\\\\Users\\\\realname\\\\x",
-           "C:/Users/realname/x/", "/Users/me/projects/secret-app/", "/home/user/projects/secret-app/",
-           "D:\\Users\\user\\projects\\secret-app"]
-    ok = ["/Users/me/projects/my-app/", "/home/user/", "C:\\Users\\example\\projects\\my-api"]
-    def flagged(t):
-        return any(m.group("user").lower() not in PLACEHOLDERS
-                   or (m.group("project") and m.group("project") not in PROJECT_PLACEHOLDERS)
-                   for m in HOME_PATH.finditer(t))
-    assert all(flagged(t) for t in bad), [t for t in bad if not flagged(t)]
-    assert not any(flagged(t) for t in ok), [t for t in ok if flagged(t)]
+    def flagged(text):
+        return any(_flagged(m) for m in HOME_PATH.finditer(text))
+
+    assert [t for t in BAD if not flagged(t)] == []
+    assert [t for t in OK if flagged(t)] == []
