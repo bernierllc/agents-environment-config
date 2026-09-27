@@ -37,7 +37,8 @@ SEP = r"[\\/]+"  # one or more separators: also matches escaped "\\" in source s
 HOME_PATH = re.compile(
     # /Users/<u>/, /home/<u>/, C:\Users\<u>\, C:/Users/<u>/ ...
     r"(?:(?:/(?:Users|home)/|\b[A-Za-z]:" + SEP + r"Users" + SEP + r")"
-    r"(?P<user>[A-Za-z][\w.-]*)" + SEP +
+    # the username ends at a separator or at the end of the path
+    r"(?P<user>[A-Za-z][\w.-]*)(?:" + SEP + r"|(?![\w.-]))"
     # ... or ~/
     r"|(?<![\w.])~" + SEP + r")"
     # ... optionally followed by projects/<name> (AEC's Windows default is ~/Projects)
@@ -91,6 +92,7 @@ BAD = [
     "/Users/me/projects/secret-app/", "/home/user/projects/secret-app/",
     r"D:\Users\user\projects\secret-app", r"C:\Users\user\Projects\secret-app",
     "~/projects/secret-app", "~/Projects/secret-app",
+    "/Users/realname", "/home/realname", r"C:\Users\realname", "cd /Users/realname && ls",
 ]
 OK = [
     "/Users/me/projects/my-app/", "/home/user/", r"C:\Users\example\projects\my-api",

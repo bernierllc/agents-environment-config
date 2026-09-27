@@ -18,33 +18,21 @@ Before running any package command, find how this repository manages its package
 
 ecks
 
-## Package Development Rules
+## Package Design
 
-### Core Package Rules
-- **Dependency-free**: Core packages must not import other internal packages
-- **Atomic functionality**: Single responsibility, focused purpose
-- **Pure functions**: Predictable, testable, side-effect free
-- **Strict typing**: No implicit `any`, comprehensive interfaces
-- **Self-contained**: All functionality implemented internally
+Follow the architecture this repository already uses; do not impose one.
 
-### Service Package Rules
-- **Compose core packages**: Use core packages as dependencies
-- **Opinionated layer**: Provide configured, ready-to-use services
-- **Adapter support**: Handle multiple implementation options
-- **Centralized error handling**: Use standard error patterns
+- **Read the repo's conventions first**: its README, CONTRIBUTING, or package docs. If packages are layered (for example core → service → suite), keep dependencies pointing one way and put code in the layer the repo defines for it.
+- **Match the language setup**: in a TypeScript repo, follow its `tsconfig` strictness; do not add types to a JavaScript package or change strictness as a side effect.
+- **Keep each package focused**: one clear responsibility and a public API documented in its README.
 
 ## Package Reuse Guidelines
 
 ### Before Creating New Packages
-1. **Search existing packages**: Check if functionality already exists
+1. **Search existing packages**: Check if functionality already exists (see `package-reuse.mdc`)
 2. **Evaluate partial matches**: Consider extending existing packages
 3. **Use composition**: Combine existing packages rather than recreating
-4. **Document decisions**: Record rationale in planning files
-
-### Package Dependencies
-- **Core packages**: No internal dependencies (except types)
-- **Service packages**: Can depend on core packages
-- **Suite packages**: Compose multiple service packages
+4. **Document decisions**: Record the rationale where the repo keeps design notes
 
 ## Quality Gates
 
@@ -56,11 +44,11 @@ ecks
 - [ ] Documentation complete: README.md, API docs, examples
 
 ### Package Requirements
-- **Comprehensive README.md**: Purpose, usage, examples
+- **README.md**: Purpose, usage, examples
 - **API documentation**: Clear interface definitions
-- **TypeScript types**: Strict typing, no implicit any
-- **Test coverage**: Comprehensive testing for edge cases
-- **Error handling**: Proper error types and handling
+- **Types**: Whatever the repo's language setup requires (e.g. its `tsconfig` strictness)
+- **Tests**: Cover the package's public behavior and edge cases
+- **Error handling**: Follow the repo's error conventions
 
 ## References
 - **Architecture**: See `general/architecture.mdc`
