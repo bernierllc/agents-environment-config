@@ -58,10 +58,11 @@ Name each entry for the service it serves; `protocol` and `description` are show
 
 ### Changing Existing Ports
 1. **Identify Impact**: Check all projects using the port
-2. **Update `.aec.json`**: Change the entry, then `aec ports check` and `aec ports register`
-3. **Update All Projects**: Change all references
-4. **Test**: Verify all services work
-5. **Commit**: Include all changes together
+2. **Update `.aec.json`**: Change the entry, then `aec ports check`
+3. **Re-register**: `aec ports unregister` then `aec ports register` (register only adds; without the unregister the old port stays reserved)
+4. **Update All Projects**: Change all references
+5. **Test**: Verify all services work
+6. **Commit**: Include all changes together
 
 ### Resolving Conflicts
 1. **Identify Conflicting Projects**: List all affected projects
@@ -165,7 +166,7 @@ The registry is rebuilt from each project's `.aec.json`, which is the source of 
 
 ### Before Changing Existing Port
 - [ ] Identify all projects using the port
-- [ ] Update the entry in `.aec.json`, then `aec ports check` and `aec ports register`
+- [ ] Update the entry in `.aec.json`, run `aec ports check`, then `aec ports unregister` and `aec ports register`
 - [ ] Update all affected project configurations
 - [ ] Test all affected services
 - [ ] Verify no new conflicts introduced

@@ -4,7 +4,7 @@
 
 **Last Updated:** 2025-11-23
 **Status:** Phase 2 Complete ✅ | Ready for Phase 3
-**Working Directory:** `~/projects/claude-skills/document-skills/gdocs/`
+**Working Directory:** `/Users/example/projects/claude-skills/document-skills/gdocs/`
 
 ---
 
@@ -12,7 +12,7 @@
 
 ### 1. Navigate to Working Directory
 ```bash
-cd ~/projects/claude-skills/document-skills/gdocs/
+cd /Users/example/projects/claude-skills/document-skills/gdocs/
 ```
 
 ### 2. Verify Environment
@@ -233,20 +233,20 @@ def delete_row(
 ## Key Files Reference
 
 ### Implementation Files
-- **Main Implementation:** `~/projects/claude-skills/document-skills/gdocs/scripts/table_manager.py`
-- **Editor Class:** `~/projects/claude-skills/document-skills/gdocs/scripts/gdocs_editor.py`
-- **Content Inserter:** `~/projects/claude-skills/document-skills/gdocs/scripts/content_inserter.py`
+- **Main Implementation:** `/Users/example/projects/claude-skills/document-skills/gdocs/scripts/table_manager.py`
+- **Editor Class:** `/Users/example/projects/claude-skills/document-skills/gdocs/scripts/gdocs_editor.py`
+- **Content Inserter:** `/Users/example/projects/claude-skills/document-skills/gdocs/scripts/content_inserter.py`
 
 ### Test Files
-- **Phase 1 Tests:** `~/projects/claude-skills/document-skills/gdocs/test_phase1_table_discovery.py`
-- **Phase 2 Tests:** `~/projects/claude-skills/document-skills/gdocs/test_phase2_table_creation.py`
+- **Phase 1 Tests:** `/Users/example/projects/claude-skills/document-skills/gdocs/test_phase1_table_discovery.py`
+- **Phase 2 Tests:** `/Users/example/projects/claude-skills/document-skills/gdocs/test_phase2_table_creation.py`
 - **Phase 3 Tests:** (To be created) `test_phase3_row_operations.py`
 
 ### Planning Documents
-- **Main Plan:** `~/projects/agents-environment-config/plans/gdocs-table-manipulation.plan.md`
-- **Phase 6 Specs:** `~/projects/claude-skills/document-skills/gdocs/PHASE_6_PLAN.md`
-- **Gap Analysis:** `~/projects/claude-skills/document-skills/gdocs/TABLE_CAPABILITIES_SUMMARY.md`
-- **Resume Guide:** `~/projects/agents-environment-config/plans/gdocs-table-manipulation-RESUME.md` (this file)
+- **Main Plan:** `/Users/example/projects/agents-environment-config/plans/gdocs-table-manipulation.plan.md`
+- **Phase 6 Specs:** `/Users/example/projects/claude-skills/document-skills/gdocs/PHASE_6_PLAN.md`
+- **Gap Analysis:** `/Users/example/projects/claude-skills/document-skills/gdocs/TABLE_CAPABILITIES_SUMMARY.md`
+- **Resume Guide:** `/Users/example/projects/agents-environment-config/plans/gdocs-table-manipulation-RESUME.md` (this file)
 
 ### Test Documents
 - **Phase 1:** https://docs.google.com/document/d/1snQqLXwSYtAjqpW73Lf1WETO99YIYsaBIEEThSeqYxg/edit
@@ -305,7 +305,7 @@ TableManager (scripts/table_manager.py)
 ### Running Tests
 ```bash
 # Phase 1 Tests
-cd ~/projects/claude-skills/document-skills/gdocs/
+cd /Users/example/projects/claude-skills/document-skills/gdocs/
 python3 test_phase1_table_discovery.py
 
 # Phase 2 Tests
@@ -372,7 +372,7 @@ except Exception as e:
 
 ### Option 1: Continue with Phase 3
 ```bash
-cd ~/projects/claude-skills/document-skills/gdocs/
+cd /Users/example/projects/claude-skills/document-skills/gdocs/
 
 # Tell Claude:
 "I'm ready to continue with Phase 3: Row Operations.
@@ -446,16 +446,16 @@ to make the tests pass"
 3. Run any test script - it will trigger OAuth flow
 
 ### If Tests Fail
-1. Check working directory: `pwd` should be `~/projects/claude-skills/document-skills/gdocs/`
+1. Check working directory: `pwd` should be `/Users/example/projects/claude-skills/document-skills/gdocs/`
 2. Verify Python version: `python3 --version` (should be 3.8+)
 3. Check imports: All scripts use `from scripts.gdocs_editor import GoogleDocsEditor`
 4. Review error stack trace for specific API errors
 
 ### If Stuck
 Refer to:
-- Main plan: `~/projects/agents-environment-config/plans/gdocs-table-manipulation.plan.md`
-- Technical specs: `~/projects/claude-skills/document-skills/gdocs/PHASE_6_PLAN.md`
-- Gap analysis: `~/projects/claude-skills/document-skills/gdocs/TABLE_CAPABILITIES_SUMMARY.md`
+- Main plan: `/Users/example/projects/agents-environment-config/plans/gdocs-table-manipulation.plan.md`
+- Technical specs: `/Users/example/projects/claude-skills/document-skills/gdocs/PHASE_6_PLAN.md`
+- Gap analysis: `/Users/example/projects/claude-skills/document-skills/gdocs/TABLE_CAPABILITIES_SUMMARY.md`
 
 ---
 

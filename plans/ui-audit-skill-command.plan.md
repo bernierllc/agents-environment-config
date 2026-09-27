@@ -236,7 +236,7 @@ Following project-manager-senior agent criteria, each task must include:
 
 ## Files to Copy and Adapt
 
-From `~/projects/SCF-Neue/`:
+From `/Users/example/projects/SCF-Neue/`:
 - `CONTEXT_CACHE/ui-audit-bootstrap.mjs` → Generic bootstrap script
 - `CONTEXT_CACHE/schema.sql` → Keep as-is
 - `tests/AUDIT-TASKS-GUIDANCE.md` → Reference documentation

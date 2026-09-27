@@ -189,7 +189,7 @@ If you are doing ANY of the following, you must consider seed data implications:
 
 - [ ] **Step 2: Verify rule parses correctly**
 
-Run: `python3 -c "from aec.lib.sources import discover_available; import json; print(json.dumps(discover_available('~/projects/agents-environment-config/.agent-rules', 'rules'), indent=2))" | grep seed`
+Run: `python3 -c "from aec.lib.sources import discover_available; import json; print(json.dumps(discover_available('/Users/example/projects/agents-environment-config/.agent-rules', 'rules'), indent=2))" | grep seed`
 Expected: `seed-data-management` appears in available rules
 
 - [ ] **Step 3: Commit**
@@ -304,7 +304,7 @@ Before committing changes that introduce new models, enums, or lookup data:
 
 - [ ] **Step 2: Verify skill is discoverable**
 
-Run: `python3 -c "from aec.lib.sources import discover_available; import json; print(json.dumps(discover_available('~/projects/agents-environment-config/.claude/skills', 'skills'), indent=2))" | grep seed`
+Run: `python3 -c "from aec.lib.sources import discover_available; import json; print(json.dumps(discover_available('/Users/example/projects/agents-environment-config/.claude/skills', 'skills'), indent=2))" | grep seed`
 Expected: `seed-data` appears in available skills
 
 - [ ] **Step 3: Commit**
@@ -838,7 +838,7 @@ git commit -m "feat(packages): implement package uninstall with keep-items optio
       },
       "skill:seed-data": {
         "version": "1.0.0",
-        "scope": "~/projects/my-app",
+        "scope": "/Users/example/projects/my-app",
         "installed_at": "2026-04-10T18:05:00Z"
       }
     },
@@ -950,7 +950,7 @@ def test_tripwire_json_output():
 
 **Scenario 2: All items in same repo**
 ```
-  ✓ Installed skill: seed-data (→ ~/projects/my-app)
+  ✓ Installed skill: seed-data (→ /Users/example/projects/my-app)
 
   ℹ  All items from the seed-data package are installed in my-app.
 
@@ -967,11 +967,11 @@ def test_tripwire_json_output():
 
 **Scenario 3: Mixed scopes**
 ```
-  ✓ Installed skill: seed-data (→ ~/projects/my-app)
+  ✓ Installed skill: seed-data (→ /Users/example/projects/my-app)
 
   ℹ  All items from the seed-data package are installed, but in different scopes:
      • rule: seed-data-management → global
-     • skill: seed-data → ~/projects/my-app
+     • skill: seed-data → /Users/example/projects/my-app
 
      Seed data management conventions — classifies application data as...
 
@@ -1259,7 +1259,7 @@ Expected output shape:
 ```json
 {
   "project": {
-    "path": "~/projects/my-app",
+    "path": "/Users/example/projects/my-app",
     "name": "my-app",
     "aec_initialized": false
   },

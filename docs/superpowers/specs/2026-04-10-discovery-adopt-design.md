@@ -353,8 +353,8 @@ Fields:
 {
   "schemaVersion": 1,
   "repos": {
-    "~/projects/aihelp": {
-      "aecJsonPath": "~/projects/aihelp/.aec.json",
+    "/Users/example/projects/aihelp": {
+      "aecJsonPath": "/Users/example/projects/aihelp/.aec.json",
       "trackedAt": "2026-04-08T03:32:24Z",
       "aecVersion": "2.18.2"
     }

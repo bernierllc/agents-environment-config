@@ -22,9 +22,10 @@ HOME_PATH = re.compile(r"/(?:Users|home)/([A-Za-z][\w.-]*)/")
 
 
 def _shipped_files():
-    out = subprocess.run(["git", "ls-files"], cwd=REPO,
-                         capture_output=True, text=True, check=True).stdout.split()
-    return [f for f in out if not f.startswith(EXCLUDE) and (REPO / f).is_file()]
+    # -z keeps filenames with spaces intact.
+    out = subprocess.run(["git", "ls-files", "-z"], cwd=REPO,
+                         capture_output=True, text=True, check=True).stdout.split("\0")
+    return [f for f in out if f and not f.startswith(EXCLUDE) and (REPO / f).is_file()]
 
 
 def test_scanner_finds_shipped_files():

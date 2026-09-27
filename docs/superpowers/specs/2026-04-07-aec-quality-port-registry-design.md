@@ -170,7 +170,7 @@ Located at `~/.agents-environment-config/ports-registry.json`.
   "ports": {
     "3333": {
       "project": "earnlearn",
-      "project_path": "~/projects/earnlearn",
+      "project_path": "/Users/example/projects/earnlearn",
       "key": "dev-server",
       "protocol": "http",
       "description": "Next.js dev server",
@@ -178,7 +178,7 @@ Located at `~/.agents-environment-config/ports-registry.json`.
     },
     "5433": {
       "project": "earnlearn",
-      "project_path": "~/projects/earnlearn",
+      "project_path": "/Users/example/projects/earnlearn",
       "key": "test-database",
       "protocol": "postgresql",
       "description": "Docker test DB",
