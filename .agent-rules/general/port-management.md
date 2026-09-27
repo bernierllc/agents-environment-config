@@ -142,7 +142,7 @@ aec ports validate
 ### Port Registry Recovery
 The registry is rebuilt from each project's `.aec.json`, which is the source of truth:
 1. **Validate**: `aec ports validate` to find entries for projects that no longer exist
-2. **Clean**: `aec ports unregister` for each stale project
+2. **Clean**: `aec ports unregister <stale-project-path>` for each path `validate` reports (with no path it unregisters the current directory)
 3. **Rebuild**: run `aec ports register` in each active project
 4. **Check**: `aec ports check` in each project
 5. **Test**: Verify all services work
