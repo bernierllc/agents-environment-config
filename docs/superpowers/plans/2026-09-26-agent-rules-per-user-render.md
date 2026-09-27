@@ -1,7 +1,7 @@
 # Render agent rules per user, not into the tracked `.agent-rules/`
 
 **Status:** Proposed (found closing out the 2026-09-24 install-fix session)
-**Priority:** Tier 2 — proposed; placement awaiting Matt's confirmation
+**Priority:** Tier 2 — placement confirmed by Matt (2026-09-27)
 
 ## Root cause
 
