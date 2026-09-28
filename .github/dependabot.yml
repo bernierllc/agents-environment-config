@@ -2,6 +2,9 @@ version: 2
 updates:
   - package-ecosystem: "pip"
     directory: "/"
+    # AEC is a library installed on Python 3.9+: keep ">=" floors as low as
+    # they work. Only raise a range when it excludes the latest release.
+    versioning-strategy: increase-if-necessary
     schedule:
       interval: "weekly"
   - package-ecosystem: "github-actions"
