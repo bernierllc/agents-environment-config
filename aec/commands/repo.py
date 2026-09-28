@@ -1682,6 +1682,9 @@ def _update_single_repo(project_dir: Path, dry_run: bool = False) -> None:
     # Check for redundant rule references in AGENTINFO.md
     _clean_agentinfo_redundancy(project_dir, dry_run)
 
+    # Port Registry block (the port rule gates on its marker)
+    _inject_port_registry_agentinfo(project_dir, dry_run)
+
     # Migrate legacy plans directories
     if not dry_run:
         _migrate_plans_dir(project_dir)
