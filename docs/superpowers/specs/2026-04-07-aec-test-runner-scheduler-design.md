@@ -134,7 +134,7 @@ Per suite, per run. Stored at `profiles/{project}/{datetime}.json`:
 ```json
 {
   "timestamp": "2026-04-08T02:00:00Z",
-  "project": "earnlearn",
+  "project": "my-app",
   "suite": "unit",
   "duration_seconds": 45.2,
   "exit_code": 0,
@@ -142,7 +142,7 @@ Per suite, per run. Stored at `profiles/{project}/{datetime}.json`:
   "ports_observed": [3333, 5433],
   "ports_registered": [3333, 5433],
   "ports_unregistered": [],
-  "docker_containers_started": ["earnlearn-test-db"],
+  "docker_containers_started": ["my-app-test-db"],
   "docker_containers_remaining": [],
   "ports_still_listening": [],
   "processes_before": {
@@ -167,11 +167,11 @@ Per suite, per run. Stored at `profiles/{project}/{datetime}.json`:
 Runs during every suite execution regardless of port registry setting:
 
 - **Port management ON:** Diffs observed ports against registry. Unregistered ports
-  surfaced in summary: "Ports 9229, 9230 appeared during earnlearn tests — consider
+  surfaced in summary: "Ports 9229, 9230 appeared during my-app tests — consider
   registering them in .aec.json"
 
 - **Port management OFF:** Cross-references observed ports across all projects' profiles.
-  Overlapping ports surfaced: "earnlearn and neverhub both use port 5434 during tests —
+  Overlapping ports surfaced: "my-app and my-hub both use port 5434 during tests —
   parallel development and testing would likely cause port problems"
 
 ### Process Leak Detection
@@ -214,8 +214,8 @@ After `min_profile_runs_for_parallel` sequential runs (default 3):
        "computed_at": "2026-04-10T02:00:00Z",
        "based_on_runs": 3,
        "lanes": [
-         ["barevents", "mbernier.com"],
-         ["earnlearn", "neverhub"]
+         ["my-events", "example.com"],
+         ["my-app", "my-hub"]
        ]
      }
    }
@@ -224,8 +224,8 @@ After `min_profile_runs_for_parallel` sequential runs (default 3):
 4. Surface in report summary:
    ```
    Suggested lanes based on port/resource analysis:
-     Lane 1: barevents, mbernier.com (no shared ports, low memory)
-     Lane 2: earnlearn, neverhub (no shared ports, both use docker)
+     Lane 1: my-events, example.com (no shared ports, low memory)
+     Lane 2: my-app, my-hub (no shared ports, both use docker)
    Enable with: aec config set parallel_enabled true
    ```
 
@@ -245,13 +245,13 @@ After `min_profile_runs_for_parallel` sequential runs (default 3):
   tests/
     2026-04-08T02:00:00Z/
       summary.txt
-      earnlearn_test_output.txt
-      barevents_test_output.txt
+      my-app_test_output.txt
+      my-events_test_output.txt
   profiles/
-    earnlearn/
+    my-app/
       2026-04-08T02:00:00Z.json
       2026-04-07T02:00:00Z.json
-    barevents/
+    my-events/
       2026-04-08T02:00:00Z.json
 ```
 
@@ -259,40 +259,40 @@ After `min_profile_runs_for_parallel` sequential runs (default 3):
 
 ```
 AEC Test Report — 2026-04-08 02:00:00 UTC
-Execution order: barevents, earnlearn, mbernier.com, neverhub (seed: 42)
+Execution order: my-events, my-app, example.com, my-hub (seed: 42)
 Note: 12 days of reports exist in ~/.agents-environment-config/tests/
 
 ──────────────────────────────────────────
 
-barevents
+my-events
   ✓ unit         23.4s   passed
   ⊘ integration  skipped (prerequisite: docker not available)
 
-earnlearn
+my-app
   ✓ unit         45.2s   passed
   ✗ integration  12.1s   FAILED (exit code 1)
-    → see earnlearn_test_output.txt
+    → see my-app_test_output.txt
 
-mbernier.com
+example.com
   ✓ unit         8.3s    passed
 
-neverhub
+my-hub
   ⊘ skipped entirely (no scheduled suites)
 
 ──────────────────────────────────────────
 
 Port observations:
-  earnlearn: ports 9229, 9230 appeared during tests — not registered in AEC
-  barevents: all observed ports match AEC registry ✓
+  my-app: ports 9229, 9230 appeared during tests — not registered in AEC
+  my-events: all observed ports match AEC registry ✓
 
 Process observations:
-  earnlearn integration: 3 node processes leaked (PIDs: 42310, 42311, 42312)
+  my-app integration: 3 node processes leaked (PIDs: 42310, 42311, 42312)
   all other suites: clean ✓
 
 Parallelization (3/3 profiling runs complete):
   Suggested lanes based on port/resource analysis:
-    Lane 1: barevents, mbernier.com (no shared ports, low memory)
-    Lane 2: earnlearn, neverhub (no shared ports, both use docker)
+    Lane 1: my-events, example.com (no shared ports, low memory)
+    Lane 2: my-app, my-hub (no shared ports, both use docker)
   Enable with: aec config set parallel_enabled true
 ```
 
@@ -399,7 +399,7 @@ All commands support `--help`.
 
 **Local (in a project):**
 ```
-earnlearn test configuration:
+my-app test configuration:
   Suites: unit, integration, e2e
   Scheduled: unit, integration
   Prerequisites: docker
@@ -545,7 +545,7 @@ Manageable via `aec config set <key> <value>` and documented in `--help`.
 
 Phase 3 will add:
 - `aec test report` interactive browser (navigate between runs, diff reports)
-- Trend analysis across profile data (is earnlearn getting slower? are leaks increasing?)
+- Trend analysis across profile data (is my-app getting slower? are leaks increasing?)
 - Cross-project contamination analysis (correlate execution order with anomalies)
 - Optional cleanup automation (opt-in to let the runner kill leaked processes)
 - CI integration (run `aec test run` in CI, post results to PR)

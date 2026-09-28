@@ -872,32 +872,7 @@ def _manage_aec_json_gitignore_step(
     manage_aec_json_gitignore(project_dir, should_ignore)
 
 
-def _inject_port_registry_agentinfo(
-    project_dir: Path,
-    dry_run: bool = False,
-) -> None:
-    """Append Port Registry section to AGENTINFO.md if applicable.
-
-    Args:
-        project_dir: Path to the project root.
-        dry_run: If True, report what would happen without making changes.
-    """
-    from ..lib.preferences import get_preference
-
-    port_enabled = get_preference("port_registry_enabled")
-    if not port_enabled:
-        return
-
-    agentinfo_path = project_dir / "AGENTINFO.md"
-    if not agentinfo_path.exists():
-        return
-
-    content = agentinfo_path.read_text()
-    if "## Port Registry" in content:
-        return
-
-    port_section = """
-## Port Registry
+_PORT_SECTION_BODY = """## Port Registry
 
 This project's ports are registered with AEC. Before assigning new ports,
 check `aec ports list` to see all registered ports and avoid conflicts.
@@ -909,13 +884,61 @@ To register new ports:
 Port assignments use first-come-first-served. See `.aec.json` for this
 project's current port assignments.
 """
+_PORT_START = "<!-- aec-port-registry:start -->"
+_PORT_END = "<!-- aec-port-registry:end -->"
 
+
+def _inject_port_registry_agentinfo(
+    project_dir: Path,
+    dry_run: bool = False,
+) -> None:
+    """Keep AGENTINFO.md's Port Registry section in step with the preference.
+
+    The always-applied port-management rule only applies where this section
+    exists, so it is added when the registry is enabled and removed when the
+    user turns it off. Only the block AEC wrote is removed: the marked block,
+    or the exact unmarked text older versions appended. A section the user
+    wrote themselves is left alone.
+
+    Args:
+        project_dir: Path to the project root.
+        dry_run: If True, report what would happen without making changes.
+    """
+    from ..lib.preferences import get_preference
+
+    port_enabled = get_preference("port_registry_enabled")
+    agentinfo_path = project_dir / "AGENTINFO.md"
+    if port_enabled is None or not agentinfo_path.exists():
+        return
+
+    content = agentinfo_path.read_text()
+    if not port_enabled:
+        stripped = re.sub(
+            r"\n?" + re.escape(_PORT_START) + r".*?" + re.escape(_PORT_END) + r"\n?", "", content, flags=re.S
+        ).replace("\n" + _PORT_SECTION_BODY, "")
+        if stripped == content:
+            return
+        if dry_run:
+            Console.info("Would remove Port Registry section from AGENTINFO.md")
+            return
+        agentinfo_path.write_text(stripped.rstrip("\n") + "\n")
+        Console.success("Removed Port Registry section from AGENTINFO.md (registry disabled)")
+        return
+
+    # The rule gates on the marker, so a user-written section without it
+    # still gets AEC's block, and an unmarked legacy block is migrated.
+    if _PORT_START in content:
+        return
+    block = f"{_PORT_START}\n{_PORT_SECTION_BODY}{_PORT_END}\n"
+    legacy = "\n" + _PORT_SECTION_BODY
     if dry_run:
         Console.info("Would add Port Registry section to AGENTINFO.md")
         return
-
-    with open(agentinfo_path, "a") as f:
-        f.write(port_section)
+    if legacy in content:
+        agentinfo_path.write_text(content.replace(legacy, "\n" + block, 1))
+    else:
+        with open(agentinfo_path, "a") as f:
+            f.write("\n" + block)
     Console.success("Added Port Registry section to AGENTINFO.md")
 
 
@@ -1658,6 +1681,9 @@ def _update_single_repo(project_dir: Path, dry_run: bool = False) -> None:
 
     # Check for redundant rule references in AGENTINFO.md
     _clean_agentinfo_redundancy(project_dir, dry_run)
+
+    # Port Registry block (the port rule gates on its marker)
+    _inject_port_registry_agentinfo(project_dir, dry_run)
 
     # Migrate legacy plans directories
     if not dry_run:

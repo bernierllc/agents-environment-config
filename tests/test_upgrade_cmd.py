@@ -766,3 +766,37 @@ def test_declined_overwrite_is_not_reported_current(tmp_path, monkeypatch):
 
     assert "1.0.0" in (installed / "s" / "SKILL.md").read_text()
     assert not_current
+
+
+class TestUpgradeMigratesPortRegistryBlock:
+    """Upgrading the port rule must not make opted-in repos look opted out."""
+
+    @patch("aec.commands.upgrade.find_tracked_repo", return_value=None)
+    @patch("aec.commands.upgrade.get_source_dirs")
+    @patch("aec.commands.upgrade.get_repo_root")
+    @patch("aec.commands.upgrade._manifest_path")
+    def test_legacy_block_gets_the_marker(
+        self, mock_mp, mock_root, mock_sd, mock_find, upgrade_env, monkeypatch
+    ):
+        from aec.commands.repo import _PORT_SECTION_BODY, _PORT_START
+        from aec.commands.upgrade import run_upgrade
+
+        mock_root.return_value = upgrade_env["repo"]
+        mock_mp.return_value = upgrade_env["manifest_path"]
+        mock_sd.return_value = _source_dirs(upgrade_env["repo"])
+        prefs = upgrade_env["aec_home"] / "preferences.json"
+        prefs.write_text(json.dumps({
+            "schema_version": "1.1", "settings": {},
+            "optional_rules": {"port_registry_enabled": {"enabled": True}},
+        }))
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs)
+        project = upgrade_env["repo"].parent / "my-app"
+        project.mkdir()
+        (project / "AGENTINFO.md").write_text("# my-app\n\n" + _PORT_SECTION_BODY)
+        monkeypatch.setattr("aec.commands.upgrade.get_all_tracked_repos", lambda: [project])
+
+        run_upgrade(yes=True, dry_run=True)
+        assert _PORT_START not in (project / "AGENTINFO.md").read_text()
+
+        run_upgrade(yes=True)
+        assert _PORT_START in (project / "AGENTINFO.md").read_text()

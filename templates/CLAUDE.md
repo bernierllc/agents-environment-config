@@ -24,10 +24,10 @@ Do NOT memorize all rules - read the specific rule file when working in that are
 
 ### All Rules by Category
 
-- **general/**: Core principles (architecture, workflow, documentation) (9 rules)
+- **general/**: Core principles (architecture, workflow, documentation) (8 rules)
 - **languages/**: Language conventions (Python, TypeScript) (2 rules)
 - **stacks/**: Stack patterns (Next.js, FastAPI, React Native) (3 rules)
-- **frameworks/**: Framework guides (databases, testing, UI) (10 rules)
+- **frameworks/**: Framework guides (databases, testing, UI) (11 rules)
 - **topics/**: Cross-cutting (API, git, security, quality) (12 rules)
 - **packages/**: Package management (2 rules)
 
@@ -42,5 +42,5 @@ Do NOT memorize all rules - read the specific rule file when working in that are
 ## Regenerating This File
 
 ```bash
-python3 -m aec files generate
+aec files generate
 ```

@@ -34,10 +34,10 @@ Drift is possible in **both** directions:
 
 | Repo | State claims | settings.json reality | Verdict |
 |---|---|---|---|
-| aihelp, formExpert.co, houseofgenius, el_new_app, barevents | hooks present | present, correct index | OK |
-| **a10d.info** | `vw-scan-on-edit` @ PostToolUse/1 | recovered (re-installed today 21:52) | OK (recovered) |
-| **email_demo** | `vw-scan-on-edit` @ PostToolUse/2 | only `[0] tsc`, `[1] verification-playwright` — vw hook **gone** | **MISSING (drift)** |
-| **kylebruns** | both vw hooks @ /1,/2 | only `[0] verification-playwright` — both vw hooks **gone** | **MISSING (drift)** |
+| repo-a, repo-b, repo-c, repo-d, repo-e | hooks present | present, correct index | OK |
+| **repo-f** | `vw-scan-on-edit` @ PostToolUse/1 | recovered (re-installed today 21:52) | OK (recovered) |
+| **repo-g** | `vw-scan-on-edit` @ PostToolUse/2 | only `[0] tsc`, `[1] verification-playwright` — vw hook **gone** | **MISSING (drift)** |
+| **repo-h** | both vw hooks @ /1,/2 | only `[0] verification-playwright` — both vw hooks **gone** | **MISSING (drift)** |
 
 Common factor in the broken repos: they carry the **older `verification-playwright`
 pipeline hook**, whose `settings.json` wiring overwrote the AEC-installed
@@ -162,12 +162,12 @@ scope unified means the existing repo-scoped uninstall already cleans up correct
 
 ## 6. Immediate remediation (independent of this plan)
 
-`email_demo` and `kylebruns` are broken **now**. Two options:
+`repo-g` and `repo-h` are broken **now**. Two options:
 - Hand-merge the missing `verification-writer` hook into each settings.json + fix the
   state pointer (one-off, manual).
 - Leave them as the first real fixtures for `aec hooks verify --repair` and fix them
   by running the tool once built (preferred — proves the tool on real drift).
 
-Also flag: a10d.info's `verification-writer` was installed today (2026-06-25 21:52)
+Also flag: repo-f's `verification-writer` was installed today (2026-06-25 21:52)
 by something other than this session. If unintended, that is a possible
 no-auto-install violation worth tracing.

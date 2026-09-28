@@ -12,7 +12,7 @@ that AEC is well-positioned to solve:
 
 1. **Port collisions** — Projects silently claim the same ports. Developers discover conflicts
    at runtime when a dev server or database fails to bind. The current workaround is a
-   manually maintained `~/projects/ports.json` file that agents are told to check, but it
+   manually maintained `ports.json` file that agents are told to check, but it
    has no enforcement and already contains conflicts (port 3000 is claimed by 5 projects).
 
 2. **No per-project AEC metadata** — AEC tracks installed skills/rules/agents in a central
@@ -71,8 +71,8 @@ Located at the project root. Created/updated during `aec setup`.
   "$schema": "https://aec.bernier.dev/schema/aec.json",
   "version": "1.0.0",
   "project": {
-    "name": "earnlearn",
-    "description": "EarnLearn platform - Next.js application"
+    "name": "my-app",
+    "description": "MyApp platform - Next.js application"
   },
   "ports": {
     "dev-server": {
@@ -169,16 +169,16 @@ Located at `~/.agents-environment-config/ports-registry.json`.
   "version": "1.0.0",
   "ports": {
     "3333": {
-      "project": "earnlearn",
-      "project_path": "/Users/mattbernier/projects/earnlearn",
+      "project": "my-app",
+      "project_path": "/Users/example/projects/my-app",
       "key": "dev-server",
       "protocol": "http",
       "description": "Next.js dev server",
       "registered_at": "2026-04-07T14:00:00Z"
     },
     "5433": {
-      "project": "earnlearn",
-      "project_path": "/Users/mattbernier/projects/earnlearn",
+      "project": "my-app",
+      "project_path": "/Users/example/projects/my-app",
       "key": "test-database",
       "protocol": "postgresql",
       "description": "Docker test DB",
@@ -209,7 +209,7 @@ Located at `~/.agents-environment-config/ports-registry.json`.
 
 ```
 $ aec setup ~/projects/new-project
-  ⚠ Port conflict: port 3000 is already registered to "mbernier.com"
+  ⚠ Port conflict: port 3000 is already registered to "example.com"
     (registered 2026-03-15T10:00:00Z)
     Your .aec.json assigns 3000 to "dev-server"
     → Update your .aec.json to use a different port, or run
@@ -599,7 +599,7 @@ This keeps the local copy in sync without requiring a separate command.
 
 ## Migration: Existing `ports.json`
 
-The existing `~/projects/ports.json` on this machine contains ~15 projects with ~80+
+An existing hand-maintained `ports.json` contains ~15 projects with ~80+
 port assignments. This is a one-time manual migration task during implementation, not
 a CLI feature.
 

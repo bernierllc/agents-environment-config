@@ -55,7 +55,6 @@ These principles apply universally across all projects. For detailed rules, see 
 - **Documentation**: See `general/documentation.mdc`
 - **Security**: See `general/security.mdc`
 - **Port Management**: See `general/port-management.mdc`
-- **Project Setup CLI**: See `general/project-setup-cli.mdc`
 - **Plans and Checklists**: See `general/plans-checklists.mdc`
 - **Rules About Rules**: See `general/rules-about-rules.mdc`
 

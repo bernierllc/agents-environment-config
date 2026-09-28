@@ -26,7 +26,7 @@ def raycast_dir(tmp_path: Path) -> Path:
 def project_dirs(tmp_path: Path) -> dict[str, Path]:
     """Create a set of fake project directories for testing."""
     projects = {}
-    for name in ["tools", "mbernier.com", "earnlearn", "radium", "missing-project"]:
+    for name in ["tools", "example.com", "my-app", "radium", "missing-project"]:
         if name != "missing-project":
             d = tmp_path / "projects" / name
             d.mkdir(parents=True)
@@ -191,7 +191,7 @@ class TestDiscoverFromScripts:
             raycast_dir, "tools", str(project_dirs["tools"])
         )
         _write_cursor_script(
-            raycast_dir, "earnlearn", str(project_dirs["earnlearn"])
+            raycast_dir, "my-app", str(project_dirs["my-app"])
         )
         _write_claude_script(
             raycast_dir, "radium", str(project_dirs["radium"])
@@ -201,7 +201,7 @@ class TestDiscoverFromScripts:
         assert len(result) == 3
         resolved = {p.resolve() for p in result}
         assert project_dirs["tools"].resolve() in resolved
-        assert project_dirs["earnlearn"].resolve() in resolved
+        assert project_dirs["my-app"].resolve() in resolved
         assert project_dirs["radium"].resolve() in resolved
 
     def test_ignores_utility_scripts(
@@ -259,7 +259,7 @@ class TestDiscoverFromScripts:
             raycast_dir, "tools", str(project_dirs["tools"])
         )
         _write_claude_script(
-            raycast_dir, "earnlearn", str(project_dirs["earnlearn"])
+            raycast_dir, "my-app", str(project_dirs["my-app"])
         )
 
         result = discover_from_scripts(raycast_dir)

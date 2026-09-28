@@ -22,7 +22,7 @@ from typing import Iterable, Optional
 
 from . import config
 
-ISSUE_URL = "https://github.com/mattbernier/agents-environment-config/issues/new?template=cli-error.md"
+ISSUE_URL = "https://github.com/bernierllc/agents-environment-config/issues/new?template=cli-error.md"
 
 _MAX_BYTES = 1 * 1024 * 1024  # 1 MB
 _BACKUP_COUNT = 5

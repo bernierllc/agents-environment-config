@@ -94,4 +94,4 @@
 - **Architecture**: See `architecture.mdc`
 - **Development Workflow**: See `development-workflow.mdc`
 - **Port Management**: See `port-management.mdc`
-- **CLI Tools**: See `project-setup-cli.mdc`
+- **Ports**: See `port-management.mdc`

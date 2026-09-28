@@ -465,7 +465,7 @@ Repo keys use **absolute paths** to avoid tilde-expansion ambiguity across tools
     "agents": {}
   },
   "repos": {
-    "/Users/matt/projects/my-app": {
+    "/Users/example/projects/my-app": {
       "skills": {
         "verification-writer": {
           "version": "2.0.0",

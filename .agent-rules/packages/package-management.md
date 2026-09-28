@@ -1,82 +1,45 @@
 # Package Management Rules
 
-## Mandatory Use of ./manager CLI
+## Use the project's own package tooling
 
-**NEVER use basic npm commands or legacy tools for package management.** Always use the comprehensive `./manager` CLI system:
+Before running any package command, find how this repository manages its packages and use that, not an ad-hoc command:
 
-### Primary Package Management Tool
+1. **Look for project scripts first**: `package.json` `scripts`, a `Makefile`, a `scripts/` directory, or a repo CLI (e.g. `./manager`, `./scripts/release`). If one exists for building, testing, versioning or publishing, it is the only supported path.
+2. **Identify the workspace tool**: npm/pnpm/yarn workspaces, Turborepo, Nx, Lerna, Changesets. Run commands through it so the whole workspace stays consistent.
+3. **Never publish by hand** (`npm publish` straight from a package directory) when the repo defines a release flow; hand publishing skips its version, changelog and validation steps.
+4. **If there is no tooling**, use the package manager the lockfile implies (`package-lock.json` → npm, `pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn) and do not mix managers.
 
-**`./manager`** - The ONLY way to manage packages in this repository
+## Package Design
 
-```bash
-# Use ./manager for ALL package operations
-./manager publish [package] [bump] [message]
-./manager validate
-./manager check
-./manager build
-./manager test
-./manager status
-./manager list [filter]
-./manager track [package]
-```
+Follow the architecture this repository already uses; do not impose one.
 
-### Forbidden Commands
-
-**DO NOT USE:**
-- `npm publish` directly
-- `npm version` manually
-- Manual version bumping in package.json
-- `development-cli` (legacy tool)
-- Any other publishing tools
-
-**ALWAYS USE:**
-- `./manager publish` for publishing
-- `./manager validate` for validation
-- `./manager check` for development checks
-
-## Package Development Rules
-
-### Core Package Rules
-- **Dependency-free**: Core packages must not import other internal packages
-- **Atomic functionality**: Single responsibility, focused purpose
-- **Pure functions**: Predictable, testable, side-effect free
-- **Strict typing**: No implicit `any`, comprehensive interfaces
-- **Self-contained**: All functionality implemented internally
-
-### Service Package Rules
-- **Compose core packages**: Use core packages as dependencies
-- **Opinionated layer**: Provide configured, ready-to-use services
-- **Adapter support**: Handle multiple implementation options
-- **Centralized error handling**: Use standard error patterns
+- **Read the repo's conventions first**: its README, CONTRIBUTING, or package docs. If packages are layered (for example core → service → suite), keep dependencies pointing one way and put code in the layer the repo defines for it.
+- **Match the language setup**: in a TypeScript repo, follow its `tsconfig` strictness; do not add types to a JavaScript package or change strictness as a side effect.
+- **Keep each package focused**: one clear responsibility and a public API documented in its README.
 
 ## Package Reuse Guidelines
 
 ### Before Creating New Packages
-1. **Search existing packages**: Check if functionality already exists
+1. **Search existing packages**: Check if functionality already exists (see `package-reuse.mdc`)
 2. **Evaluate partial matches**: Consider extending existing packages
 3. **Use composition**: Combine existing packages rather than recreating
-4. **Document decisions**: Record rationale in planning files
-
-### Package Dependencies
-- **Core packages**: No internal dependencies (except types)
-- **Service packages**: Can depend on core packages
-- **Suite packages**: Compose multiple service packages
+4. **Document decisions**: Record the rationale where the repo keeps design notes
 
 ## Quality Gates
 
 ### Before Publishing
-- [ ] Package validation: `./manager validate`
-- [ ] Development checks: `./manager check`
-- [ ] Build success: `./manager build`
-- [ ] Tests passing: `./manager test`
+- [ ] Validation/lint passes (the project's validate or lint script)
+- [ ] Build succeeds (the project's build script)
+- [ ] Tests pass (the project's test script)
+- [ ] Version bump and changelog follow the project's release flow
 - [ ] Documentation complete: README.md, API docs, examples
 
 ### Package Requirements
-- **Comprehensive README.md**: Purpose, usage, examples
+- **README.md**: Purpose, usage, examples
 - **API documentation**: Clear interface definitions
-- **TypeScript types**: Strict typing, no implicit any
-- **Test coverage**: Comprehensive testing for edge cases
-- **Error handling**: Proper error types and handling
+- **Types**: Whatever the repo's language setup requires (e.g. its `tsconfig` strictness)
+- **Tests**: Cover the package's public behavior and edge cases
+- **Error handling**: Follow the repo's error conventions
 
 ## References
 - **Architecture**: See `general/architecture.mdc`

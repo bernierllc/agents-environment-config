@@ -78,8 +78,8 @@ class TestRepairHookStructure:
         assert "command" not in entry
         assert "type" not in entry
 
-    def test_real_world_formexpert_two_sibling_entries(self, temp_dir):
-        """The exact formexpert.co bug: two flat entries sharing a matcher.
+    def test_real_world_my_forms_two_sibling_entries(self, temp_dir):
+        """The exact my-forms bug: two flat entries sharing a matcher.
 
         Standalone normalization: each entry gets its own nested hooks[].
         Duplicate-matcher entries are valid in Claude Code; we don't merge.

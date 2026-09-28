@@ -2,48 +2,34 @@
 
 ## Core Principle
 
-**Reuse first, create second!** Before starting any new package development, always check existing @bernierllc packages to avoid reinventing functionality.
+**Reuse first, create second.** Before writing new functionality or a new package, check whether it already exists: in this repository, in your organization's packages, or as a well-maintained public package.
 
 ## Pre-Development Checklist
 
-### 1. Check Existing Packages
-Before starting any new package or feature:
+### 1. Check what already exists
+- **This repository**: list its workspace packages (`packages/`, `apps/`, or the workspace tool's list command) and search for the functionality by name and by behavior.
+- **Your organization**: check its internal registry or package scope, if it has one.
+- **Public registries**: prefer a widely used, maintained package over writing your own for well-solved problems (retries, CSV parsing, markdown, email, tokens, queues).
 
-```bash
-# List all packages to see what exists
-# Make sure that localhost:3355 is running, if not then `cd ~/projects/mbernier.com/mbernier.com && npm run dev` first
-~/projects/tools/manager list all
+### 2. Ask what the feature actually needs
+- Retry logic, state machines, metrics, parsing, rendering, messaging, auth tokens: each is usually a solved problem. Name the existing package that solves it before writing code.
 
-# Check specific package status
-./manager status-enhanced [package-name]
-```
-
-### 2. Search for Relevant Functionality
-Ask yourself:
-- Does this need retry logic? → Use `@bernierllc/retry-policy`
-- Does this need state management? → Use `@bernierllc/retry-state`
-- Does this need metrics/analytics? → Use `@bernierllc/retry-metrics`
-- Does this process CSV data? → Use `@bernierllc/csv-parser` and/or `@bernierllc/csv-validator`
-- Does this handle markdown? → Use `@bernierllc/markdown-detector` and/or `@bernierllc/markdown-renderer`
-- Does this send emails? → Use `@bernierllc/email-sender`
-- Does this need secure tokens? → Use `@bernierllc/magic-link`
-- Does this need message queuing? → Use `@bernierllc/message-queue`
-
-### 3. Check Package Capabilities
+### 3. Evaluate candidates
 For each potentially relevant package:
 - Review the README and API documentation
-- Check if it supports your specific use case
-- Consider if it can be extended rather than replaced
-- Look for integration patterns in examples
+- Check it supports your specific use case
+- Consider whether it can be extended rather than replaced
+- Look for integration patterns in its examples
+- Check maintenance health (recent releases, open issues, license)
 
 ## Implementation Steps
 
-1. **Before starting**: Run `./manager list all` to see what's available
-2. **Research**: Check package READMEs and examples
-3. **Plan integration**: Design how to use existing packages
-4. **Implement**: Use existing packages as dependencies
-5. **Test**: Ensure integration works correctly
-6. **Document**: Update documentation to show package usage
+1. **Before starting**: list what exists (step 1 above)
+2. **Research**: read candidate READMEs and examples
+3. **Plan integration**: design how to use the existing package
+4. **Implement**: add it as a dependency
+5. **Test**: make sure the integration works
+6. **Document**: note which package provides the behavior and why it was chosen
 
 ## Benefits
 
@@ -54,7 +40,7 @@ For each potentially relevant package:
 
 ## When to Create New Packages
 
-Only create new packages when:
+Only create a new package when:
 - No existing package provides the needed functionality
 - The functionality is truly atomic and reusable
 - It follows MECE architecture principles

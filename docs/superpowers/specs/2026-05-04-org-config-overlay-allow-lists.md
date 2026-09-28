@@ -52,7 +52,7 @@ Source of truth: `OPTIONAL_FEATURES` registry in `aec/lib/preferences.py:15-60`.
 |---|---|---|---|---|
 | `leave-it-better` | bool | `preferences.check_pending_preferences`, `preferences set` CLI | **Yes** | Pure rule-text toggle. No code execution, no fetches. |
 | `update_check` | bool | `check_pending_preferences`, `preferences set` CLI | **Yes** | Controls weekly update-check ping to GitHub. Org may want to disable to avoid noise; cannot be redirected (URL is hard-coded). |
-| `port_registry_enabled` | bool | `check_pending_preferences`, `preferences set` CLI | **Yes** | Toggles local `~/projects/ports.json` tracker. No network. |
+| `port_registry_enabled` | bool | `check_pending_preferences`, `preferences set` CLI | **Yes** | Toggles local a hand-maintained `ports.json` tracker. No network. |
 | `scheduled_tests_enabled` | bool | `check_pending_preferences`, `preferences set` CLI, `test_cmd.py:125` | **Yes (with note)** | Enables local scheduled-test runner. Runs only commands the user defines per-repo; org cannot inject the commands themselves through this key. |
 | `discovery_recompare` | bool | `check_pending_preferences`, `preferences set` CLI | **Yes** | Local discovery behavior toggle. |
 

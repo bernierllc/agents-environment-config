@@ -1,10 +1,10 @@
 # Packages Rules
 
-Package-specific rules for @bernierllc packages and package management.
+Rules for repositories that build, reuse, or publish packages.
 
 ## Package Management
 
-- `package-management.mdc` - Package management rules using ./manager CLI
+- `package-management.mdc` - Use the project's own package tooling; quality gates before publishing
 - `package-reuse.mdc` - Guidelines for reusing existing packages
 
 ## Usage
