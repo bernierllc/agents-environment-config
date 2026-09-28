@@ -347,3 +347,20 @@ class TestPortRuleHonorsOptOut:
         from aec.commands.repo import _inject_port_registry_agentinfo
         _inject_port_registry_agentinfo(tmp_path)
         assert (tmp_path / "AGENTINFO.md").read_text() == "# my-app\n"
+
+    def test_disabling_keeps_a_section_the_user_wrote(self, tmp_path, monkeypatch):
+        own = "# my-app\n\n## Port Registry\n\nWe use 3000 for web.\n"
+        agentinfo = tmp_path / "AGENTINFO.md"
+        self._inject(tmp_path, monkeypatch, False)
+        agentinfo.write_text(own)
+        from aec.commands.repo import _inject_port_registry_agentinfo
+        _inject_port_registry_agentinfo(tmp_path)
+        assert agentinfo.read_text() == own
+
+    def test_disabling_removes_the_unmarked_legacy_section(self, tmp_path, monkeypatch):
+        from aec.commands.repo import _PORT_SECTION_BODY, _inject_port_registry_agentinfo
+        agentinfo = tmp_path / "AGENTINFO.md"
+        self._inject(tmp_path, monkeypatch, False)
+        agentinfo.write_text("# my-app\n\n" + _PORT_SECTION_BODY)
+        _inject_port_registry_agentinfo(tmp_path)
+        assert agentinfo.read_text() == "# my-app\n"

@@ -872,6 +872,22 @@ def _manage_aec_json_gitignore_step(
     manage_aec_json_gitignore(project_dir, should_ignore)
 
 
+_PORT_SECTION_BODY = """## Port Registry
+
+This project's ports are registered with AEC. Before assigning new ports,
+check `aec ports list` to see all registered ports and avoid conflicts.
+
+To register new ports:
+1. Add them to `.aec.json` in the `ports` section
+2. Run `aec ports register` to register them centrally
+
+Port assignments use first-come-first-served. See `.aec.json` for this
+project's current port assignments.
+"""
+_PORT_START = "<!-- aec-port-registry:start -->"
+_PORT_END = "<!-- aec-port-registry:end -->"
+
+
 def _inject_port_registry_agentinfo(
     project_dir: Path,
     dry_run: bool = False,
@@ -880,7 +896,9 @@ def _inject_port_registry_agentinfo(
 
     The always-applied port-management rule only applies where this section
     exists, so it is added when the registry is enabled and removed when the
-    user turns it off.
+    user turns it off. Only the block AEC wrote is removed: the marked block,
+    or the exact unmarked text older versions appended. A section the user
+    wrote themselves is left alone.
 
     Args:
         project_dir: Path to the project root.
@@ -895,8 +913,9 @@ def _inject_port_registry_agentinfo(
 
     content = agentinfo_path.read_text()
     if not port_enabled:
-        # The section runs to the next "## " heading or the end of the file.
-        stripped = re.sub(r"^## Port Registry\n.*?(?=^## |\Z)", "", content, flags=re.S | re.M)
+        stripped = re.sub(
+            r"\n?" + re.escape(_PORT_START) + r".*?" + re.escape(_PORT_END) + r"\n?", "", content, flags=re.S
+        ).replace("\n" + _PORT_SECTION_BODY, "")
         if stripped == content:
             return
         if dry_run:
@@ -909,26 +928,12 @@ def _inject_port_registry_agentinfo(
     if "## Port Registry" in content:
         return
 
-    port_section = """
-## Port Registry
-
-This project's ports are registered with AEC. Before assigning new ports,
-check `aec ports list` to see all registered ports and avoid conflicts.
-
-To register new ports:
-1. Add them to `.aec.json` in the `ports` section
-2. Run `aec ports register` to register them centrally
-
-Port assignments use first-come-first-served. See `.aec.json` for this
-project's current port assignments.
-"""
-
     if dry_run:
         Console.info("Would add Port Registry section to AGENTINFO.md")
         return
 
     with open(agentinfo_path, "a") as f:
-        f.write(port_section)
+        f.write(f"\n{_PORT_START}\n{_PORT_SECTION_BODY}{_PORT_END}\n")
     Console.success("Added Port Registry section to AGENTINFO.md")
 
 
