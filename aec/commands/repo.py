@@ -925,15 +925,20 @@ def _inject_port_registry_agentinfo(
         Console.success("Removed Port Registry section from AGENTINFO.md (registry disabled)")
         return
 
-    if "## Port Registry" in content:
+    # The rule gates on the marker, so a user-written section without it
+    # still gets AEC's block, and an unmarked legacy block is migrated.
+    if _PORT_START in content:
         return
-
+    block = f"{_PORT_START}\n{_PORT_SECTION_BODY}{_PORT_END}\n"
+    legacy = "\n" + _PORT_SECTION_BODY
     if dry_run:
         Console.info("Would add Port Registry section to AGENTINFO.md")
         return
-
-    with open(agentinfo_path, "a") as f:
-        f.write(f"\n{_PORT_START}\n{_PORT_SECTION_BODY}{_PORT_END}\n")
+    if legacy in content:
+        agentinfo_path.write_text(content.replace(legacy, "\n" + block, 1))
+    else:
+        with open(agentinfo_path, "a") as f:
+            f.write("\n" + block)
     Console.success("Added Port Registry section to AGENTINFO.md")
 
 

@@ -275,14 +275,14 @@ class TestInjectPortRegistryAgentinfo:
         assert "aec ports list" in content
 
     def test_skips_if_section_already_exists(self, temp_dir, monkeypatch):
-        """Does not duplicate Port Registry section."""
-        from aec.commands.repo import _inject_port_registry_agentinfo
+        """Does not duplicate AEC's marked Port Registry block."""
+        from aec.commands.repo import _PORT_END, _PORT_START, _inject_port_registry_agentinfo
 
         project_dir = temp_dir / "existing-section"
         project_dir.mkdir()
 
         agentinfo = project_dir / "AGENTINFO.md"
-        original = "# My Project\n\n## Port Registry\n\nAlready here.\n"
+        original = f"# My Project\n\n{_PORT_START}\n## Port Registry\n\nAlready here.\n{_PORT_END}\n"
         agentinfo.write_text(original)
 
         monkeypatch.setattr(

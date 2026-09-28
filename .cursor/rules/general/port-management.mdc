@@ -10,7 +10,7 @@ tags: [ports, infrastructure, development, general]
 Prevent port conflicts across all projects on this machine using AEC's port registry.
 
 ## When this rule applies
-The port registry is opt-in. Follow this rule only in a project whose `AGENTINFO.md` has a `## Port Registry` section; AEC adds that section when the user enables the registry. Without it, the user has opted out: do not run `aec ports` or require registration, and choose ports as the project already does.
+The port registry is opt-in. Follow this rule only in a project whose `AGENTINFO.md` contains the `<!-- aec-port-registry:start -->` marker; AEC writes that marked block when the user enables the registry and removes it when they turn it off. Without the marker (a `## Port Registry` heading alone does not count), the user has opted out: do not run `aec ports` or require registration, and choose ports as the project already does.
 
 ## Port Management System
 
