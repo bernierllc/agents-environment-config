@@ -35,8 +35,9 @@ PROJECT_PLACEHOLDERS = {
 
 SEP = r"[\\/]+"  # one or more separators: also matches escaped "\\" in source strings
 HOME_PATH = re.compile(
-    # /Users/<u>/, /home/<u>/, C:\Users\<u>\, C:/Users/<u>/ ...
-    r"(?:(?:/(?:Users|home)/|\b[A-Za-z]:" + SEP + r"Users" + SEP + r")"
+    # /Users/<u>/, /home/<u>/, C:\Users\<u>\, C:/Users/<u>/ ... (Windows
+    # Users in any case; lowercase /users/ is left alone: API routes, docs/users/)
+    r"(?:(?:/(?:Users|home)/|\b[A-Za-z]:" + SEP + r"(?i:Users)" + SEP + r")"
     # the username ends at a separator or at the end of the path
     r"(?P<user>[A-Za-z][\w.-]*)(?:" + SEP + r"|(?![\w.-]))"
     # ... or ~/ or /root/ (homes without a username)
@@ -95,12 +96,12 @@ BAD = [
     "~/projects/secret-app", "~/Projects/secret-app",
     "/Users/realname", "/home/realname", r"C:\Users\realname", "cd /Users/realname && ls",
     "/Users/me/src/secret-app", "/home/user/code/secret-app", r"C:\Users\user\Repos\secret-app",
-    "/root/projects/secret-app",
+    "/root/projects/secret-app", r"C:\users\realname\x", r"c:\USERS\user\projects\secret-app",
 ]
 OK = [
     "/Users/me/projects/my-app/", "/home/user/", r"C:\Users\example\projects\my-api",
     r"C:\Users\user\Projects\my-app", "~/projects/my-app", "~/.claude/skills", "a~/b",
-    "/root/.bashrc", "/srv/root/projects/x",
+    "/root/.bashrc", "/srv/root/projects/x", "GET /users/search", "docs/users/catalog.md",
 ]
 
 
