@@ -145,6 +145,28 @@ class TestInstallSkill:
             with pytest.raises(SystemExit):
                 run_install(item_type="skill", name="nonexistent", global_flag=False, yes=True)
 
+    def test_install_into_source_repo_keeps_source(self, install_env, monkeypatch):
+        """Installing into the repo that holds the catalog must not delete the source.
+
+        The aec repo keeps the skills submodule at `.claude/skills`, which is also
+        its local install target, so src and dst are the same directory.
+        """
+        from aec.commands.install_cmd import run_install
+        from aec.lib.manifest_v2 import load_manifest
+
+        repo = install_env["repo"]
+        log = install_env["aec_home"] / "setup-repo-locations.txt"
+        log.write_text(log.read_text() + f"2026-04-04T00:00:00Z|2.5.4|{repo.resolve()}\n")
+        patches = _patch_repo(install_env)
+        monkeypatch.chdir(repo)
+
+        with patches[0], patches[1]:
+            run_install(item_type="skill", name="my-skill", global_flag=False, yes=True)
+
+        assert (repo / ".claude" / "skills" / "my-skill" / "SKILL.md").exists()
+        m = load_manifest(install_env["manifest_path"])
+        assert "my-skill" in m["repos"][str(repo.resolve())]["skills"]
+
     def test_records_in_manifest(self, install_env):
         from aec.commands.install_cmd import run_install
         from aec.lib.manifest_v2 import load_manifest

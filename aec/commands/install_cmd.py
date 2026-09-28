@@ -318,17 +318,20 @@ def _install_single_item(
     Non-interactive: callers are responsible for any overwrite prompts before
     calling this function.
     """
-    if dst.exists():
-        if dst.is_dir():
-            shutil.rmtree(dst)
-        else:
-            dst.unlink()
+    # In the aec repo itself the catalog lives at the install target
+    # (`.claude/skills`), so src is dst: removing dst would delete the source.
+    if not (dst.exists() and dst.resolve() == src.resolve()):
+        if dst.exists():
+            if dst.is_dir():
+                shutil.rmtree(dst)
+            else:
+                dst.unlink()
 
-    target_dir.mkdir(parents=True, exist_ok=True)
-    if src.is_dir():
-        shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".*"))
-    else:
-        shutil.copy2(src, dst)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        if src.is_dir():
+            shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".*"))
+        else:
+            shutil.copy2(src, dst)
 
     content_hash = hash_skill_directory(dst) if dst.is_dir() else ""
     manifest = load_manifest(manifest_file)
