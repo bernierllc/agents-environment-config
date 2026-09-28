@@ -876,7 +876,11 @@ def _inject_port_registry_agentinfo(
     project_dir: Path,
     dry_run: bool = False,
 ) -> None:
-    """Append Port Registry section to AGENTINFO.md if applicable.
+    """Keep AGENTINFO.md's Port Registry section in step with the preference.
+
+    The always-applied port-management rule only applies where this section
+    exists, so it is added when the registry is enabled and removed when the
+    user turns it off.
 
     Args:
         project_dir: Path to the project root.
@@ -885,14 +889,23 @@ def _inject_port_registry_agentinfo(
     from ..lib.preferences import get_preference
 
     port_enabled = get_preference("port_registry_enabled")
-    if not port_enabled:
-        return
-
     agentinfo_path = project_dir / "AGENTINFO.md"
-    if not agentinfo_path.exists():
+    if port_enabled is None or not agentinfo_path.exists():
         return
 
     content = agentinfo_path.read_text()
+    if not port_enabled:
+        # The section runs to the next "## " heading or the end of the file.
+        stripped = re.sub(r"^## Port Registry\n.*?(?=^## |\Z)", "", content, flags=re.S | re.M)
+        if stripped == content:
+            return
+        if dry_run:
+            Console.info("Would remove Port Registry section from AGENTINFO.md")
+            return
+        agentinfo_path.write_text(stripped.rstrip("\n") + "\n")
+        Console.success("Removed Port Registry section from AGENTINFO.md (registry disabled)")
+        return
+
     if "## Port Registry" in content:
         return
 

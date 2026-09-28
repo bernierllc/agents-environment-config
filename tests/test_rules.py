@@ -324,3 +324,26 @@ class TestPortRuleHonorsOptOut:
 
     def test_opted_out_project_gets_no_section(self, tmp_path, monkeypatch):
         assert "## Port Registry" not in self._inject(tmp_path, monkeypatch, False)
+
+    def test_disabling_later_removes_the_section(self, tmp_path, monkeypatch):
+        """Turning the registry off after setup must not leave the rule active."""
+        self._inject(tmp_path, monkeypatch, True)
+        agentinfo = tmp_path / "AGENTINFO.md"
+        agentinfo.write_text(agentinfo.read_text() + "\n## Testing\n\nRun pytest.\n")
+        (tmp_path / "preferences.json").write_text(json.dumps({
+            "schema_version": "1.1", "settings": {},
+            "optional_rules": {"port_registry_enabled": {"enabled": False}},
+        }))
+        from aec.commands.repo import _inject_port_registry_agentinfo
+        _inject_port_registry_agentinfo(tmp_path)
+        assert agentinfo.read_text() == "# my-app\n\n## Testing\n\nRun pytest.\n"
+
+    def test_disabling_removes_a_trailing_section(self, tmp_path, monkeypatch):
+        self._inject(tmp_path, monkeypatch, True)
+        (tmp_path / "preferences.json").write_text(json.dumps({
+            "schema_version": "1.1", "settings": {},
+            "optional_rules": {"port_registry_enabled": {"enabled": False}},
+        }))
+        from aec.commands.repo import _inject_port_registry_agentinfo
+        _inject_port_registry_agentinfo(tmp_path)
+        assert (tmp_path / "AGENTINFO.md").read_text() == "# my-app\n"
