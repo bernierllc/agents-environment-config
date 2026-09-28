@@ -299,3 +299,28 @@ class TestValidateWithSettings:
         success, errors = validate()
         assert success is True
         assert errors == []
+
+
+class TestPortRuleHonorsOptOut:
+    """The always-applied port rule gates on the AGENTINFO section AEC writes only when opted in."""
+
+    RULE = Path(__file__).resolve().parent.parent / ".cursor" / "rules" / "general" / "port-management.mdc"
+
+    def _inject(self, tmp_path, monkeypatch, enabled):
+        prefs_file = tmp_path / "preferences.json"
+        prefs_file.write_text(json.dumps({
+            "schema_version": "1.1", "settings": {},
+            "optional_rules": {"port_registry_enabled": {"enabled": enabled}},
+        }))
+        monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
+        (tmp_path / "AGENTINFO.md").write_text("# my-app\n")
+        from aec.commands.repo import _inject_port_registry_agentinfo
+        _inject_port_registry_agentinfo(tmp_path)
+        return (tmp_path / "AGENTINFO.md").read_text()
+
+    def test_rule_gates_on_the_section_aec_writes(self, tmp_path, monkeypatch):
+        assert "## Port Registry" in self._inject(tmp_path, monkeypatch, True)
+        assert "`AGENTINFO.md` has a `## Port Registry` section" in self.RULE.read_text()
+
+    def test_opted_out_project_gets_no_section(self, tmp_path, monkeypatch):
+        assert "## Port Registry" not in self._inject(tmp_path, monkeypatch, False)

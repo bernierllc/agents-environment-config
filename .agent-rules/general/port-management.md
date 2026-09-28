@@ -3,6 +3,9 @@
 ## Objective
 Prevent port conflicts across all projects on this machine using AEC's port registry.
 
+## When this rule applies
+The port registry is opt-in. Follow this rule only in a project whose `AGENTINFO.md` has a `## Port Registry` section; AEC adds that section when the user enables the registry. Without it, the user has opted out: do not run `aec ports` or require registration, and choose ports as the project already does.
+
 ## Port Management System
 
 ### Where ports live
