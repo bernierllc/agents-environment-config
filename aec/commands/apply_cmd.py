@@ -12,7 +12,7 @@ from ..lib.portable_manifest import (
     load_portable_manifest,
     resolve_repo_token,
 )
-from ..lib.scope import get_all_tracked_repos
+from ..lib.scope import get_all_tracked_repos, is_catalog_repo
 from ..lib.sources import discover_available, get_source_dirs
 
 PLURAL_TO_SINGULAR = {"skills": "skill", "rules": "rule", "agents": "agent", "mcps": "mcp"}
@@ -201,7 +201,7 @@ def run_apply(file: str, dry_run: bool = False, latest: bool = False, yes: bool 
         if source_dirs.get(plural)
     }
 
-    tracked_repos = get_all_tracked_repos()
+    tracked_repos = [r for r in get_all_tracked_repos() if not is_catalog_repo(r)]
     items = compile_desired_items(portable, latest=latest, tracked_repos=tracked_repos)
     plugins = _collect_plugins(portable, tracked_repos)
     if not items and not plugins:

@@ -74,6 +74,34 @@ def _source_dirs(repo):
 
 
 class TestUpgradeCommand:
+    @patch("aec.commands.upgrade.get_source_dirs")
+    @patch("aec.commands.upgrade.get_repo_root")
+    @patch("aec.commands.upgrade._manifest_path")
+    def test_skips_catalog_repo(self, mock_mp, mock_root, mock_sd, upgrade_env):
+        """A manifest entry for the aec repo itself must never be upgraded:
+        its install target is the catalog source."""
+        from aec.commands.upgrade import run_upgrade
+
+        repo = upgrade_env["repo"]
+        mock_root.return_value = repo
+        mock_mp.return_value = upgrade_env["manifest_path"]
+        mock_sd.return_value = _source_dirs(repo)
+        m = json.loads(upgrade_env["manifest_path"].read_text())
+        m["repos"][str(repo.resolve())] = {
+            "skills": {"test-skill": {"version": "1.0.0", "contentHash": "", "installedAt": ""}},
+            "rules": {}, "agents": {},
+        }
+        upgrade_env["manifest_path"].write_text(json.dumps(m))
+
+        with patch("aec.commands.upgrade.find_tracked_repo", return_value=repo), \
+                patch("aec.commands.upgrade.get_all_tracked_repos", return_value=[repo]), \
+                patch("aec.lib.config.get_repo_root", return_value=repo):
+            run_upgrade(yes=True)
+
+        assert "2.0.0" in (repo / ".claude" / "skills" / "test-skill" / "SKILL.md").read_text()
+        after = json.loads(upgrade_env["manifest_path"].read_text())
+        assert after["repos"][str(repo.resolve())]["skills"]["test-skill"]["version"] == "1.0.0"
+
     @patch("aec.commands.upgrade.find_tracked_repo", return_value=None)
     @patch("aec.commands.upgrade.get_all_tracked_repos", return_value=[])
     @patch("aec.commands.upgrade.get_source_dirs")

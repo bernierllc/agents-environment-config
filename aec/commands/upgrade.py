@@ -24,7 +24,7 @@ from ..lib.manifest_v2 import (
     is_stale,
 )
 from ..lib.sources import discover_available, get_source_dirs
-from ..lib.scope import find_tracked_repo, get_all_tracked_repos
+from ..lib.scope import find_tracked_repo, get_all_tracked_repos, is_catalog_repo
 from ..lib.skills_manifest import (
     version_is_newer,
     hash_skill_directory,
@@ -75,6 +75,8 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
         Console.print("  (up to date)")
 
     local_repo = find_tracked_repo()
+    if local_repo and is_catalog_repo(local_repo):
+        local_repo = None  # its items are the catalog source; see is_catalog_repo
     if local_repo:
         Console.print(f"\nUpgrading {local_repo} (current repo)...")
         repo_key = str(local_repo.resolve())
@@ -88,7 +90,7 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
 
     # Offer to upgrade other repos
     all_repos = get_all_tracked_repos()
-    other_repos = [r for r in all_repos if r != local_repo]
+    other_repos = [r for r in all_repos if r != local_repo and not is_catalog_repo(r)]
     if other_repos and not dry_run:
         outdated_repos = _find_outdated_repos(manifest, other_repos, source_dirs)
         if outdated_repos:

@@ -145,13 +145,12 @@ class TestInstallSkill:
             with pytest.raises(SystemExit):
                 run_install(item_type="skill", name="nonexistent", global_flag=False, yes=True)
 
-    def test_install_into_source_repo_keeps_source(self, install_env, monkeypatch):
-        """Installing into the repo that holds the catalog must not delete the source.
-
-        The aec repo keeps the skills submodule at `.claude/skills`, which is also
-        its local install target, so src and dst are the same directory.
-        """
+    @pytest.mark.parametrize("command", ["install", "uninstall"])
+    def test_catalog_repo_is_refused_and_source_kept(self, install_env, monkeypatch, command):
+        """The aec repo's `.claude/skills` is the catalog, so it is also the
+        would-be install target: install/uninstall there deletes the source."""
         from aec.commands.install_cmd import run_install
+        from aec.commands.uninstall import run_uninstall
         from aec.lib.manifest_v2 import load_manifest
 
         repo = install_env["repo"]
@@ -159,13 +158,14 @@ class TestInstallSkill:
         log.write_text(log.read_text() + f"2026-04-04T00:00:00Z|2.5.4|{repo.resolve()}\n")
         patches = _patch_repo(install_env)
         monkeypatch.chdir(repo)
+        run = run_install if command == "install" else run_uninstall
 
-        with patches[0], patches[1]:
-            run_install(item_type="skill", name="my-skill", global_flag=False, yes=True)
+        with patches[0], patches[1], patch("aec.lib.config.get_repo_root", return_value=repo):
+            with pytest.raises(SystemExit):
+                run(item_type="skill", name="my-skill", global_flag=False, yes=True)
 
         assert (repo / ".claude" / "skills" / "my-skill" / "SKILL.md").exists()
-        m = load_manifest(install_env["manifest_path"])
-        assert "my-skill" in m["repos"][str(repo.resolve())]["skills"]
+        assert str(repo.resolve()) not in load_manifest(install_env["manifest_path"])["repos"]
 
     def test_records_in_manifest(self, install_env):
         from aec.commands.install_cmd import run_install
