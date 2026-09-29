@@ -111,7 +111,7 @@ def _rendered(repo_root: Path, item_type: str, item_key: str,
         entries = translate_to_agent(
             applied, agent,
             resolved_commands=_resolve_script_commands(
-                applied, src, repo_root, agent),
+                applied, src, repo_root, agent, f"{item_type}:{item_key}"),
         )
     # Broad on purpose: item content is untrusted input, and verify/doctor must
     # report on every other hook rather than crash on one bad file. Install

@@ -564,7 +564,7 @@ class TestRepoLocalScriptRendering:
         (item_dir / "hooks.json").write_text(json.dumps({
             "$schema": "x", "version": "1.0.0", "hooks": [{
                 "id": "g", "event": "pre_tool_use", "blocking": True,
-                "command": "aec run-script skill:demo guard.sh", "description": "d",
+                "command": "aec run-script skill:wrong guard.sh", "description": "d",
             }],
         }))
         install_item_hooks(

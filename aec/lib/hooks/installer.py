@@ -155,7 +155,7 @@ def interpreter_for(script_path: Path) -> List[str]:
 
 
 def _resolve_script_commands(
-    hf, item_dir: Path, repo_root: Path, agent: str
+    hf, item_dir: Path, repo_root: Path, agent: str, item_ref: str
 ) -> Dict[str, str]:
     """Rewrite `aec run-script <item> <script> [args...]` to a real path.
 
@@ -187,7 +187,7 @@ def _resolve_script_commands(
                 if agent in _SHELL_GUARD_AGENTS and _is_repo_local(
                     script_path, repo_root
                 ):
-                    notice = (missing_script_notice(agent, parts[2], h.id)
+                    notice = (missing_script_notice(agent, item_ref, h.id)
                               if h.blocking else "")
                     cmd = guard_script_command(rendered, cmd, notice)
         resolved[h.id] = cmd
@@ -333,7 +333,8 @@ def install_item_hooks(
             )
             continue
         # Only hooks that apply: a skipped hook's script may legitimately be absent.
-        resolved = _resolve_script_commands(filtered, item_dir, repo_root, agent)
+        resolved = _resolve_script_commands(
+            filtered, item_dir, repo_root, agent, f"{item_type}:{item_key}")
         entries = translate_to_agent(filtered, agent, resolved_commands=resolved)
         if agent == "claude":
             _install_claude(repo_root, entries, st, item_version)
