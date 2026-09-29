@@ -552,6 +552,40 @@ class TestRepoLocalScriptRendering:
         assert str(repo_root) not in cmd
         assert script.exists()
 
+    def test_blocking_hook_is_loud_when_script_missing(self, tmp_path):
+        """A clone without the skill must say its guard is off, not skip silently."""
+        import subprocess
+        from aec.lib.hooks.installer import install_item_hooks
+        repo_root = tmp_path / "repo"
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        (item_dir / "scripts").mkdir(parents=True)
+        script = item_dir / "scripts" / "guard.sh"
+        script.write_text("#!/bin/sh\necho ran\n")
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "g", "event": "pre_tool_use", "blocking": True,
+                "command": "aec run-script skill:wrong guard.sh", "description": "d",
+            }],
+        }))
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["claude"],
+        )
+        settings = json.loads((repo_root / ".claude/settings.json").read_text())
+        cmd = settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        env = {"CLAUDE_PROJECT_DIR": str(repo_root), "PATH": "/usr/bin:/bin"}
+
+        def run():
+            return subprocess.run(["sh", "-c", cmd], env=env, capture_output=True, text=True)
+
+        present = run()
+        assert present.returncode == 0 and present.stdout == "ran\n"
+        script.unlink()
+        missing = run()
+        assert missing.returncode == 0
+        msg = json.loads(missing.stdout)["systemMessage"]
+        assert "aec install skill demo" in msg and "OFF" in msg
+
     def test_gemini_keeps_absolute_path(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
