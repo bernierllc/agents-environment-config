@@ -309,3 +309,34 @@ def test_plugins_apply_even_when_item_pass_fails(tmp_path, monkeypatch):
     # (b) the key assertion: plugin pass STILL ran despite the item failure
     m = load_manifest(home / ".agents-environment-config" / "installed-manifest.json")
     assert "impeccable-style" in m["global"]["plugins"]
+
+
+def test_apply_skips_projects_token_resolving_to_catalog(tmp_path, monkeypatch):
+    # ${PROJECTS}/<catalog> resolves without consulting tracked repos, so apply
+    # must filter on the resolved scope, before items, MCPs or plugins run.
+    home = tmp_path / "home"
+    (home / ".agents-environment-config").mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("PROJECTS_DIR", str(home / "projects"))
+    repo = _make_source_repo(home / "projects")
+    manifest_file = tmp_path / "m.json"
+    manifest_file.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "generatedBy": "aec test",
+                "repos": [
+                    {"path": "${PROJECTS}/aec-repo", "skills": [{"name": "my-skill", "version": "1.0.0"}]}
+                ],
+            }
+        )
+    )
+
+    with patch("aec.commands.apply_cmd.get_repo_root", return_value=repo), patch(
+        "aec.lib.config.get_repo_root", return_value=repo
+    ), patch("aec.commands.apply_cmd.get_source_dirs", return_value=_source_dirs(repo)):
+        run_apply(file=str(manifest_file))
+
+    assert (repo / ".claude" / "skills" / "my-skill" / "SKILL.md").exists()
+    manifest_path = home / ".agents-environment-config" / "installed-manifest.json"
+    assert not manifest_path.exists() or str(repo.resolve()) not in load_manifest(manifest_path)["repos"]
