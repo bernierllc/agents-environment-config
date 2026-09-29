@@ -103,9 +103,30 @@ GUARD_PREFIX = "if [ -f "
 _SHELL_GUARD_AGENTS = frozenset({"claude", "git"})
 
 
-def guard_script_command(rendered_path: str, command: str) -> str:
-    """Wrap `command` so it only runs when `rendered_path` exists."""
-    return f"{GUARD_PREFIX}{rendered_path} ]; then {command}; fi"
+def guard_script_command(rendered_path: str, command: str, missing: str = "") -> str:
+    """Wrap `command` so it only runs when `rendered_path` exists.
+
+    `missing`, when given, runs instead of the script when it's absent.
+    """
+    orelse = f"; else {missing}" if missing else ""
+    return f"{GUARD_PREFIX}{rendered_path} ]; then {command}{orelse}; fi"
+
+
+def missing_script_notice(agent: str, item_ref: str, hook_id: str) -> str:
+    """Shell command that warns a blocking hook is off because its item is absent.
+
+    A guard that silently isn't there is worse than one that's loud about it:
+    the checkout looks protected. Claude shows `systemMessage` to the user
+    without blocking the tool call; a git hook's stderr reaches the terminal.
+    """
+    item_type, _, name = item_ref.partition(":")
+    text = (
+        f"aec: blocking hook {hook_id} is OFF in this checkout: {item_ref} is not "
+        f"installed. Run: aec install {item_type} {name}"
+    )
+    if agent == "claude":
+        return "printf '%s\\n' " + shlex.quote(json.dumps({"systemMessage": text}))
+    return "echo " + shlex.quote(text) + " >&2"
 
 
 def is_guarded(command: str) -> bool:
@@ -166,7 +187,9 @@ def _resolve_script_commands(
                 if agent in _SHELL_GUARD_AGENTS and _is_repo_local(
                     script_path, repo_root
                 ):
-                    cmd = guard_script_command(rendered, cmd)
+                    notice = (missing_script_notice(agent, parts[2], h.id)
+                              if h.blocking else "")
+                    cmd = guard_script_command(rendered, cmd, notice)
         resolved[h.id] = cmd
     return resolved
 
