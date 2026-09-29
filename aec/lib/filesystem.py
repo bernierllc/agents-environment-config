@@ -356,3 +356,25 @@ def installed_dst_path(target_dir: Path, name: str, src: Path) -> Path:
     if src.is_dir():
         return target_dir / name
     return target_dir / (name + src.suffix)
+
+
+def remove_installed_item(path: Path) -> None:
+    """Delete an installed item (dir or file), refusing anything inside the aec catalog.
+
+    Every install, upgrade and uninstall path removes the old copy before
+    writing the new one. Inside the catalog repo that copy *is* the source, so
+    the guard sits here, at the delete, rather than in each caller.
+    """
+    from .config import get_repo_root
+
+    root = get_repo_root()
+    resolved = path.resolve()
+    if root is not None and (resolved == root.resolve() or root.resolve() in resolved.parents):
+        raise RuntimeError(
+            f"refusing to delete {path}: it is inside the aec catalog ({root}), "
+            "so it is an install source, not an installed copy"
+        )
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    elif path.exists() or path.is_symlink():
+        path.unlink()

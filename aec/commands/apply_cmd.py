@@ -12,7 +12,7 @@ from ..lib.portable_manifest import (
     load_portable_manifest,
     resolve_repo_token,
 )
-from ..lib.scope import get_all_tracked_repos
+from ..lib.scope import get_all_tracked_repos, is_catalog_repo
 from ..lib.sources import discover_available, get_source_dirs
 
 PLURAL_TO_SINGULAR = {"skills": "skill", "rules": "rule", "agents": "agent", "mcps": "mcp"}
@@ -204,6 +204,13 @@ def run_apply(file: str, dry_run: bool = False, latest: bool = False, yes: bool 
     tracked_repos = get_all_tracked_repos()
     items = compile_desired_items(portable, latest=latest, tracked_repos=tracked_repos)
     plugins = _collect_plugins(portable, tracked_repos)
+    # Filter on resolved scopes: ${PROJECTS} tokens resolve without tracked_repos.
+    def _catalog(scope_key: str) -> bool:
+        return scope_key != "global" and is_catalog_repo(Path(scope_key))
+    if any(_catalog(i.scope) for i in items) or any(_catalog(k) for k, _ in plugins):
+        Console.warning(f"Skipping entries scoped to the aec catalog ({repo}): it is the install source.")
+    items = [i for i in items if not _catalog(i.scope)]
+    plugins = [(k, n) for k, n in plugins if not _catalog(k)]
     if not items and not plugins:
         Console.info("Manifest contains no items to apply.")
         return

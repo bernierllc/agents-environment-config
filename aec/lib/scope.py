@@ -79,6 +79,19 @@ def find_tracked_repo(start: Optional[Path] = None) -> Optional[Path]:
     return None
 
 
+def is_catalog_repo(path: Path) -> bool:
+    """True when `path` is the aec repo itself.
+
+    Its `.claude/skills`, `.claude/agents` and `.agent-rules` are the catalog
+    that installs copy from, so they are also its would-be install targets:
+    installing, upgrading or uninstalling there deletes the source.
+    """
+    from .config import get_repo_root
+
+    root = get_repo_root()
+    return root is not None and path.resolve() == root.resolve()
+
+
 def resolve_scope(global_flag: bool) -> Scope:
     """Resolve scope from the -g flag and current working directory.
 
@@ -93,6 +106,12 @@ def resolve_scope(global_flag: bool) -> Scope:
         raise ScopeError(
             "Not in a tracked repo. Use `-g` for global install, "
             "or `cd` into a project first."
+        )
+    if is_catalog_repo(repo):
+        raise ScopeError(
+            f"{repo} is the aec catalog: its items are the install source, so "
+            "they can't be installed, upgraded or uninstalled here. "
+            "`cd` into a project, or use `-g`."
         )
     return Scope(is_global=False, repo_path=repo)
 

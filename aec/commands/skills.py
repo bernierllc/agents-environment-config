@@ -12,6 +12,7 @@ except ImportError:
     HAS_TYPER = False
 
 from ..lib import Console, get_repo_root, AEC_HOME, CLAUDE_DIR
+from ..lib.filesystem import remove_installed_item
 from ..lib.prompt_catalog.install_flow_area import item_prompt_id
 from ..lib.prompt_catalog.skills_area import (
     SKILLS_INSTALL_OVERWRITE_PREFIX,
@@ -178,8 +179,7 @@ def install_skills(
                 Console.info(f"Skipped: {name}")
                 continue
 
-        if dst.exists():
-            shutil.rmtree(dst)
+        remove_installed_item(dst)
         shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".*"))
 
         content_hash = hash_skill_directory(dst)
@@ -229,7 +229,7 @@ def uninstall_skills(
                 Console.info(f"Skipped: {name}")
                 continue
 
-        shutil.rmtree(skill_dir)
+        remove_installed_item(skill_dir)
         manifest["skills"].pop(name, None)
         Console.success(f"Uninstalled: {name}")
 
@@ -330,8 +330,7 @@ def update_skills(
                 Console.info(f"Skipped: {name}")
                 continue
 
-        if skill_dir.exists():
-            shutil.rmtree(skill_dir)
+        remove_installed_item(skill_dir)
         shutil.copytree(src, skill_dir, ignore=shutil.ignore_patterns(".*"))
 
         content_hash = hash_skill_directory(skill_dir)
