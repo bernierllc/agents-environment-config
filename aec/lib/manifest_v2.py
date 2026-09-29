@@ -51,6 +51,7 @@ def load_manifest(path: Path) -> dict:
                 data.setdefault("global", _empty_scope())
                 data.setdefault("repos", {})
                 data.setdefault("lastUpdateCheck", None)
+                _drop_catalog_scope(data)
                 for key in ITEM_TYPES:
                     data["global"].setdefault(key, {})
                 for scope_dict in data["repos"].values():
@@ -61,6 +62,23 @@ def load_manifest(path: Path) -> dict:
         except (json.JSONDecodeError, OSError):
             pass
     return _empty_manifest()
+
+
+def _drop_catalog_scope(data: dict) -> None:
+    """Forget any repo scope that is the aec catalog itself.
+
+    The catalog's items are the install source, never installed copies, so a
+    record for it is always stale. Dropping it here keeps every loop over
+    ``repos`` (upgrade, uninstall --repos, global migration) from touching it.
+    """
+    from .config import get_repo_root
+
+    root = get_repo_root()
+    if root is None:
+        return
+    catalog = str(root.resolve())
+    for key in [k for k in data["repos"] if str(Path(k).resolve()) == catalog]:
+        del data["repos"][key]
 
 
 def save_manifest(manifest: dict, path: Path) -> None:

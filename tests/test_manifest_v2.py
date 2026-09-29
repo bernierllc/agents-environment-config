@@ -276,3 +276,24 @@ def test_load_manifest_backfills_plugins_bucket_on_repo_scope(manifest_path):
     record_plugin_install(m, "/some/repo", "ponytail", "1.0.0",
                           install_type="per-tool", targets=["claude"])
     assert m["repos"]["/some/repo"]["plugins"]["ponytail"]["version"] == "1.0.0"
+
+
+def test_load_drops_catalog_repo_scope(tmp_path, monkeypatch):
+    """A record for the aec catalog is always stale (its items are the source).
+    Dropping it at load keeps upgrade, uninstall --repos and global migration
+    from ever iterating it."""
+    import json
+    from aec.lib.manifest_v2 import load_manifest
+
+    catalog = tmp_path / "aec"
+    other = tmp_path / "app"
+    catalog.mkdir()
+    other.mkdir()
+    rec = {"skills": {"s": {"version": "1.0.0"}}, "rules": {}, "agents": {}}
+    path = tmp_path / "m.json"
+    path.write_text(json.dumps({
+        "manifestVersion": 2, "global": {}, "repos": {str(catalog): rec, str(other): rec},
+    }))
+    monkeypatch.setattr("aec.lib.config.get_repo_root", lambda: catalog)
+
+    assert list(load_manifest(path)["repos"]) == [str(other)]

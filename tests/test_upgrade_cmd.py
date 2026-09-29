@@ -100,7 +100,8 @@ class TestUpgradeCommand:
 
         assert "2.0.0" in (repo / ".claude" / "skills" / "test-skill" / "SKILL.md").read_text()
         after = json.loads(upgrade_env["manifest_path"].read_text())
-        assert after["repos"][str(repo.resolve())]["skills"]["test-skill"]["version"] == "1.0.0"
+        catalog_rec = after["repos"].get(str(repo.resolve()), {}).get("skills", {}).get("test-skill", {})
+        assert catalog_rec.get("version") != "2.0.0"
 
     @patch("aec.commands.upgrade.find_tracked_repo", return_value=None)
     @patch("aec.commands.upgrade.get_all_tracked_repos", return_value=[])
