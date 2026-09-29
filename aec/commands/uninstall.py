@@ -1,6 +1,5 @@
 """aec uninstall <type> <name> -- remove a skill, rule, agent, or MCP server."""
 
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -18,7 +17,7 @@ from ..lib.prompt_catalog.lifecycle_area import (
     UNINSTALL_SCOPE_REPO_PREFIX,
 )
 from ..lib.prompts import prompt as ask_prompt
-from ..lib.filesystem import resolve_installed_path
+from ..lib.filesystem import remove_installed_item, resolve_installed_path
 from ..lib.installed_store import remove_item_install
 from ..lib.manifest_v2 import load_manifest, save_manifest, remove_install, get_installed
 from ..lib.scope import resolve_scope, Scope, ScopeError
@@ -230,10 +229,7 @@ def _purge_scope(item_type: str, name: str, plural: str, scope: Scope,
                 )
             except Exception as e:  # noqa: BLE001 — never block uninstall on hook removal
                 Console.warning(f"hooks removal failed for {name}: {e}")
-        if item_path.is_dir():
-            shutil.rmtree(item_path)
-        else:
-            item_path.unlink()
+        remove_installed_item(item_path)
     scope_key = "global" if scope.is_global else str(scope.repo_path.resolve())
     remove_install(manifest, scope_key, plural, name)
 

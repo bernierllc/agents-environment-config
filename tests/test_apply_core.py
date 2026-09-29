@@ -124,3 +124,20 @@ class TestExecuteApply:
         )
         assert not second.applied
         assert not second.errors
+
+    def test_catalog_repo_scope_keeps_source(self, exec_env, monkeypatch):
+        # A manifest entry like ${PROJECTS}/agents-environment-config resolves
+        # straight to the catalog; the install target is then the source itself.
+        repo = exec_env["source_dirs"]["skills"].parent.parent
+        monkeypatch.setattr("aec.lib.config.get_repo_root", lambda: repo)
+        plan = [ApplyPlanEntry(DesiredItem("skill", "my-skill", str(repo)), "install", None, "1.0.0", "x")]
+        result = execute_apply(
+            plan,
+            source_dirs=exec_env["source_dirs"],
+            available_by_type=AVAIL,
+            manifest_path=exec_env["manifest_path"],
+            install_hooks=False,
+        )
+        assert not result.applied
+        assert "aec catalog" in result.errors[0][1]
+        assert (repo / ".claude" / "skills" / "my-skill" / "SKILL.md").exists()

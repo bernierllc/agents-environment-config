@@ -8,7 +8,7 @@ import subprocess
 
 from ..lib import Console
 from ..lib.config import get_repo_root
-from ..lib.filesystem import installed_dst_path
+from ..lib.filesystem import installed_dst_path, remove_installed_item
 from ..lib.manifest_v2 import (
     load_manifest, save_manifest, record_install, record_mcp_install, record_plugin_install,
 )
@@ -318,11 +318,7 @@ def _install_single_item(
     Non-interactive: callers are responsible for any overwrite prompts before
     calling this function.
     """
-    if dst.exists():
-        if dst.is_dir():
-            shutil.rmtree(dst)
-        else:
-            dst.unlink()
+    remove_installed_item(dst)
 
     target_dir.mkdir(parents=True, exist_ok=True)
     if src.is_dir():

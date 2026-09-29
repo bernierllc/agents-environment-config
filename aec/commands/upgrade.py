@@ -14,7 +14,7 @@ from ..lib.prompt_catalog.maintenance_area import (
 )
 from ..lib.prompts import prompt
 from ..lib.config import get_repo_root
-from ..lib.filesystem import installed_dst_path, resolve_installed_path
+from ..lib.filesystem import installed_dst_path, remove_installed_item, resolve_installed_path
 from ..lib.installed_store import record_item_install as record_item_install_pertype
 from ..lib.manifest_v2 import (
     load_manifest,
@@ -249,11 +249,7 @@ def _check_and_upgrade_dep_conflicts(
         dep_existing = resolve_installed_path(target_dir, vc.name)
         dep_dst = installed_dst_path(target_dir, vc.name, dep_src)
 
-        if dep_existing.exists():
-            if dep_existing.is_dir():
-                shutil.rmtree(dep_existing)
-            else:
-                dep_existing.unlink()
+        remove_installed_item(dep_existing)
 
         target_dir.mkdir(parents=True, exist_ok=True)
         if dep_src.is_dir():
@@ -288,11 +284,7 @@ def _check_and_upgrade_dep_conflicts(
             dep_existing = resolve_installed_path(target_dir, d.name)
             dep_dst = installed_dst_path(target_dir, d.name, dep_src)
 
-            if dep_existing.exists():
-                if dep_existing.is_dir():
-                    shutil.rmtree(dep_existing)
-                else:
-                    dep_existing.unlink()
+            remove_installed_item(dep_existing)
 
             target_dir.mkdir(parents=True, exist_ok=True)
             if dep_src.is_dir():
@@ -621,11 +613,7 @@ def _upgrade_scope(
                     upgraded = True  # still outdated; never report "up to date"
                     continue
 
-            if existing_path.exists():
-                if existing_path.is_dir():
-                    shutil.rmtree(existing_path)
-                else:
-                    existing_path.unlink()
+            remove_installed_item(existing_path)
 
             target.mkdir(parents=True, exist_ok=True)
             if src_path.is_dir():
