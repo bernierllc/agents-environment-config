@@ -63,7 +63,7 @@ def unwire(repo: Path, item_type: str, name: str) -> bool:
 def refresh(repo: Path, allow_custom_check: bool = False, dry_run: bool = False) -> list[str]:
     """Re-wire every wired item whose catalog version moved.
 
-    Items that left the catalog are unwired. Consent to custom checks given at
+    Items that left the catalog, or dropped their hooks.json, are unwired. Consent to custom checks given at
     install is kept. Re-wiring goes through ``install_item_hooks``, which
     validates the new hooks.json before retracting the old hooks, so a failed
     refresh leaves the previous hooks working. Returns one line per change
@@ -82,6 +82,12 @@ def refresh(repo: Path, allow_custom_check: bool = False, dry_run: bool = False)
         if state.item_version == found[1]:
             continue
         line = f"{name}: {state.item_version} -> {found[1]}"
+        if not (found[0] / "hooks.json").exists():
+            # The new version dropped its hooks: retract the old ones.
+            if not dry_run:
+                unwire(repo, item_type, name)
+            changes.append(f"{line}: no hooks.json, hooks unwired")
+            continue
         if not dry_run:
             try:
                 wire(repo, item_type, name, allow_custom_check or state.allow_custom_check)

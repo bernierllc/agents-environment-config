@@ -122,3 +122,15 @@ def test_directory_form_rule_wires_from_its_directory(catalog):
         "description": "t", "blocking": True, "timeout_ms": 1000,
     }]}))
     assert catalog_hooks.wire(catalog, "rule", "my-rule")
+
+
+def test_refresh_unwires_when_new_version_drops_hooks_json(catalog):
+    from aec.lib import catalog_hooks
+
+    catalog_hooks.wire(catalog, "skill", "my-skill")
+    skill = _skill(catalog, "1.1.0")
+    (skill / "hooks.json").unlink()
+
+    assert catalog_hooks.refresh(catalog) == ["my-skill: 1.0.0 -> 1.1.0: no hooks.json, hooks unwired"]
+    assert "my-skill" not in (catalog / ".claude" / "settings.json").read_text()
+    assert catalog_hooks.refresh(catalog) == []

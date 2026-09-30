@@ -266,6 +266,16 @@ def run_uninstall(
         # The files are the catalog itself: unwire the hooks, keep the item.
         from ..lib import catalog_hooks
 
+        if not yes:
+            resp = ask_prompt(
+                item_prompt_id(UNINSTALL_SCOPE_REPO_PREFIX, name),
+                f"  Remove {name}'s hooks from {catalog}? Catalog files are kept. [y/N]: ",
+                type="yes_no",
+                default=False,
+            ).strip().lower()
+            if resp != "y":
+                Console.info("Skipped.")
+                return
         if catalog_hooks.unwire(catalog, item_type, name):
             Console.success(f"{name}: hooks removed from {catalog}; catalog files kept")
         else:

@@ -182,6 +182,11 @@ class TestInstallSkill:
             assert load_state(repo, "skill", "my-skill").hooks_installed
             assert "my-skill" in (repo / ".claude" / "settings.json").read_text()
 
+            # interactive uninstall asks first; declining keeps the hooks
+            with patch("aec.commands.uninstall.ask_prompt", return_value="n"):
+                run_uninstall(item_type="skill", name="my-skill", global_flag=False, yes=False)
+            assert load_state(repo, "skill", "my-skill").hooks_installed
+
             run_uninstall(item_type="skill", name="my-skill", global_flag=False, yes=True)
             assert not (repo / ".aec" / "installed-hooks" / "skill.my-skill.json").exists()
             assert "my-skill" not in (repo / ".claude" / "settings.json").read_text()
