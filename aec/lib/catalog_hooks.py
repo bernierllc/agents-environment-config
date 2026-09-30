@@ -38,13 +38,18 @@ def _catalog_item(item_type: str, name: str) -> Optional[tuple[Path, str]]:
 def wire(repo: Path, item_type: str, name: str, allow_custom_check: bool = False) -> bool:
     """Wire an item's hooks from the catalog in place.
 
-    Returns False when the item ships no hooks.json. Raises LookupError when
+    Returns False when the item ships no hooks.json, unwiring any hooks an
+    earlier version left. Raises LookupError when
     the catalog has no such item.
     """
     found = _catalog_item(item_type, name)
     if found is None:
         raise LookupError(f"{item_type} not found in catalog: {name}")
     item_dir, version = found
+    if not (item_dir / "hooks.json").exists():
+        # A version that dropped its hooks: retract any it wired before.
+        unwire(repo, item_type, name)
+        return False
     return install_hooks_for_item(
         item_type=item_type,
         item_key=name,

@@ -8,6 +8,7 @@ I/O so they can be tested in isolation — this file grows across Tasks 9a-9g.
 from __future__ import annotations
 
 import json
+import os
 import shlex
 from pathlib import Path
 from typing import Dict, List, Sequence
@@ -331,10 +332,28 @@ def install_item_hooks(
     # content fingerprint, so without this a hook whose command changed (a
     # version bump in an argument, say) leaves the old entry behind AND appends
     # the new one — and the stale copy keeps firing.
-    _remove_recorded_hooks(
-        repo_root, st.hooks_installed, item_type=item_type, item_key=item_key,
-    )
+    snapshot = _snapshot_configs(repo_root, st.hooks_installed, rendered)
+    try:
+        _remove_recorded_hooks(
+            repo_root, st.hooks_installed, item_type=item_type, item_key=item_key,
+        )
+        _install_rendered(
+            repo_root, rendered, st, skipped, item_type, item_key, item_version,
+            agents, hooks_json, allow_custom_check,
+        )
+    except Exception:
+        # All or nothing: a config that fails to parse or write part-way must
+        # not leave earlier agents retracted. State is saved only on success.
+        _restore_configs(snapshot)
+        raise
 
+    hook_state.save_state(repo_root, st)
+
+
+def _install_rendered(
+    repo_root, rendered, st, skipped, item_type, item_key, item_version,
+    agents, hooks_json, allow_custom_check,
+) -> None:
     st.item_version = item_version
     st.hooks_file_hash = fingerprint_hook(json.loads(hooks_json.read_text()))
     st.agents_targeted = list(agents)
@@ -353,7 +372,27 @@ def install_item_hooks(
         else:
             _install_git(repo_root, entries, st, item_type, item_key, item_version)
 
-    hook_state.save_state(repo_root, st)
+
+def _snapshot_configs(repo_root: Path, hooks_installed: List[dict], rendered: List) -> dict:
+    """Bytes and mode of every config file a (re)install may touch; None if absent."""
+    paths = {repo_root / ".claude/settings.json", repo_root / ".gemini/settings.json",
+             repo_root / ".cursor/hooks.json"}
+    git_events = {h["target_json_pointer"].split("/")[2]
+                  for h in hooks_installed if h["agent"] == "git"}
+    git_events |= {e["event_key"] for agent, entries in rendered if agent == "git" for e in entries}
+    if git_events:
+        hooks_dir = resolve_hooks_dir(repo_root).hooks_dir
+        paths |= {hooks_dir / ev for ev in git_events}
+    return {p: (p.read_bytes(), p.stat().st_mode) if p.is_file() else None for p in paths}
+
+
+def _restore_configs(snapshot: dict) -> None:
+    for path, saved in snapshot.items():
+        if saved is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(saved[0])
+            os.chmod(path, saved[1])
 
 
 def _remove_recorded_hooks(

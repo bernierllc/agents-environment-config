@@ -122,6 +122,35 @@ def test_refresh_with_missing_script_keeps_previous_hooks(catalog):
     assert "not refreshed, previous hooks kept" in line
     assert (catalog / ".claude" / "settings.json").read_text() == before
 
+
+def test_refresh_write_failure_restores_every_agent(catalog):
+    from aec.lib import catalog_hooks
+    from aec.lib.hooks import installer
+
+    catalog_hooks.wire(catalog, "skill", "my-skill")
+    settings = catalog / ".claude" / "settings.json"
+    before = settings.read_text()
+    _skill(catalog, "1.1.0")
+
+    # Retraction has already rewritten settings.json when the install write fails.
+    with patch.object(installer, "_install_claude", side_effect=OSError("disk full")):
+        [line] = catalog_hooks.refresh(catalog)
+    assert "not refreshed, previous hooks kept" in line
+    assert settings.read_text() == before
+
+
+def test_wire_unwires_when_item_no_longer_ships_hooks(catalog):
+    from aec.lib import catalog_hooks
+    from aec.lib.hooks.state import STATE_DIR
+
+    skill = catalog / ".claude" / "skills" / "my-skill"
+    catalog_hooks.wire(catalog, "skill", "my-skill")
+    (skill / "hooks.json").unlink()
+
+    assert catalog_hooks.wire(catalog, "skill", "my-skill") is False
+    assert not list((catalog / STATE_DIR).glob("*.json"))
+    assert "my-skill" not in (catalog / ".claude" / "settings.json").read_text()
+
 def test_directory_form_rule_wires_from_its_directory(catalog):
     from aec.lib import catalog_hooks
 
