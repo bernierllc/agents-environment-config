@@ -92,8 +92,9 @@ Invoked by a user or triggered by verification-writer. Reads the task list from 
 
 The existing `sync-tests.js` script handles mechanical operations after LLM generation: removing tests for deleted items, updating `@tag` annotations when item IDs change, re-enabling `.skip()` tests when previously-missing testids are found. The postToolUse hook calls this script. Read `references/test-generation-patterns.md` for marker format details.
 
-**Item ID collision guard.** `manifest/items.json` is keyed globally by item ID, so two
-verification docs that mint the same ID cannot both be represented. `sync-tests.js`
+**Item ID collision guard.** Item IDs are globally unique across the per-doc
+`manifest/items/*.json` files, so two verification docs that mint the same ID cannot
+both be represented (`loadManifest` refuses a manifest with one ID in two files). `sync-tests.js`
 refuses to write when an item it is about to add is already owned by a different
 `source_doc`: it exits non-zero, names each colliding ID and its current owner, and
 leaves the manifest untouched. Without the guard the second doc silently reassigns the
@@ -105,19 +106,34 @@ by giving each doc a unique namespace, then re-run sync.
 
 ### Queue bridge
 
-The hook runs `sync-tests.js` first. If the script detects items needing LLM intelligence (new items, substantial changes), it writes them to `pending-generation.json`. The skill reads and processes this queue on next invocation.
+The hook runs `sync-tests.js` first. If the script detects items needing LLM intelligence (new items, substantial changes), it flags their entries `"pending_generation": true` in that doc's `manifest/items/<doc-slug>.json`. The skill processes the flagged items on next invocation and removes the flag from each item it generates (see `references/manifest-format.md` → The pending-generation queue). There is no `pending-generation.json` since 4.0.0.
+
+### Manifest layout (4.0.0+)
+
+The manifest is one file per verification doc (`manifest/items/<doc-slug>.json`) and one per page (`manifest/import-index/<page>.json`), each with `"version": "2.0"` and no repo-wide timestamp — edits to different docs write disjoint files. **Every script reads and writes it through `scripts/lib/manifest.js` (`loadManifest` / `saveManifest`); never parse the files directly.** Full format: `references/manifest-format.md`.
+
+**Upgrading from 3.x is automatic.** The first script to load the manifest detects layout-1 files (`manifest/items.json`, `manifest/import-index.json`, `pending-generation.json`) by their `version` field (missing = `1.0`), splits them into the per-doc files, verifies nothing was lost, and deletes them. If anything would be lost it refuses with a non-zero exit and leaves the old files untouched; fix the file it names. A manifest file newer than this skill fails with "upgrade the skill" — it is never downgraded. After the migration, commit `manifest/items/` and `manifest/import-index/` and `git rm` the old files; `verify-pipeline.js` warns when it performed this migration, and fails when a merge brings a layout-1 file back next to the new layout (it folds it in per doc — an existing per-doc file wins — and names the `git rm`).
+
+**Consumers mark the per-doc files `-merge`** in `.gitattributes`, so a conflicting merge is regenerated instead of spliced:
+
+```
+tests/verification-playwright/manifest/items/*.json -merge
+tests/verification-playwright/manifest/import-index/*.json -merge
+```
+
+On a conflict take either side, then re-run `sync-tests.js` for that doc, passing its path (`node scripts/verification-playwright/sync-tests.js docs/verification/<doc>.md`), or `--force-index` for that page.
 
 ## Entry Points
 
 | Trigger | Scope |
 |---|---|
-| **First run in a project** | Full generation: run `check-versions.js`, create metadata docs for all pages, generate all tests, produce testid-gaps.md report |
-| **Pending generation queue** | Read `pending-generation.json`, generate tests for queued items only |
+| **First run in a project** | Full generation: run `check-versions.js` (which also migrates a 3.x manifest to the per-doc layout), create metadata docs for all pages, generate all tests, write one `manifest/items/<doc-slug>.json` per doc and one `manifest/import-index/<page>.json` per page, produce testid-gaps.md report, and add the `-merge` lines above to `.gitattributes` |
+| **Pending generation queue** | Generate tests only for items flagged `pending_generation: true` (`pendingIds(loadManifest(dir))`), clearing each flag after its test is written |
 | **User invocation** | Generate or update tests for specified scope (page, flow, or full) |
 | **`--check` flag** | Run `check-versions.js` only, report staleness without generating anything |
-| **`--force` flag** | Regenerate all tests from scratch, discarding manifest |
-| **`--force-index` flag** | Rebuild import-index.json only, preserve item hashes |
-| **`--force-items` flag** | Rebuild items.json only, preserve config and index |
+| **`--force` flag** | Regenerate all tests from scratch, discarding `manifest/items/` and `manifest/import-index/` (`config.json` is kept) |
+| **`--force-index` flag** | Rebuild every `manifest/import-index/<page>.json` only, preserve item hashes |
+| **`--force-items` flag** | Rebuild every `manifest/items/<doc-slug>.json` only, preserve config and index |
 | **`--resync` flag** | Adopt a newer verification-writer skill version: apply that version's ID renames (from verification-writer's migration table) to the manifest and test `@tag` annotations, update every `source_generated_by` field in metadata docs, update every `@source-generated-by` line in test headers. Does NOT regenerate test bodies |
 
 ## Checklist
@@ -136,10 +152,21 @@ Complete these in order:
    - **7b. Pre-flight ID validation (before writing each spec file):** After generating the full text of a spec file, before writing to disk, extract every `@begin:ID` from the generated text and cross-check against the ID set from `parseVerificationItems()`. If any `@begin:ID` is not in that set, refuse to write and report the specific invalid IDs. This is a hard stop — do not write the file.
    - **7b.1. Artifact-token guard (before writing each spec file):** In the same pre-write pass, scan the generated text for leaked tool-call artifact tokens (stray opening/closing `invoke`, `parameter`, or `function_calls` tags). If any are present the generation is malformed — refuse to write and regenerate. This is a hard stop: a single corrupted spec makes Playwright fail at *collection*, aborting the entire suite before any test runs. `verify-pipeline.js`'s `checkSpecArtifacts` re-checks this on disk as a defense-in-depth gate, but the file must never be written in the first place.
 8. **Handle missing testids** — exhaust stable alternative selectors first (`getByRole` → `getByLabel` → `getByText` for static copy → `getByPlaceholder` for static copy); generate `.skip()` stub only if all fail and only for types that require DOM selectors (not `api-response` or `auth-boundary`); document alternatives tried in stub comment (see stub template in `references/test-generation-patterns.md`); update `testid-gaps.md`
-   - **8a. Selector verification (Checkpoint A.5 — gates every live test):** Before emitting any live (non-`.skip()`) test that depends on a DOM selector, the selector MUST be verified against actual component source. Open the component file (use `import-index.json` to locate it) and confirm the exact `data-testid`, label, role+name, or static text exists. **Best-guess selectors are forbidden in live tests.** If you cannot read the component source, or the component does not expose the expected hook, the test MUST be a `.skip()` stub citing skip reason 3 with "selector unverified" and a `testid-gaps.md` entry. See "Selector Verification" below.
+   - **8a. Selector verification (Checkpoint A.5 — gates every live test):** Before emitting any live (non-`.skip()`) test that depends on a DOM selector, the selector MUST be verified against actual component source. Open the component file (use `manifest/import-index/` to locate it) and confirm the exact `data-testid`, label, role+name, or static text exists. **Best-guess selectors are forbidden in live tests.** If you cannot read the component source, or the component does not expose the expected hook, the test MUST be a `.skip()` stub citing skip reason 3 with "selector unverified" and a `testid-gaps.md` entry. See "Selector Verification" below.
    - **8b. Data dependency classification:** If a verification item asserts the presence of dynamic content (cards, list items, feed entries, table rows, counts > 0), classify as data-dependent. Set the page's metadata `data_setup.ready` accordingly. If `data_setup.ready = false`, generate a `.skip()` stub citing skip reason 2 — do not paper over with `hasCards || hasEmptyState` fallbacks unless the verification item is explicitly typed as `graceful empty state`. See "Live Data Dependencies" below.
 9. **Update manifest** — write changes atomically with lockfile
-10. **Rebuild import index** — trace routes to source files, update `manifest/import-index.json`. Index keys are **repo-root-relative** (the git toplevel), not relative to the Playwright project dir. This matters in monorepos where the project root is a subdirectory and sources span multiple packages: `map-changes.js --since-main` matches these keys against `git diff --name-only`, which always emits repo-root-relative paths. `verify-pipeline.js`/`map-changes.js` resolve the repo root via `git rev-parse --show-toplevel` and fall back to the project dir when not in a git repo (so single-root projects are unaffected).
+10. **Rebuild import index** — trace routes to source files, write one `manifest/import-index/<page>.json` per page you rebuilt (a `files` list; see `references/manifest-format.md`). Index paths are **repo-root-relative** (the git toplevel), not relative to the Playwright project dir. This matters in monorepos where the project root is a subdirectory and sources span multiple packages: `map-changes.js --since-main` matches these keys against `git diff --name-only`, which always emits repo-root-relative paths. `verify-pipeline.js`/`map-changes.js` resolve the repo root via `git rev-parse --show-toplevel` and fall back to the project dir when not in a git repo (so single-root projects are unaffected).
+10b. **Link specs back into the manifest** — run
+    `node <skill-dir>/scripts/link-specs.js <projectDir>`, by absolute skill path with the target
+    project passed explicitly. The skill's scripts do not live inside the project, so a bare
+    `scripts/link-specs.js` resolves to the *project's* scripts directory, and relying on
+    `process.cwd()` breaks the moment the caller runs from the skill directory. `projectDir`
+    defaults to the cwd for the common case. Specs are written by
+    this skill, not by `sync-tests.js`, and nothing else writes `spec_file` back onto the manifest.
+    **Without this step three of `verify-pipeline.js`'s checks — `checkSpecFiles`,
+    `checkSpecArtifacts`, and the marker half of `checkItemConsistency` — silently iterate an empty
+    set, so the gate passes because it inspects nothing.** Run it after any generation pass and
+    before `verify-pipeline.js`.
 11. **Patch test headers** — for `header-missing` items, add `@source`, `@source-generated-by`, `@metadata`, and `@generated-by` comments to existing test files
     - **11a. Post-generation audit (Checkpoint B — gates step 12):** count complete tests vs. stubs; for every stub verify it carries one of the four valid skip reasons from Test Completeness Standards; reclassify and implement any stub with an invalid reason; do not proceed to step 12 until every stub has a valid reason
 12. **Report** — print summary of generated, updated, skipped, blocked, and pinned tests
@@ -149,14 +176,13 @@ Complete these in order:
 ```
 tests/verification-playwright/
 ├── manifest/
-│   ├── items.json              # Item-to-test mapping, hashes (hash_version field), pin status
-│   ├── import-index.json       # Source file → page tag mapping
+│   ├── items/                  # One <doc-slug>.json per verification doc: items, hashes, pins, pending flags
+│   ├── import-index/           # One <page>.json per page tag: source files that affect it
 │   └── config.json             # Tier config, dry-run, test isolation
 ├── metadata/                   # Derivative docs — this skill's own research
 │   ├── admin-dashboard.md      # Auth strategy, data setup, readiness per page
 │   ├── event-detail.md
 │   └── ...
-├── pending-generation.json     # Queue of items needing LLM generation
 ├── playwright.config.ts        # Extends root config, verification-specific
 ├── testid-gaps.md              # Missing data-testid work list
 ├── helpers/
@@ -391,7 +417,7 @@ Only if all applicable options are exhausted is the element untargetable without
 
 A selector is *verified* when one of the following is true:
 
-1. **`data-testid` confirmed in source** — grep the component file (located via `import-index.json` route → source mapping) for the exact `data-testid` value the test will use. Match found = verified.
+1. **`data-testid` confirmed in source** — grep the component file (located via the `manifest/import-index/` route → source mapping) for the exact `data-testid` value the test will use. Match found = verified.
 2. **`getByRole` + accessible name confirmed in source** — the component's JSX shows the exact role-bearing element with the exact accessible name (visible text, `aria-label`, or label association). Verified.
 3. **`getByLabel` confirmed in source** — the component renders a `<label>` with matching text bound to the input. Verified.
 4. **`getByText` for static copy confirmed in source** — the literal string is present in the JSX as static markup, not interpolated from data. Verified.
@@ -401,7 +427,7 @@ Anything else — including `[data-testid*="activity"]`, `locator('form').first(
 
 **Required workflow before writing a live test:**
 
-1. Locate the page's component source via `import-index.json`.
+1. Locate the page's component source via `manifest/import-index/`.
 2. Read the component(s) actually rendered for the route.
 3. For each selector the test will use, confirm it matches by one of the five criteria above.
 4. If all selectors verify → emit a live test.
@@ -554,9 +580,9 @@ Before generating a skip stub for a missing testid:
 When a developer manually edits a generated test to fix a bad selector or add project-specific setup:
 
 1. `sync-tests.js` detects the content between `@begin`/`@end` markers no longer matches `generated_hash`
-2. It sets `"pinned": true` in `items.json`
+2. It sets `"pinned": true` on the item in its doc's `manifest/items/<doc-slug>.json`
 3. Pinned tests are never overwritten — reported as "pinned (manually edited)" in the generation log
-4. Un-pin by setting `"pinned": false` in `items.json`, or use `--force`
+4. Un-pin by setting `"pinned": false` on that entry, or use `--force`
 
 ## Version Check Script
 
@@ -620,7 +646,7 @@ The `version_delta` field tells the agent whether the change is `patch`, `minor`
 
 ## Hash Algorithm
 
-The `generated_hash` field in `items.json` records the content hash of each test (content between `@begin`/`@end` markers). A hash mismatch signals that a developer manually edited the test — the test is then pinned and never overwritten.
+The `generated_hash` field on each manifest item records the content hash of each test (content between `@begin`/`@end` markers). A hash mismatch signals that a developer manually edited the test — the test is then pinned and never overwritten.
 
 ### Normalization (must be applied before hashing)
 
@@ -635,18 +661,20 @@ Any deviation from this algorithm produces a different hash for the same logical
 
 ### hash_version field
 
-`items.json` includes a top-level `hash_version` field that records which version of the normalization algorithm was used to produce the hashes in that file:
+Each `manifest/items/<doc-slug>.json` includes a top-level `hash_version` field that records which version of the normalization algorithm was used to produce the hashes in that file (the 3.x → 4.0 migration copies the old repo-wide value into every doc file):
 
 ```json
 {
+  "version": "2.0",
   "hash_version": 1,
+  "source_doc": "docs/verification/pages/admin-event-form.md",
   "items": { ... }
 }
 ```
 
 - Drift within the same `hash_version` is a bug — the algorithm is non-deterministic.
 - Drift across `hash_version` values is expected — bump `hash_version` when the normalization algorithm changes, and regenerate all hashes on the next `--force` run.
-- When reading `items.json`, if the `hash_version` is absent, treat it as version 0 (legacy, pre-normalization-lock). All hashes from version 0 are suspect — a `--force` regeneration is recommended.
+- When reading a doc file, if the `hash_version` is absent, treat it as version 0 (legacy, pre-normalization-lock). All hashes from version 0 are suspect — a `--force` regeneration is recommended.
 
 ## Skill Version Compatibility
 
@@ -670,7 +698,7 @@ Silent adoption is the specific failure mode this system exists to prevent.
 
 1. Read verification-writer's migration table (in its "Skill Version Tracking and Migration" section) for every version hop between the stored `source_generated_by` and the live `generated_by`
 2. Apply each hop's `ID renames` column to:
-   - `manifest/items.json` — rekey entries from OLD-ID to NEW-ID
+   - `manifest/items/<doc-slug>.json` — rekey entries from OLD-ID to NEW-ID (through `loadManifest` / `saveManifest`)
    - Test file `@tag` annotations — rewrite `@OLD-ID` to `@NEW-ID` in test titles
    - Test file `@begin:OLD-ID` / `@end:OLD-ID` markers — rewrite to NEW-ID
 3. Apply each hop's `Structural changes` column — e.g., rekey frontmatter fields the metadata doc mirrors
@@ -698,11 +726,22 @@ Read `references/hook-templates.md` for the complete hook configuration. Summary
 
 Tier configuration is fully user-configurable in `manifest/config.json`.
 
+The gate enforces that table rather than describing it:
+
+- **Depth** comes from `tiers.gate.depths`, as a **positive allowlist**: a test must carry a gate depth AND an affected suite tag. Deriving exclusions from other tiers' depths leaked anything no tier declared — one consumer had `@error` and `@edge` items running at commit time — so unrecognised depths are out by default.
+- **Browsers** come from `tiers.gate.browsers`, so adding a browser to the config changes the gate rather than silently affecting pre-push alone.
+- **The cap** is compared against the number of tests Playwright actually resolves (`--list`), not the number of tags. Tags are suite-level: a single changed file can pull in a whole suite, so a tag count is not a test count and a cap compared against one never fires.
+- **Playwright owns the server; the hook does not start one.** `webServer` already starts the app when down and passes the right env, and reimplementing that in the hook produced six Critical review findings in two rounds — process groups, EXIT traps, env parity — none of it the hook's job. The one check Playwright cannot make is kept: a checkout whose `node_modules` is a symlink can never serve the app (Turbopack refuses it), so the gate skips with a one-line reason instead of a wall of connection failures.
+- **Set `reuseExistingServer: false` on the verification config, and take the port from `VERIFICATION_PORT`.** With reuse on, Playwright adopts whatever is listening — including a dev server started with a different env, which for a suite pointed at a mock API means silently reaching the real one; an unauthenticated probe cannot tell the two apart, so do not try. With reuse off, a busy port ends the run before a single test, and on a shared machine the default port is usually busy. So the hook picks the first free port in a small range and exports `VERIFICATION_PORT`; the config reads it for `baseURL`, `webServer.port` and the dev command. Any fixed port a globalSetup binds (a mock API, say) needs the same treatment — the template exports `MOCK_SENDGRID_PORT` as the worked example; rename to taste. No free port is an environmental skip with a reason, never a block.
+- **Suite tags need a terminator in the grep.** `@onboarding` also matches `@onboarding-domains`; one consumer selected 195 tests for a one-file change instead of 38, tripped the cap, and skipped the gate for the tests that were affected. The template follows each tag and depth with `(?:\s|$)`.
+- **The gate runs a dev server, never a build.** If the verification config builds and serves a production bundle for the batched runner (paying the build once per suite run), the hook exports `VERIFICATION_SERVER=dev` and the config swaps the command for `next dev` on the chosen port: a `next build` per commit takes minutes and writes into the same `.next` a running batched server may be serving from. `next dev` writes under `.next/dev` and its first-hit compile is bounded by the gate's own `--timeout`.
+- **The gate never blocks a commit for an environmental reason.** No server, no dependencies, an empty selection at gate depth, or a selection over the cap all skip with a reason and exit 0. Only a genuine test failure blocks.
+
 ## Cross-Skill Integration
 
 ### When invoked by verification-writer
 
-After verification-writer updates docs (and bumps their version), the postToolUse hook triggers `sync-tests.js`. If new or substantially changed items are detected, they are queued in `pending-generation.json`. On next skill invocation, `check-versions.js` detects the version mismatch and the agent processes the queue.
+After verification-writer updates docs (and bumps their version), the postToolUse hook triggers `sync-tests.js`. If new or substantially changed items are detected, they are flagged `pending_generation: true` in their doc's manifest file. On next skill invocation, `check-versions.js` detects the version mismatch and the agent processes the queue.
 
 ### Relationship to browser-verification
 
@@ -721,7 +760,8 @@ Browser-verification findings feed back to verification-writer, which updates do
 | Blocking commits when pipeline not initialized | Guard clause: exit 0 if `scripts/verification-playwright/` missing |
 | Using CSS selectors instead of data-testid | Flag missing testids in testid-gaps.md, generate `.skip()` stubs |
 | Running full suite on every commit | Use tag-based `--grep` to run only affected tests |
-| Ignoring pending-generation.json | Check the queue at the start of every invocation |
+| Ignoring `pending_generation` flags | Check `pendingIds(loadManifest(dir))` at the start of every invocation |
+| Parsing `manifest/items/*.json` or `manifest/import-index/*.json` directly | Go through `scripts/lib/manifest.js` — it migrates older layouts, enforces ID uniqueness and writes only changed files |
 | Hardcoding tier configuration | Read from `manifest/config.json` — tiers are user-configurable |
 | Generating tests for authenticated pages without auth setup | Read verification doc frontmatter `access` block → check metadata `auth.ready` → generate `.skip()` if not ready |
 | Agent scanning all files to find what changed | Run `check-versions.js` first — it compares versions in milliseconds, hands agent only items that need work |
@@ -733,7 +773,7 @@ Browser-verification findings feed back to verification-writer, which updates do
 | Skipping API response items as "backend-only" | Classify as `api-response` and use `page.request` — API response assertions are Playwright tests |
 | Stubbing `multi-step-workflow` items | `multi-step-workflow` is an interaction type, not a skip reason — execute each step in sequence, assert intermediate and final states |
 | Generating a testid-missing stub without trying stable alternatives | Try `getByRole`, `getByLabel`, `getByText` (static copy only), `getByPlaceholder` (static copy only) before generating a stub; document what was tried |
-| Emitting a live test with a guessed/unverified selector (e.g., `[data-testid*="article-card"], article, .article-card`, `locator('form').first()`, `nav a` filters constructed from the verification doc's natural language) | Live tests require selector verification against component source — read the component via `import-index.json` and confirm the testid/role/label/static text exists. If unverified, emit a `.skip()` stub with skip reason 3 and a `testid-gaps.md` entry. Best-guess selectors are forbidden in live tests. |
+| Emitting a live test with a guessed/unverified selector (e.g., `[data-testid*="article-card"], article, .article-card`, `locator('form').first()`, `nav a` filters constructed from the verification doc's natural language) | Live tests require selector verification against component source — read the component via `manifest/import-index/` and confirm the testid/role/label/static text exists. If unverified, emit a `.skip()` stub with skip reason 3 and a `testid-gaps.md` entry. Best-guess selectors are forbidden in live tests. |
 | Asserting presence of dynamic content (cards, feed entries, list rows) without checking `data_setup.ready` | Data-dependent items must check the metadata doc's `data_setup.ready`. If false, stub with skip reason 2; if true, seed required data in `beforeEach`. Do not assume the dev database is populated. |
 | Papering over data-dependence with `expect(hasContent || hasEmptyState).toBe(true)` | This is only valid when the verification item is explicitly typed `graceful empty state`. Otherwise it masks the actual assertion and silently passes against an empty database — classify the item correctly and either seed data or stub with skip reason 2. |
 | Claiming "missing testid" for `api-response` or `auth-boundary` items | These types use `page.request` or URL/navigation assertions — they do not need DOM selectors; this is a misclassification |
@@ -746,7 +786,7 @@ Browser-verification findings feed back to verification-writer, which updates do
 | Using a different slugify implementation than sync-tests.js | Both tools must import from `scripts/verification-playwright/lib/slugify.js` — divergent implementations produce different IDs for the same input |
 | Generating tests for a flow doc with no Format A IDs | Flow docs without `**FLOW-PREFIX-NN**` IDs have nothing for `parseVerificationItems()` to return — report the gap, don't mint IDs |
 | Hash drift within the same hash_version | The normalization algorithm must be deterministic — strip trailing whitespace, normalize CRLF→LF, trim surrounding blank lines, encode UTF-8; any variation produces false manual-edit detections |
-| Writing absolute paths into manifest files | All manifest paths must be relative, never absolute — absolute paths (especially worktree paths) break on any other machine or after worktree cleanup. Two relative bases apply: `import-index.json` keys are **repo-root-relative** (they match `git diff` output and may span packages); `spec_file` / `source_doc` paths in `items.json` and `pending-generation.json` are **project-dir-relative** (under `tests/verification-playwright/`). In a single-root project the two bases coincide. |
+| Writing absolute paths into manifest files | All manifest paths must be relative, never absolute — absolute paths (especially worktree paths) break on any other machine or after worktree cleanup. Two relative bases apply: `manifest/import-index/*.json` paths are **repo-root-relative** (they match `git diff` output and may span packages); `spec_file` / `source_doc` paths in `manifest/items/*.json` are **project-dir-relative** (under `tests/verification-playwright/`). In a single-root project the two bases coincide. |
 
 ## Red Flags — STOP
 
@@ -763,5 +803,48 @@ Browser-verification findings feed back to verification-writer, which updates do
 - `check-versions.js` reports `skill-version-mismatch` and `--resync` has not been run — STOP; silent adoption of a newer verification-writer version corrupts manifests and test markers
 - About to overwrite a `source_generated_by` or `@source-generated-by` value as part of normal generation — these only change during a `--resync` pass
 - `check-versions.js` reports `stamp-missing` on a verification doc — tell the user to re-run verification-writer so it stamps the doc; do not invent a `source_generated_by` value
-- `items.json`, `import-index.json`, or `pending-generation.json` contain absolute paths (including worktree paths like `.claude/worktrees/...`) — these paths break on any machine other than where they were written; rebuild the manifest with project-relative paths
+- `manifest/items/*.json` or `manifest/import-index/*.json` contain absolute paths (including worktree paths like `.claude/worktrees/...`) — these paths break on any machine other than where they were written; rebuild the manifest with project-relative paths
 - Multiple parallel agents were used to generate tests and their work has been merged — run `verify-pipeline.js` before declaring done; parallel worktree merges silently discard all-but-last for shared files
+
+## Changelog
+
+### 4.0.3
+
+**Fix: a truncated hook payload on stdin fails loudly.** If the writer sent part of the JSON and went quiet past the idle bound, the partial text failed to parse, `sync-tests.js` printed usage and exited 0, and the manifest sync was skipped with no error. A non-empty payload that doesn't parse now exits 2 like no payload at all. A complete payload for a file that isn't a verification doc still exits 0.
+
+### 4.0.2
+
+**Fix: `sync-tests.js` with no argument no longer hangs.** With no doc path it read stdin for the hook's `{"tool_input":{"file_path":…}}` payload using a blocking read, which never returns when stdin is a terminal (run by hand) or a pipe that stays open without writing (run by an agent). It now reads stdin with a 2 s idle bound, reset by each chunk, so a slow hook writer is never cut off and a writer that goes quiet without closing still has its payload used. If stdin is a terminal, sends nothing, or is already closed (`</dev/null`), it prints usage to stderr and exits 2. The hook still writes its payload and closes at once, so it is unaffected. The docs' "re-run `sync-tests.js` for that doc" steps now show the path form.
+
+### 4.0.1
+
+**Fix: tier validation checks the order tiers are selected in, not config key order.** `selectTier()` always checks `full`, `thorough`, `gate` in that order (`TIER_ORDER`, now exported), but `validateTierOrder()` walked the keys of `config.json` as `JSON.parse` returned them. A config listing `gate: "*"` first is valid, yet it threw on every branch, so no tier ever ran. Validation now rejects only a catch-all that really shadows a tier checked after it.
+
+**Fix: the pre-commit harness tests the gate in a worktree that symlinks `node_modules`.** From such a checkout every `check()` case hit the hook's symlink skip, so 9 of 12 failed while testing nothing. When `node_modules` is a symlink, the cases now run from a sandbox mirror of the checkout that has a real, empty `node_modules`.
+
+**Fix: the mixed-state fold never lets a layout-1 file overwrite an existing per-doc file.** A branch cut before 4.0.0 re-saves `items.json` with a fresh repo-wide `generated_at`, so under the old "newer timestamp wins" rule its stale entries overwrote every newer per-doc file on merge. An existing 2.0 file now always wins; layout-1 entries only fill docs and pages that have no 2.0 file. A kept doc the stale branch really did change is re-flagged by `sync-tests` on its next run, since its `content_hash` no longer matches.
+
+**Fix: `verify-pipeline.js` fails on a bootstrapped manifest with no item files.** If `manifest/items/` was deleted or emptied, the loader returned an empty map and every check passed over nothing. It now fails and names the restore, and it warns when `manifest/import-index/` is empty while items exist.
+
+**Fix: the pre-push template passes the tier's browsers as `--project` flags.** It read no browser list, so a `playwright.config.ts` with more projects than `tiers.<tier>.browsers` ran all of them.
+
+### 4.0.0
+
+Combines the per-doc manifest layout (was PR #39) with the running-app commit gate (was PR #32), so they land in one release.
+
+**Breaking: on-disk manifest layout 1.0 → 2.0.**
+- `manifest/items.json` and `manifest/import-index.json` are split into `manifest/items/<doc-slug>.json` and `manifest/import-index/<page>.json`, each `"version": "2.0"`. Two PRs touching different verification docs now touch different files, so they no longer conflict on a repo-wide `-merge` file.
+- `pending-generation.json` is gone. An item is queued when its entry carries `pending_generation: true`.
+- Every script loads and saves through `scripts/lib/manifest.js`, which migrates older layouts on first load. The migration is ordered by `LAYOUT_STEPS`, lossless (it refuses rather than drop data), and idempotent. It also folds a layout-1 file that an old branch brings back, and it refuses to read a newer layout or to downgrade. Two item files that declare the same `source_doc`, or two index files that declare the same page, are refused, and concurrent first loads use per-process temp files.
+- Consumers: commit the new directories, `git rm` the old aggregate files, and change `.gitattributes` `-merge` lines to the per-doc globs (see the "Upgrading from 3.x" paragraph under Execution Model).
+
+**Commit gate (`templates/hooks/pre-commit.sh`).** See "Tiered Test Execution" for details.
+- Selects tests by `tiers.gate.depths` as a positive allowlist and by `tiers.gate.browsers`.
+- Terminates each tag in the grep, so `@onboarding` no longer also matches `@onboarding-domains`.
+- Counts resolved tests with `--list` rather than counting tags.
+- Picks a free port and exports `VERIFICATION_PORT` and `VERIFICATION_SERVER=dev`. It uses `lsof` when present and falls back to a node `net` probe, never to guessing. Playwright's `webServer` starts the app.
+- Never blocks a commit for an environmental reason. Only a genuine test failure blocks.
+- Reports a `map-changes.js` failure (for example, a refused manifest migration) and skips, rather than reading it as "no affected tags" and going silent.
+- Has a bash harness in `templates/hooks/__tests__/pre-commit.test.sh`.
+
+**CLI entry points resolve symlinks.** Every script compares real paths through `isEntryPoint()` in `lib/repo.js`. Before this, a script run through a symlinked `scripts/` directory exited silently.

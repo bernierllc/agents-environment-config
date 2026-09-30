@@ -598,7 +598,7 @@ When this flag is passed:
 2. For each doc with a stamp older than the current skill version, look up the migration table row(s) for that version gap.
 3. Apply ONLY the ID renames listed in those rows. For each renamed item:
    - Update the verification doc item
-   - Update every downstream reference: playwright-test-generator's `manifest/items.json`, test file `@tag` annotations, `@begin:ID` / `@end:ID` markers, findings reports, run logs
+   - Update every downstream reference: playwright-test-generator's `manifest/items/<doc-slug>.json`, test file `@tag` annotations, `@begin:ID` / `@end:ID` markers, findings reports, run logs
 4. Bump each touched doc's `version` (patch — structural re-sync, no content change).
 5. Re-stamp `generated_by` with the current skill version.
 6. Report every ID that changed with old → new mapping, and every downstream file touched.
