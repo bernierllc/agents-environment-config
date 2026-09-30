@@ -191,6 +191,39 @@ def test_refresh_isolates_one_items_failure(catalog):
     assert "my-skill: 1.0.0 -> 1.1.0" in lines
     assert load_state(catalog, "skill", "my-skill").item_version == "1.1.0"
 
+
+def test_failed_unwire_restores_hooks_and_state(catalog):
+    from aec.lib import catalog_hooks
+    from aec.lib.hooks import installer
+    from aec.lib.hooks.state import load_state
+
+    catalog_hooks.wire(catalog, "skill", "my-skill")
+    settings = catalog / ".claude" / "settings.json"
+    before = settings.read_text()
+    shutil.rmtree(catalog / ".claude" / "skills" / "my-skill")  # left the catalog
+
+    with patch.object(installer.hook_state, "remove_state", side_effect=OSError("busy")):
+        [line] = catalog_hooks.refresh(catalog)
+    assert "not refreshed" in line
+    assert settings.read_text() == before
+    assert load_state(catalog, "skill", "my-skill").hooks_installed
+
+
+def test_rollback_leaves_a_directory_in_the_way_alone(catalog):
+    from aec.lib.hooks import installer
+
+    blocker = catalog / ".gemini" / "settings.json"
+    blocker.mkdir(parents=True)
+    settings = catalog / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text("{}")
+
+    snap = installer._snapshot_configs(catalog, [], [])
+    settings.write_text('{"changed": true}')
+    installer._restore_configs(snap)
+    assert settings.read_text() == "{}"
+    assert blocker.is_dir()
+
 def test_directory_form_rule_wires_from_its_directory(catalog):
     from aec.lib import catalog_hooks
 

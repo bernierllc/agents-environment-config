@@ -373,7 +373,11 @@ def _install_rendered(
 
 
 def _snapshot_configs(repo_root: Path, hooks_installed: List[dict], rendered: List) -> dict:
-    """Bytes and mode of every config file a (re)install may touch; None if absent."""
+    """Bytes and mode of every config file a (re)install may touch; None if absent.
+
+    A path that exists but is not a file (a directory in the way) is left out:
+    writes there fail before touching it, and restoring must not remove it.
+    """
     paths = {repo_root / ".claude/settings.json", repo_root / ".gemini/settings.json",
              repo_root / ".cursor/hooks.json"}
     git_events = {h["target_json_pointer"].split("/")[2]
@@ -382,7 +386,8 @@ def _snapshot_configs(repo_root: Path, hooks_installed: List[dict], rendered: Li
     if git_events:
         hooks_dir = resolve_hooks_dir(repo_root).hooks_dir
         paths |= {hooks_dir / ev for ev in git_events}
-    return {p: (p.read_bytes(), p.stat().st_mode) if p.is_file() else None for p in paths}
+    return {p: (p.read_bytes(), p.stat().st_mode) if p.is_file() else None
+            for p in paths if p.is_file() or not p.exists()}
 
 
 def _restore_configs(snapshot: dict) -> None:
@@ -433,10 +438,15 @@ def remove_item_hooks(
 ) -> None:
     """Remove an item's hooks from all recorded agents, then drop state."""
     st = hook_state.load_state(repo_root, item_type=item_type, item_key=item_key)
-    _remove_recorded_hooks(
-        repo_root, st.hooks_installed, item_type=item_type, item_key=item_key,
-    )
-    hook_state.remove_state(repo_root, item_type=item_type, item_key=item_key)
+    snapshot = _snapshot_configs(repo_root, st.hooks_installed, [])
+    try:
+        _remove_recorded_hooks(
+            repo_root, st.hooks_installed, item_type=item_type, item_key=item_key,
+        )
+        hook_state.remove_state(repo_root, item_type=item_type, item_key=item_key)
+    except Exception:
+        _restore_configs(snapshot)  # hooks and state stay in step
+        raise
 
 
 def _remove_claude(repo_root: Path, event_key: str, fp: str) -> None:
