@@ -13,7 +13,9 @@ re-plan** — a run that is already mapped gets picked up at its first non-done 
 
 - **State dir:** user/project instructions may name one; default `.orchata/`. Read
   `run-state.json` if present (schema: a run has `steps[]` with `status`, plus
-  `next_action`). Read the last ~10 lines of `activity.jsonl` if present.
+  `next_action`). If it records a `workflow_run_id`, read that run's `journal.jsonl` before
+  anything else — it holds the fan-out's completed and stalled workers. Read the last ~10
+  lines of `activity.jsonl` if present.
 - **Git:** `git branch --show-current`, `git log --oneline -10`, `git status --short`,
   `git branch -a --sort=-committerdate` for other branches — local **and**
   remote-tracking. No run-state on the current branch → check those branches, most
@@ -26,8 +28,11 @@ re-plan** — a run that is already mapped gets picked up at its first non-done 
   the branch-mismatch rule in step 2.
 - **External tracker:** if the user's instructions configure one, query its open
   (non-done) rows whose source link matches this repo — match on `org/repo` from
-  `git remote get-url origin`, never the repo name alone. Tracker unavailable → proceed
-  on layers 1–2 and say so.
+  `git remote get-url origin`, never the repo name alone. Bound the query: add a
+  work-mode or status subset, `LIMIT` the rows, and select a truncated notes column — an
+  unbounded "all non-done rows" query can overflow the tool result. Filter server-side to
+  the branch/run where possible; page through matches only when not, before concluding no
+  row exists. Tracker unavailable → proceed on layers 1–2 and say so.
 
 ## 2. Reconcile — trust reality over records
 

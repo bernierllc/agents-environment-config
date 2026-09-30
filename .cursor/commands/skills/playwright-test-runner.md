@@ -194,7 +194,7 @@ Flag any of these in the report:
 | Mode | Trigger | What runs |
 |---|---|---|
 | **Full suite** | Default, `--all` | Every test file |
-| **Changed files** | `--changed` | Tests mapped to changed source files (uses `manifest/import-index.json` if available) |
+| **Changed files** | `--changed` | Tests mapped to changed source files (uses the page shards in `manifest/import-index/<page>.json` if present) |
 | **Changed paths** | `--changed-paths <list>` | Tests for verification pages whose `affected_paths` (frontmatter) intersect the supplied path list. Reads `docs/verification/pages/*.md` frontmatter — only pages whose `affected_paths` glob-match a changed path contribute their spec file. Pages with absent or empty `affected_paths` are skipped (warn in the report). |
 | **Single file** | `--file path/to/spec.ts` | One test file |
 | **Single test** | `--grep "TEST-ID"` | One test by grep pattern |
@@ -213,7 +213,7 @@ Complete these in order:
 6. **Parse results** — extract from JSON output: total tests, passed, failed, skipped, timed out. For each failure, extract: test file path, test name, error message, error stack trace, and expected vs. actual values. Extract per-test and per-file durations for the profiling report.
 7. **Triage failures** — categorize each failure before attempting fixes (see "Failure Classification" below). Group by category. Address categories in priority order: environment → test infrastructure → app bugs → flaky tests.
 8. **Fix loop** — for each failing test, up to 3 attempts:
-   - **8a. Read context** — read the test file (focus on the failing test function via `@begin`/`@end` markers if present). Read the source code the test exercises (use import-index.json or trace from the test's navigation/API calls).
+   - **8a. Read context** — read the test file (focus on the failing test function via `@begin`/`@end` markers if present). Read the source code the test exercises (use `manifest/import-index/<page>.json` or trace from the test's navigation/API calls).
    - **8b. Diagnose** — determine root cause from error message, stack trace, and code inspection. See "Diagnosis Patterns" in `references/diagnosis-patterns.md`.
    - **8c. Classify fix target** — decide whether the fix belongs in app code, test code, test helpers, or test infrastructure. See "Fix Target Decision" below.
    - **8d. Implement fix** — make the minimal change that addresses the root cause. Do not refactor surrounding code.
@@ -482,7 +482,7 @@ When the failure count is high (>10 failures), consider parallel diagnosis:
 - More than 50% of tests fail on the first run — diagnose environment/infrastructure first
 - A fix requires changing a verification doc — this skill does not own verification docs
 - A fix requires generating new tests — invoke playwright-test-generator instead
-- About to modify a pinned test (check `items.json` for `"pinned": true`) without user approval
+- About to modify a pinned test (check the item in `manifest/items/<doc-slug>.json` for `"pinned": true`) without user approval
 - Dev server is not running and cannot be started — report and stop
 - Fix attempt introduces a security vulnerability (e.g., disabling auth checks to make tests pass)
 - About to commit changes to `.env`, credentials, or secrets files

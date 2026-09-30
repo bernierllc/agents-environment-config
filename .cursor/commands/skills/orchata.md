@@ -40,9 +40,31 @@ Read before asking, in order:
 
 Baseline before writing code: run the repo's build/typecheck once at intake so a pre-existing
 red baseline is a known punch-list item, not a discovery at first commit (pre-commit hooks
-surface it at the worst moment). And when acceptance for any item requires a live
-authenticated check on a remote environment, confirm credential availability now and
-punch-list the check upfront — never discover the gap at retro.
+surface it at the worst moment). If the baseline build fails on a *different* target each
+run, suspect a missing env file before suspecting the tree. And when acceptance for any item
+requires a live authenticated check on a remote environment, confirm credential availability
+now and punch-list the check upfront — never discover the gap at retro.
+
+If the run uses a worktree, create it at intake, before the plan commit — pre-commit hooks
+already run there. At creation:
+
+- Dependencies: symlink `node_modules` from the primary checkout only while the branch
+  leaves the dependency manifests untouched and no worktree installs into it; otherwise
+  install per worktree (sharing only the package-manager cache). Install with an explicit
+  `NODE_ENV=development` — unattended shells often export `NODE_ENV=production`, which
+  silently skips devDependencies and makes the baseline look broken.
+- Ensure `node_modules` is excluded, once, in the file every worktree shares:
+  `x="$(git rev-parse --git-common-dir)/info/exclude"; grep -qx node_modules "$x" || echo
+  node_modules >> "$x"`. A gitignore pattern with a trailing slash (`node_modules/`) matches
+  directories, not a symlink; and git reads `info/exclude` from the common dir, not the
+  per-worktree `--git-dir`.
+- Copy or symlink the primary checkout's gitignored env files (`.env.local` and similar).
+- If sibling worktrees share one local test database whose setup drops and re-creates it,
+  give this worktree its own database URL when the repo supports an override. When it
+  doesn't, never run two full suites from this run at once, treat failures that vanish on a
+  clean rerun as collisions rather than defects, and punch-list per-worktree database
+  support as the fix. Don't hand-roll a cross-session lock or rely on a process check —
+  both race (and `pgrep -f` matches the invoking shell's own command line).
 
 Then ask **at most one batched `AskUserQuestion`** covering only genuine unknowns that would
 materially change the plan (e.g., prod posture when no profile exists, a real fork in scope).
@@ -118,6 +140,17 @@ the actual work as possible:
 - The orchestrator consumes conclusions and structured returns, never workers' file dumps or
   transcripts.
 - Worker tier and effort are set per the tier table; mechanical batches go low-tier.
+- Exception to "never inline": when one implementation unit's brief *is* the full loaded
+  context (a spec plus a schema that just landed), re-sending that context to a worker
+  costs more than building it. Build that unit inline and spend the worker budget on an
+  adversarial reviewer of it instead — the independent check is never skipped.
+- Cap concurrent fan-out to what the host can hold. On a laptop, run review fan-outs
+  serially and never alongside implementation workers. A review whose consolidated result
+  hasn't arrived: wait for the host's completion notification (read the journal only on
+  completion or timeout, never in a polling loop); if it alone has died or stalled (several
+  stalling at once is a usage limit — see Supervisor resilience),
+  confirm it stopped (cancel it) before re-running it at lower parallelism — never
+  hand-triage its raw finder output, and never run the replacement alongside it.
 
 ### Shared-worktree mode
 
@@ -133,16 +166,16 @@ Worktree hygiene (either mode):
 - Sequence environment moves **before** dispatching background agents: create the worktree
   and complete any `cd` first, then dispatch with worktree-absolute paths. An agent
   dispatched against a checkout that then moves gets its Bash calls refused.
-- At worktree creation, exclude the `node_modules` symlink from git's view (worktree
-  equivalent of `.git/info/exclude`) — gitignore does not match symlinks, so `git add -A`
-  is otherwise a standing hazard.
+- Creation-time setup (deps, `info/exclude`, env files, test DB) is listed in Phase 1;
+  apply it whenever the run creates a worktree, including per-worker ones created here.
 
 ### Orchestration mechanics
 
 - Use the **Workflow tool** where the host provides it (`agent()` accepts per-call `model`
   and `effort` overrides). If unavailable, fall back to the **Agent tool**: dispatch
   independent workers in parallel, `model` override only (no per-call effort), and note the
-  degradation in the retro.
+  degradation in the retro. The Agent tool is also fine by choice for ≤4 file-disjoint
+  workers that need no per-stage effort tiers; reserve Workflow for larger or pipelined runs.
 - Read `references/workflow-patterns.md` before writing the script.
 - `pipeline()` by default; barriers only when a stage genuinely needs all prior results.
 - Per-stage `model`/`effort` overrides per the tier table; omit when no tier clearly fits.
@@ -157,6 +190,9 @@ Worktree hygiene (either mode):
   JSON string.
 - Prefer absolute paths (or `git -C <path>`) in every Bash call — never rely on the shell's
   persisted cwd, which drifts across calls and environment moves.
+- Never stream logs in a harness (`railway logs` without `-n`, `tail -f`, `kubectl logs -f`):
+  a background task killed mid-stream loses its output, and some hosts lack coreutils
+  `timeout`. Fetch bounded slices (`-n N`, `--since`) instead.
 - Log friction as it happens — a wrong default in these instructions, an unnecessary pause, a
   missed case that caused rework → append to the friction register (see Phase 5).
 
@@ -187,6 +223,11 @@ Fan-out runs assume workers die. Rules:
   `failed`.
 - **Retry budget: 2** per task, then mark `blocked` with the last error as evidence and
   move on — never spin on one worker.
+- **A stall is not a failure.** When several workers stall (no progress) at once, that is an
+  account or usage limit, not a worker defect: abort the wave, checkpoint, and stop — never
+  retry into it (one run burned ~1.6M tokens retrying stalled agents for zero output). Record
+  the Workflow run id as `workflow_run_id` in run-state immediately after dispatch so a
+  resume can read its journal first (see `references/run-state.md`).
 - **Stream results:** append each verdict to `<state-dir>/fleet-results.json` as it
   arrives, not in a final batch. A supervisor cut mid-fleet loses zero completed verdicts.
 - **Propose in parallel, merge serially:** workers produce branches/patches concurrently;
@@ -205,6 +246,17 @@ Promotion PRs between long-lived branches (e.g. staging → main) use **merge co
 squash** — a squash leaves the branches' blobs divergent and the next promotion reports
 false conflicts. If a squash promotion already exists in history, back-merge the target
 into the source branch before opening the next promotion.
+
+Re-read bot reviews **immediately before** the merge click, not only after the initial
+wait: a review whose summary still says *Running* has not finished — wait for it. An empty
+early window is not a clean review.
+
+After any merge that touched a generated or aggregate file (an index, a manifest, a
+hand-maintained table of contents), resolve by re-running the owning generator — never by
+hand-splicing the conflict — and assert its shape (row count vs sources) before committing.
+Git can auto-merge such a file "cleanly" into garbage. A hand-maintained aggregate with no
+generator: take one side wholesale, re-derive the missing entries from their sources, and
+run the same shape assertion — then propose a generator or guard test for it in the PR.
 
 ## Phase 4 — Escalate
 
@@ -232,6 +284,19 @@ legitimate mid-run stop. One blocker never stops the run while other work can pr
 
 1. **Verify with evidence.** Tests actually run, outputs shown, claims match reality; report
    failures plainly. Specifics:
+   - Before opening a PR, run the CI workflow's lint/typecheck commands exactly as CI runs
+     them (read `.github/workflows`) — whole-repo if CI is whole-repo, the changed-file set
+     vs base if CI scopes it that way. Per-file spot checks miss files CI lints and cost a
+     full CI round-trip.
+   - Map the PR's added behavior (new files *and* new jobs/routes/exports in existing files)
+     to new or modified tests — from the repo's coverage report when it has one, by reading
+     the diff when it doesn't. Added behavior with no covering test goes back to
+     implementation as a test task before the PR opens — a green suite proves existing
+     coverage, not that new code has any. Punch-list it only when writing the test is
+     genuinely blocked on the human.
+   - Verifying an async trigger (queue enqueue, webhook, cron kick) means observing the
+     consumer's completion evidence — a worker log line, a row delta — never just the
+     producer's 200. A silent no-op enqueue returns 200 too.
    - A page load is not verification. Deploy verification asserts deployment **identity**
      (a new deployment id/commit visible in the provider's deployment list) plus a
      response-body match — never a bare HTTP status code, which a stale or placeholder
@@ -281,3 +346,13 @@ on the tracker.
 
 Before the first create against a tracker collection in a run, fetch its schema once and
 cache the property names in run-state — never guess field names into a 400.
+
+Resume queries against a tracker are bounded: filter to the repo **and** to a work-mode or
+status subset, `LIMIT` the rows, and select a truncated notes column. An unbounded
+"all non-done rows" query can overflow the tool result. Bounded is not truncated: filter
+server-side to the branch/run so the row must be in the first page, and page through
+matches only when no such filter exists — before concluding a row doesn't exist.
+
+Tracker API down but a human's answer lives in a row: read it through any other surface
+the host offers (e.g. the row's page text in a browser) before punch-listing it as
+unreadable. Writes fall back per the user's instructions, or to run-state.
