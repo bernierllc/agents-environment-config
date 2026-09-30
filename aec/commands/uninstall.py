@@ -20,7 +20,7 @@ from ..lib.prompts import prompt as ask_prompt
 from ..lib.filesystem import remove_installed_item, resolve_installed_path
 from ..lib.installed_store import remove_item_install
 from ..lib.manifest_v2 import load_manifest, save_manifest, remove_install, get_installed
-from ..lib.scope import resolve_scope, Scope, ScopeError
+from ..lib.scope import catalog_repo_here, resolve_scope, Scope, ScopeError
 from ..lib.uninstall_scope import find_repos_with_install, resolve_repos_flag
 
 VALID_TYPES = ("skill", "rule", "agent", "mcp", "plugin")
@@ -259,6 +259,17 @@ def run_uninstall(
 
     if item_type == "plugin":
         _uninstall_plugin(name, global_flag, yes)
+        return
+
+    catalog = catalog_repo_here(global_flag)
+    if catalog is not None:
+        # The files are the catalog itself: unwire the hooks, keep the item.
+        from ..lib import catalog_hooks
+
+        if catalog_hooks.unwire(catalog, item_type, name):
+            Console.success(f"{name}: hooks removed from {catalog}; catalog files kept")
+        else:
+            Console.info(f"{name} has no hooks wired in {catalog}; catalog files are never removed")
         return
 
     plural = TYPE_TO_PLURAL[item_type]

@@ -180,7 +180,11 @@ def list_repos() -> List[TrackedRepo]:
 
 def prune_stale(dry_run: bool = False) -> List[TrackedRepo]:
     """
-    Remove entries from the tracking file where the path no longer exists.
+    Remove tracked repos whose path no longer exists, from both stores.
+
+    Reads and writes go to tracked-repos.json and the legacy
+    setup-repo-locations.txt alike (see ``log_setup``'s dual-write);
+    pruning only one leaves the dead path tracked in the other.
 
     Args:
         dry_run: If True, report what would be pruned without making changes.
@@ -188,16 +192,12 @@ def prune_stale(dry_run: bool = False) -> List[TrackedRepo]:
     Returns:
         List of TrackedRepo entries that were (or would be) pruned.
     """
-    if not AEC_SETUP_LOG.exists():
-        return []
-
-    content = AEC_SETUP_LOG.read_text().strip()
-    if not content:
-        return []
+    from .tracked_repos import load_tracked_repos, save_tracked_repos
 
     keep: list[str] = []
-    pruned: list[TrackedRepo] = []
+    pruned: dict[Path, TrackedRepo] = {}
 
+    content = AEC_SETUP_LOG.read_text().strip() if AEC_SETUP_LOG.exists() else ""
     for line in content.split("\n"):
         if not line:
             continue
@@ -208,17 +208,37 @@ def prune_stale(dry_run: bool = False) -> List[TrackedRepo]:
             if path.exists():
                 keep.append(line)
             else:
-                pruned.append(TrackedRepo(
+                pruned[path] = TrackedRepo(
                     timestamp=parts[0],
                     version=parts[1],
                     path=path,
                     exists=False,
-                ))
+                )
         else:
             keep.append(line)
+    txt_changed = bool(pruned)
+
+    store = load_tracked_repos()
+    json_dead: list[str] = []
+    for raw, entry in store.get("repos", {}).items():
+        path = Path(raw)
+        if path.exists():
+            continue
+        json_dead.append(raw)
+        pruned.setdefault(path, TrackedRepo(
+            timestamp=entry.get("trackedAt", ""),
+            version=entry.get("aecVersion", ""),
+            path=path,
+            exists=False,
+        ))
 
     if pruned and not dry_run:
-        AEC_SETUP_LOG.write_text("\n".join(keep) + "\n" if keep else "")
+        if txt_changed:
+            AEC_SETUP_LOG.write_text("\n".join(keep) + "\n" if keep else "")
+        if json_dead:
+            for raw in json_dead:
+                del store["repos"][raw]
+            save_tracked_repos(store)
 
         # Also free ports for pruned projects
         try:
@@ -226,7 +246,7 @@ def prune_stale(dry_run: bool = False) -> List[TrackedRepo]:
             from .config import AEC_PORTS_REGISTRY
             registry = load_registry(AEC_PORTS_REGISTRY)
             any_freed = False
-            for repo in pruned:
+            for repo in pruned.values():
                 freed = unregister_project_ports(registry, str(repo.path))
                 if freed:
                     any_freed = True
@@ -235,7 +255,7 @@ def prune_stale(dry_run: bool = False) -> List[TrackedRepo]:
         except ImportError:
             pass  # ports module not yet available
 
-    return pruned
+    return list(pruned.values())
 
 
 def untrack_repo(project_dir: Path) -> bool:

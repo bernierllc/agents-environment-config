@@ -23,7 +23,7 @@ from ..lib.prompt_catalog.install_flow_area import (
     item_prompt_id,
 )
 from ..lib.prompts import prompt as ask_prompt
-from ..lib.scope import resolve_scope, Scope, ScopeError
+from ..lib.scope import catalog_repo_here, resolve_scope, Scope, ScopeError
 from ..lib.sources import discover_available, get_source_dirs
 from ..lib.installed_store import record_item_install
 from ..lib.skills_manifest import hash_skill_directory
@@ -40,6 +40,27 @@ TYPE_TO_PLURAL = {
 def _manifest_path() -> Path:
     """Compute manifest path dynamically so tests can monkeypatch Path.home()."""
     return Path.home() / ".agents-environment-config" / "installed-manifest.json"
+
+
+def _wire_catalog_hooks(repo: Path, item_type: str, name: str, yes: bool) -> None:
+    """In the aec repo the item is already in place: wire its hooks only."""
+    from ..lib import catalog_hooks
+
+    try:
+        wired = catalog_hooks.wire(repo, item_type, name, allow_custom_check=yes)
+    except LookupError as e:
+        Console.error(str(e))
+        raise SystemExit(1)
+    except PermissionError as e:
+        Console.warning(f"hooks not installed: {e}")
+        return
+    except Exception as e:  # noqa: BLE001 — hooks are all this path does, so say so and exit
+        Console.error(f"hooks not installed for {name}: {e}")
+        raise SystemExit(1)
+    if wired:
+        Console.success(f"{name}: used in place from the aec catalog; hooks wired in {repo}")
+    else:
+        Console.info(f"{name} is already in place in the aec catalog and ships no hooks; nothing to install.")
 
 
 def run_install(
@@ -63,6 +84,11 @@ def run_install(
         return
 
     plural = TYPE_TO_PLURAL[item_type]
+
+    catalog = catalog_repo_here(global_flag)
+    if catalog is not None:
+        _wire_catalog_hooks(catalog, item_type, name, yes)
+        return
 
     try:
         scope = resolve_scope(global_flag)
