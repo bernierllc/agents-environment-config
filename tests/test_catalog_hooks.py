@@ -224,6 +224,17 @@ def test_rollback_leaves_a_directory_in_the_way_alone(catalog):
     assert settings.read_text() == "{}"
     assert blocker.is_dir()
 
+
+def test_refresh_unwires_when_hooks_json_goes_without_a_version_bump(catalog):
+    from aec.lib import catalog_hooks
+    from aec.lib.hooks.state import STATE_DIR
+
+    catalog_hooks.wire(catalog, "skill", "my-skill")
+    (catalog / ".claude" / "skills" / "my-skill" / "hooks.json").unlink()
+
+    assert catalog_hooks.refresh(catalog) == ["my-skill: no hooks.json, hooks unwired"]
+    assert not list((catalog / STATE_DIR).glob("*.json"))
+
 def test_directory_form_rule_wires_from_its_directory(catalog):
     from aec.lib import catalog_hooks
 

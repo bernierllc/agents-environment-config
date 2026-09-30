@@ -97,14 +97,14 @@ def _refresh_one(
         if not dry_run:
             unwire(repo, item_type, name)
         return f"{name}: removed from catalog, hooks unwired"
-    if state.item_version == found[1]:
-        return None
-    line = f"{name}: {state.item_version} -> {found[1]}"
+    line = name if state.item_version == found[1] else f"{name}: {state.item_version} -> {found[1]}"
     if not (found[0] / "hooks.json").exists():
-        # The new version dropped its hooks: retract the old ones.
+        # The item dropped its hooks (with or without a version bump): retract them.
         if not dry_run:
             unwire(repo, item_type, name)
         return f"{line}: no hooks.json, hooks unwired"
+    if state.item_version == found[1]:
+        return None
     if not dry_run:
         wire(repo, item_type, name, allow_custom_check or state.allow_custom_check)
     return line
