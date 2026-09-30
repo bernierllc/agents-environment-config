@@ -70,33 +70,41 @@ def refresh(repo: Path, allow_custom_check: bool = False, dry_run: bool = False)
 
     Items that left the catalog, or dropped their hooks.json, are unwired. Consent to custom checks given at
     install is kept. Re-wiring goes through ``install_item_hooks``, which
-    validates the new hooks.json before retracting the old hooks, so a failed
-    refresh leaves the previous hooks working. Returns one line per change
+    renders the new hooks before retracting the old ones and restores the
+    configs if any write fails, so a failed refresh leaves the previous hooks
+    working; one item's failure never stops the rest. Returns one line per change
     (made, or pending when ``dry_run``).
     """
     changes: list[str] = []
     for state_file in sorted((repo / STATE_DIR).glob("*.json")):
         item_type, _, name = state_file.stem.partition(".")
-        state = load_state(repo, item_type, name)
-        found = _catalog_item(item_type, name)
-        if found is None:
-            if not dry_run:
-                unwire(repo, item_type, name)
-            changes.append(f"{name}: removed from catalog, hooks unwired")
-            continue
-        if state.item_version == found[1]:
-            continue
-        line = f"{name}: {state.item_version} -> {found[1]}"
-        if not (found[0] / "hooks.json").exists():
-            # The new version dropped its hooks: retract the old ones.
-            if not dry_run:
-                unwire(repo, item_type, name)
-            changes.append(f"{line}: no hooks.json, hooks unwired")
-            continue
-        if not dry_run:
-            try:
-                wire(repo, item_type, name, allow_custom_check or state.allow_custom_check)
-            except Exception as e:  # noqa: BLE001 — one item never blocks the rest
-                line += f" not refreshed, previous hooks kept: {e}"
-        changes.append(line)
+        try:
+            line = _refresh_one(repo, item_type, name, allow_custom_check, dry_run)
+        except Exception as e:  # noqa: BLE001 — one item never blocks the rest
+            line = f"{name}: not refreshed, previous hooks kept: {e}"
+        if line:
+            changes.append(line)
     return changes
+
+
+def _refresh_one(
+    repo: Path, item_type: str, name: str, allow_custom_check: bool, dry_run: bool,
+) -> Optional[str]:
+    """Refresh one wired item; return its change line, or None if current."""
+    state = load_state(repo, item_type, name)
+    found = _catalog_item(item_type, name)
+    if found is None:
+        if not dry_run:
+            unwire(repo, item_type, name)
+        return f"{name}: removed from catalog, hooks unwired"
+    if state.item_version == found[1]:
+        return None
+    line = f"{name}: {state.item_version} -> {found[1]}"
+    if not (found[0] / "hooks.json").exists():
+        # The new version dropped its hooks: retract the old ones.
+        if not dry_run:
+            unwire(repo, item_type, name)
+        return f"{line}: no hooks.json, hooks unwired"
+    if not dry_run:
+        wire(repo, item_type, name, allow_custom_check or state.allow_custom_check)
+    return line

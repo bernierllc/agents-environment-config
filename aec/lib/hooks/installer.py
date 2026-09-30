@@ -341,13 +341,12 @@ def install_item_hooks(
             repo_root, rendered, st, skipped, item_type, item_key, item_version,
             agents, hooks_json, allow_custom_check,
         )
+        hook_state.save_state(repo_root, st)
     except Exception:
-        # All or nothing: a config that fails to parse or write part-way must
-        # not leave earlier agents retracted. State is saved only on success.
+        # All or nothing: a config or state write that fails part-way must not
+        # leave earlier agents retracted, or hooks live that state doesn't record.
         _restore_configs(snapshot)
         raise
-
-    hook_state.save_state(repo_root, st)
 
 
 def _install_rendered(

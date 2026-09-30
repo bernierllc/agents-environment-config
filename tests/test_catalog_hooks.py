@@ -151,6 +151,46 @@ def test_wire_unwires_when_item_no_longer_ships_hooks(catalog):
     assert not list((catalog / STATE_DIR).glob("*.json"))
     assert "my-skill" not in (catalog / ".claude" / "settings.json").read_text()
 
+
+def test_refresh_state_write_failure_restores_configs(catalog):
+    from aec.lib import catalog_hooks
+    from aec.lib.hooks import installer
+
+    catalog_hooks.wire(catalog, "skill", "my-skill")
+    settings = catalog / ".claude" / "settings.json"
+    before = settings.read_text()
+    skill = _skill(catalog, "1.1.0")
+    (skill / "scripts" / "guard2.py").write_text("print('ok')\n")
+    hooks = skill / "hooks.json"
+    hooks.write_text(hooks.read_text().replace("guard.py", "guard2.py"))  # new payload
+
+    with patch.object(installer.hook_state, "save_state", side_effect=OSError("read-only")):
+        [line] = catalog_hooks.refresh(catalog)
+    assert "not refreshed, previous hooks kept" in line
+    assert settings.read_text() == before
+
+
+def test_refresh_isolates_one_items_failure(catalog):
+    from aec.lib import catalog_hooks
+    from aec.lib.hooks.state import STATE_DIR, load_state
+
+    catalog_hooks.wire(catalog, "skill", "my-skill")
+    state_dir = catalog / STATE_DIR
+    (state_dir / "skill.aaa-broken.json").write_text((state_dir / "skill.my-skill.json").read_text())
+    _skill(catalog, "1.1.0")
+
+    real = catalog_hooks._catalog_item
+    def lookup(item_type, name):
+        if name == "aaa-broken":
+            raise OSError("unreadable source")
+        return real(item_type, name)
+
+    with patch.object(catalog_hooks, "_catalog_item", side_effect=lookup):
+        lines = catalog_hooks.refresh(catalog)
+    assert lines[0].startswith("aaa-broken: not refreshed")
+    assert "my-skill: 1.0.0 -> 1.1.0" in lines
+    assert load_state(catalog, "skill", "my-skill").item_version == "1.1.0"
+
 def test_directory_form_rule_wires_from_its_directory(catalog):
     from aec.lib import catalog_hooks
 
