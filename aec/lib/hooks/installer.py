@@ -8,6 +8,7 @@ I/O so they can be tested in isolation — this file grows across Tasks 9a-9g.
 from __future__ import annotations
 
 import json
+import os
 import shlex
 from pathlib import Path
 from typing import Dict, List, Sequence
@@ -286,30 +287,14 @@ def install_item_hooks(
 
     st = hook_state.load_state(repo_root, item_type=item_type, item_key=item_key)
 
-    # Retract whatever the previous install of this item put in the agent config
-    # files before merging the new payloads. The merge only dedupes on an exact
-    # content fingerprint, so without this a hook whose command changed (a
-    # version bump in an argument, say) leaves the old entry behind AND appends
-    # the new one — and the stale copy keeps firing.
-    _remove_recorded_hooks(
-        repo_root, st.hooks_installed, item_type=item_type, item_key=item_key,
-    )
-
-    st.item_version = item_version
-    st.hooks_file_hash = fingerprint_hook(json.loads(hooks_json.read_text()))
-    st.agents_targeted = list(agents)
-    st.hooks_installed = []
-    st.hooks_skipped = []
-    if allow_custom_check:
-        st.allow_custom_check = True
-
+    skipped: List[dict] = []
     kept: List = []
     for h in hf.hooks:
         result = evaluate_when(h.when, repo_root)
         if result.applied:
             kept.append(h)
         else:
-            st.hooks_skipped.append({"hook_id": h.id, "reason": result.reason})
+            skipped.append({"hook_id": h.id, "reason": result.reason})
 
     filtered = HooksFile(
         version=hf.version,
@@ -322,11 +307,16 @@ def install_item_hooks(
         source_path=hf.source_path,
     )
 
+    # Render every agent's entries before touching any config: a failure here
+    # (a missing script, say) must leave the previous install's hooks working.
+    rendered: List = []
     for agent in agents:
+        if agent not in ("claude", "gemini", "cursor", "git"):
+            raise NotImplementedError(f"agent {agent!r} handled in later task")
         blocked = config_dir_blocked(repo_root, agent)
         if blocked is not None:
             reason = f"{blocked} is a file, not the {agent} config directory"
-            st.hooks_skipped.append({"agent": agent, "reason": reason})
+            skipped.append({"agent": agent, "reason": reason})
             Console.warning(
                 f"skipping {agent} hooks: {reason}. Move it aside "
                 f"(e.g. `mv {blocked} {blocked}.bak`) to enable {agent} hooks."
@@ -335,19 +325,78 @@ def install_item_hooks(
         # Only hooks that apply: a skipped hook's script may legitimately be absent.
         resolved = _resolve_script_commands(
             filtered, item_dir, repo_root, agent, f"{item_type}:{item_key}")
-        entries = translate_to_agent(filtered, agent, resolved_commands=resolved)
+        rendered.append((agent, translate_to_agent(filtered, agent, resolved_commands=resolved)))
+
+    # Retract whatever the previous install of this item put in the agent config
+    # files before merging the new payloads. The merge only dedupes on an exact
+    # content fingerprint, so without this a hook whose command changed (a
+    # version bump in an argument, say) leaves the old entry behind AND appends
+    # the new one — and the stale copy keeps firing.
+    snapshot = _snapshot_configs(repo_root, st.hooks_installed, rendered)
+    try:
+        _remove_recorded_hooks(
+            repo_root, st.hooks_installed, item_type=item_type, item_key=item_key,
+        )
+        _install_rendered(
+            repo_root, rendered, st, skipped, item_type, item_key, item_version,
+            agents, hooks_json, allow_custom_check,
+        )
+        hook_state.save_state(repo_root, st)
+    except Exception:
+        # All or nothing: a config or state write that fails part-way must not
+        # leave earlier agents retracted, or hooks live that state doesn't record.
+        _restore_configs(snapshot)
+        raise
+
+
+def _install_rendered(
+    repo_root, rendered, st, skipped, item_type, item_key, item_version,
+    agents, hooks_json, allow_custom_check,
+) -> None:
+    st.item_version = item_version
+    st.hooks_file_hash = fingerprint_hook(json.loads(hooks_json.read_text()))
+    st.agents_targeted = list(agents)
+    st.hooks_installed = []
+    st.hooks_skipped = skipped
+    if allow_custom_check:
+        st.allow_custom_check = True
+
+    for agent, entries in rendered:
         if agent == "claude":
             _install_claude(repo_root, entries, st, item_version)
         elif agent == "gemini":
             _install_gemini(repo_root, entries, st, item_version)
         elif agent == "cursor":
             _install_cursor(repo_root, entries, st, item_version)
-        elif agent == "git":
-            _install_git(repo_root, entries, st, item_type, item_key, item_version)
         else:
-            raise NotImplementedError(f"agent {agent!r} handled in later task")
+            _install_git(repo_root, entries, st, item_type, item_key, item_version)
 
-    hook_state.save_state(repo_root, st)
+
+def _snapshot_configs(repo_root: Path, hooks_installed: List[dict], rendered: List) -> dict:
+    """Bytes and mode of every config file a (re)install may touch; None if absent.
+
+    A path that exists but is not a file (a directory in the way) is left out:
+    writes there fail before touching it, and restoring must not remove it.
+    """
+    paths = {repo_root / ".claude/settings.json", repo_root / ".gemini/settings.json",
+             repo_root / ".cursor/hooks.json"}
+    git_events = {h["target_json_pointer"].split("/")[2]
+                  for h in hooks_installed if h["agent"] == "git"}
+    git_events |= {e["event_key"] for agent, entries in rendered if agent == "git" for e in entries}
+    if git_events:
+        hooks_dir = resolve_hooks_dir(repo_root).hooks_dir
+        paths |= {hooks_dir / ev for ev in git_events}
+    return {p: (p.read_bytes(), p.stat().st_mode) if p.is_file() else None
+            for p in paths if p.is_file() or not p.exists()}
+
+
+def _restore_configs(snapshot: dict) -> None:
+    for path, saved in snapshot.items():
+        if saved is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(saved[0])
+            os.chmod(path, saved[1])
 
 
 def _remove_recorded_hooks(
@@ -389,10 +438,15 @@ def remove_item_hooks(
 ) -> None:
     """Remove an item's hooks from all recorded agents, then drop state."""
     st = hook_state.load_state(repo_root, item_type=item_type, item_key=item_key)
-    _remove_recorded_hooks(
-        repo_root, st.hooks_installed, item_type=item_type, item_key=item_key,
-    )
-    hook_state.remove_state(repo_root, item_type=item_type, item_key=item_key)
+    snapshot = _snapshot_configs(repo_root, st.hooks_installed, [])
+    try:
+        _remove_recorded_hooks(
+            repo_root, st.hooks_installed, item_type=item_type, item_key=item_key,
+        )
+        hook_state.remove_state(repo_root, item_type=item_type, item_key=item_key)
+    except Exception:
+        _restore_configs(snapshot)  # hooks and state stay in step
+        raise
 
 
 def _remove_claude(repo_root: Path, event_key: str, fp: str) -> None:

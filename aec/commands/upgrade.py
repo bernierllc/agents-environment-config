@@ -77,6 +77,24 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
     local_repo = find_tracked_repo()
     if local_repo and is_catalog_repo(local_repo):
         local_repo = None  # its items are the catalog source; see is_catalog_repo
+
+    # The aec repo uses its items in place, so their version is the catalog's:
+    # only the hooks can fall behind, after a submodule bump.
+    catalog = get_repo_root()
+    if catalog is not None:
+        from ..lib import catalog_hooks
+
+        try:
+            changes = catalog_hooks.refresh(catalog, allow_custom_check=yes, dry_run=dry_run)
+        except Exception as e:  # noqa: BLE001 — never break upgrade on hook failure
+            Console.warning(f"catalog hooks not refreshed: {e}")
+            changes = []
+        if changes:
+            verb = "Would refresh" if dry_run else "Refreshing"
+            Console.print(f"\n{verb} hooks in {catalog} (aec catalog)...")
+            for line in changes:
+                Console.print(f"  {line}")
+            any_upgraded = True
     if local_repo:
         Console.print(f"\nUpgrading {local_repo} (current repo)...")
         repo_key = str(local_repo.resolve())

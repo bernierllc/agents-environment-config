@@ -92,6 +92,17 @@ def is_catalog_repo(path: Path) -> bool:
     return root is not None and path.resolve() == root.resolve()
 
 
+def catalog_repo_here(global_flag: bool) -> Optional[Path]:
+    """The aec repo, when a repo-scoped command runs inside it; else None.
+
+    Skills, rules and agents are used there in place: see ``catalog_hooks``.
+    """
+    if global_flag:
+        return None
+    repo = find_tracked_repo()
+    return repo if repo is not None and is_catalog_repo(repo) else None
+
+
 def resolve_scope(global_flag: bool) -> Scope:
     """Resolve scope from the -g flag and current working directory.
 
