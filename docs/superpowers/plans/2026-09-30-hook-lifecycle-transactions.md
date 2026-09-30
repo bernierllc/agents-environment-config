@@ -53,8 +53,7 @@ that state does not record.
    (drift repair) and `install_cmd.py` all call `install_hooks_for_item`; check
    that none does its own remove first (grep `remove_hooks_for_item`), and add
    the same missing-script test for each.
-5. **Findings from #99 Codex round 7**, if any fall in this class — listed
-   below when triaged.
+5. **Findings from later #99 Codex rounds** in this class, listed below.
 
 ## Affected surfaces
 
@@ -68,6 +67,7 @@ drift repair, catalog refresh) either fully applies or leaves configs and state
 exactly as they were, with a test per entry point that injects a failure after
 retraction.
 
-## Round-7 findings (triaged)
+## Later #99 findings (triaged)
 
-_None yet._
+- Round 7 (catalog refresh skipped a hooks.json removed without a version bump):
+  in #99's own code, fixed there.
