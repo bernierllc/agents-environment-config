@@ -9,6 +9,17 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -f \"$CLAUDE_PROJECT_DIR\"/.claude/skills/pr-merge-flow/scripts/pr-guard.py ]; then /usr/bin/env python3 \"$CLAUDE_PROJECT_DIR\"/.claude/skills/pr-merge-flow/scripts/pr-guard.py; else printf '%s\\n' '{\"systemMessage\": \"aec: blocking hook pmf-pr-guard is OFF in this checkout: skill:pr-merge-flow is not installed. Run: aec install skill pr-merge-flow\"}'; fi",
+            "timeout": 20
+          }
+        ]
+      }
     ]
   }
 }
