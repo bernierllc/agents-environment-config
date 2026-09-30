@@ -192,7 +192,9 @@ def prune_stale(dry_run: bool = False) -> List[TrackedRepo]:
     Returns:
         List of TrackedRepo entries that were (or would be) pruned.
     """
-    from .tracked_repos import load_tracked_repos, save_tracked_repos
+    from .tracked_repos import (
+        _empty_store, _read_json, _tracked_repos_path, load_tracked_repos, save_tracked_repos,
+    )
 
     keep: list[str] = []
     pruned: dict[Path, TrackedRepo] = {}
@@ -218,7 +220,15 @@ def prune_stale(dry_run: bool = False) -> List[TrackedRepo]:
             keep.append(line)
     txt_changed = bool(pruned)
 
-    store = load_tracked_repos()
+    # load_tracked_repos() migrates the txt into a missing JSON, which is a
+    # write; a dry run reads only what is already there (the txt was read above).
+    json_path = _tracked_repos_path()
+    if not dry_run:
+        store = load_tracked_repos()
+    elif json_path.exists():
+        store = _read_json(json_path)
+    else:
+        store = _empty_store()
     json_dead: list[str] = []
     for raw, entry in store.get("repos", {}).items():
         path = Path(raw)

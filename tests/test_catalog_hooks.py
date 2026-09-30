@@ -109,6 +109,19 @@ def test_failed_refresh_keeps_previous_hooks(catalog):
     assert "my-skill" in (catalog / ".claude" / "settings.json").read_text()
 
 
+
+def test_refresh_with_missing_script_keeps_previous_hooks(catalog):
+    from aec.lib import catalog_hooks
+
+    catalog_hooks.wire(catalog, "skill", "my-skill")
+    before = (catalog / ".claude" / "settings.json").read_text()
+    skill = _skill(catalog, "1.1.0")
+    (skill / "scripts" / "guard.py").unlink()  # valid hooks.json, fails at render
+
+    [line] = catalog_hooks.refresh(catalog)
+    assert "not refreshed, previous hooks kept" in line
+    assert (catalog / ".claude" / "settings.json").read_text() == before
+
 def test_directory_form_rule_wires_from_its_directory(catalog):
     from aec.lib import catalog_hooks
 

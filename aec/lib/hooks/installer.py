@@ -286,6 +286,46 @@ def install_item_hooks(
 
     st = hook_state.load_state(repo_root, item_type=item_type, item_key=item_key)
 
+    skipped: List[dict] = []
+    kept: List = []
+    for h in hf.hooks:
+        result = evaluate_when(h.when, repo_root)
+        if result.applied:
+            kept.append(h)
+        else:
+            skipped.append({"hook_id": h.id, "reason": result.reason})
+
+    filtered = HooksFile(
+        version=hf.version,
+        hooks=kept,
+        claude=hf.claude,
+        cursor=hf.cursor,
+        gemini=hf.gemini,
+        git=hf.git,
+        schema_url=hf.schema_url,
+        source_path=hf.source_path,
+    )
+
+    # Render every agent's entries before touching any config: a failure here
+    # (a missing script, say) must leave the previous install's hooks working.
+    rendered: List = []
+    for agent in agents:
+        if agent not in ("claude", "gemini", "cursor", "git"):
+            raise NotImplementedError(f"agent {agent!r} handled in later task")
+        blocked = config_dir_blocked(repo_root, agent)
+        if blocked is not None:
+            reason = f"{blocked} is a file, not the {agent} config directory"
+            skipped.append({"agent": agent, "reason": reason})
+            Console.warning(
+                f"skipping {agent} hooks: {reason}. Move it aside "
+                f"(e.g. `mv {blocked} {blocked}.bak`) to enable {agent} hooks."
+            )
+            continue
+        # Only hooks that apply: a skipped hook's script may legitimately be absent.
+        resolved = _resolve_script_commands(
+            filtered, item_dir, repo_root, agent, f"{item_type}:{item_key}")
+        rendered.append((agent, translate_to_agent(filtered, agent, resolved_commands=resolved)))
+
     # Retract whatever the previous install of this item put in the agent config
     # files before merging the new payloads. The merge only dedupes on an exact
     # content fingerprint, so without this a hook whose command changed (a
@@ -299,53 +339,19 @@ def install_item_hooks(
     st.hooks_file_hash = fingerprint_hook(json.loads(hooks_json.read_text()))
     st.agents_targeted = list(agents)
     st.hooks_installed = []
-    st.hooks_skipped = []
+    st.hooks_skipped = skipped
     if allow_custom_check:
         st.allow_custom_check = True
 
-    kept: List = []
-    for h in hf.hooks:
-        result = evaluate_when(h.when, repo_root)
-        if result.applied:
-            kept.append(h)
-        else:
-            st.hooks_skipped.append({"hook_id": h.id, "reason": result.reason})
-
-    filtered = HooksFile(
-        version=hf.version,
-        hooks=kept,
-        claude=hf.claude,
-        cursor=hf.cursor,
-        gemini=hf.gemini,
-        git=hf.git,
-        schema_url=hf.schema_url,
-        source_path=hf.source_path,
-    )
-
-    for agent in agents:
-        blocked = config_dir_blocked(repo_root, agent)
-        if blocked is not None:
-            reason = f"{blocked} is a file, not the {agent} config directory"
-            st.hooks_skipped.append({"agent": agent, "reason": reason})
-            Console.warning(
-                f"skipping {agent} hooks: {reason}. Move it aside "
-                f"(e.g. `mv {blocked} {blocked}.bak`) to enable {agent} hooks."
-            )
-            continue
-        # Only hooks that apply: a skipped hook's script may legitimately be absent.
-        resolved = _resolve_script_commands(
-            filtered, item_dir, repo_root, agent, f"{item_type}:{item_key}")
-        entries = translate_to_agent(filtered, agent, resolved_commands=resolved)
+    for agent, entries in rendered:
         if agent == "claude":
             _install_claude(repo_root, entries, st, item_version)
         elif agent == "gemini":
             _install_gemini(repo_root, entries, st, item_version)
         elif agent == "cursor":
             _install_cursor(repo_root, entries, st, item_version)
-        elif agent == "git":
-            _install_git(repo_root, entries, st, item_type, item_key, item_version)
         else:
-            raise NotImplementedError(f"agent {agent!r} handled in later task")
+            _install_git(repo_root, entries, st, item_type, item_key, item_version)
 
     hook_state.save_state(repo_root, st)
 

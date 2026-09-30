@@ -46,3 +46,11 @@ def test_prune_removes_dead_paths_from_both_stores(stores):
     assert prune_stale() == []
 
 
+
+
+def test_dry_run_does_not_migrate_legacy_txt(stores):
+    from aec.lib.tracking import prune_stale
+
+    stores["store"].unlink()  # only the legacy txt exists: load would migrate it
+    assert {r.path for r in prune_stale(dry_run=True)} == {p for p in stores["dead"] if "txt" in p.name}
+    assert not stores["store"].exists()
