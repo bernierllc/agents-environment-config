@@ -143,3 +143,60 @@ class TestScopeTargetPaths:
         assert scope.skills_dir == tracked_repo / ".claude" / "skills"
         assert scope.agents_dir == tracked_repo / ".claude" / "agents"
         assert scope.rules_dir == tracked_repo / ".agent-rules"
+
+
+def _git(*args, cwd):
+    import subprocess
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+@pytest.fixture
+def tracked_git_repo(tracked_repo):
+    """tracked_repo as a real git repo with a worktree at .worktrees/topic."""
+    _git("init", "-q", "-b", "main", cwd=tracked_repo)
+    (tracked_repo / ".claude" / "keep").write_text("")
+    _git("add", ".", cwd=tracked_repo)
+    _git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init", cwd=tracked_repo)
+    _git("worktree", "add", "-q", ".worktrees/topic", "-b", "topic", cwd=tracked_repo)
+    return tracked_repo
+
+
+class TestWorktrees:
+    def test_worktree_of_tracked_repo_is_its_own_target(self, tracked_git_repo, monkeypatch):
+        from aec.lib.scope import find_tracked_repo
+        wt = tracked_git_repo / ".worktrees" / "topic"
+        (wt / "src").mkdir()
+        monkeypatch.chdir(wt / "src")
+        assert find_tracked_repo() == wt
+
+    def test_worktree_of_untracked_repo_never_resolves_to_its_parent(self, tracked_repo, monkeypatch):
+        from aec.lib.scope import find_tracked_repo
+        other = tracked_repo / "vendor" / "other"
+        other.mkdir(parents=True)
+        (other / ".claude").mkdir()
+        (other / ".claude" / "keep").write_text("")
+        _git("init", "-q", "-b", "main", cwd=other)
+        _git("add", ".", cwd=other)
+        _git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init", cwd=other)
+        _git("worktree", "add", "-q", str(tracked_repo / "wt"), "-b", "wt", cwd=other)
+        monkeypatch.chdir(tracked_repo / "wt")
+        assert find_tracked_repo() is None
+
+    def test_submodule_still_resolves_to_parent_repo(self, tracked_repo, monkeypatch):
+        from aec.lib.scope import find_tracked_repo, main_checkout
+        sub = tracked_repo / ".claude" / "skills"
+        sub.mkdir()
+        (sub / ".git").write_text("gitdir: ../../.git/modules/skills\n")  # no commondir
+        assert main_checkout(sub) == sub
+        monkeypatch.chdir(sub)
+        assert find_tracked_repo() == tracked_repo
+
+    def test_worktree_of_catalog_is_catalog(self, tracked_git_repo):
+        from unittest.mock import patch
+        from aec.lib.scope import is_catalog_repo
+        wt = tracked_git_repo / ".worktrees" / "topic"
+        with patch("aec.lib.config.get_repo_root", return_value=tracked_git_repo):
+            assert is_catalog_repo(wt)
+            assert is_catalog_repo(tracked_git_repo)
+        with patch("aec.lib.config.get_repo_root", return_value=wt):
+            assert is_catalog_repo(tracked_git_repo)

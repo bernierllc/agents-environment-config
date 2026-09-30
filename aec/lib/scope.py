@@ -62,16 +62,22 @@ def find_tracked_repo(start: Optional[Path] = None) -> Optional[Path]:
     """Walk up from start (default cwd) to find a tracked repo.
 
     A directory is considered a tracked repo if it appears in the setup log
-    AND has a .claude/ or .agent-rules/ directory or .aec.json file.
+    AND has a .claude/ or .agent-rules/ directory or .aec.json file. A linked
+    git worktree counts as tracked when its main checkout is, and it is its
+    own install target: the walk never climbs out of a worktree (they
+    usually live inside the main checkout, at `.worktrees/<topic>`).
     """
     if start is None:
         start = Path.cwd()
     tracked = _load_tracked_paths()
     current = start.resolve()
     for _ in range(20):
-        if current in tracked:
+        main = main_checkout(current)
+        if main in tracked:
             if (current / ".claude").is_dir() or (current / ".agent-rules").is_dir() or (current / ".aec.json").is_file():
                 return current
+        if main != current:
+            return None  # a worktree of an untracked repo
         parent = current.parent
         if parent == current:
             break
@@ -79,8 +85,30 @@ def find_tracked_repo(start: Optional[Path] = None) -> Optional[Path]:
     return None
 
 
+def main_checkout(path: Path) -> Path:
+    """The main checkout of a linked git worktree rooted at `path`; else `path`.
+
+    A linked worktree's `.git` is a file pointing at
+    `<main>/.git/worktrees/<name>`, whose `commondir` names `<main>/.git`.
+    Submodules also have a `.git` file, but their gitdir has no `commondir`,
+    so they are left alone.
+    """
+    dot_git = path / ".git"
+    if not dot_git.is_file():
+        return path
+    try:
+        text = dot_git.read_text().strip()
+        if not text.startswith("gitdir:"):
+            return path
+        gitdir = (path / text[len("gitdir:"):].strip()).resolve()
+        common = (gitdir / (gitdir / "commondir").read_text().strip()).resolve()
+    except OSError:
+        return path
+    return common.parent if common.name == ".git" else path
+
+
 def is_catalog_repo(path: Path) -> bool:
-    """True when `path` is the aec repo itself.
+    """True when `path` is the aec repo itself, or a worktree of it.
 
     Its `.claude/skills`, `.claude/agents` and `.agent-rules` are the catalog
     that installs copy from, so they are also its would-be install targets:
@@ -89,7 +117,7 @@ def is_catalog_repo(path: Path) -> bool:
     from .config import get_repo_root
 
     root = get_repo_root()
-    return root is not None and path.resolve() == root.resolve()
+    return root is not None and main_checkout(path.resolve()) == main_checkout(root.resolve())
 
 
 def catalog_repo_here(global_flag: bool) -> Optional[Path]:
