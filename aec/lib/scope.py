@@ -158,8 +158,23 @@ def resolve_scope(global_flag: bool) -> Scope:
 
 
 def get_all_tracked_repos() -> list[Path]:
-    """Return all tracked repo paths that exist on disk."""
-    return [p for p in _load_tracked_paths() if p.exists()]
+    """Return all tracked repo paths that exist on disk, plus their linked
+    worktrees (which inherit tracking; see find_tracked_repo)."""
+    repos = [p for p in _load_tracked_paths() if p.exists()]
+    return list(dict.fromkeys(repos + [w for p in repos for w in _linked_worktrees(p)]))
+
+
+def _linked_worktrees(repo: Path) -> list[Path]:
+    """Live linked worktrees of repo, from .git/worktrees/*/gitdir."""
+    found = []
+    for gitdir in sorted((repo / ".git" / "worktrees").glob("*/gitdir")):
+        try:
+            wt = Path(gitdir.read_text().strip()).parent.resolve()
+        except OSError:
+            continue
+        if wt.is_dir():
+            found.append(wt)
+    return found
 
 
 def _setup_log_path() -> Path:

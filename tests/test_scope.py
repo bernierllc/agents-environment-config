@@ -223,3 +223,18 @@ class TestWorktrees:
             assert is_catalog_repo(tracked_git_repo)
         with patch("aec.lib.config.get_repo_root", return_value=wt):
             assert is_catalog_repo(tracked_git_repo)
+
+    def test_manifest_load_drops_catalog_worktree_scope(self, tracked_git_repo):
+        import json
+        from unittest.mock import patch
+        from aec.lib.manifest_v2 import load_manifest
+        wt = tracked_git_repo / ".worktrees" / "topic"
+        path = tracked_git_repo.parent / "installed-manifest.json"
+        path.write_text(json.dumps({"manifestVersion": 2, "global": {}, "repos": {
+            str(wt): {"skills": {}, "rules": {}, "agents": {}}}}))
+        with patch("aec.lib.config.get_repo_root", return_value=tracked_git_repo):
+            assert load_manifest(path)["repos"] == {}
+
+    def test_all_tracked_repos_include_inherited_worktrees(self, tracked_git_repo):
+        from aec.lib.scope import get_all_tracked_repos
+        assert get_all_tracked_repos() == [tracked_git_repo, tracked_git_repo / ".worktrees" / "topic"]
