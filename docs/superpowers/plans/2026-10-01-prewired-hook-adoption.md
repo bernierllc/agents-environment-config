@@ -44,6 +44,17 @@ installs: a hook-bearing item the user never installed must stay inactive.
    adopted — so `aec uninstall` removes a committed entry it can prove it
    owns, and nothing it cannot.
 
+4. **The committed entry can never be stale** — the precondition for
+   exact-match adoption. The fingerprint hashes the whole payload, so an entry
+   rendered from `hooks.json` version N cannot be matched against N+1. Rather
+   than teach adoption to recognise old renders, make a stale commit
+   impossible: a test (`tests/test_prewired_hooks.py`) renders every hook the
+   repo commits (today: pr-merge-flow into `.claude/settings.json`) from the
+   checked-out submodule and asserts the committed entry equals the render. A
+   submodule bump that changes a prewired hook fails CI until the entry is
+   re-rendered in the same PR, so a fresh checkout always holds an adoptable,
+   current payload.
+
 ## Affected surfaces
 
 `aec/lib/hooks/installer.py`, `aec/lib/catalog_hooks.py`,
@@ -51,4 +62,4 @@ installs: a hook-bearing item the user never installed must stay inactive.
 installer tests (fresh clone with committed entry → refresh adopts, no
 duplicate; a hook-bearing item with no committed entry stays uninstalled;
 uninstall removes an adopted entry; a hand-edited, non-matching entry is left
-alone).
+alone) and `tests/test_prewired_hooks.py`.
