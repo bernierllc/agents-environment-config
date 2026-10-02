@@ -63,20 +63,21 @@ def find_tracked_repo(start: Optional[Path] = None) -> Optional[Path]:
 
     A directory is considered a tracked repo if it appears in the setup log
     AND has a .claude/ or .agent-rules/ directory or .aec.json file. A linked
-    git worktree counts as tracked when it or its main checkout is (no marker
-    needed: they may be gitignored), and it is its own install target: the walk never climbs out of a worktree (they
-    usually live inside the main checkout, at `.worktrees/<topic>`).
+    git worktree counts as tracked when it, or any checkout sharing its git
+    directory, is (no marker needed: they may be gitignored). It is its own
+    install target: the walk never climbs out of a worktree (they usually
+    live inside the main checkout, at `.worktrees/<topic>`).
     """
     if start is None:
         start = Path.cwd()
     tracked = _load_tracked_paths()
     current = start.resolve()
     for _ in range(20):
-        main = main_checkout(current)
-        if main != current:
-            # A linked worktree: tracked directly or via its main checkout
-            # (markers may be gitignored there), and never climbed out of.
-            return current if (main in tracked or current in tracked) else None
+        common, linked = git_dirs(current)
+        if linked:
+            if current in tracked or any(git_dirs(t)[0] == common for t in tracked):
+                return current
+            return None  # a worktree of an untracked repo
         if current in tracked:
             if (current / ".claude").is_dir() or (current / ".agent-rules").is_dir() or (current / ".aec.json").is_file():
                 return current
@@ -87,26 +88,29 @@ def find_tracked_repo(start: Optional[Path] = None) -> Optional[Path]:
     return None
 
 
-def main_checkout(path: Path) -> Path:
-    """The main checkout of a linked git worktree rooted at `path`; else `path`.
+def git_dirs(path: Path) -> tuple[Optional[Path], bool]:
+    """(common git dir, is a linked worktree) for a checkout rooted at `path`.
 
-    A linked worktree's `.git` is a file pointing at
-    `<main>/.git/worktrees/<name>`, whose `commondir` names `<main>/.git`.
-    Submodules also have a `.git` file, but their gitdir has no `commondir`,
-    so they are left alone.
+    Checkouts of one repo share a common git dir; comparing it, rather than
+    guessing the main checkout's path, also covers `--separate-git-dir`. A
+    linked worktree's `.git` file points at a gitdir with a `commondir`; a
+    submodule's (or a separate-git-dir main checkout's) has none. Not a
+    checkout root: (None, False).
     """
     dot_git = path / ".git"
-    if not dot_git.is_file():
-        return path
+    if dot_git.is_dir():
+        return dot_git.resolve(), False
     try:
         text = dot_git.read_text().strip()
         if not text.startswith("gitdir:"):
-            return path
+            return None, False
         gitdir = (path / text[len("gitdir:"):].strip()).resolve()
-        common = (gitdir / (gitdir / "commondir").read_text().strip()).resolve()
+        commondir = gitdir / "commondir"
+        if not commondir.is_file():
+            return gitdir, False
+        return (gitdir / commondir.read_text().strip()).resolve(), True
     except OSError:
-        return path
-    return common.parent if common.name == ".git" else path
+        return None, False
 
 
 def is_catalog_repo(path: Path) -> bool:
@@ -119,7 +123,11 @@ def is_catalog_repo(path: Path) -> bool:
     from .config import get_repo_root
 
     root = get_repo_root()
-    return root is not None and main_checkout(path.resolve()) == main_checkout(root.resolve())
+    if root is None:
+        return False
+    path, root = path.resolve(), root.resolve()
+    common = git_dirs(path)[0]
+    return path == root or (common is not None and common == git_dirs(root)[0])
 
 
 def catalog_repo_here(global_flag: bool) -> Optional[Path]:
@@ -167,7 +175,10 @@ def get_all_tracked_repos() -> list[Path]:
 def _linked_worktrees(repo: Path) -> list[Path]:
     """Live linked worktrees of repo, from .git/worktrees/*/gitdir."""
     found = []
-    for gitdir in sorted((repo / ".git" / "worktrees").glob("*/gitdir")):
+    common, _ = git_dirs(repo)
+    if common is None:
+        return []
+    for gitdir in sorted((common / "worktrees").glob("*/gitdir")):
         try:
             wt = Path(gitdir.read_text().strip()).parent.resolve()
         except OSError:
