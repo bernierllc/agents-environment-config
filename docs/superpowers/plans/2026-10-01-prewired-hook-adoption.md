@@ -55,6 +55,27 @@ installs: a hook-bearing item the user never installed must stay inactive.
    re-rendered in the same PR, so a fresh checkout always holds an adoptable,
    current payload.
 
+### Constraints (from PR #103 review)
+
+- **No predicate execution while scanning.** Adoption must not go through the
+  install render path, which evaluates `when.custom_check` with `shell=True`
+  and, from `catalog_hooks.refresh`, inherits `aec upgrade --yes` as consent.
+  Candidates are fingerprinted from the unconditional render (predicates
+  ignored). Only after an entry matches does an item with a `custom_check` ask
+  for item-specific consent before its state is written; `--yes` is not that
+  consent.
+- **Refresh stays within the adopted scope.** State records the agents and
+  entries that were adopted. `catalog_hooks._refresh_one` → `wire()` must pass
+  exactly those agents (today it defaults to claude/gemini/cursor/git), so a
+  later version bump re-renders the adopted Claude entry and never installs a
+  Gemini, Cursor or git hook that was never there. Applies to every
+  state-driven refresh, adopted or not: refresh re-renders what state lists.
+
+Tests for both: an item with a `custom_check` whose command would write a
+sentinel file is scanned and the sentinel never appears; a one-target
+(Claude-only) adoption followed by a `hooks.json` version bump leaves
+`.gemini/settings.json` absent.
+
 ## Affected surfaces
 
 `aec/lib/hooks/installer.py`, `aec/lib/catalog_hooks.py`,
