@@ -32,7 +32,8 @@ rebuild. This skill stops that.
    harness wakes you. Never write a `sleep`/poll loop.
 4. **Never sync worktrees in a loop.** `for w in …; do git -C $w merge origin/staging` is
    the exact pattern that rebuilt every open PR at once. Handle one PR at a time, by rule 1.
-5. **PRs open ready for review, never as drafts,** and on the right repo: in a fork, run
+5. **PRs open ready for review unless aec's `pr_open_mode` is `draft`**
+   (`~/.agents-environment-config/preferences.json` → `settings.pr_open_mode`), and on the right repo: in a fork, run
    `gh repo set-default <owner>/<repo>` once or pass `-R`.
 
 ## The guard
@@ -43,7 +44,7 @@ hooks dormant). It blocks:
 
 - `git merge|pull|rebase <base>` when the current branch's open PR into `<base>` is mergeable;
 - the same command in a directory it can't resolve (`$w` in a loop);
-- `gh pr create --draft` and `gh pr ready --undo`;
+- `gh pr create --draft` and `gh pr ready --undo`, unless `pr_open_mode` is `draft`;
 - `gh pr create` without `-R` in a fork that has no `gh repo set-default` (it would open
   the PR on the upstream repo).
 

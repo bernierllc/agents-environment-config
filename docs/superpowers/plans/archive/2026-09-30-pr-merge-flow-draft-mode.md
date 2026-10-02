@@ -1,3 +1,5 @@
+> Status: shipped via bernierllc/claude-skills#46 and #103 on 2026-10-01
+
 # pr-merge-flow honours `pr_open_mode`
 
 **Status:** planned (Tier 2) · **Origin:** PR #100 review (Codex P2, 2026-09-30)
