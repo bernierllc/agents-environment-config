@@ -148,15 +148,16 @@ def _discover_available_plugins(source_dir: Path) -> dict:
     return plugins
 
 
-def get_source_dirs() -> dict:
+def get_source_dirs(root: Optional[Path] = None) -> dict:
     """Get source directories for each item type from the AEC repo.
 
     These are the AEC repo's source directories (where available items
-    are defined), NOT the user's install targets.
+    are defined), NOT the user's install targets. `root` picks a checkout of
+    the aec repo other than the installed one (a worktree of it, say).
 
     Returns dict of item_type -> Path.
     """
-    repo = get_repo_root()
+    repo = root or get_repo_root()
     if repo is None:
         return {}
     return {

@@ -18,10 +18,14 @@ from .sources import discover_available, get_source_dirs
 _PLURAL = {"skill": "skills", "rule": "rules", "agent": "agents"}
 
 
-def _catalog_item(item_type: str, name: str) -> Optional[tuple[Path, str]]:
-    """Return (item dir, version) for a catalog item, or None if absent."""
+def _catalog_item(repo: Path, item_type: str, name: str) -> Optional[tuple[Path, str]]:
+    """Return (item dir, version) for an item in this checkout of the catalog.
+
+    `repo` is the aec repo or a worktree of it; the item is read from `repo`,
+    not from the installed checkout, so a worktree wires its own copy.
+    """
     plural = _PLURAL.get(item_type)
-    source_dir = get_source_dirs().get(plural) if plural else None
+    source_dir = get_source_dirs(repo).get(plural) if plural else None
     if not source_dir or not source_dir.exists():
         return None
     info = discover_available(source_dir, plural).get(name)
@@ -42,7 +46,7 @@ def wire(repo: Path, item_type: str, name: str, allow_custom_check: bool = False
     earlier version left. Raises LookupError when
     the catalog has no such item.
     """
-    found = _catalog_item(item_type, name)
+    found = _catalog_item(repo, item_type, name)
     if found is None:
         raise LookupError(f"{item_type} not found in catalog: {name}")
     item_dir, version = found
@@ -92,7 +96,7 @@ def _refresh_one(
 ) -> Optional[str]:
     """Refresh one wired item; return its change line, or None if current."""
     state = load_state(repo, item_type, name)
-    found = _catalog_item(item_type, name)
+    found = _catalog_item(repo, item_type, name)
     if found is None:
         if not dry_run:
             unwire(repo, item_type, name)

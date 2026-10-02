@@ -180,10 +180,10 @@ def test_refresh_isolates_one_items_failure(catalog):
     _skill(catalog, "1.1.0")
 
     real = catalog_hooks._catalog_item
-    def lookup(item_type, name):
+    def lookup(repo, item_type, name):
         if name == "aaa-broken":
             raise OSError("unreadable source")
-        return real(item_type, name)
+        return real(repo, item_type, name)
 
     with patch.object(catalog_hooks, "_catalog_item", side_effect=lookup):
         lines = catalog_hooks.refresh(catalog)
@@ -260,3 +260,17 @@ def test_refresh_unwires_when_new_version_drops_hooks_json(catalog):
     assert catalog_hooks.refresh(catalog) == ["my-skill: 1.0.0 -> 1.1.0: no hooks.json, hooks unwired"]
     assert "my-skill" not in (catalog / ".claude" / "settings.json").read_text()
     assert catalog_hooks.refresh(catalog) == []
+
+
+def test_wire_reads_items_from_the_checkout_it_wires(temp_dir):
+    from aec.lib import catalog_hooks
+
+    primary, worktree = temp_dir / "aec", temp_dir / "aec-wt"
+    _skill(primary, "1.0.0")
+    _skill(worktree, "1.1.0")
+    with patch("aec.lib.sources.get_repo_root", return_value=primary):
+        item_dir, version = catalog_hooks._catalog_item(worktree, "skill", "my-skill")
+        assert catalog_hooks.wire(worktree, "skill", "my-skill")
+    assert (item_dir, version) == (worktree / ".claude" / "skills" / "my-skill", "1.1.0")
+    assert (worktree / ".claude" / "settings.json").exists()
+    assert not (primary / ".claude" / "settings.json").exists()

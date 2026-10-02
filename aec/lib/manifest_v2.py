@@ -68,16 +68,13 @@ def _drop_catalog_scope(data: dict) -> None:
     """Forget any repo scope that is the aec catalog itself.
 
     The catalog's items are the install source, never installed copies, so a
-    record for it is always stale. Dropping it here keeps every loop over
-    ``repos`` (upgrade, uninstall --repos, global migration) from touching it.
+    record for it, or for a worktree of it, is always stale. Dropping it here
+    keeps every loop over ``repos`` (upgrade, uninstall --repos, global
+    migration) from touching it.
     """
-    from .config import get_repo_root
+    from .scope import is_catalog_repo
 
-    root = get_repo_root()
-    if root is None:
-        return
-    catalog = str(root.resolve())
-    for key in [k for k in data["repos"] if str(Path(k).resolve()) == catalog]:
+    for key in [k for k in data["repos"] if is_catalog_repo(Path(k))]:
         del data["repos"][key]
 
 

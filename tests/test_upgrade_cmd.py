@@ -103,6 +103,26 @@ class TestUpgradeCommand:
         catalog_rec = after["repos"].get(str(repo.resolve()), {}).get("skills", {}).get("test-skill", {})
         assert catalog_rec.get("version") != "2.0.0"
 
+    @patch("aec.commands.upgrade.get_source_dirs")
+    @patch("aec.commands.upgrade.get_repo_root")
+    @patch("aec.commands.upgrade._manifest_path")
+    def test_refreshes_hooks_in_the_catalog_worktree_it_runs_from(self, mock_mp, mock_root, mock_sd, upgrade_env, temp_dir):
+        """Run from a worktree of the catalog, upgrade refreshes that worktree's
+        hooks, not the installed primary checkout's."""
+        from aec.commands.upgrade import run_upgrade
+
+        repo, wt = upgrade_env["repo"], temp_dir / "aec-repo-wt"
+        mock_root.return_value = repo
+        mock_mp.return_value = upgrade_env["manifest_path"]
+        mock_sd.return_value = _source_dirs(repo)
+        with patch("aec.commands.upgrade.find_tracked_repo", return_value=wt), \
+                patch("aec.commands.upgrade.is_catalog_repo", return_value=True), \
+                patch("aec.commands.upgrade.get_all_tracked_repos", return_value=[]), \
+                patch("aec.lib.catalog_hooks.refresh", return_value=[]) as refresh:
+            run_upgrade(yes=True)
+
+        assert refresh.call_args.args[0] == wt
+
     @patch("aec.commands.upgrade.find_tracked_repo", return_value=None)
     @patch("aec.commands.upgrade.get_all_tracked_repos", return_value=[])
     @patch("aec.commands.upgrade.get_source_dirs")

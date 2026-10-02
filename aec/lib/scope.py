@@ -62,13 +62,22 @@ def find_tracked_repo(start: Optional[Path] = None) -> Optional[Path]:
     """Walk up from start (default cwd) to find a tracked repo.
 
     A directory is considered a tracked repo if it appears in the setup log
-    AND has a .claude/ or .agent-rules/ directory or .aec.json file.
+    AND has a .claude/ or .agent-rules/ directory or .aec.json file. A linked
+    git worktree counts as tracked when it, or any checkout sharing its git
+    directory, is (no marker needed: they may be gitignored). It is its own
+    install target: the walk never climbs out of a worktree (they usually
+    live inside the main checkout, at `.worktrees/<topic>`).
     """
     if start is None:
         start = Path.cwd()
     tracked = _load_tracked_paths()
     current = start.resolve()
     for _ in range(20):
+        common, linked = git_dirs(current)
+        if linked:
+            if current in tracked or any(git_dirs(t)[0] == common for t in tracked):
+                return current
+            return None  # a worktree of an untracked repo
         if current in tracked:
             if (current / ".claude").is_dir() or (current / ".agent-rules").is_dir() or (current / ".aec.json").is_file():
                 return current
@@ -79,8 +88,33 @@ def find_tracked_repo(start: Optional[Path] = None) -> Optional[Path]:
     return None
 
 
+def git_dirs(path: Path) -> tuple[Optional[Path], bool]:
+    """(common git dir, is a linked worktree) for a checkout rooted at `path`.
+
+    Checkouts of one repo share a common git dir; comparing it, rather than
+    guessing the main checkout's path, also covers `--separate-git-dir`. A
+    linked worktree's `.git` file points at a gitdir with a `commondir`; a
+    submodule's (or a separate-git-dir main checkout's) has none. Not a
+    checkout root: (None, False).
+    """
+    dot_git = path / ".git"
+    if dot_git.is_dir():
+        return dot_git.resolve(), False
+    try:
+        text = dot_git.read_text().strip()
+        if not text.startswith("gitdir:"):
+            return None, False
+        gitdir = (path / text[len("gitdir:"):].strip()).resolve()
+        commondir = gitdir / "commondir"
+        if not commondir.is_file():
+            return gitdir, False
+        return (gitdir / commondir.read_text().strip()).resolve(), True
+    except OSError:
+        return None, False
+
+
 def is_catalog_repo(path: Path) -> bool:
-    """True when `path` is the aec repo itself.
+    """True when `path` is the aec repo itself, or a worktree of it.
 
     Its `.claude/skills`, `.claude/agents` and `.agent-rules` are the catalog
     that installs copy from, so they are also its would-be install targets:
@@ -89,7 +123,11 @@ def is_catalog_repo(path: Path) -> bool:
     from .config import get_repo_root
 
     root = get_repo_root()
-    return root is not None and path.resolve() == root.resolve()
+    if root is None:
+        return False
+    path, root = path.resolve(), root.resolve()
+    common = git_dirs(path)[0]
+    return path == root or (common is not None and common == git_dirs(root)[0])
 
 
 def catalog_repo_here(global_flag: bool) -> Optional[Path]:
@@ -128,8 +166,26 @@ def resolve_scope(global_flag: bool) -> Scope:
 
 
 def get_all_tracked_repos() -> list[Path]:
-    """Return all tracked repo paths that exist on disk."""
-    return [p for p in _load_tracked_paths() if p.exists()]
+    """Return all tracked repo paths that exist on disk, plus their linked
+    worktrees (which inherit tracking; see find_tracked_repo)."""
+    repos = [p for p in _load_tracked_paths() if p.exists()]
+    return list(dict.fromkeys(repos + [w for p in repos for w in _linked_worktrees(p)]))
+
+
+def _linked_worktrees(repo: Path) -> list[Path]:
+    """Live linked worktrees of repo, from .git/worktrees/*/gitdir."""
+    found = []
+    common, _ = git_dirs(repo)
+    if common is None:
+        return []
+    for gitdir in sorted((common / "worktrees").glob("*/gitdir")):
+        try:
+            wt = Path(gitdir.read_text().strip()).parent.resolve()
+        except OSError:
+            continue
+        if wt.is_dir():
+            found.append(wt)
+    return found
 
 
 def _setup_log_path() -> Path:

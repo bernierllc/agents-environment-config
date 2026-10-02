@@ -54,3 +54,20 @@ def test_dry_run_does_not_migrate_legacy_txt(stores):
     stores["store"].unlink()  # only the legacy txt exists: load would migrate it
     assert {r.path for r in prune_stale(dry_run=True)} == {p for p in stores["dead"] if "txt" in p.name}
     assert not stores["store"].exists()
+def test_prune_drops_manifest_scopes_of_removed_worktrees(stores, monkeypatch):
+    import aec.lib.config as config_mod
+    from aec.lib.manifest_v2 import load_manifest, save_manifest
+    from aec.lib.tracking import prune_stale
+
+    path = stores["store"].parent / "installed-manifest.json"
+    monkeypatch.setattr(config_mod, "INSTALLED_MANIFEST_V2", path)
+    manifest = load_manifest(path)
+    gone = stores["live"] / ".worktrees" / "topic"  # never tracked, now removed
+    for repo in (stores["live"], gone):
+        manifest["repos"][str(repo)] = {"skills": {}, "rules": {}, "agents": {}}
+    save_manifest(manifest, path)
+
+    assert gone in {r.path for r in prune_stale(dry_run=True)}  # previewed
+    assert str(gone) in load_manifest(path)["repos"]
+    assert gone in {r.path for r in prune_stale()}  # reported
+    assert list(load_manifest(path)["repos"]) == [str(stores["live"])]

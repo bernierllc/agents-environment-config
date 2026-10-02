@@ -241,6 +241,8 @@ def prune_stale(dry_run: bool = False) -> List[TrackedRepo]:
             path=path,
             exists=False,
         ))
+    for raw in _prune_dead_manifest_scopes(dry_run):
+        pruned.setdefault(Path(raw), TrackedRepo(timestamp="", version="", path=Path(raw), exists=False))
 
     if pruned and not dry_run:
         if txt_changed:
@@ -266,6 +268,26 @@ def prune_stale(dry_run: bool = False) -> List[TrackedRepo]:
             pass  # ports module not yet available
 
     return list(pruned.values())
+
+
+def _prune_dead_manifest_scopes(dry_run: bool) -> List[str]:
+    """Drop install-manifest scopes whose repo path is gone; return their keys.
+
+    A worktree install records its own scope; removing the worktree
+    leaves that scope behind even though no tracked repo points at it.
+    """
+    from .config import INSTALLED_MANIFEST_V2
+    from .manifest_v2 import load_manifest, save_manifest
+
+    if not INSTALLED_MANIFEST_V2.exists():
+        return []
+    manifest = load_manifest(INSTALLED_MANIFEST_V2)
+    dead = [k for k in manifest["repos"] if not Path(k).exists()]
+    if dead and not dry_run:
+        for key in dead:
+            del manifest["repos"][key]
+        save_manifest(manifest, INSTALLED_MANIFEST_V2)
+    return dead
 
 
 def untrack_repo(project_dir: Path) -> bool:
