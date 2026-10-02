@@ -75,12 +75,14 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
         Console.print("  (up to date)")
 
     local_repo = find_tracked_repo()
+    catalog = get_repo_root()
     if local_repo and is_catalog_repo(local_repo):
-        local_repo = None  # its items are the catalog source; see is_catalog_repo
+        # Its items are the catalog source (see is_catalog_repo); refresh the
+        # checkout we are in, which may be a worktree of the installed one.
+        catalog, local_repo = local_repo, None
 
     # The aec repo uses its items in place, so their version is the catalog's:
     # only the hooks can fall behind, after a submodule bump.
-    catalog = get_repo_root()
     if catalog is not None:
         from ..lib import catalog_hooks
 
