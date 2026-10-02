@@ -67,7 +67,7 @@ def test_prune_drops_manifest_scopes_of_removed_worktrees(stores, monkeypatch):
         manifest["repos"][str(repo)] = {"skills": {}, "rules": {}, "agents": {}}
     save_manifest(manifest, path)
 
-    prune_stale(dry_run=True)
+    assert gone in {r.path for r in prune_stale(dry_run=True)}  # previewed
     assert str(gone) in load_manifest(path)["repos"]
-    prune_stale()
+    assert gone in {r.path for r in prune_stale()}  # reported
     assert list(load_manifest(path)["repos"]) == [str(stores["live"])]

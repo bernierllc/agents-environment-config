@@ -63,8 +63,8 @@ def find_tracked_repo(start: Optional[Path] = None) -> Optional[Path]:
 
     A directory is considered a tracked repo if it appears in the setup log
     AND has a .claude/ or .agent-rules/ directory or .aec.json file. A linked
-    git worktree counts as tracked when its main checkout is, and it is its
-    own install target: the walk never climbs out of a worktree (they
+    git worktree counts as tracked when it or its main checkout is (no marker
+    needed: they may be gitignored), and it is its own install target: the walk never climbs out of a worktree (they
     usually live inside the main checkout, at `.worktrees/<topic>`).
     """
     if start is None:
@@ -73,11 +73,13 @@ def find_tracked_repo(start: Optional[Path] = None) -> Optional[Path]:
     current = start.resolve()
     for _ in range(20):
         main = main_checkout(current)
-        if main in tracked:
+        if main != current:
+            # A linked worktree: tracked directly or via its main checkout
+            # (markers may be gitignored there), and never climbed out of.
+            return current if (main in tracked or current in tracked) else None
+        if current in tracked:
             if (current / ".claude").is_dir() or (current / ".agent-rules").is_dir() or (current / ".aec.json").is_file():
                 return current
-        if main != current:
-            return None  # a worktree of an untracked repo
         parent = current.parent
         if parent == current:
             break

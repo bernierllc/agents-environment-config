@@ -169,6 +169,29 @@ class TestWorktrees:
         monkeypatch.chdir(wt / "src")
         assert find_tracked_repo() == wt
 
+    def test_marker_free_worktree_of_tracked_repo_is_tracked(self, tracked_git_repo, monkeypatch):
+        import shutil
+        from aec.lib.scope import find_tracked_repo
+        wt = tracked_git_repo / ".worktrees" / "topic"
+        shutil.rmtree(wt / ".claude")  # markers gitignored in the main checkout
+        monkeypatch.chdir(wt)
+        assert find_tracked_repo() == wt
+
+    def test_directly_tracked_worktree_is_tracked(self, tracked_repo, monkeypatch):
+        from aec.lib.scope import find_tracked_repo
+        other = tracked_repo.parent / "other"
+        other.mkdir()
+        (other / "f").write_text("")
+        _git("init", "-q", "-b", "main", cwd=other)
+        _git("add", ".", cwd=other)
+        _git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init", cwd=other)
+        wt = tracked_repo.parent / "other-wt"
+        _git("worktree", "add", "-q", str(wt), "-b", "wt", cwd=other)
+        log = Path.home() / ".agents-environment-config" / "setup-repo-locations.txt"
+        log.write_text(log.read_text() + f"2026-04-04T00:00:00Z|2.5.4|{wt}\n")
+        monkeypatch.chdir(wt)
+        assert find_tracked_repo() == wt
+
     def test_worktree_of_untracked_repo_never_resolves_to_its_parent(self, tracked_repo, monkeypatch):
         from aec.lib.scope import find_tracked_repo
         other = tracked_repo / "vendor" / "other"
