@@ -4,7 +4,6 @@ description: "Use when creating, modifying, or auditing application data that mu
 tags: ["skill"]
 ---
 
-
 # Seed Data Classification & Generation
 
 Use this skill whenever data has to live in a database across environments — new lookup tables, enum rows, roles, statuses, baseline accounts, demo content, or test inputs. It walks the agent through classifying the data, picking the correct framework workflow, and producing idempotent, environment-aware artifacts.
