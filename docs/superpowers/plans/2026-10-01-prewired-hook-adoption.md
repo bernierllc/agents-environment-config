@@ -38,12 +38,18 @@ registry, never from scanning the catalog.
    `.claude/settings.json` → `PreToolUse`.
 2. `hooks/installer.py`: `adopt_prewired_hooks(repo_root)` reads the registry
    and, for each record whose `content_fingerprint` (`fingerprint.py`) matches
-   an entry at any index of that event in that config, writes the state file
-   recording just that entry and agent. No match → nothing written. Adoption
+   an entry at any index of that event in that config, merges that entry and
+   agent into the item's state: one load → union → atomic write per item, so
+   ownership already recorded (e.g. Gemini or Cursor hooks from a normal
+   install) and other registry records for the same item are kept, and an
+   entry already in state is a no-op. No match → nothing written. Adoption
    never installs and never renders through the install path, so no
    `when.custom_check` predicate runs; items not in the registry are never
    touched.
 3. Catalog refresh calls `adopt_prewired_hooks` before its state-driven pass.
+   `dry_run` threads through: under `aec upgrade --dry-run` the adopter only
+   reports what it would adopt and writes nothing, matching refresh's
+   existing no-mutation contract.
    A fresh clone of the aec repo adopts the committed pr-merge-flow entry on
    its first `aec upgrade`; once adopted, the normal refresh keeps it current.
 4. Uninstall with no state: call `adopt_prewired_hooks`, then remove what was
@@ -73,7 +79,10 @@ registry, never from scanning the catalog.
   Gemini, Cursor or git hook that was never there. Applies to every
   state-driven refresh: refresh re-renders what state lists.
 
-Tests: an unregistered hook-bearing item with an identical committed entry is
+Tests: adopting into an item whose state already owns Gemini/Cursor hooks
+keeps them (and two registry records for one item both land); a dry-run
+refresh on a fresh checkout leaves `.aec/installed-hooks/` absent; an
+unregistered hook-bearing item with an identical committed entry is
 not adopted; an item with a `custom_check` that would write a sentinel file is
 never evaluated; a Claude-only adoption followed by a `hooks.json` version bump
 leaves `.gemini/settings.json` absent; the registry/committed-entry freshness
