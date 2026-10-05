@@ -65,3 +65,6 @@ docs/demo-script.md
 
 # Per-machine AEC project state written by `aec setup` (not part of the tool)
 .aec.json
+
+# Per-session agent run state and activity log (never tracked)
+.otto/
