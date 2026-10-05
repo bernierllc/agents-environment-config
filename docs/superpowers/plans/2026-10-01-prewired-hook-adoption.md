@@ -54,11 +54,7 @@ registry, never from scanning the catalog.
    ownership already recorded (e.g. Gemini or Cursor hooks from a normal
    install) and other registry records for the same item are kept, and an
    entry already in state is a no-op. No match → nothing written.
-   Adoption also **reconciles**: an adopted `(hook_id, agent)` pair in state
-   whose registry record is gone is removed from state (deleting the state
-   file when nothing is left). The config entry itself is left to the repo's
-   commit, which owns that file; dropping the pair only stops aec from
-   refreshing, repairing or reinstalling it. Adoption
+   Adoption
    never installs and never renders through the install path, so no
    `when.custom_check` predicate runs; items not in the registry are never
    touched.
@@ -88,20 +84,26 @@ registry, never from scanning the catalog.
 - **No predicate execution.** Adoption fingerprints the stored registry value;
   it never calls the install render path, which evaluates `when.custom_check`
   with `shell=True` and would inherit `aec upgrade --yes` as consent.
-- **Adopted refresh stays within the adopted entries — exact `(hook_id,
-  agent)` pairs.** Adopted state records each entry's `hook_id` (copied from
-  the registry record; the id `hooks.json` validation keeps unique, recorded
-  today as `source_hook_id` and keyed on in `hooks/drift.py`) and agent, and is
-  marked `origin: "adopted"`. For adopted state, `catalog_hooks._refresh_one` →
-  `wire()` → `install_item_hooks` passes the recorded `(hook_id, agent)` pairs
-  — never independent id and agent sets, which would cross-render
-  `(hook-a, gemini)` from `(hook-a, claude)` + `(hook-b, gemini)` — and
-  `translate_to_agent` renders only those pairs. A later version that adds a
-  second Claude hook re-renders the adopted entry and neither installs nor
-  claims the new one.
+- **Adopted scope is derived from the registry, never stored.** State
+  records only *that* an item was adopted (`origin: "adopted"`), not which
+  pairs. The adopted scope is computed on every read as the current
+  registry's `(hook_id, agent)` records for that item (the id `hooks.json`
+  validation keeps unique, recorded today as `source_hook_id` and keyed on in
+  `hooks/drift.py`). A stored copy of the pairs drifts: removing a registry
+  record would leave a stale pair that `verify --repair` reinstalls before
+  any refresh runs, and a predicate that skips the hook would replace
+  `hooks_installed` and lose the pair (`hooks_skipped` keeps ids, not
+  agents). Deriving it means a registry removal de-scopes the pair on every
+  path at once, and a false→true predicate brings the hook back, with no
+  reconciliation step. Filtering is always by exact pairs — never independent
+  id and agent sets, which would cross-render `(hook-a, gemini)` from
+  `(hook-a, claude)` + `(hook-b, gemini)`. A later version that adds a second
+  Claude hook re-renders the adopted entry and neither installs nor claims
+  the new one. An adopted item with no registry records left loses its state
+  file on the next adoption pass.
 - **One scope function, every state-driven path.** The scope lives on the
   state, not in each caller: `hooks/state.py` gains `render_scope(state)` →
-  the `(hook_id, agent)` pairs for `origin: "adopted"`, or today's full
+  the registry-derived `(hook_id, agent)` pairs for `origin: "adopted"`, or today's full
   `agents_targeted` × all hooks (skipped included) for ordinary installs.
   Every reader of `agents_targeted` routes through it — catalog refresh
   (`catalog_hooks._refresh_one`), drift verification (`drift.verify_repo`,
@@ -128,7 +130,7 @@ registry, never from scanning the catalog.
   predicate that was false at install and is true now) and every agent the
   install targeted. The pair filter applies only to `origin: "adopted"`. When
   adoption merges into existing install state (step 2), the item keeps its
-  install scope and the adopted pairs are added to it, so nothing it already
+  install scope and the registry pairs are added to it, so nothing it already
   tracked narrows.
 
 Tests: adopting into an item whose state already owns Gemini/Cursor hooks
@@ -149,9 +151,11 @@ unadopted hook with a sentinel-writing `custom_check` and a missing
 `aec run-script` target succeeds and the sentinel never appears; the
 registered payload committed in an unrelated tracked repo is not adopted
 and survives `aec uninstall`; a registry record with an empty or duplicate
-hook id fails the freshness test; removing a record from the registry while
-the item still ships the hook de-scopes the pair, and a later version bump
-or `verify --repair` does not reinstall it; `verify` on an adopted item whose
+hook id fails the freshness test; removing a record and its committed
+entry while the item still ships the hook, then running `verify --repair`
+with no refresh first, reports nothing and reinstalls nothing; an adopted
+hook whose `repo_has` predicate goes false then true is retracted and then
+re-rendered by refresh and repair; `verify` on an adopted item whose
 new version adds an unadopted hook with a missing script still reports the
 adopted entry STALE and repair fixes it; the registry/committed-entry freshness
 test above.
