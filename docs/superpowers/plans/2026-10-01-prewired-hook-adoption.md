@@ -35,7 +35,13 @@ registry, never from scanning the catalog.
    change that commits the entry). One record per prewired entry:
    `{item_type, item_key, hook_id, agent, config_path, event, fingerprint}`.
    `hook_id` is stored, not derived: validation allows two ids to render
-   identical payloads, so a fingerprint cannot recover it. Today it
+   identical payloads, so a fingerprint cannot recover it. It must be
+   non-empty and unique within the item: `hooks.json` allows id-less agent
+   overrides (`validator.py`), which translate to `source_hook_id == ""`, so
+   an empty id would collapse distinct entries into one `("", agent)` pair.
+   An item whose hook lacks an id cannot be registered until it gains one;
+   the freshness test (step 5) loads the registry and fails on an empty or
+   duplicate `(item, hook_id, agent)`. Today it
    holds exactly one record: pr-merge-flow → claude →
    `.claude/settings.json` → `PreToolUse`.
 2. `hooks/installer.py`: `adopt_prewired_hooks(repo_root)` returns at once
@@ -132,7 +138,8 @@ and installs nothing; an adopted refresh whose new version adds an
 unadopted hook with a sentinel-writing `custom_check` and a missing
 `aec run-script` target succeeds and the sentinel never appears; the
 registered payload committed in an unrelated tracked repo is not adopted
-and survives `aec uninstall`; the registry/committed-entry freshness
+and survives `aec uninstall`; a registry record with an empty or duplicate
+hook id fails the freshness test; the registry/committed-entry freshness
 test above.
 
 ## Affected surfaces
