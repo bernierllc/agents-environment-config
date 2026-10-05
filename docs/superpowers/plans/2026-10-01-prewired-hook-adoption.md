@@ -53,7 +53,12 @@ registry, never from scanning the catalog.
    agent into the item's state: one load → union → atomic write per item, so
    ownership already recorded (e.g. Gemini or Cursor hooks from a normal
    install) and other registry records for the same item are kept, and an
-   entry already in state is a no-op. No match → nothing written. Adoption
+   entry already in state is a no-op. No match → nothing written.
+   Adoption also **reconciles**: an adopted `(hook_id, agent)` pair in state
+   whose registry record is gone is removed from state (deleting the state
+   file when nothing is left). The config entry itself is left to the repo's
+   commit, which owns that file; dropping the pair only stops aec from
+   refreshing, repairing or reinstalling it. Adoption
    never installs and never renders through the install path, so no
    `when.custom_check` predicate runs; items not in the registry are never
    touched.
@@ -105,13 +110,18 @@ registry, never from scanning the catalog.
   goes) — so `aec hooks verify --repair` cannot install or claim an
   unadopted hook either. A test asserts no module outside `state.py` reads
   `agents_targeted` directly, so a future state-driven path cannot skip it.
-- **Scope is applied first, not at translation.** `install_item_hooks`
-  today runs consent checks, evaluates every hook's `when` predicates and
-  resolves every `aec run-script` command (`_resolve_script_commands`) before
-  `translate_to_agent`. The `render_scope` filter therefore runs at the top
-  of `install_item_hooks`, on the parsed hook list, before any of those
-  steps: an unadopted hook added in a later version is never consent-checked,
-  never has its `custom_check` executed and never fails script resolution.
+- **Scope is applied at load, not at translation.** Two paths render an
+  item's hooks from source, and each runs work over every hook before
+  `translate_to_agent`: `install_item_hooks` (consent checks, `when`
+  predicates, `_resolve_script_commands`) and `drift._rendered` (predicates,
+  `_resolve_script_commands`, returning `None` — no drift opinion — when any
+  script is missing). Both call `schema.load_hooks_file`; the scope filter is
+  one helper applied to its result (`scoped_hooks(hf, state, agent)`) by both
+  callers, before anything else touches the hook list. An unadopted hook added
+  in a later version is then never consent-checked, never has its
+  `custom_check` executed, and cannot fail script resolution or blank out
+  STALE detection for the adopted entry. The no-direct-`agents_targeted` test
+  also asserts both render paths call `scoped_hooks`.
 - **Ordinary installs keep today's refresh scope.** State from a normal
   install is unchanged: refresh still re-evaluates its full intended scope,
   including hooks recorded only in `hooks_skipped` (e.g. a `repo_has`
@@ -139,14 +149,18 @@ unadopted hook with a sentinel-writing `custom_check` and a missing
 `aec run-script` target succeeds and the sentinel never appears; the
 registered payload committed in an unrelated tracked repo is not adopted
 and survives `aec uninstall`; a registry record with an empty or duplicate
-hook id fails the freshness test; the registry/committed-entry freshness
+hook id fails the freshness test; removing a record from the registry while
+the item still ships the hook de-scopes the pair, and a later version bump
+or `verify --repair` does not reinstall it; `verify` on an adopted item whose
+new version adds an unadopted hook with a missing script still reports the
+adopted entry STALE and repair fixes it; the registry/committed-entry freshness
 test above.
 
 ## Affected surfaces
 
 `aec/data/prewired-hooks.json`, `scripts/render-prewired-hooks.py`,
 `aec/lib/hooks/installer.py` (+ `translate_to_agent` filter), `aec/lib/catalog_hooks.py`,
-`aec/lib/hooks/lifecycle.py`, `aec/lib/hooks/state.py`, `aec/lib/hooks/drift.py`; tests in `tests/test_catalog_hooks.py` and the
+`aec/lib/hooks/lifecycle.py`, `aec/lib/hooks/state.py`, `aec/lib/hooks/drift.py`, `aec/lib/hooks/schema.py`; tests in `tests/test_catalog_hooks.py` and the
 installer tests (fresh clone with committed entry → refresh adopts, no
 duplicate; an unregistered item stays untouched;
 uninstall removes an adopted entry; a hand-edited, non-matching entry is left
