@@ -87,40 +87,42 @@ registry, never from scanning the catalog.
 - **No predicate execution.** Adoption fingerprints the stored registry value;
   it never calls the install render path, which evaluates `when.custom_check`
   with `shell=True` and would inherit `aec upgrade --yes` as consent.
-- **Adopted scope is derived from the registry, never stored.** State
-  records only *that* an item was adopted (`adopted: true`), not which
-  pairs; it is a flag beside, not instead of, the normal-install scope. The adopted scope is computed on every read as the current
-  registry's `(hook_id, agent)` records for that item (the id `hooks.json`
-  validation keeps unique, recorded today as `source_hook_id` and keyed on in
-  `hooks/drift.py`). A stored copy of the pairs drifts: removing a registry
-  record would leave a stale pair that `verify --repair` reinstalls before
-  any refresh runs, and a predicate that skips the hook would replace
-  `hooks_installed` and lose the pair (`hooks_skipped` keeps ids, not
-  agents). Deriving it means a registry removal de-scopes the pair on every
-  path at once, and a false→true predicate brings the hook back, with no
-  reconciliation step. Filtering is always by exact pairs — never independent
-  id and agent sets, which would cross-render `(hook-a, gemini)` from
-  `(hook-a, claude)` + `(hook-b, gemini)`. A later version that adds a second
-  Claude hook re-renders the adopted entry and neither installs nor claims
-  the new one. An adopted item with no registry records left loses its state
-  file on the next adoption pass.
+- **Adopted scope = matched pairs ∩ current registry.** State gains
+  `adopted_pairs`: the `(hook_id, agent)` pairs whose committed entry
+  actually matched at adoption (the id `hooks.json` validation keeps unique,
+  recorded today as `source_hook_id` and keyed on in `hooks/drift.py`). It is
+  its own field, written only by the adopter and never by install, so a
+  predicate that skips the hook and replaces `hooks_installed` cannot lose it
+  (`hooks_skipped` keeps ids, not agents), and a false→true predicate brings
+  the hook back. The scope used everywhere is `adopted_pairs` intersected with
+  the current registry on every read: a registry record with no matching
+  entry is never owned (a missing or hand-edited entry is not adopted, so
+  refresh and repair never install it), and a registry removal de-scopes the
+  pair on every path at once, including `verify --repair` before any refresh.
+  Filtering is always by exact pairs — never independent id and agent sets,
+  which would cross-render `(hook-a, gemini)` from `(hook-a, claude)` +
+  `(hook-b, gemini)`. A later version that adds a second Claude hook
+  re-renders the adopted entry and neither installs nor claims the new one.
+  When the intersection is empty and no normal install scope remains, the
+  next adoption pass deletes the state file.
 - **One scope function, every state-driven path.** The scope lives on the
   state, not in each caller: `hooks/state.py` gains `render_scope(state)` →
-  the union of two independent scopes: `install_agents` × all hooks (skipped
-  included; today's `agents_targeted`, renamed so it means only the agents a
-  normal install chose) and, when `adopted`, the registry-derived
-  `(hook_id, agent)` pairs. Adoption never writes `install_agents`; a normal
-  install never clears `adopted`. So a Gemini/Cursor install plus an adopted
-  Claude pair renders every Gemini/Cursor hook and exactly the registered
-  Claude hook — never a later unregistered Claude hook — and neither scope
-  narrows the other.
+  the union of two independent scopes: `agents_targeted` × all hooks
+  (skipped included — unchanged; it already means only the agents a normal
+  install chose, so no rename and no state migration) and `adopted_pairs` ∩
+  registry. Adoption never writes `agents_targeted`; install never writes
+  `adopted_pairs`. So a Gemini/Cursor install plus an adopted Claude pair
+  renders every Gemini/Cursor hook and exactly the registered, matched Claude
+  hook — never a later unregistered Claude hook — and neither scope narrows
+  the other. `adopted_pairs` is optional on load (absent = empty), so
+  existing v1 state files load unchanged.
   Every reader of the old `agents_targeted` routes through it — catalog refresh
   (`catalog_hooks._refresh_one`), drift verification (`drift.verify_repo`,
   which renders expected entries per `agents_targeted`) and drift repair
   (`drift.repair_repo` → `install_hooks_for_item`, whose agent default also
   goes) — so `aec hooks verify --repair` cannot install or claim an
   unadopted hook either. A test asserts no module outside `state.py` reads
-  `install_agents` directly, so a future state-driven path cannot skip it.
+  `agents_targeted` or `adopted_pairs` directly, so a future state-driven path cannot skip it.
 - **Scope is applied at load, not at translation.** Two paths render an
   item's hooks from source, and each runs work over every hook before
   `translate_to_agent`: `install_item_hooks` (consent checks, `when`
@@ -131,20 +133,21 @@ registry, never from scanning the catalog.
   callers, before anything else touches the hook list. An unadopted hook added
   in a later version is then never consent-checked, never has its
   `custom_check` executed, and cannot fail script resolution or blank out
-  STALE detection for the adopted entry. The no-direct-`install_agents` test
+  STALE detection for the adopted entry. The no-direct-scope-read test
   also asserts both render paths call `scoped_hooks`.
 - **Ordinary installs keep today's refresh scope.** State from a normal
   install is unchanged: refresh still re-evaluates its full intended scope,
   including hooks recorded only in `hooks_skipped` (e.g. a `repo_has`
   predicate that was false at install and is true now) and every agent the
-  install targeted, via `install_agents`. Adoption merging into existing
-  install state (step 2) only sets `adopted`, so nothing it already tracked
-  narrows or widens.
+  install targeted. Adoption merging into existing install state (step 2)
+  only adds `adopted_pairs`, so nothing it already tracked narrows or widens.
 
 Tests: adopting into an item whose state already owns Gemini/Cursor hooks
 keeps them, and a later version adding an unregistered Claude hook installs
 it for neither Claude nor the adopted pair; uninstalling an item whose
-existing state omits the committed entry removes that entry too; two registry records for one item both land; a dry-run
+existing state omits the committed entry removes that entry too; two registry records for one item where only one committed entry matches
+adopts only that one, and refresh/repair never install the other; an
+existing state file without `adopted_pairs` loads with its scope intact; a dry-run
 refresh on a fresh checkout leaves `.aec/installed-hooks/` absent; an
 unregistered hook-bearing item with an identical committed entry is
 not adopted; an item with a `custom_check` that would write a sentinel file is
