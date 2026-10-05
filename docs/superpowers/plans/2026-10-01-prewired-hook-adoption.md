@@ -72,12 +72,16 @@ registry, never from scanning the catalog.
 - **No predicate execution.** Adoption fingerprints the stored registry value;
   it never calls the install render path, which evaluates `when.custom_check`
   with `shell=True` and would inherit `aec upgrade --yes` as consent.
-- **Refresh stays within the adopted scope.** State records the agents and
-  entries that were adopted. `catalog_hooks._refresh_one` → `wire()` must pass
-  exactly those agents (today it defaults to claude/gemini/cursor/git), so a
-  later version bump re-renders the adopted Claude entry and never installs a
-  Gemini, Cursor or git hook that was never there. Applies to every
-  state-driven refresh: refresh re-renders what state lists.
+- **Refresh stays within the adopted scope — per entry, not per agent.**
+  State records each adopted entry's `hook_id` (the unique id `hooks.json`
+  validation already enforces, recorded today as `source_hook_id` and keyed on
+  in `hooks/drift.py`) and agent. `catalog_hooks._refresh_one` → `wire()` →
+  `install_item_hooks` gains a `hook_ids` filter, and `translate_to_agent`
+  renders only those ids for only those agents (today refresh defaults to
+  claude/gemini/cursor/git and renders every compatible hook). A later version
+  that adds a second Claude hook therefore re-renders the adopted entry and
+  neither installs nor claims the new one. Applies to every state-driven
+  refresh: refresh re-renders exactly the entries state lists.
 
 Tests: adopting into an item whose state already owns Gemini/Cursor hooks
 keeps them (and two registry records for one item both land); a dry-run
@@ -85,13 +89,15 @@ refresh on a fresh checkout leaves `.aec/installed-hooks/` absent; an
 unregistered hook-bearing item with an identical committed entry is
 not adopted; an item with a `custom_check` that would write a sentinel file is
 never evaluated; a Claude-only adoption followed by a `hooks.json` version bump
-leaves `.gemini/settings.json` absent; the registry/committed-entry freshness
+leaves `.gemini/settings.json` absent; a version bump that adds a second
+Claude hook to an adopted item re-renders only the adopted entry and leaves
+the new hook uninstalled and out of state; the registry/committed-entry freshness
 test above.
 
 ## Affected surfaces
 
 `aec/data/prewired-hooks.json`, `scripts/render-prewired-hooks.py`,
-`aec/lib/hooks/installer.py`, `aec/lib/catalog_hooks.py`,
+`aec/lib/hooks/installer.py` (+ `translate_to_agent` filter), `aec/lib/catalog_hooks.py`,
 `aec/lib/hooks/lifecycle.py`; tests in `tests/test_catalog_hooks.py` and the
 installer tests (fresh clone with committed entry → refresh adopts, no
 duplicate; an unregistered item stays untouched;
