@@ -33,7 +33,9 @@ registry, never from scanning the catalog.
 
 1. **Registry** — `aec/data/prewired-hooks.json` (committed, reviewed with the
    change that commits the entry). One record per prewired entry:
-   `{item_type, item_key, agent, config_path, event, fingerprint}`. Today it
+   `{item_type, item_key, hook_id, agent, config_path, event, fingerprint}`.
+   `hook_id` is stored, not derived: validation allows two ids to render
+   identical payloads, so a fingerprint cannot recover it. Today it
    holds exactly one record: pr-merge-flow → claude →
    `.claude/settings.json` → `PreToolUse`.
 2. `hooks/installer.py`: `adopt_prewired_hooks(repo_root)` reads the registry
@@ -72,16 +74,25 @@ registry, never from scanning the catalog.
 - **No predicate execution.** Adoption fingerprints the stored registry value;
   it never calls the install render path, which evaluates `when.custom_check`
   with `shell=True` and would inherit `aec upgrade --yes` as consent.
-- **Refresh stays within the adopted scope — per entry, not per agent.**
-  State records each adopted entry's `hook_id` (the unique id `hooks.json`
-  validation already enforces, recorded today as `source_hook_id` and keyed on
-  in `hooks/drift.py`) and agent. `catalog_hooks._refresh_one` → `wire()` →
-  `install_item_hooks` gains a `hook_ids` filter, and `translate_to_agent`
-  renders only those ids for only those agents (today refresh defaults to
-  claude/gemini/cursor/git and renders every compatible hook). A later version
-  that adds a second Claude hook therefore re-renders the adopted entry and
-  neither installs nor claims the new one. Applies to every state-driven
-  refresh: refresh re-renders exactly the entries state lists.
+- **Adopted refresh stays within the adopted entries — exact `(hook_id,
+  agent)` pairs.** Adopted state records each entry's `hook_id` (copied from
+  the registry record; the id `hooks.json` validation keeps unique, recorded
+  today as `source_hook_id` and keyed on in `hooks/drift.py`) and agent, and is
+  marked `origin: "adopted"`. For adopted state, `catalog_hooks._refresh_one` →
+  `wire()` → `install_item_hooks` passes the recorded `(hook_id, agent)` pairs
+  — never independent id and agent sets, which would cross-render
+  `(hook-a, gemini)` from `(hook-a, claude)` + `(hook-b, gemini)` — and
+  `translate_to_agent` renders only those pairs. A later version that adds a
+  second Claude hook re-renders the adopted entry and neither installs nor
+  claims the new one.
+- **Ordinary installs keep today's refresh scope.** State from a normal
+  install is unchanged: refresh still re-evaluates its full intended scope,
+  including hooks recorded only in `hooks_skipped` (e.g. a `repo_has`
+  predicate that was false at install and is true now) and every agent the
+  install targeted. The pair filter applies only to `origin: "adopted"`. When
+  adoption merges into existing install state (step 2), the item keeps its
+  install scope and the adopted pairs are added to it, so nothing it already
+  tracked narrows.
 
 Tests: adopting into an item whose state already owns Gemini/Cursor hooks
 keeps them (and two registry records for one item both land); a dry-run
@@ -91,7 +102,10 @@ not adopted; an item with a `custom_check` that would write a sentinel file is
 never evaluated; a Claude-only adoption followed by a `hooks.json` version bump
 leaves `.gemini/settings.json` absent; a version bump that adds a second
 Claude hook to an adopted item re-renders only the adopted entry and leaves
-the new hook uninstalled and out of state; the registry/committed-entry freshness
+the new hook uninstalled and out of state; adopted state holding
+`(hook-a, claude)` and `(hook-b, gemini)` refreshes to exactly those two
+entries; a normal install whose `repo_has` hook was skipped picks it up on
+a later refresh once the file exists; the registry/committed-entry freshness
 test above.
 
 ## Affected surfaces
