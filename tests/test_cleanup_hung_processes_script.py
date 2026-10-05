@@ -24,24 +24,37 @@ def _helper_prelude() -> str:
     return text.split(marker, 1)[0]
 
 
+def _fake_tool(tmp_path: Path, name: str, body: str) -> Path:
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    tool = bindir / name
+    tool.write_text("#!/bin/bash\n" + body)
+    tool.chmod(0o755)
+    return bindir
+
+
 @pytest.fixture
 def fake_yarn(tmp_path: Path) -> Path:
     """A `yarn` that mimics a Corepack shim: refuses when offline, otherwise
     waits on stdin forever (the prompt that caused the hang)."""
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    yarn = bindir / "yarn"
-    yarn.write_text(
-        "#!/bin/bash\n"
+    return _fake_tool(
+        tmp_path,
+        "yarn",
         'if [ "${COREPACK_ENABLE_NETWORK:-1}" = "0" ]; then\n'
         '  echo "Internal Error: Cannot download yarn (network disabled)" >&2; exit 1\n'
         "fi\n"
         'echo "? Do you want to continue? [Y/n] " >&2\n'
         "read -r _answer\n"
-        'echo "cleaned"\n'
+        'echo "cleaned"\n',
     )
-    yarn.chmod(0o755)
-    return bindir
+
+
+def _prelude_with_network_allowed() -> str:
+    """Drop the offline guard so the fake shim takes the prompt path."""
+    prelude = _helper_prelude()
+    prefix = "COREPACK_ENABLE_NETWORK=0 "
+    assert prefix in prelude, "offline guard moved; update this test"
+    return prelude.replace(prefix, "")
 
 
 def _run_clean_pm_cache(bindir: Path, env_extra: dict, timeout_s: int = 2) -> subprocess.CompletedProcess:
@@ -65,16 +78,33 @@ def test_corepack_shim_fails_fast_instead_of_downloading(fake_yarn: Path) -> Non
     assert "network disabled" in result.stdout
 
 
-def test_blocking_prompt_is_cut_by_timeout(fake_yarn: Path) -> None:
-    # Force the fake shim down the prompt path to prove the timeout + /dev/null
-    # stdin guard holds even if network were allowed.
-    prelude = _helper_prelude().replace("COREPACK_ENABLE_NETWORK=0 ", "")
-    script = prelude + '\nclean_pm_cache 2 "Cleaning yarn cache" yarn cache clean\n'
+def test_stdin_guard_stops_prompt_from_blocking(fake_yarn: Path) -> None:
+    # Hold the parent's stdin open, as a terminal would. Without the </dev/null
+    # guard the fake shim's `read` blocks until the 5s alarm fires.
+    script = _prelude_with_network_allowed() + '\nclean_pm_cache 5 "Cleaning yarn cache" yarn cache clean\n'
     env = {**os.environ, "PATH": f"{fake_yarn}:{os.environ['PATH']}"}
+    read_end, write_end = os.pipe()  # write_end stays open for the whole run
     start = time.monotonic()
-    result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True, timeout=15)
+    try:
+        result = subprocess.run(
+            ["bash", "-c", script], env=env, stdin=read_end, capture_output=True, text=True, timeout=15
+        )
+    finally:
+        os.close(read_end)
+        os.close(write_end)
     elapsed = time.monotonic() - start
-    # stdin is /dev/null so `read` returns at once and the fake "cleans";
-    # either way the step returns well inside the 2s alarm.
-    assert elapsed < 3, f"step took {elapsed:.1f}s"
-    assert "cleaned" in result.stdout or "failed or timed out" in result.stdout
+    assert "cleaned" in result.stdout, result.stdout
+    assert elapsed < 3, f"read blocked on inherited stdin for {elapsed:.1f}s"
+
+
+def test_timeout_kills_children_holding_the_pipe(tmp_path: Path) -> None:
+    # A tool that forks a child and then hangs. Killing only the leader leaves
+    # the child holding stdout, so `$(...)` would wait the full 30s for EOF.
+    bindir = _fake_tool(tmp_path, "yarn", "sleep 30 &\nsleep 30\n")
+    script = _helper_prelude() + '\nclean_pm_cache 1 "Cleaning yarn cache" yarn cache clean\n'
+    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"}
+    start = time.monotonic()
+    result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True, timeout=20)
+    elapsed = time.monotonic() - start
+    assert "failed or timed out" in result.stdout, result.stdout
+    assert elapsed < 10, f"grandchild kept the step alive for {elapsed:.1f}s"

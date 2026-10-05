@@ -6,10 +6,27 @@
 
 # Run a command with timeout (macOS doesn't have GNU timeout)
 # Usage: run_with_timeout SECONDS command [args...]
+# The command runs in its own process group and the whole group is killed on
+# expiry: killing only the leader leaves children (brew's ruby, pnpm workers)
+# holding stdout open, so a `$(...)` caller would still wait for EOF forever.
+# Exit status: the command's, or 124 on timeout (same as GNU timeout).
 run_with_timeout() {
     local seconds="$1"
     shift
-    perl -e "alarm $seconds; exec @ARGV" -- "$@"
+    perl -e '
+        my $seconds = shift @ARGV;
+        my $pid = fork;
+        die "fork: $!" unless defined $pid;
+        if ($pid == 0) { setpgrp(0, 0); exec @ARGV; exit 127 }
+        my $kill_group = sub {
+            kill "-TERM", $pid; sleep 2; kill "-KILL", $pid; waitpid $pid, 0;
+        };
+        $SIG{ALRM} = sub { $kill_group->(); exit 124 };
+        $SIG{INT} = $SIG{TERM} = sub { $kill_group->(); exit 130 };
+        alarm $seconds;
+        waitpid $pid, 0;
+        exit(($? & 127) ? 128 + ($? & 127) : $? >> 8);
+    ' -- "$seconds" "$@"
 }
 
 # Clean a package-manager cache without letting it hang the script.
