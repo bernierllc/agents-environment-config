@@ -7,6 +7,7 @@ piped into `tail -1` the prompt was invisible and the script hung forever.
 """
 
 import os
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -115,3 +116,17 @@ def test_timeout_kills_children_holding_the_pipe(tmp_path: Path) -> None:
     elapsed = time.monotonic() - start
     assert "failed or timed out" in result.stdout, result.stdout
     assert elapsed < 10, f"grandchild kept the step alive for {elapsed:.1f}s"
+
+
+def test_ctrl_c_aborts_the_script_through_the_timeout_wrapper() -> None:
+    # The wrapper must die of SIGINT, not exit normally, or bash carries on
+    # with the next cleanup step after Ctrl-C.
+    script = _helper_prelude() + "\nrun_with_timeout 20 sh -c 'sleep 20 & sleep 20'\necho STEP2_RAN\n"
+    proc = subprocess.Popen(
+        ["bash", "-c", script], start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    )
+    time.sleep(1.5)
+    os.killpg(proc.pid, signal.SIGINT)
+    out, _ = proc.communicate(timeout=15)
+    assert proc.returncode == -signal.SIGINT, (proc.returncode, out)
+    assert "STEP2_RAN" not in out, out
