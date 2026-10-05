@@ -6,7 +6,7 @@ from typing import List, Optional
 # Check for typer, fall back to argparse if not available
 try:
     import typer
-    from typing_extensions import Annotated
+    from typing import Annotated
     HAS_TYPER = True
 except ImportError:
     HAS_TYPER = False
