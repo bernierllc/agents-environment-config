@@ -85,6 +85,17 @@ registry, never from scanning the catalog.
   `translate_to_agent` renders only those pairs. A later version that adds a
   second Claude hook re-renders the adopted entry and neither installs nor
   claims the new one.
+- **One scope function, every state-driven path.** The scope lives on the
+  state, not in each caller: `hooks/state.py` gains `render_scope(state)` →
+  the `(hook_id, agent)` pairs for `origin: "adopted"`, or today's full
+  `agents_targeted` × all hooks (skipped included) for ordinary installs.
+  Every reader of `agents_targeted` routes through it — catalog refresh
+  (`catalog_hooks._refresh_one`), drift verification (`drift.verify_repo`,
+  which renders expected entries per `agents_targeted`) and drift repair
+  (`drift.repair_repo` → `install_hooks_for_item`, whose agent default also
+  goes) — so `aec hooks verify --repair` cannot install or claim an
+  unadopted hook either. A test asserts no module outside `state.py` reads
+  `agents_targeted` directly, so a future state-driven path cannot skip it.
 - **Ordinary installs keep today's refresh scope.** State from a normal
   install is unchanged: refresh still re-evaluates its full intended scope,
   including hooks recorded only in `hooks_skipped` (e.g. a `repo_has`
@@ -105,14 +116,16 @@ Claude hook to an adopted item re-renders only the adopted entry and leaves
 the new hook uninstalled and out of state; adopted state holding
 `(hook-a, claude)` and `(hook-b, gemini)` refreshes to exactly those two
 entries; a normal install whose `repo_has` hook was skipped picks it up on
-a later refresh once the file exists; the registry/committed-entry freshness
+a later refresh once the file exists; `aec hooks verify --repair` on an
+adopted item whose new version adds a second Claude hook reports no drift
+and installs nothing; the registry/committed-entry freshness
 test above.
 
 ## Affected surfaces
 
 `aec/data/prewired-hooks.json`, `scripts/render-prewired-hooks.py`,
 `aec/lib/hooks/installer.py` (+ `translate_to_agent` filter), `aec/lib/catalog_hooks.py`,
-`aec/lib/hooks/lifecycle.py`; tests in `tests/test_catalog_hooks.py` and the
+`aec/lib/hooks/lifecycle.py`, `aec/lib/hooks/state.py`, `aec/lib/hooks/drift.py`; tests in `tests/test_catalog_hooks.py` and the
 installer tests (fresh clone with committed entry → refresh adopts, no
 duplicate; an unregistered item stays untouched;
 uninstall removes an adopted entry; a hand-edited, non-matching entry is left
