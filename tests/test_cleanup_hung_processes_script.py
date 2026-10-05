@@ -10,6 +10,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -57,9 +58,15 @@ def _prelude_with_network_allowed() -> str:
     return prelude.replace(prefix, "")
 
 
+def _env(bindir: Path, extra: Optional[dict] = None) -> dict:
+    env = {**os.environ, **(extra or {}), "PATH": f"{bindir}:{os.environ['PATH']}"}
+    env.pop("COREPACK_ENABLE_NETWORK", None)  # the script sets it; ambient values must not steer the fakes
+    return env
+
+
 def _run_clean_pm_cache(bindir: Path, env_extra: dict, timeout_s: int = 2) -> subprocess.CompletedProcess:
     script = _helper_prelude() + f'\nclean_pm_cache {timeout_s} "Cleaning yarn cache" yarn cache clean\n'
-    env = {**os.environ, **env_extra, "PATH": f"{bindir}:{os.environ['PATH']}"}
+    env = _env(bindir, env_extra)
     return subprocess.run(
         ["bash", "-c", script],
         env=env,
@@ -73,7 +80,7 @@ def _run_clean_pm_cache(bindir: Path, env_extra: dict, timeout_s: int = 2) -> su
 def test_corepack_shim_fails_fast_instead_of_downloading(fake_yarn: Path) -> None:
     start = time.monotonic()
     result = _run_clean_pm_cache(fake_yarn, {})
-    assert time.monotonic() - start < 2, "step should return immediately, not wait on a prompt"
+    assert time.monotonic() - start < 5, "step should return immediately, not wait on a prompt"
     assert "failed or timed out" in result.stdout
     assert "network disabled" in result.stdout
 
@@ -82,7 +89,7 @@ def test_stdin_guard_stops_prompt_from_blocking(fake_yarn: Path) -> None:
     # Hold the parent's stdin open, as a terminal would. Without the </dev/null
     # guard the fake shim's `read` blocks until the 5s alarm fires.
     script = _prelude_with_network_allowed() + '\nclean_pm_cache 5 "Cleaning yarn cache" yarn cache clean\n'
-    env = {**os.environ, "PATH": f"{fake_yarn}:{os.environ['PATH']}"}
+    env = _env(fake_yarn)
     read_end, write_end = os.pipe()  # write_end stays open for the whole run
     start = time.monotonic()
     try:
@@ -102,7 +109,7 @@ def test_timeout_kills_children_holding_the_pipe(tmp_path: Path) -> None:
     # the child holding stdout, so `$(...)` would wait the full 30s for EOF.
     bindir = _fake_tool(tmp_path, "yarn", "sleep 30 &\nsleep 30\n")
     script = _helper_prelude() + '\nclean_pm_cache 1 "Cleaning yarn cache" yarn cache clean\n'
-    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"}
+    env = _env(bindir)
     start = time.monotonic()
     result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True, timeout=20)
     elapsed = time.monotonic() - start

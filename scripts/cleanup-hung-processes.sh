@@ -18,11 +18,16 @@ run_with_timeout() {
         my $pid = fork;
         die "fork: $!" unless defined $pid;
         if ($pid == 0) { setpgrp(0, 0); exec @ARGV; exit 127 }
+        setpgrp($pid, $pid);  # also from the parent: closes the race with an early signal
         my $kill_group = sub {
             kill "-TERM", $pid; sleep 2; kill "-KILL", $pid; waitpid $pid, 0;
         };
         $SIG{ALRM} = sub { $kill_group->(); exit 124 };
-        $SIG{INT} = $SIG{TERM} = sub { $kill_group->(); exit 130 };
+        # Ctrl-C: kill the group, then die of the same signal so the calling
+        # shell sees an interrupt and aborts instead of running the next step.
+        $SIG{INT} = $SIG{TERM} = sub {
+            my $sig = shift; $kill_group->(); $SIG{$sig} = "DEFAULT"; kill $sig, $$;
+        };
         alarm $seconds;
         waitpid $pid, 0;
         exit(($? & 127) ? 128 + ($? & 127) : $? >> 8);
