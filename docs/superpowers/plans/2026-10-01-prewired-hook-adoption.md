@@ -38,8 +38,11 @@ registry, never from scanning the catalog.
    identical payloads, so a fingerprint cannot recover it. Today it
    holds exactly one record: pr-merge-flow → claude →
    `.claude/settings.json` → `PreToolUse`.
-2. `hooks/installer.py`: `adopt_prewired_hooks(repo_root)` reads the registry
-   and, for each record whose `content_fingerprint` (`fingerprint.py`) matches
+2. `hooks/installer.py`: `adopt_prewired_hooks(repo_root)` returns at once
+   unless `scope.is_catalog_repo(repo_root)` (true for the aec checkout and
+   its linked worktrees): the registry describes what *this* repo commits, so
+   an identical payload in any other project is never adopted. It then reads
+   the registry and, for each record whose `content_fingerprint` (`fingerprint.py`) matches
    an entry at any index of that event in that config, merges that entry and
    agent into the item's state: one load → union → atomic write per item, so
    ownership already recorded (e.g. Gemini or Cursor hooks from a normal
@@ -96,6 +99,13 @@ registry, never from scanning the catalog.
   goes) — so `aec hooks verify --repair` cannot install or claim an
   unadopted hook either. A test asserts no module outside `state.py` reads
   `agents_targeted` directly, so a future state-driven path cannot skip it.
+- **Scope is applied first, not at translation.** `install_item_hooks`
+  today runs consent checks, evaluates every hook's `when` predicates and
+  resolves every `aec run-script` command (`_resolve_script_commands`) before
+  `translate_to_agent`. The `render_scope` filter therefore runs at the top
+  of `install_item_hooks`, on the parsed hook list, before any of those
+  steps: an unadopted hook added in a later version is never consent-checked,
+  never has its `custom_check` executed and never fails script resolution.
 - **Ordinary installs keep today's refresh scope.** State from a normal
   install is unchanged: refresh still re-evaluates its full intended scope,
   including hooks recorded only in `hooks_skipped` (e.g. a `repo_has`
@@ -118,7 +128,11 @@ the new hook uninstalled and out of state; adopted state holding
 entries; a normal install whose `repo_has` hook was skipped picks it up on
 a later refresh once the file exists; `aec hooks verify --repair` on an
 adopted item whose new version adds a second Claude hook reports no drift
-and installs nothing; the registry/committed-entry freshness
+and installs nothing; an adopted refresh whose new version adds an
+unadopted hook with a sentinel-writing `custom_check` and a missing
+`aec run-script` target succeeds and the sentinel never appears; the
+registered payload committed in an unrelated tracked repo is not adopted
+and survives `aec uninstall`; the registry/committed-entry freshness
 test above.
 
 ## Affected surfaces
