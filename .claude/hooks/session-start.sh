@@ -17,7 +17,7 @@ LOG="/tmp/aec-session-start.log"
 # Catalog/skills/agents live in git submodules; init them if possible.
 git submodule update --init --recursive >"$LOG" 2>&1 || true
 
-# Editable install with all test deps: typer, typing_extensions, PyYAML,
+# Editable install with all test deps: typer, PyYAML,
 # pytest stack (dev) plus pinned pynacl (org-configs) for the signing tests.
 if {
   python -m pip install --upgrade pip
