@@ -12,6 +12,26 @@ run_with_timeout() {
     perl -e "alarm $seconds; exec @ARGV" -- "$@"
 }
 
+# Clean a package-manager cache without letting it hang the script.
+# Usage: clean_pm_cache SECONDS label command [args...]
+# - stdin from /dev/null: Corepack shims (node's bundled yarn/pnpm) prompt
+#   "Do you want to continue? [Y/n]" on a TTY stdin when the tool isn't
+#   downloaded yet; with stderr piped the prompt is invisible and blocks forever.
+# - COREPACK_ENABLE_NETWORK=0: a missing tool fails fast instead of being
+#   downloaded by a cleanup script.
+# - run_with_timeout: same guard the Docker steps already have.
+clean_pm_cache() {
+    local seconds="$1" label="$2"
+    shift 2
+    echo "  $label..."
+    local out
+    if out=$(COREPACK_ENABLE_NETWORK=0 run_with_timeout "$seconds" "$@" </dev/null 2>&1); then
+        echo "    $(tail -n1 <<<"$out")"
+    else
+        echo "    ($label failed or timed out: $(tail -n1 <<<"$out"))"
+    fi
+}
+
 # Check if process has been running longer than N minutes based on ps etime
 # etime formats: MM:SS, HH:MM:SS, D-HH:MM:SS
 # Returns 0 (true) if old enough, 1 (false) otherwise
@@ -292,32 +312,27 @@ echo "Starting package manager cache cleanup..."
 echo "================================="
 
 if command -v pnpm >/dev/null 2>&1; then
-    echo "  Pruning pnpm store..."
-    pnpm store prune 2>&1 | tail -1 || echo "  (pnpm store prune failed)"
+    clean_pm_cache 120 "Pruning pnpm store" pnpm store prune
 else
     echo "  pnpm not found, skipping"
 fi
 
 if command -v yarn >/dev/null 2>&1; then
-    echo "  Cleaning yarn cache..."
-    yarn cache clean 2>&1 | tail -1 || echo "  (yarn cache clean failed)"
+    clean_pm_cache 120 "Cleaning yarn cache" yarn cache clean
 else
     echo "  yarn not found, skipping"
 fi
 
 if command -v brew >/dev/null 2>&1; then
-    echo "  Running brew cleanup..."
-    brew cleanup 2>&1 | tail -5 || echo "  (brew cleanup failed)"
+    clean_pm_cache 300 "Running brew cleanup" brew cleanup
 else
     echo "  brew not found, skipping"
 fi
 
 if command -v pip >/dev/null 2>&1; then
-    echo "  Purging pip cache..."
-    pip cache purge 2>&1 | tail -1 || echo "  (pip cache purge failed)"
+    clean_pm_cache 120 "Purging pip cache" pip cache purge
 elif command -v pip3 >/dev/null 2>&1; then
-    echo "  Purging pip3 cache..."
-    pip3 cache purge 2>&1 | tail -1 || echo "  (pip3 cache purge failed)"
+    clean_pm_cache 120 "Purging pip3 cache" pip3 cache purge
 else
     echo "  pip not found, skipping"
 fi
