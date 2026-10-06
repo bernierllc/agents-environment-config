@@ -1,7 +1,7 @@
 # Org-config settings & file delivery (git-sourced org configs)
 
 Status: proposed — ROADMAP Tier 2, after org-config plugin governance
-Revision: 2 (2026-10-06) — reworked after adversarial review: content-hash trust model, allow-lists over denylists, lifecycle and unattended semantics, phased delivery
+Revision: 3 (2026-10-06): round-2 review fixes (single-commit verification order, guided = pending when unattended, `EXIT_PENDING`, signed orgs require pinned custom sources, `--replace` re-verifies trust). Revision 2 reworked the content-hash trust model, allow-lists, lifecycle and phasing.
 Priority: High (org-wide agent settings are hand-synced per machine today)
 Discovered: 2026-10-06, syncing a Claude Code `autoMode` block between two machines by hand
 
@@ -94,6 +94,9 @@ aec org enroll git+https://github.com/my-org/aec-catalog.git#main:org/my-org.yam
 - New module `aec/lib/org_config/git_source.py`. `fetch.py` stays the
   https-GET-only module its docstring promises. It follows `sources.py`'s
   subprocess and debug-logging pattern (`_debug.log_subprocess_failure`).
+  `sources.fetch_latest` isn't reused: it runs `git pull --ff-only` on AEC's own
+  checkout and has no clone step, URL validation, protocol allow-list or
+  detached checkout.
 - **Input validation (enroll time and every refresh):**
   - The URL scheme must be `https://` or scp-style `git@host:path`. Reject
     `file://`, `ext::`, and anything starting with `-`.
@@ -106,6 +109,11 @@ aec org enroll git+https://github.com/my-org/aec-catalog.git#main:org/my-org.yam
   - Set env `GIT_TERMINAL_PROMPT=0`, plus a timeout.
   - Clone with `clone --depth 1 --branch <ref>`.
   - Refresh does `fetch --depth 1 origin <ref>` then `checkout --detach FETCH_HEAD`. AEC owns the clone, so force-pushes and moved tags are followed, not failed on.
+  - Concretely, the argvs are:
+    - `["git", *PROTO_FLAGS, "clone", "--depth", "1", "--branch", ref, "--", url, dest]`
+    - `["git", *PROTO_FLAGS, "-C", dest, "fetch", "--depth", "1", "origin", "--", ref]`
+
+    The ref regex already forbids a leading `-`; the `--` is a second guard.
 - **Credentials:** the user's own git setup (credential helper, ssh agent). AEC
   never stores credentials.
 - **Clone location:** `~/.aec/orgs/<org_id>.d/repo/`. The `.d` suffix keeps it
@@ -113,17 +121,33 @@ aec org enroll git+https://github.com/my-org/aec-catalog.git#main:org/my-org.yam
   validation (`^[a-z0-9][a-z0-9-]{0,62}$`) in `validator.py`. That also closes
   the existing traversal path in `OrgPaths.config_for`.
 - **Signatures:** for `pinned_key` / `dns_anchor` orgs, the detached signature
-  is a sibling file in the repo (`org/my-org.yaml.sig`), read from the same
-  commit. `_signature_for_url` gets a git counterpart. Verification and key
-  rotation are otherwise unchanged.
+  is a sibling file in the repo (`org/my-org.yaml.sig`). `_signature_for_url`
+  gets a git counterpart. Verification and key rotation are otherwise
+  unchanged.
+- **One commit, verified before any write.** The signature, the YAML, every
+  fragment and every file are read from the single `resolved_commit` that the
+  detached checkout produced. That is never a mix of working-tree states. The
+  order is fixed:
+  1. checkout;
+  2. verify the signature over the YAML;
+  3. verify every sha256 pin (and Phase 2 `commit:` pins) against that same
+     checkout;
+  4. only then plan or write anything.
+
+  Any failure leaves the previously applied state untouched and records
+  `pending: {kind: "verify_failed", commit, reason}`.
 
 ### State
 
 - `OrgState` gains `source_of_record: "git"`, plus `source_repo`, `source_ref`,
   `source_path`, `resolved_commit`, and `pending: Optional[dict]` (see
   Lifecycle). All new fields have defaults.
-- `read_state` ignores unknown keys instead of `OrgState(**data)` raising on
-  them, so an older AEC can read a newer state file.
+- `last_applied_at` becomes `Optional[str] = None`. It stays `None` until the
+  first successful apply. Its writers (`org.py:314`, `org.py:603`) and the
+  status display (`org.py:367-389`) handle `None` ("never applied").
+- `read_state` filters `data` to `dataclasses.fields(OrgState)` before
+  constructing, instead of `OrgState(**data)` (`state.py:63`) raising on unknown
+  keys. That lets an older AEC read a newer state file.
 - `remove_cmd` also deletes `<org_id>.d/`.
 
 ### Refresh then apply (all source kinds)
@@ -133,18 +157,29 @@ aec org enroll git+https://github.com/my-org/aec-catalog.git#main:org/my-org.yam
 | Situation | Behavior |
 |---|---|
 | Content unchanged (commit and hash) | Nothing is written. |
-| Changed, **signed** org, `install.mode: managed` | Re-verify, re-enroll, apply non-interactively. |
-| Changed, **unsigned** org, or `guided` mode | Re-enroll, **do not apply**. Record `pending: {kind: "review", commit, summary}`. Print the plan diff and the command (`aec org apply`). |
+| Changed, **signed** org, `install.mode: managed`, all pins verify | Re-enroll and apply non-interactively. |
+| Changed, **unsigned** org, or `guided` mode (including `install.mode` unset, which `apply.py` already treats as guided) | Re-enroll, **do not apply**. Record `pending: {kind: "review", commit, summary}`. Print the plan diff and the command (`aec org apply`). |
+| Signature or any pin fails to verify | Nothing re-enrolled or applied. Record `pending: {kind: "verify_failed", …}`. |
+
+**`aec update` never prompts.** "Guided" in an unattended run always means
+pending-review. Only signed + managed + verified applies without a human.
 
 This replaces today's `perform_enroll(..., allow_unsigned=True, yes=True)` in
 `refresh_url_sourced_orgs`, which silently re-consents to changed unsigned
 content. The `last_applied_at` that enrollment currently stamps at enroll time
-(`org.py:304`) moves to the moment apply actually succeeds.
+(`org.py:314`) moves to the moment apply actually succeeds.
 
 ### Pending state is loud
 
-- Any org with `pending` set makes `aec update` exit **non-zero** (2).
-- `aec doctor` and `aec org status` show the pending item and its fix.
+- Any org with `pending` set makes `aec update` exit with a new
+  `EXIT_PENDING = 14`, defined beside `EXIT_TRUST` / `EXIT_VALIDATION` in
+  `org.py`. It is not 2, which typer uses for usage errors. Today
+  `_refresh_org_configs` (`update.py:85`) returns `None` and swallows
+  `OrgConfigError`. It changes to return a status, and the `update` command
+  raises `typer.Exit(EXIT_PENDING)` after finishing every other step, so a
+  pending org never blocks unrelated updates.
+- `aec doctor` (`run_doctor` returns `(ok, messages)`) returns `ok=False` with
+  the pending item and its fix. `aec org status` shows it too.
 - Every interactive `aec` command prints a one-line banner naming it.
 - `pending` clears only when an apply succeeds or the user declines that commit
   (`aec org apply --decline <commit>`).
@@ -155,8 +190,14 @@ content. The `last_applied_at` that enrollment currently stamps at enroll time
 ### Migration
 
 `aec org enroll --replace <git source>` swaps an enrolled org's source of
-record and keeps its conflict resolutions and key-trust records. It replaces
-the manual remove-then-enroll-then-apply sequence, which would lose them.
+record and keeps its conflict resolutions. It replaces the manual
+remove-then-enroll-then-apply sequence, which would lose them.
+
+Trust is **re-established, not inherited**:
+- the new source's signature is verified from scratch;
+- if its pinned key or `trust_mode` differs from the recorded one, the user
+  re-consents interactively, exactly as on a first enroll;
+- `--replace` with `--yes` refuses a key change.
 
 ## Phase 2 — custom sources install
 
@@ -169,11 +210,15 @@ The review found this needs more than `_catalog`:
 - Each custom source clones through `git_source.py` (same validation) to
   `<org_id>.d/sources/<id>/`. A custom source whose URL equals the config's
   own repo reuses that clone.
-- **Content is pinned:** a custom source must declare `commit:` (a full sha), not
-  just `ref`. Signing the YAML then authenticates the source content too. A
-  `ref`-only custom source is accepted only for unsigned orgs, and every change
-  to it goes through the "pending review" path above.
-- **Provenance:** `manifest_v2` records `source_id` per installed item, so
+- **Content is pinned:** `CustomSource` (`schema.py:46-50`) gains an optional
+  `commit:` (a full 40-hex sha), and `ref` becomes optional when `commit` is set.
+  - In a **signed org**, a custom source without `commit:` is a **validation
+    error** at enroll and at every refresh (`EXIT_VALIDATION`). It is not
+    skipped. Signing the YAML then authenticates the source content
+    transitively.
+  - In an **unsigned org**, a `ref`-only source is accepted, and every change to
+    it goes through the "pending review" path above.
+- **Provenance:** `aec/lib/manifest_v2.py` records `source_id` per installed item, so
   `aec upgrade` / `aec outdated` / `aec update`'s outdated report
   (`update.py:_report_scope_outdated`) resolve the item against its own source
   instead of `get_source_dirs()`.
@@ -304,14 +349,15 @@ machine` in a fragment.
 | Surface | Phase | Change |
 |---|---|---|
 | `aec/lib/org_config/git_source.py` (new) | 1 | Validated clone/fetch/checkout; argv-only; protocol allow-list |
+| `aec/lib/org_config/schema.py` | 1–3 | `CustomSource.commit` (ref optional when set); `agent_settings` / `files` dataclasses |
 | `aec/lib/org_config/validator.py` | 1–3 | `org_id` charset; git source syntax; custom `commit:`; new blocks, allow-lists, sha256 fields, value scan |
 | `aec/lib/org_config/paths.py` | 1 | `<org_id>.d/` clone and sources dirs |
 | `aec/lib/org_config/state.py` | 1, 3 | git fields, `pending`, applied hashes; tolerant `read_state` |
-| `aec/lib/org_config/trust.py`, `aec/commands/org.py` | 1 | Signature sibling-file for git; `enroll --replace`; `apply --decline`, `--overwrite-drift`; remove deletes clone |
-| `aec/commands/update.py` | 1 | Refresh-then-apply table; non-zero exit on pending |
-| `aec/commands/doctor.py`, CLI banner | 1 | Surface `pending` |
+| `aec/lib/org_config/trust.py`, `aec/commands/org.py` | 1, 3 | Signature sibling-file for git; `EXIT_PENDING`; `enroll --replace` (re-verifies trust); `apply --decline`, `--overwrite-drift`; remove deletes clone; `last_applied_at` optional; `org pin` (Phase 3) |
+| `aec/commands/update.py` | 1 | `_refresh_org_configs` returns a status instead of `None`; refresh-then-apply table; `typer.Exit(EXIT_PENDING)` at the end |
+| `aec/commands/doctor.py`, CLI banner | 1 | `pending` → `ok=False` plus the fix line |
 | `aec/lib/org_config/apply.py`, `aec/lib/apply_core.py` | 2, 3 | `source_id` on `DesiredItem`; per-source dirs; `apply_agent_settings`, `apply_files` |
-| `manifest_v2`, upgrade/outdated paths | 2 | Per-item `source_id` provenance |
+| `aec/lib/manifest_v2.py`, upgrade/outdated paths | 2 | Per-item `source_id` provenance |
 | `aec/lib/org_config/allow_lists.py` + allow-lists spec addendum | 3 | `AGENT_SETTINGS_KEYS_ALLOW_LIST` (with exec-capable class), `FILES_DST_ALLOW_LIST`, `FILES_SRC_EXTENSIONS` |
 | `aec/lib/org_config/effective.py`, `conflicts.py` | 3 | New conflict subjects |
 | `docs/orgs/authoring-org-configs.md`, `docs/users/org-configs.md`, `docs/qa-verification.md` | 1–3 | git enroll, trust table, pending, drift, migration, machine-neutral authoring |
@@ -328,17 +374,32 @@ Phase 1:
 - Rejected: `ref` = `--upload-pack=x`; URLs `ext::sh -c x`, `file:///tmp/x`, and
   `-oProxyCommand=x`; `org_id` = `../x`; a config path escaping the clone.
 - Force-pushed ref → refresh follows it.
-- Unsigned changed commit → `aec update` exits 2, `pending` recorded, nothing
-  applied. `--decline` clears it.
-- Signed + managed changed commit → applied. Signed with a bad sig → refused.
+- Unsigned changed commit → `aec update` finishes its other steps, then exits
+  `EXIT_PENDING` (14); `pending` is recorded and nothing is applied. `--decline`
+  clears it. `aec doctor` returns not-ok while it is pending.
+- Signed + guided (and signed with `install.mode` unset) changed commit →
+  pending-review, not applied, no prompt.
+- Signed + managed changed commit → applied. Signed with a bad sig → refused,
+  previous state untouched, `pending.kind == "verify_failed"`.
+- Signature valid but a pinned sha256 differs in the same commit → nothing
+  applied (verification runs after checkout, before any write).
 - Backward compatibility: existing local and url state files load; the existing
   `tests/commands/test_org_refresh.py` passes; an unknown state key is ignored.
-- `enroll --replace` keeps resolutions; `remove` deletes `<org_id>.d/`.
+- `enroll --replace` keeps resolutions; with a different pinned key it
+  re-prompts, and with `--yes` it refuses. `remove` deletes `<org_id>.d/`.
+- `last_applied_at` is `None` after enroll and set after a successful apply;
+  `aec org status` renders "never applied".
 
 Phase 2:
 - An item from a custom source installs, and `aec upgrade` / `outdated` resolve
   it against that source.
-- Custom source without `commit:` in a signed org → rejected.
+- Custom source without `commit:` in a signed org → `EXIT_VALIDATION` at
+  enroll and at refresh. Accepted in an unsigned org, with changes going to
+  pending-review.
+
+`aec org pin` (shipped with Phase 3): it rewrites the pins from disk and leaves
+the signature invalid until re-signed. It refuses to run on a path under
+`~/.aec/orgs/`.
 
 Phase 3:
 - Apply writes owned keys, and non-owned keys are parsed-equal before and after.
@@ -370,8 +431,11 @@ Phase 3:
    with `aec org enroll --replace git+…`.
 2. Phase 2, then release.
 3. Phase 3, then release. Catalog authors add fragments and files with their
-   sha256 pins. A `aec org pin` helper writes the hashes into the YAML so
-   nobody computes them by hand.
+   sha256 pins. `aec org pin <config.yaml>` is an **authoring** command run in
+   the catalog checkout, before signing. It rewrites the `sha256` /
+   `manifest_sha256` fields from the files on disk and prints that the config
+   must now be (re-)signed. It never runs on an enrolled config. Signing stays
+   the author's step, so the signature always covers the final pins.
 
 ## Open questions
 
