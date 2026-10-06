@@ -1,7 +1,7 @@
 # Org-config settings & file delivery (git-sourced org configs)
 
 Status: proposed — ROADMAP Tier 2, after org-config plugin governance
-Revision 5 (2026-10-06): per-kind `pending` clearing rules; `--yes` refuses any trust change; repo-borne key change is `trust_change`, not rotation. Revision 4: trust judged against recorded state, not fetched YAML; custom-source pinned fetch; every refresh failure becomes `pending`. Revision 3: round-2 review fixes (single-commit verification order, guided = pending when unattended, `EXIT_PENDING`, signed orgs require pinned custom sources, `--replace` re-verifies trust). Revision 2 reworked the content-hash trust model, allow-lists, lifecycle and phasing.
+Revision 6 (2026-10-06): `trust_dns_domain` is part of the trust anchor. Revision 5: per-kind `pending` clearing rules; `--yes` refuses any trust change; repo-borne key change is `trust_change`, not rotation. Revision 4: trust judged against recorded state, not fetched YAML; custom-source pinned fetch; every refresh failure becomes `pending`. Revision 3: round-2 review fixes (single-commit verification order, guided = pending when unattended, `EXIT_PENDING`, signed orgs require pinned custom sources, `--replace` re-verifies trust). Revision 2 reworked the content-hash trust model, allow-lists, lifecycle and phasing.
 Priority: High (org-wide agent settings are hand-synced per machine today)
 Discovered: 2026-10-06, syncing a Claude Code `autoMode` block between two machines by hand
 
@@ -163,7 +163,7 @@ aec org enroll git+https://github.com/my-org/aec-catalog.git#main:org/my-org.yam
 | Situation | Behavior |
 |---|---|
 | Content unchanged (config commit and hash, **and** every custom source's resolved sha) | Nothing is written. |
-| New content changes `trust_mode` or the pinned key relative to **recorded** state | Nothing re-enrolled or applied. Record `pending: {kind: "trust_change", from, to}`. Resolved only by an interactive `aec org enroll --replace`, using the same re-consent rule as Migration. |
+| New content changes the **trust anchor** (`trust_mode`, the pinned key, or `trust_dns_domain`) relative to **recorded** state | Nothing re-enrolled or applied. Record `pending: {kind: "trust_change", from, to}`. Resolved only by an interactive `aec org enroll --replace`, using the same re-consent rule as Migration. |
 | New content fails validation (e.g. a signed org's custom source loses its `commit:`) | Nothing re-enrolled or applied. Record `pending: {kind: "verify_failed", reason}`. |
 | Changed, **signed** org, `install.mode: managed`, all pins verify | Re-enroll and apply non-interactively. |
 | Changed, **unsigned** org, or `guided` mode (including `install.mode` unset, which `apply.py` already treats as guided) | Re-enroll, **do not apply**. Record `pending: {kind: "review", commit, summary}`. Print the plan diff and the command (`aec org apply`). |
@@ -171,6 +171,12 @@ aec org enroll git+https://github.com/my-org/aec-catalog.git#main:org/my-org.yam
 
 **`aec update` never prompts.** "Guided" in an unattended run always means
 pending-review. Only signed + managed + verified applies without a human.
+
+**Trust anchor.** `trust_mode`, the pinned key's fingerprint, and
+`trust_dns_domain`. `OrgState` gains `trust_dns_domain: Optional[str] = None`
+(it records only `pubkey_source` today). Changing the domain is a key change in
+disguise: the next DNS rotation check would fetch a key from the new domain and
+open a `key_rotation_pending`.
 
 **"Signed" always means the recorded trust.** It is the recorded
 `state.trust_mode` and pinned key from the last interactive enroll, never the
@@ -223,10 +229,9 @@ remove-then-enroll-then-apply sequence, which would lose them.
 
 Trust is **re-established, not inherited**:
 - the new source's signature is verified from scratch;
-- if its pinned key or `trust_mode` differs from the recorded one, the user
+- if its trust anchor (`trust_mode`, pinned key, `trust_dns_domain`) differs from the recorded one, the user
   re-consents interactively, exactly as on a first enroll;
-- `--replace` with `--yes` refuses any change to `trust_mode` or the pinned
-  key. Only a person at a prompt can accept one.
+- `--replace` with `--yes` refuses any trust-anchor change. Only a person at a prompt can accept one.
 
 ## Phase 2 — custom sources install
 
@@ -416,12 +421,13 @@ Phase 1:
 - Rejected: `ref` = `--upload-pack=x`; URLs `ext::sh -c x`, `file:///tmp/x`, and
   `-oProxyCommand=x`; `org_id` = `../x`; a config path escaping the clone.
 - Force-pushed ref → refresh follows it.
-- Refresh where the fetched YAML flips `trust_mode` to `unsigned`, or carries a
-  different pinned key → `pending.kind == "trust_change"`, nothing applied,
+- Refresh where the fetched YAML flips `trust_mode` to `unsigned`, carries a
+  different pinned key, or changes `trust_dns_domain` (no rotation is opened)
+  → `pending.kind == "trust_change"`, nothing applied,
   exit 14; only an interactive `enroll --replace` clears it.
 - Unsigned changed commit → `aec update` finishes its other steps, then exits
   `EXIT_PENDING` (14); `pending` is recorded and nothing is applied. `--decline`
-  clears it. `aec doctor` returns not-ok while it is pending.
+  clears it (`review` only). `aec doctor` returns not-ok while it is pending.
 - Signed + guided (and signed with `install.mode` unset) changed commit →
   pending-review, not applied, no prompt.
 - Signed + managed changed commit → applied. Signed with a bad sig → refused,
@@ -430,8 +436,8 @@ Phase 1:
   applied (verification runs after checkout, before any write).
 - Backward compatibility: existing local and url state files load; the existing
   `tests/commands/test_org_refresh.py` passes; an unknown state key is ignored.
-- `enroll --replace` keeps resolutions; with a different pinned key or
-  `trust_mode` it re-prompts, and with `--yes` it refuses either.
+- `enroll --replace` keeps resolutions; with a different trust anchor it
+  re-prompts, and with `--yes` it refuses either.
 - `aec org apply --decline` on a `trust_change` → refused, pending kept. A
   second refresh doesn't downgrade a `trust_change` to `review`.
 - Unsigned org, YAML unchanged, a `ref`-only custom source moves → detected as
