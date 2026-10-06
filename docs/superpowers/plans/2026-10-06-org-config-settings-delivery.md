@@ -1,7 +1,7 @@
 # Org-config settings & file delivery (git-sourced org configs)
 
 Status: proposed — ROADMAP Tier 2, after org-config plugin governance
-Revision 7 (2026-10-06): legacy states backfill `trust_dns_domain` from the enrolled on-disk config. Revision 6: `trust_dns_domain` is part of the trust anchor. Revision 5: per-kind `pending` clearing rules; `--yes` refuses any trust change; repo-borne key change is `trust_change`, not rotation. Revision 4: trust judged against recorded state, not fetched YAML; custom-source pinned fetch; every refresh failure becomes `pending`. Revision 3: round-2 review fixes (single-commit verification order, guided = pending when unattended, `EXIT_PENDING`, signed orgs require pinned custom sources, `--replace` re-verifies trust). Revision 2 reworked the content-hash trust model, allow-lists, lifecycle and phasing.
+Revision 8 (2026-10-06): backfill moves to an explicit `migrate_state`, is hash-checked and persisted immediately, and ships with the refresh redesign; `pinned_key` comparison stated. Revision 7: legacy states backfill `trust_dns_domain` from the enrolled on-disk config. Revision 6: `trust_dns_domain` is part of the trust anchor. Revision 5: per-kind `pending` clearing rules; `--yes` refuses any trust change; repo-borne key change is `trust_change`, not rotation. Revision 4: trust judged against recorded state, not fetched YAML; custom-source pinned fetch; every refresh failure becomes `pending`. Revision 3: round-2 review fixes (single-commit verification order, guided = pending when unattended, `EXIT_PENDING`, signed orgs require pinned custom sources, `--replace` re-verifies trust). Revision 2 reworked the content-hash trust model, allow-lists, lifecycle and phasing.
 Priority: High (org-wide agent settings are hand-synced per machine today)
 Discovered: 2026-10-06, syncing a Claude Code `autoMode` block between two machines by hand
 
@@ -181,12 +181,36 @@ open a `key_rotation_pending`.
 **Backfill for states enrolled before this field.** A missing
 `trust_dns_domain` is never compared as `None` (a bogus `trust_change` for every
 existing dns_anchor org) and never treated as "accept anything" (the first
-refresh after upgrade would let a push change the domain). Instead, `read_state`
-fills it from the **enrolled on-disk config** (`cfg.trust_dns_domain`, the copy
-written by the last interactive enroll, which is what
-`propagation.detect_dns_rotation` already reads) and the next `write_state`
-persists it. It is never taken from freshly fetched content. The backfill runs
-before any trust-anchor comparison.
+refresh after upgrade would let a push change the domain).
+
+- **Where.** An explicit `migrate_state(paths, enrolled)` in `state.py`, taking
+  the `EnrolledOrg` its callers already hold. `read_state` stays a pure JSON
+  reader, so `aec doctor`, `org list` and `org status` (which call it and must
+  not raise on a broken config) are unchanged; they show a missing domain as
+  "not recorded". Callers that compare trust anchors must call `migrate_state`
+  first: the refresh path (before any fetch), `propagation.detect_dns_rotation`,
+  and `enroll --replace`.
+- **Source.** The enrolled on-disk config (`cfg.trust_dns_domain`), and only if
+  `sha256(on-disk config) == state.config_hash` (the comparison
+  `propagation.detect_changes` already makes). On a mismatch the anchor is
+  unknown: record `pending: {kind: "trust_change"}` and require an interactive
+  `enroll --replace`. Never taken from freshly fetched content.
+- **Persistence.** Written immediately, under the lock `write_state` already
+  takes, before any fetch. Not deferred to some later write.
+- **Ordering.** Ships in the same change as this refresh redesign. Today the
+  refresh path (`org.py:347` → `perform_enroll(..., yes=True)`) rewrites the
+  on-disk config with fetched bytes without comparing the domain. Under the
+  redesign, the on-disk config is rewritten only after the trust anchor matched
+  (rows above) or by an interactive enroll, so the on-disk domain is
+  person-chosen.
+- **Accepted limitation.** An org that already refreshed from a URL under the
+  old code may hold a repo-chosen domain on disk; the backfill cannot tell.
+  The release note tells dns_anchor orgs enrolled by URL to re-confirm with
+  `aec org enroll --replace`.
+
+`pinned_key` orgs need no backfill: `pubkey_fingerprint` is always recorded for
+signed enrolls. The fetched YAML's inline `trust_pubkey` is fingerprinted and
+compared to `state.pubkey_fingerprint`; a mismatch is a `trust_change`.
 
 **"Signed" always means the recorded trust.** It is the recorded
 `state.trust_mode` and pinned key from the last interactive enroll, never the
@@ -438,6 +462,12 @@ Phase 1:
 - Legacy state with no `trust_dns_domain` (dns_anchor org): a refresh whose
   fetched YAML keeps the enrolled domain → no `trust_change`, and the backfilled
   domain is persisted; a refresh whose YAML changes the domain → `trust_change`.
+- Legacy dns_anchor state whose on-disk config hash differs from
+  `state.config_hash` → `trust_change`, no backfill, nothing applied.
+- `pinned_key` org: fetched YAML with a different inline `trust_pubkey` →
+  `trust_change`; same key → no `trust_change`, no backfill needed.
+- `aec doctor` / `org status` on a legacy state never raise and show the domain
+  as "not recorded".
 - Unsigned changed commit → `aec update` finishes its other steps, then exits
   `EXIT_PENDING` (14); `pending` is recorded and nothing is applied. `--decline`
   clears it (`review` only). `aec doctor` returns not-ok while it is pending.
@@ -499,6 +529,8 @@ Phase 3:
 
 1. Ship Phase 1 and release. Existing local enrollments keep working; migrate
    with `aec org enroll --replace git+…`.
+   The release note tells dns_anchor orgs enrolled from a URL to re-confirm their
+   domain with `aec org enroll --replace` (see Backfill).
 2. Phase 2, then release.
 3. Phase 3, then release. Catalog authors add fragments and files with their
    sha256 pins. `aec org pin <config.yaml>` is an **authoring** command run in
