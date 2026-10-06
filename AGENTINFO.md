@@ -124,3 +124,17 @@ Loadout schema: `docs/loadout/` — plugin publishers ship a `plugin.json` at th
 - Where docs live
 - How to update docs
 - Documentation standards
+
+<!-- aec-port-registry:start -->
+## Port Registry
+
+This project's ports are registered with AEC. Before assigning new ports,
+check `aec ports list` to see all registered ports and avoid conflicts.
+
+To register new ports:
+1. Add them to `.aec.json` in the `ports` section
+2. Run `aec ports register` to register them centrally
+
+Port assignments use first-come-first-served. See `.aec.json` for this
+project's current port assignments.
+<!-- aec-port-registry:end -->
