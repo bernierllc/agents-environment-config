@@ -1,7 +1,7 @@
 # Org-config settings & file delivery (git-sourced org configs)
 
 Status: proposed — ROADMAP Tier 2, after org-config plugin governance
-Revision 9 (2026-10-06): legacy URL-sourced dns_anchor orgs go `trust_change` instead of backfilling; `migrate_state` caller and writer lists completed; re-enroll writes the verified bytes; any pinned-key mismatch is `trust_change`. Revision 8: backfill moves to an explicit `migrate_state`, is hash-checked and persisted immediately, and ships with the refresh redesign; `pinned_key` comparison stated. Revision 7: legacy states backfill `trust_dns_domain` from the enrolled on-disk config. Revision 6: `trust_dns_domain` is part of the trust anchor. Revision 5: per-kind `pending` clearing rules; `--yes` refuses any trust change; repo-borne key change is `trust_change`, not rotation. Revision 4: trust judged against recorded state, not fetched YAML; custom-source pinned fetch; every refresh failure becomes `pending`. Revision 3: round-2 review fixes (single-commit verification order, guided = pending when unattended, `EXIT_PENDING`, signed orgs require pinned custom sources, `--replace` re-verifies trust). Revision 2 reworked the content-hash trust model, allow-lists, lifecycle and phasing.
+Revision 10 (2026-10-06): `enroll --replace` accepts the current source, so legacy URL orgs have an exit; `migrate_state` entry points and stop-on-`trust_change` behavior specified; tests drive real entry points. Revision 9: legacy URL-sourced dns_anchor orgs go `trust_change` instead of backfilling; `migrate_state` caller and writer lists completed; re-enroll writes the verified bytes; any pinned-key mismatch is `trust_change`. Revision 8: backfill moves to an explicit `migrate_state`, is hash-checked and persisted immediately, and ships with the refresh redesign; `pinned_key` comparison stated. Revision 7: legacy states backfill `trust_dns_domain` from the enrolled on-disk config. Revision 6: `trust_dns_domain` is part of the trust anchor. Revision 5: per-kind `pending` clearing rules; `--yes` refuses any trust change; repo-borne key change is `trust_change`, not rotation. Revision 4: trust judged against recorded state, not fetched YAML; custom-source pinned fetch; every refresh failure becomes `pending`. Revision 3: round-2 review fixes (single-commit verification order, guided = pending when unattended, `EXIT_PENDING`, signed orgs require pinned custom sources, `--replace` re-verifies trust). Revision 2 reworked the content-hash trust model, allow-lists, lifecycle and phasing.
 Priority: High (org-wide agent settings are hand-synced per machine today)
 Discovered: 2026-10-06, syncing a Claude Code `autoMode` block between two machines by hand
 
@@ -202,12 +202,23 @@ refresh after upgrade would let a push change the domain).
     `pending: {kind: "trust_change"}`. No backfill. The old refresh path
     (`org.py:347` → `perform_enroll(..., yes=True)`) rewrote the on-disk config
     and `config_hash` together from fetched bytes, so neither can prove the
-    domain was person-chosen. A person re-confirms with `enroll --replace`.
-  - **Local-sourced**: only an interactive enroll ever wrote the on-disk config.
-    Backfill from `cfg.trust_dns_domain` if `sha256(on-disk config) ==
+    domain was person-chosen. A person re-confirms with `enroll --replace`
+    (any source, including the same URL; see Migration). The `pending` records
+    `from: {trust_dns_domain: null}` (unknown) and `to:` the on-disk domain.
+  - **Local-sourced**: only `perform_enroll` writes the on-disk config, but old
+    `trust_rotate_cmd` (`org.py:595-600`) re-stamps `config_hash` from whatever
+    is on disk, so a hand edit followed by an old-version rotate passes the hash
+    check. Accepted: it needs local write access to the user's config dir, which
+    is already full control. Backfill from `cfg.trust_dns_domain` if `sha256(on-disk config) ==
     state.config_hash`. On a mismatch (a hand edit, or a crash between the
     config write and the state write), record `trust_change` instead. That
     false positive is intended: it costs one interactive `enroll --replace`.
+- **When it fires.** Local orgs are never fetched, so for them `migrate_state`
+  runs only from the DNS rotation check, `trust_rotate_cmd` and
+  `enroll --replace`. URL and git orgs also meet it at the start of refresh.
+- **On `trust_change`.** Every caller stops: the rotation check opens no
+  rotation, `trust_rotate_cmd` refuses (it never rewrites `config_hash`), and
+  refresh fetches nothing. Only an interactive `enroll --replace` proceeds.
 - **Persistence.** `migrate_state` writes its result through `write_state`
   immediately, before any fetch.
 - **Ordering.** Ships in the same change as this refresh redesign.
@@ -216,7 +227,9 @@ refresh after upgrade would let a push change the domain).
 exact bytes that were fetched and checked against the trust anchor, never a
 second fetch. Git sources already are one commit; for URL sources, today's
 `refresh_url_sourced_orgs` fetches once and `perform_enroll` fetches again
-(`org.py:340-350`), and that double fetch is removed.
+(`org.py:340-350`), and that double fetch is removed. Likewise a key fetched
+from `trust_pubkey_url` is fetched once and the same bytes are used for both
+the fingerprint comparison and the signature verification.
 
 **Pinned key.** `pinned_key` orgs need no backfill: `pubkey_fingerprint` is
 always recorded for signed enrolls. The fetched config's key, whether inline
@@ -269,8 +282,10 @@ content. The `last_applied_at` that enrollment currently stamps at enroll time
 
 ### Migration
 
-`aec org enroll --replace <git source>` swaps an enrolled org's source of
-record and keeps its conflict resolutions. It replaces the manual
+`aec org enroll --replace <source>` swaps an enrolled org's source of record
+(a git source, or the same or another URL or local file) and keeps its conflict
+resolutions. Re-running it with the org's current source is how a person
+re-confirms trust and clears a `trust_change`. It replaces the manual
 remove-then-enroll-then-apply sequence, which would lose them.
 
 Trust is **re-established, not inherited**:
@@ -445,7 +460,9 @@ machine` in a fragment.
 | `aec/lib/org_config/schema.py` | 1–3 | `CustomSource.commit` (ref optional when set); `agent_settings` / `files` dataclasses |
 | `aec/lib/org_config/validator.py` | 1–3 | `org_id` charset; git source syntax; custom `commit:`; new blocks, allow-lists, sha256 fields, value scan |
 | `aec/lib/org_config/paths.py` | 1 | `<org_id>.d/` clone and sources dirs |
-| `aec/lib/org_config/state.py` | 1, 3 | git fields, `pending`, applied hashes; tolerant `read_state` |
+| `aec/lib/org_config/state.py` | 1, 3 | git fields, `pending`, applied hashes, `trust_dns_domain`; tolerant `read_state` |
+| `aec/lib/org_config/discovery.py` | 1 | `migrate_state` (legacy `trust_dns_domain` rule) |
+| `aec/lib/org_config/propagation.py` | 1 | DNS rotation check reads the domain from state after `migrate_state` |
 | `aec/lib/org_config/trust.py`, `aec/commands/org.py` | 1, 3 | Signature sibling-file for git; `EXIT_PENDING`; `enroll --replace` (re-verifies trust); `apply --decline`, `--overwrite-drift`; remove deletes clone; `last_applied_at` optional; `org pin` (Phase 3) |
 | `aec/commands/update.py` | 1 | `_refresh_org_configs` returns a status instead of `None`; refresh-then-apply table; `typer.Exit(EXIT_PENDING)` at the end |
 | `aec/commands/doctor.py`, CLI banner | 1 | `pending` → `ok=False` plus the fix line |
@@ -471,9 +488,17 @@ Phase 1:
   different pinned key, or changes `trust_dns_domain` (no rotation is opened)
   → `pending.kind == "trust_change"`, nothing applied,
   exit 14; only an interactive `enroll --replace` clears it.
-- Legacy **local-sourced** state with no `trust_dns_domain` (dns_anchor org): a refresh whose
-  fetched YAML keeps the enrolled domain → no `trust_change`, and the backfilled
-  domain is persisted; a refresh whose YAML changes the domain → `trust_change`.
+- Legacy **local-sourced** dns_anchor state, matching hash: the DNS rotation
+  check, `trust rotate` and `enroll --replace` each backfill the domain and
+  persist it before any network call (assert state on disk after a fetch stub
+  that fails the test if reached first).
+- Legacy state where `migrate_state` yields `trust_change`: the rotation check
+  opens no rotation; `trust rotate` refuses and leaves `config_hash` unchanged.
+- With a recorded domain and an on-disk config whose `trust_dns_domain` was
+  edited, the rotation check and `trust rotate` both query the **recorded**
+  domain, not the edited one.
+- `enroll --replace` with the org's current URL clears a legacy `trust_change`
+  after interactive consent; with `--yes` it refuses.
 - Legacy **local-sourced** dns_anchor state whose on-disk config hash differs
   from `state.config_hash` → `trust_change`, no backfill, nothing applied.
 - Legacy **URL-sourced** dns_anchor state → `trust_change` on the first refresh,
