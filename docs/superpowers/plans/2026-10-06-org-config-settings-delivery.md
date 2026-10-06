@@ -1,7 +1,7 @@
 # Org-config settings & file delivery (git-sourced org configs)
 
 Status: proposed — ROADMAP Tier 2, after org-config plugin governance
-Revision: 3 (2026-10-06): round-2 review fixes (single-commit verification order, guided = pending when unattended, `EXIT_PENDING`, signed orgs require pinned custom sources, `--replace` re-verifies trust). Revision 2 reworked the content-hash trust model, allow-lists, lifecycle and phasing.
+Revision 4 (2026-10-06): trust judged against recorded state, not fetched YAML; custom-source pinned fetch; every refresh failure becomes `pending`. Revision 3: round-2 review fixes (single-commit verification order, guided = pending when unattended, `EXIT_PENDING`, signed orgs require pinned custom sources, `--replace` re-verifies trust). Revision 2 reworked the content-hash trust model, allow-lists, lifecycle and phasing.
 Priority: High (org-wide agent settings are hand-synced per machine today)
 Discovered: 2026-10-06, syncing a Claude Code `autoMode` block between two machines by hand
 
@@ -157,12 +157,24 @@ aec org enroll git+https://github.com/my-org/aec-catalog.git#main:org/my-org.yam
 | Situation | Behavior |
 |---|---|
 | Content unchanged (commit and hash) | Nothing is written. |
+| New content changes `trust_mode` or the pinned key relative to **recorded** state | Nothing re-enrolled or applied. Record `pending: {kind: "trust_change", from, to}`. Resolved only by an interactive `aec org enroll --replace`, using the same re-consent rule as Migration. |
+| New content fails validation (e.g. a signed org's custom source loses its `commit:`) | Nothing re-enrolled or applied. Record `pending: {kind: "verify_failed", reason}`. |
 | Changed, **signed** org, `install.mode: managed`, all pins verify | Re-enroll and apply non-interactively. |
 | Changed, **unsigned** org, or `guided` mode (including `install.mode` unset, which `apply.py` already treats as guided) | Re-enroll, **do not apply**. Record `pending: {kind: "review", commit, summary}`. Print the plan diff and the command (`aec org apply`). |
 | Signature or any pin fails to verify | Nothing re-enrolled or applied. Record `pending: {kind: "verify_failed", …}`. |
 
 **`aec update` never prompts.** "Guided" in an unattended run always means
 pending-review. Only signed + managed + verified applies without a human.
+
+**"Signed" always means the recorded trust.** It is the recorded
+`state.trust_mode` and pinned key from the last interactive enroll, never the
+`trust_mode` declared in freshly fetched YAML (today `org.py` reads it from the
+YAML). A push cannot downgrade an org to unsigned, or swap its key, and pass as
+an ordinary unsigned change.
+
+Every refresh failure lands in `pending` and so in the single `EXIT_PENDING`
+path. `EXIT_VALIDATION` and `EXIT_TRUST` keep their meaning for interactive
+`aec org enroll` / `apply`.
 
 This replaces today's `perform_enroll(..., allow_unsigned=True, yes=True)` in
 `refresh_url_sourced_orgs`, which silently re-consents to changed unsigned
@@ -208,12 +220,21 @@ The review found this needs more than `_catalog`:
 - `plan_apply` / `execute_apply` take source dirs keyed by
   `(source_id, item_type)` rather than by type alone.
 - Each custom source clones through `git_source.py` (same validation) to
-  `<org_id>.d/sources/<id>/`. A custom source whose URL equals the config's
-  own repo reuses that clone.
+  `<org_id>.d/sources/<id>/`, always its own clone (never shared with the
+  config clone, whose `resolved_commit` may differ from the source's pin).
+- **Pinned fetch:** `fetch --depth 1 origin -- <commit>` (GitHub, GitLab and
+  Bitbucket serve reachable shas by default), then `checkout --detach
+  FETCH_HEAD`, then assert `git rev-parse HEAD` == `commit`. If the server
+  refuses a sha fetch, AEC fails that source with a named error instead of
+  falling back to a full clone of an unpinned ref.
+- **Verification order extends the Phase 1 rule:** every source is fetched and
+  its pin asserted *before* any item from any source is written. One failure
+  means `pending: verify_failed` and nothing applied for that org.
 - **Content is pinned:** `CustomSource` (`schema.py:46-50`) gains an optional
   `commit:` (a full 40-hex sha), and `ref` becomes optional when `commit` is set.
   - In a **signed org**, a custom source without `commit:` is a **validation
-    error** at enroll and at every refresh (`EXIT_VALIDATION`). It is not
+    error**. At interactive enroll it exits `EXIT_VALIDATION`; at refresh it
+    becomes `pending: verify_failed` (see the refresh table). It is never
     skipped. Signing the YAML then authenticates the source content
     transitively.
   - In an **unsigned org**, a `ref`-only source is accepted, and every change to
@@ -305,7 +326,9 @@ files:
 | signed, hashes match | apply (managed) / confirm (guided) | apply (managed) / confirm (guided) |
 | unsigned | confirm on every change | confirm on every change, with the full diff of each exec-capable key and file shown; never applied by `aec update` |
 
-Any hash mismatch refuses that block outright.
+Any hash mismatch refuses that block outright. "Confirm" means an interactive
+`aec org apply`. Under `aec update` every "confirm" cell becomes
+pending-review, per the never-prompts rule.
 
 ### Drift and lifecycle
 
@@ -374,6 +397,9 @@ Phase 1:
 - Rejected: `ref` = `--upload-pack=x`; URLs `ext::sh -c x`, `file:///tmp/x`, and
   `-oProxyCommand=x`; `org_id` = `../x`; a config path escaping the clone.
 - Force-pushed ref → refresh follows it.
+- Refresh where the fetched YAML flips `trust_mode` to `unsigned`, or carries a
+  different pinned key → `pending.kind == "trust_change"`, nothing applied,
+  exit 14; only an interactive `enroll --replace` clears it.
 - Unsigned changed commit → `aec update` finishes its other steps, then exits
   `EXIT_PENDING` (14); `pending` is recorded and nothing is applied. `--decline`
   clears it. `aec doctor` returns not-ok while it is pending.
@@ -394,14 +420,16 @@ Phase 2:
 - An item from a custom source installs, and `aec upgrade` / `outdated` resolve
   it against that source.
 - Custom source without `commit:` in a signed org → `EXIT_VALIDATION` at
-  enroll and at refresh. Accepted in an unsigned org, with changes going to
-  pending-review.
-
-`aec org pin` (shipped with Phase 3): it rewrites the pins from disk and leaves
-the signature invalid until re-signed. It refuses to run on a path under
-`~/.aec/orgs/`.
+  enroll and `pending: verify_failed` at refresh. Accepted in an unsigned org,
+  with changes going to pending-review.
+- Custom source pinned to commit A while the server's ref points at B →
+  installs A, and `rev-parse HEAD` is asserted. A pin to a sha the server
+  won't serve → named error, nothing applied.
 
 Phase 3:
+- `aec org pin`: pins are rewritten from the files on disk; the existing
+  signature then fails verification until re-signed; it refuses a path under
+  `~/.aec/orgs/`.
 - Apply writes owned keys, and non-owned keys are parsed-equal before and after.
 - Symlinked settings file → edited through the link, and the link survives.
 - Invalid or commented JSON → refused, file untouched.
