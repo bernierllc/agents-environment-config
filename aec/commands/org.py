@@ -30,6 +30,7 @@ from ..lib.org_config.parser import parse_org_config_text
 from ..lib.org_config.reconcile import open_conflicts
 from ..lib.org_config.resolutions import Resolution, save_resolution
 from ..lib.org_config.rotation import rotation_status
+from ..lib.org_config.schema import ITEM_TYPES
 from ..lib.org_config.state import OrgState, read_state, write_state
 from ..lib.org_config.trust import UnsignedConsent, UnsignedConsentDeclined, verify_trust
 from ..lib.org_config.validator import validate_org_config
@@ -462,7 +463,7 @@ def show_cmd(
         typer.echo(f"  {k}: {v}")
     typer.echo(f"custom_sources: {len(config.custom_sources)}")
     typer.echo("items:")
-    for item_type in ("skills", "rules", "agents", "mcps"):
+    for item_type in ITEM_TYPES:
         count = len(config.items.get(item_type, {}))
         typer.echo(f"  {item_type}: {count}")
 
