@@ -1,7 +1,7 @@
 # Org-config settings & file delivery (git-sourced org configs)
 
 Status: proposed — ROADMAP Tier 2, after org-config plugin governance
-Revision 4 (2026-10-06): trust judged against recorded state, not fetched YAML; custom-source pinned fetch; every refresh failure becomes `pending`. Revision 3: round-2 review fixes (single-commit verification order, guided = pending when unattended, `EXIT_PENDING`, signed orgs require pinned custom sources, `--replace` re-verifies trust). Revision 2 reworked the content-hash trust model, allow-lists, lifecycle and phasing.
+Revision 5 (2026-10-06): per-kind `pending` clearing rules; `--yes` refuses any trust change; repo-borne key change is `trust_change`, not rotation. Revision 4: trust judged against recorded state, not fetched YAML; custom-source pinned fetch; every refresh failure becomes `pending`. Revision 3: round-2 review fixes (single-commit verification order, guided = pending when unattended, `EXIT_PENDING`, signed orgs require pinned custom sources, `--replace` re-verifies trust). Revision 2 reworked the content-hash trust model, allow-lists, lifecycle and phasing.
 Priority: High (org-wide agent settings are hand-synced per machine today)
 Discovered: 2026-10-06, syncing a Claude Code `autoMode` block between two machines by hand
 
@@ -122,8 +122,14 @@ aec org enroll git+https://github.com/my-org/aec-catalog.git#main:org/my-org.yam
   the existing traversal path in `OrgPaths.config_for`.
 - **Signatures:** for `pinned_key` / `dns_anchor` orgs, the detached signature
   is a sibling file in the repo (`org/my-org.yaml.sig`). `_signature_for_url`
-  gets a git counterpart. Verification and key rotation are otherwise
-  unchanged.
+  gets a git counterpart. Verification is otherwise unchanged.
+- **Key rotation:** the existing `dns_anchor` rotation path
+  (`propagation.detect_dns_rotation` → `key_rotation_pending` → lockout in
+  `apply.py`) is unchanged, because the new key arrives over DNS, not from the
+  repo. A key change that appears *only* in fetched repo content (a new
+  `pinned_key` in the YAML or a sig under a different key) is not rotation. It
+  is a `trust_change` (see the refresh table), so a repo pusher can't rotate an
+  org's key.
 - **One commit, verified before any write.** The signature, the YAML, every
   fragment and every file are read from the single `resolved_commit` that the
   detached checkout produced. That is never a mix of working-tree states. The
@@ -156,7 +162,7 @@ aec org enroll git+https://github.com/my-org/aec-catalog.git#main:org/my-org.yam
 
 | Situation | Behavior |
 |---|---|
-| Content unchanged (commit and hash) | Nothing is written. |
+| Content unchanged (config commit and hash, **and** every custom source's resolved sha) | Nothing is written. |
 | New content changes `trust_mode` or the pinned key relative to **recorded** state | Nothing re-enrolled or applied. Record `pending: {kind: "trust_change", from, to}`. Resolved only by an interactive `aec org enroll --replace`, using the same re-consent rule as Migration. |
 | New content fails validation (e.g. a signed org's custom source loses its `commit:`) | Nothing re-enrolled or applied. Record `pending: {kind: "verify_failed", reason}`. |
 | Changed, **signed** org, `install.mode: managed`, all pins verify | Re-enroll and apply non-interactively. |
@@ -193,8 +199,18 @@ content. The `last_applied_at` that enrollment currently stamps at enroll time
 - `aec doctor` (`run_doctor` returns `(ok, messages)`) returns `ok=False` with
   the pending item and its fix. `aec org status` shows it too.
 - Every interactive `aec` command prints a one-line banner naming it.
-- `pending` clears only when an apply succeeds or the user declines that commit
-  (`aec org apply --decline <commit>`).
+- `pending` clears per kind, and nothing else clears it:
+
+  | `pending.kind` | Cleared by |
+  |---|---|
+  | `review` | a successful `aec org apply`, or `aec org apply --decline <commit>` |
+  | `verify_failed` | a later refresh that verifies cleanly (the author fixed the repo) |
+  | `drift` | `aec org apply --overwrite-drift`, or the on-disk value matching the catalog again |
+  | `trust_change` | only an interactive `aec org enroll --replace`. `--decline` and `--overwrite-drift` refuse it. |
+
+- Later refreshes never overwrite a pending `trust_change` with a lesser kind.
+  They re-evaluate it and keep the record, updating `to` if the content moved
+  again.
 - AEC has no scheduled update runner; `scheduled_runner_entrypoint.py` runs tests
   only. Unattended delivery means a user's own cron or launchd job running
   `aec update`, and a non-zero exit is how that job learns something needs a human.
@@ -209,7 +225,8 @@ Trust is **re-established, not inherited**:
 - the new source's signature is verified from scratch;
 - if its pinned key or `trust_mode` differs from the recorded one, the user
   re-consents interactively, exactly as on a first enroll;
-- `--replace` with `--yes` refuses a key change.
+- `--replace` with `--yes` refuses any change to `trust_mode` or the pinned
+  key. Only a person at a prompt can accept one.
 
 ## Phase 2 — custom sources install
 
@@ -222,7 +239,9 @@ The review found this needs more than `_catalog`:
 - Each custom source clones through `git_source.py` (same validation) to
   `<org_id>.d/sources/<id>/`, always its own clone (never shared with the
   config clone, whose `resolved_commit` may differ from the source's pin).
-- **Pinned fetch:** `fetch --depth 1 origin -- <commit>` (GitHub, GitLab and
+- **Pinned fetch:** the clone is created with `git init` and
+  `remote add origin -- <url>` (same `PROTO_FLAGS`, since `clone --branch`
+  can't take a sha), then `fetch --depth 1 origin -- <commit>` (GitHub, GitLab and
   Bitbucket serve reachable shas by default), then `checkout --detach
   FETCH_HEAD`, then assert `git rev-parse HEAD` == `commit`. If the server
   refuses a sha fetch, AEC fails that source with a named error instead of
@@ -411,8 +430,12 @@ Phase 1:
   applied (verification runs after checkout, before any write).
 - Backward compatibility: existing local and url state files load; the existing
   `tests/commands/test_org_refresh.py` passes; an unknown state key is ignored.
-- `enroll --replace` keeps resolutions; with a different pinned key it
-  re-prompts, and with `--yes` it refuses. `remove` deletes `<org_id>.d/`.
+- `enroll --replace` keeps resolutions; with a different pinned key or
+  `trust_mode` it re-prompts, and with `--yes` it refuses either.
+- `aec org apply --decline` on a `trust_change` → refused, pending kept. A
+  second refresh doesn't downgrade a `trust_change` to `review`.
+- Unsigned org, YAML unchanged, a `ref`-only custom source moves → detected as
+  changed and goes to pending-review. `remove` deletes `<org_id>.d/`.
 - `last_applied_at` is `None` after enroll and set after a successful apply;
   `aec org status` renders "never applied".
 
