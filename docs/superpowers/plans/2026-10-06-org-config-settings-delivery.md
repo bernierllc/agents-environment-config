@@ -1,7 +1,7 @@
 # Org-config settings & file delivery (git-sourced org configs)
 
 Status: proposed — ROADMAP Tier 2, after org-config plugin governance
-Revision 6 (2026-10-06): `trust_dns_domain` is part of the trust anchor. Revision 5: per-kind `pending` clearing rules; `--yes` refuses any trust change; repo-borne key change is `trust_change`, not rotation. Revision 4: trust judged against recorded state, not fetched YAML; custom-source pinned fetch; every refresh failure becomes `pending`. Revision 3: round-2 review fixes (single-commit verification order, guided = pending when unattended, `EXIT_PENDING`, signed orgs require pinned custom sources, `--replace` re-verifies trust). Revision 2 reworked the content-hash trust model, allow-lists, lifecycle and phasing.
+Revision 7 (2026-10-06): legacy states backfill `trust_dns_domain` from the enrolled on-disk config. Revision 6: `trust_dns_domain` is part of the trust anchor. Revision 5: per-kind `pending` clearing rules; `--yes` refuses any trust change; repo-borne key change is `trust_change`, not rotation. Revision 4: trust judged against recorded state, not fetched YAML; custom-source pinned fetch; every refresh failure becomes `pending`. Revision 3: round-2 review fixes (single-commit verification order, guided = pending when unattended, `EXIT_PENDING`, signed orgs require pinned custom sources, `--replace` re-verifies trust). Revision 2 reworked the content-hash trust model, allow-lists, lifecycle and phasing.
 Priority: High (org-wide agent settings are hand-synced per machine today)
 Discovered: 2026-10-06, syncing a Claude Code `autoMode` block between two machines by hand
 
@@ -177,6 +177,16 @@ pending-review. Only signed + managed + verified applies without a human.
 (it records only `pubkey_source` today). Changing the domain is a key change in
 disguise: the next DNS rotation check would fetch a key from the new domain and
 open a `key_rotation_pending`.
+
+**Backfill for states enrolled before this field.** A missing
+`trust_dns_domain` is never compared as `None` (a bogus `trust_change` for every
+existing dns_anchor org) and never treated as "accept anything" (the first
+refresh after upgrade would let a push change the domain). Instead, `read_state`
+fills it from the **enrolled on-disk config** (`cfg.trust_dns_domain`, the copy
+written by the last interactive enroll, which is what
+`propagation.detect_dns_rotation` already reads) and the next `write_state`
+persists it. It is never taken from freshly fetched content. The backfill runs
+before any trust-anchor comparison.
 
 **"Signed" always means the recorded trust.** It is the recorded
 `state.trust_mode` and pinned key from the last interactive enroll, never the
@@ -425,6 +435,9 @@ Phase 1:
   different pinned key, or changes `trust_dns_domain` (no rotation is opened)
   → `pending.kind == "trust_change"`, nothing applied,
   exit 14; only an interactive `enroll --replace` clears it.
+- Legacy state with no `trust_dns_domain` (dns_anchor org): a refresh whose
+  fetched YAML keeps the enrolled domain → no `trust_change`, and the backfilled
+  domain is persisted; a refresh whose YAML changes the domain → `trust_change`.
 - Unsigned changed commit → `aec update` finishes its other steps, then exits
   `EXIT_PENDING` (14); `pending` is recorded and nothing is applied. `--decline`
   clears it (`review` only). `aec doctor` returns not-ok while it is pending.
