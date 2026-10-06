@@ -168,13 +168,11 @@ def apply_plugins(
     """
     import subprocess
 
-    from ..claude_plugins import installed_record
     from ..config import detect_agents
     from ..console import Console
-    from ..installed_store import record_item_install
     from ..loadout import LoadoutError, load_loadout
-    from ..manifest_v2 import get_installed, load_manifest, record_plugin_install, save_manifest
-    from ..plugin_install import install_plugin
+    from ..manifest_v2 import get_installed, load_manifest
+    from ..plugin_install import install_and_record
     from ..preferences import get_setting
     from ..sources import discover_available
 
@@ -204,20 +202,12 @@ def apply_plugins(
             Console.warning(f"Invalid plugin '{name}': {exc}; skipping.")
             continue
         # The org policy was approved up front; external plugins never run anyway.
-        result = install_plugin(
-            manifest_def, detected,
+        install_and_record(
+            manifest_def, scope, name, detected,
             runner=lambda cmd: subprocess.run(cmd),
             confirm=lambda *a: True, printer=Console.print, pref=pref,
+            manifest_path=manifest_path,
         )
-        version, plugin_id = installed_record(manifest_def, result)
-        manifest = load_manifest(manifest_path)
-        record_plugin_install(
-            manifest, scope, name, version,
-            install_type=result["install_type"], targets=result["targets"],
-            plugin_id=plugin_id,
-        )
-        save_manifest(manifest, manifest_path)
-        record_item_install("plugin", name, version)
         installed_names.append(name)
 
     for name in blocked:

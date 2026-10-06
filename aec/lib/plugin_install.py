@@ -152,3 +152,28 @@ def uninstall_plugin(manifest, detected, *, runner, confirm, printer, pref) -> D
         printer("manual cleanup may be required")
 
     return {"install_type": install_type, "targets": targets, "executed": executed}
+
+
+def install_and_record(manifest_def, scope, name, detected, *, runner, confirm, printer, pref, manifest_path) -> str:
+    """Install a plugin, then record the version its agent reports. Returns it.
+
+    Shared by ``aec apply`` and org-policy apply so both record identically.
+    """
+    from .claude_plugins import installed_record
+    from .installed_store import record_item_install
+    from .manifest_v2 import load_manifest, record_plugin_install, save_manifest
+
+    result = install_plugin(
+        manifest_def, detected,
+        runner=runner, confirm=confirm, printer=printer, pref=pref,
+    )
+    version, plugin_id = installed_record(manifest_def, result)
+    manifest = load_manifest(manifest_path)
+    record_plugin_install(
+        manifest, scope, name, version,
+        install_type=result["install_type"], targets=result["targets"],
+        plugin_id=plugin_id,
+    )
+    save_manifest(manifest, manifest_path)
+    record_item_install("plugin", name, version)
+    return version
