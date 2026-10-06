@@ -79,6 +79,7 @@ Reserved source IDs (always available, do not declare):
 - `aec.default.rules`
 - `aec.default.agents`
 - `aec.default.mcps`
+- `aec.default.plugins`
 
 `sources.custom[]` lets you pull from your own Git repos:
 
@@ -90,7 +91,7 @@ custom:
     contributes: ["skills"]
 ```
 
-`id` must be unique and not collide with reserved IDs. `contributes` is a non-empty subset of `["skills", "rules", "agents", "mcps"]`.
+`id` must be unique and not collide with reserved IDs. `contributes` is a non-empty subset of `["skills", "rules", "agents", "mcps", "plugins"]`.
 
 ## Items
 
@@ -118,6 +119,12 @@ Required fields: `source` (must be a reserved or declared custom ID) and `stance
 | `silent` | No prompts about this item; useful for org-internal experiments. |
 
 `version` is optional except when stance is `pinned` (then required).
+
+### Plugins
+
+`items.plugins.<name>` uses the catalog plugin name (for example `my-plugin`). `required` and `recommended` install it, `blocked` uninstalls it, `silent` only records it. Installs run through the same loadout engine as `aec apply`, so a user's `plugins.execution=instructions-only` setting still prints the commands instead of running them. In managed mode there is no per-plugin confirmation; the policy is the approval.
+
+Plugin versions belong to the agent's plugin manager (for example Claude Code), so `pinned` and `version` are rejected for plugins. Use `required`.
 
 ## install.preferences (closed allow-list)
 

@@ -137,6 +137,12 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
                     field_path=f"{base_path}.stance",
                 )
             version = policy_dict.get("version")
+            if type_name == "plugins" and (stance_raw == "pinned" or version is not None):
+                raise OrgConfigValidationError(
+                    "plugin versions are owned by the agent's plugin manager, so a "
+                    "plugin cannot be pinned or given a version; use stance 'required'",
+                    field_path=f"{base_path}.{'version' if version is not None else 'stance'}",
+                )
             validated[item_name] = ItemPolicy(
                 source=source,
                 stance=Stance(stance_raw),
