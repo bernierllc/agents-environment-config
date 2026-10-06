@@ -68,7 +68,17 @@ def apply_prompts(policy: EffectivePolicy) -> None:
 
 
 _INSTALL_STANCES = frozenset({"required", "recommended", "pinned"})
+# File-copy item types applied through apply_core. Plugins install through the
+# loadout engine instead (see apply_plugins), so they are deliberately absent.
 _PLURAL_TO_SINGULAR = {"skills": "skill", "rules": "rule", "agents": "agent", "mcps": "mcp"}
+
+
+def _plugin_names(policy: EffectivePolicy, stances) -> list[str]:
+    return [
+        subject.split("/", 1)[1]
+        for subject, (_org_id, p) in sorted(policy.items.items())
+        if subject.startswith("plugins/") and p.stance.value in stances
+    ]
 
 
 def compile_desired_items(policy: EffectivePolicy, scope: str) -> list:
@@ -78,7 +88,7 @@ def compile_desired_items(policy: EffectivePolicy, scope: str) -> list:
     desired: list = []
     for subject, (_org_id, p) in sorted(policy.items.items()):
         plural, name = subject.split("/", 1)
-        if p.stance.value not in _INSTALL_STANCES:
+        if plural == "plugins" or p.stance.value not in _INSTALL_STANCES:
             continue
         desired.append(
             DesiredItem(
@@ -95,8 +105,8 @@ def blocked_item_keys(policy: EffectivePolicy) -> list[tuple[str, str]]:
     """(item_type, name) pairs the policy blocks, for removal."""
     out: list[tuple[str, str]] = []
     for subject, (_org_id, p) in sorted(policy.items.items()):
-        if p.stance.value == "blocked":
-            plural, name = subject.split("/", 1)
+        plural, name = subject.split("/", 1)
+        if p.stance.value == "blocked" and plural != "plugins":
             out.append((_PLURAL_TO_SINGULAR[plural], name))
     return out
 
@@ -140,6 +150,82 @@ def _uninstall_blocked(item_type: str, name: str, scope: str) -> None:
     from ...commands.uninstall import run_uninstall
 
     run_uninstall(item_type, name, global_flag=(scope == "global"), yes=True)
+
+
+def apply_plugins(
+    policy: EffectivePolicy,
+    scope: str,
+    *,
+    source_dirs: dict,
+    manifest_path,
+) -> tuple[list[str], list[str]]:
+    """Install install-intent plugins and uninstall blocked ones.
+
+    Runs through the same loadout engine as ``aec apply`` (``install_plugin`` /
+    ``uninstall_plugin``), so ``plugins.execution=instructions-only`` still
+    prints instead of running. Versions are whatever the agent's plugin manager
+    reports (``installed_record``). Returns ``(installed, removed)`` names.
+    """
+    import subprocess
+
+    from ..claude_plugins import installed_record
+    from ..config import detect_agents
+    from ..console import Console
+    from ..installed_store import record_item_install
+    from ..loadout import LoadoutError, load_loadout
+    from ..manifest_v2 import get_installed, load_manifest, record_plugin_install, save_manifest
+    from ..plugin_install import install_plugin
+    from ..preferences import get_setting
+    from ..sources import discover_available
+
+    want = _plugin_names(policy, _INSTALL_STANCES)
+    blocked = _plugin_names(policy, {"blocked"})
+    installed_names: list[str] = []
+    removed_names: list[str] = []
+
+    source_dir = source_dirs.get("plugins")
+    available = (
+        discover_available(Path(source_dir), "plugins")
+        if source_dir and Path(source_dir).exists()
+        else {}
+    )
+    pref = get_setting("plugins.execution")
+    detected = detect_agents()
+
+    for name in want:
+        if name in get_installed(load_manifest(manifest_path), scope, "plugins"):
+            continue
+        if name not in available:
+            Console.warning(f"Org policy plugin not in catalog: {name}; skipping.")
+            continue
+        try:
+            manifest_def = load_loadout(Path(source_dir) / available[name]["path"])
+        except LoadoutError as exc:
+            Console.warning(f"Invalid plugin '{name}': {exc}; skipping.")
+            continue
+        # The org policy was approved up front; external plugins never run anyway.
+        result = install_plugin(
+            manifest_def, detected,
+            runner=lambda cmd: subprocess.run(cmd),
+            confirm=lambda *a: True, printer=Console.print, pref=pref,
+        )
+        version, plugin_id = installed_record(manifest_def, result)
+        manifest = load_manifest(manifest_path)
+        record_plugin_install(
+            manifest, scope, name, version,
+            install_type=result["install_type"], targets=result["targets"],
+            plugin_id=plugin_id,
+        )
+        save_manifest(manifest, manifest_path)
+        record_item_install("plugin", name, version)
+        installed_names.append(name)
+
+    for name in blocked:
+        if name in get_installed(load_manifest(manifest_path), scope, "plugins"):
+            _uninstall_blocked("plugin", name, scope)
+            removed_names.append(name)
+
+    return installed_names, removed_names
 
 
 @dataclass
@@ -220,7 +306,11 @@ def apply_org_policy(
         manifest_path=manifest_path,
     )
 
-    applied = len(result.applied)
+    plugins_in, plugins_out = apply_plugins(
+        policy, scope, source_dirs=source_dirs, manifest_path=manifest_path
+    )
+    applied = len(result.applied) + len(plugins_in)
+    removed = [*removed, *plugins_out]
     Console.success(
         f"Org policy applied: {applied} installed, {len(removed)} removed, "
         f"{len(prefs_applied)} preference(s) set."
