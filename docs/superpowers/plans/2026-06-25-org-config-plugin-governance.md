@@ -1,6 +1,6 @@
 # Org-config plugin governance
 
-Status: in progress (revised 2026-10-06; implemented on `feat/org-plugin-governance`)
+Status: done (revised 2026-10-06; shipped in #110, v2.47.0)
 Priority: P2 (correctness gap, silently drops a config block; no data loss)
 Discovered: 2026-06-25, adversarial review of `feature/plugin-management-loadout-schema` (Finding G)
 Revised: 2026-10-06 — plugin versioning moved to Claude Code (#85, #87); see "What changed since 2026-06-25".
