@@ -1005,10 +1005,15 @@ def _decline_review(paths: OrgPaths, commit_prefix: str) -> None:
     if len(commit_prefix) < 7:
         typer.echo("error: --decline needs at least 7 characters of the commit", err=True)
         raise typer.Exit(code=EXIT_VALIDATION)
-    matches = [st for st in pending_orgs(paths) if str(st.pending.get("commit", "")).startswith(commit_prefix)]
+    pending = pending_orgs(paths)
+    matches = [st for st in pending if str(st.pending.get("commit", "")).startswith(commit_prefix)]
     if not matches:
-        typer.echo(f"error: no pending change matches '{commit_prefix}'", err=True)
-        raise typer.Exit(code=EXIT_VALIDATION)
+        # A trust_change has no commit to name; say what clears it instead.
+        trust = [st for st in pending if st.pending.get("kind") == "trust_change"]
+        typer.echo(f"error: no pending review matches '{commit_prefix}'", err=True)
+        for st in trust:
+            typer.echo(f"  {pending_fix(st)}", err=True)
+        raise typer.Exit(code=EXIT_TRUST if trust else EXIT_VALIDATION)
     for st in matches:
         if st.pending.get("kind") != "review":
             typer.echo(
