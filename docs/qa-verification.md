@@ -82,3 +82,22 @@ relevant subsystems before merging.
 1. With the same setup, run `aec uninstall skill foo --global --yes` — verify default `--repos none`: repo copies spared.
 2. Run `aec uninstall skill foo --global --yes --repos all` — verify all repo copies removed.
 3. Verify `--repos <path1>,<path2>` removes only the named repos (unknown paths ignored).
+
+## Org configs: git source and `aec update` refresh
+
+Use a scratch git repo you can push to, holding `org/my-org.yaml` (unsigned).
+
+### Enroll and refresh
+1. `aec org enroll 'git+https://<host>/<repo>.git#main:org/my-org.yaml' --allow-unsigned`; `aec org status` shows the git source, the commit, and "never applied".
+2. `aec update` with no upstream change: the org reports "up to date" and the exit code is 0.
+3. Bump `config_version` upstream and push. `aec update` prints the diff, reports "pending review", and exits 14. `aec doctor` fails and names `aec org apply`. `~/.aec/orgs/my-org.yaml` is unchanged.
+4. `aec org apply --dry-run`: nothing changes and the review stays staged. `aec org apply --yes`: the new version is enrolled and the pending is cleared.
+5. Push another change, `aec update`, then `aec org apply --decline <first 7 of commit>`: the pending is cleared and the old version kept.
+
+### Trust change
+1. Change `trust.mode` upstream to a signed mode and push. `aec update` reports `trust_change` and exits 14.
+2. `aec org apply --decline 0000000` and `aec org trust-rotate my-org` both refuse (exit 10).
+3. `aec org enroll --replace my-org <source> --yes` refuses (exit 10). Without `--yes`, confirm at the prompt: the pending is cleared.
+
+### Remove
+1. `aec org remove my-org --yes` deletes `~/.aec/orgs/my-org.d/`.
