@@ -38,12 +38,23 @@ class OrgState:
     pubkey_fingerprint: Optional[str]
     pubkey_source: Optional[str]
     last_verified_at: str
-    last_applied_at: str
-    source_of_record: str
+    # None until an apply succeeds ("never applied").
+    last_applied_at: Optional[str]
+    source_of_record: str  # "local" | "url" | "git"
     unsigned_warning_acknowledged_at: Optional[str]
     key_rotation_pending: Optional[dict]
     # URL the config was fetched from, when source_of_record is "url".
     source_url: Optional[str] = None
+    # git+<source_repo>#<source_ref>:<source_path>, when source_of_record is "git".
+    source_repo: Optional[str] = None
+    source_ref: Optional[str] = None
+    source_path: Optional[str] = None
+    resolved_commit: Optional[str] = None
+    # Domain recorded at the last interactive enroll (dns_anchor). Part of the
+    # trust anchor: a refresh compares fetched content against it, never the YAML.
+    trust_dns_domain: Optional[str] = None
+    # Something needs a human: {"kind": "review"|"verify_failed"|"trust_change", ...}.
+    pending: Optional[dict] = None
 
 
 class OrgStateCorruptError(OrgConfigError):
@@ -60,7 +71,9 @@ def read_state(paths: OrgPaths, org_id: str) -> Optional[OrgState]:
         raise OrgStateCorruptError(
             f"corrupt state file at {state_path}: {exc}"
         ) from exc
-    return OrgState(**data)
+    # Ignore keys a newer AEC wrote, so an older AEC can still read the file.
+    known = {f.name for f in dataclasses.fields(OrgState)}
+    return OrgState(**{k: v for k, v in data.items() if k in known})
 
 
 def write_state(paths: OrgPaths, state: OrgState) -> None:
