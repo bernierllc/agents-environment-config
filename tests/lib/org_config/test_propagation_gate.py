@@ -141,3 +141,82 @@ def test_concurrent_state_writes_do_not_corrupt(tmp_path, monkeypatch):
     final = read_state(paths, "acme")
     assert final is not None
     assert final.org_id == "acme"
+
+
+def _make_legacy(paths, **changes):
+    """Strip trust_dns_domain, as state written before the field existed."""
+    st = read_state(paths, "acme")
+    write_state(paths, dataclasses.replace(st, trust_dns_domain=None, **changes))
+
+
+def test_migrate_backfills_local_domain_before_any_fetch(tmp_path, monkeypatch):
+    key = nacl_signing.SigningKey.generate()
+    _enroll_dns(tmp_path, monkeypatch, key)
+    paths = OrgPaths(home_dir=tmp_path)
+    _make_legacy(paths, last_verified_at="2026-01-01T00:00:00Z")
+    seen = []
+
+    def fetcher(url):
+        # The backfill is already persisted when the first fetch happens.
+        seen.append(read_state(paths, "acme").trust_dns_domain)
+        return base64.b64encode(bytes(key.verify_key))
+
+    run_propagation_gate(paths, now="2026-05-24T00:00:00Z", pubkey_fetcher=fetcher)
+
+    assert seen == ["acme.example"]
+    st = read_state(paths, "acme")
+    assert st.trust_dns_domain == "acme.example" and st.pending is None
+
+
+def test_migrate_hash_mismatch_is_trust_change_and_skips_rotation(tmp_path, monkeypatch):
+    key = nacl_signing.SigningKey.generate()
+    _enroll_dns(tmp_path, monkeypatch, key)
+    paths = OrgPaths(home_dir=tmp_path)
+    _make_legacy(paths, config_hash="sha256:not-the-on-disk-bytes",
+                 last_verified_at="2026-01-01T00:00:00Z")
+
+    def fetcher(url):
+        raise AssertionError("no fetch while a trust_change is pending")
+
+    result = run_propagation_gate(paths, now="2026-05-24T00:00:00Z", pubkey_fetcher=fetcher)
+
+    assert result.rotations_detected == []
+    st = read_state(paths, "acme")
+    assert st.trust_dns_domain is None
+    assert st.pending == {
+        "kind": "trust_change",
+        "from": {"trust_dns_domain": None},
+        "to": {"trust_dns_domain": "acme.example"},
+    }
+
+
+def test_migrate_url_source_never_backfills(tmp_path, monkeypatch):
+    key = nacl_signing.SigningKey.generate()
+    _enroll_dns(tmp_path, monkeypatch, key)
+    paths = OrgPaths(home_dir=tmp_path)
+    _make_legacy(paths, source_of_record="url", source_url="https://acme.example/org.yaml")
+
+    from aec.lib.org_config.discovery import migrate_state
+
+    st = migrate_state(paths, "acme")
+    assert st.trust_dns_domain is None and st.pending["kind"] == "trust_change"
+
+
+def test_gate_uses_recorded_domain_not_edited_yaml(tmp_path, monkeypatch):
+    key = nacl_signing.SigningKey.generate()
+    _enroll_dns(tmp_path, monkeypatch, key)
+    paths = OrgPaths(home_dir=tmp_path)
+    st = read_state(paths, "acme")
+    write_state(paths, dataclasses.replace(
+        st, trust_dns_domain="acme.example", last_verified_at="2026-01-01T00:00:00Z"))
+    cfg = paths.config_for("acme")
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace("acme.example", "evil.example"),
+                   encoding="utf-8")
+    urls = []
+
+    def fetcher(url):
+        urls.append(url)
+        return base64.b64encode(bytes(key.verify_key))
+
+    run_propagation_gate(paths, now="2026-05-24T00:00:00Z", pubkey_fetcher=fetcher)
+    assert urls == ["https://acme.example/.well-known/aec-pubkey"]

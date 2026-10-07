@@ -309,6 +309,7 @@ def apply_org_policy(
         Console.warning(
             f"{len(policy.held)} item(s) held pending decision — run `aec org resolve`."
         )
+    _stamp_applied(paths, now)
     return ApplyOutcome(
         applied_items=applied,
         removed_items=len(removed),
@@ -340,3 +341,18 @@ def _default_confirm(policy: EffectivePolicy) -> bool:
         type="yes_no",
         default=False,
     ).strip().lower() == "y"
+
+
+def _stamp_applied(paths, now: Optional[str]) -> None:
+    """Record ``last_applied_at`` on every enrolled org after a successful apply."""
+    import dataclasses
+    from datetime import datetime, timezone
+
+    from .discovery import discover_enrolled_orgs
+    from .state import read_state, write_state
+
+    stamp = now or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    for enrolled in discover_enrolled_orgs(paths):
+        st = read_state(paths, enrolled.config.org_id)
+        if st is not None:
+            write_state(paths, dataclasses.replace(st, last_applied_at=stamp))
