@@ -1,4 +1,4 @@
-"""Tests for url-sourced org-config refresh (Phase 2c.3)."""
+"""Tests for url-sourced org-config refresh (``refresh_remote_orgs``)."""
 
 from pathlib import Path
 
@@ -48,7 +48,7 @@ def test_refresh_unchanged_is_noop(tmp_path, monkeypatch):
     paths = OrgPaths(home_dir=tmp_path)
     before = read_state(paths, "acme")
 
-    results = org_cmd.refresh_url_sourced_orgs(paths)
+    results = org_cmd.refresh_remote_orgs(paths)
 
     assert results == [("acme", "unchanged")]
     after = read_state(paths, "acme")
@@ -56,18 +56,22 @@ def test_refresh_unchanged_is_noop(tmp_path, monkeypatch):
     assert after.last_applied_at == before.last_applied_at
 
 
-def test_refresh_updates_changed_config(tmp_path, monkeypatch):
+def test_refresh_stages_changed_unsigned_config_for_review(tmp_path, monkeypatch):
+    """An unsigned change is never applied by a refresh: it is staged for review."""
     _enroll_url(monkeypatch, tmp_path, UNSIGNED_V1.encode())
     paths = OrgPaths(home_dir=tmp_path)
-    old_hash = read_state(paths, "acme").config_hash
+    before = read_state(paths, "acme")
 
     _serve(monkeypatch, UNSIGNED_V2.encode())
-    results = org_cmd.refresh_url_sourced_orgs(paths)
+    results = org_cmd.refresh_remote_orgs(paths)
 
-    assert results == [("acme", "updated")]
+    assert results == [("acme", "pending review")]
     after = read_state(paths, "acme")
-    assert after.config_hash != old_hash
-    assert after.config_version == "2.0.0"
+    assert after.config_hash == before.config_hash
+    assert after.config_version == "1.0.0"
+    assert after.pending["kind"] == "review"
+    assert paths.config_for("acme").read_text(encoding="utf-8") == UNSIGNED_V1
+    assert (paths.org_dir_for("acme") / "staged.yaml").read_text(encoding="utf-8") == UNSIGNED_V2
 
 
 def test_refresh_skips_local_orgs(tmp_path, monkeypatch):
@@ -77,7 +81,7 @@ def test_refresh_skips_local_orgs(tmp_path, monkeypatch):
     org_cmd.perform_enroll(str(cfg), allow_unsigned=True)
 
     paths = OrgPaths(home_dir=tmp_path)
-    results = org_cmd.refresh_url_sourced_orgs(paths)
+    results = org_cmd.refresh_remote_orgs(paths)
     assert results == []
 
 
@@ -91,6 +95,7 @@ def test_refresh_reports_fetch_failure(tmp_path, monkeypatch):
         raise OrgConfigFetchError("connection refused")
 
     monkeypatch.setattr(org_cmd, "_url_fetcher", boom)
-    results = org_cmd.refresh_url_sourced_orgs(paths)
+    results = org_cmd.refresh_remote_orgs(paths)
     assert results[0][0] == "acme"
-    assert "fetch failed" in results[0][1]
+    assert results[0][1].startswith("verify_failed: fetch failed")
+    assert read_state(paths, "acme").pending["kind"] == "verify_failed"

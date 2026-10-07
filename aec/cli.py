@@ -72,6 +72,13 @@ if HAS_TYPER:
             return
         for message in result.warnings:
             Console.warning(message)
+        try:
+            from .commands.org import pending_fix, pending_orgs
+            pending = pending_orgs(paths)
+        except Exception:  # noqa: BLE001 - same rule as the gate above
+            return
+        for st in pending:
+            Console.warning(pending_fix(st))
 
     @app.callback(invoke_without_command=True)
     def _cli_callback(
@@ -121,8 +128,10 @@ if HAS_TYPER:
     @app.command("update")
     def update_cmd():
         """Fetch latest sources and report what's outdated."""
+        from .commands.org import EXIT_PENDING
         from .commands.update import run_update
-        run_update()
+        if run_update():
+            raise typer.Exit(EXIT_PENDING)
 
     @app.command("upgrade")
     def upgrade_cmd(
@@ -1059,8 +1068,10 @@ else:
             Console.print(f"aec version {__version__}")
 
         elif args.command == "update":
+            from .commands.org import EXIT_PENDING
             from .commands.update import run_update
-            run_update()
+            if run_update():
+                sys.exit(EXIT_PENDING)
 
         elif args.command == "upgrade":
             from .commands.upgrade import run_upgrade

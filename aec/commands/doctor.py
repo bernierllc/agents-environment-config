@@ -37,11 +37,12 @@ def _check(name: str, condition: bool, success_msg: str, failure_msg: str) -> bo
         return False
 
 
-def _check_org_configurations() -> None:
-    """Render the 'Org configurations' section.
+def _check_org_configurations() -> list:
+    """Render the 'Org configurations' section. Returns issues for the summary.
 
-    Doctor reports, it does not gate: errors discovering enrolled orgs
-    surface as a red line but do not flip the overall pass/fail state.
+    An org with a ``pending`` item (unreviewed change, trust-anchor change,
+    failed refresh) is an issue: it fails doctor and names its fix. Errors
+    discovering enrolled orgs surface as a red line but do not fail doctor.
     The section is omitted entirely when no orgs are enrolled, to avoid
     padding output with empty noise.
     """
@@ -55,7 +56,7 @@ def _check_org_configurations() -> None:
         from ..lib.org_config.state import read_state
     except ImportError:
         # PyYAML extra not installed — silently skip.
-        return
+        return []
 
     paths = OrgPaths.default()
     try:
@@ -63,10 +64,13 @@ def _check_org_configurations() -> None:
     except OrgConfigError as exc:
         Console.header("Org configurations")
         Console.error(f"Failed to load enrolled org: {exc}")
-        return
+        return []
 
     if not orgs:
-        return
+        return []
+    from .org import pending_fix
+
+    issues = []
 
     Console.header("Org configurations")
     for enrolled in orgs:
@@ -80,9 +84,14 @@ def _check_org_configurations() -> None:
         state = read_state(paths, cfg.org_id)
         if state is not None:
             Console.print(f"  last_verified_at: {state.last_verified_at}")
-            Console.print(f"  last_applied_at: {state.last_applied_at}")
+            Console.print(f"  last_applied_at: {state.last_applied_at or 'never applied'}")
             if state.pubkey_fingerprint:
                 Console.print(f"  pubkey_fingerprint: {state.pubkey_fingerprint}")
+            if state.trust_mode == "dns_anchor":
+                Console.print(f"  trust_dns_domain: {state.trust_dns_domain or 'not recorded'}")
+            if state.pending:
+                Console.error(f"  pending: {pending_fix(state)}")
+                issues.append(pending_fix(state))
             from datetime import datetime, timezone
 
             now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -110,6 +119,7 @@ def _check_org_configurations() -> None:
                 participants = ", ".join(f"{p.org_id}={p.value}" for p in c.participants)
                 Console.error(f"  {c.kind} on {c.subject}: {participants}")
             Console.print("  Run `aec org resolve` to decide.")
+    return issues
 
 
 def _check_agent_blurb_drift(repo_root) -> None:
@@ -532,7 +542,7 @@ def run_doctor() -> Tuple[bool, List[str]]:
                 pass
 
     # Org configurations (Phase 1: 0 or 1 enrolled org)
-    _check_org_configurations()
+    issues.extend(_check_org_configurations())
 
     # Agent blurb drift (informational; never gates pass/fail)
     _check_agent_blurb_drift(repo_root)
