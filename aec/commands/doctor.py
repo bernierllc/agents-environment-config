@@ -54,6 +54,7 @@ def _check_org_configurations() -> list:
         )
         from ..lib.org_config.rotation import rotation_status
         from ..lib.org_config.state import read_state
+        from .org import pending_fix
     except ImportError:
         # PyYAML extra not installed — silently skip.
         return []
@@ -68,7 +69,6 @@ def _check_org_configurations() -> list:
 
     if not orgs:
         return []
-    from .org import pending_fix
 
     issues = []
 

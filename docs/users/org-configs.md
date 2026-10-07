@@ -34,7 +34,7 @@ aec org enroll https://my-org.example/aec.yaml        # signed configs need no -
 aec org enroll 'git+https://git.example.com/my-org/aec-catalog.git#main:org/my-org.yaml'
 ```
 
-Only `https://` URLs are accepted. A git source is `git+<url>#<ref>:<path>`, where `<url>` is `https://…` or `git@host:path`, `<ref>` is a branch or tag, and `<path>` is the config's path inside the repo. AEC clones with your own git credentials (it never stores them) and keeps the clone in `~/.aec/orgs/<org_id>.d/repo/`. A signed git config's signature is `<path>.sig` in the same commit.
+Only `https://` URLs are accepted. A git source is `git+<url>#<ref>:<path>`, where `<url>` is `https://…` or `git@host:path`, `<ref>` is a branch or tag, and `<path>` is the config's path inside the repo. AEC clones with your own git credentials (a credential helper or ssh key) and never stores them, so a url with `user:token@` in it is refused and keeps the clone in `~/.aec/orgs/<org_id>.d/repo/`. A signed git config's signature is `<path>.sig` in the same commit.
 
 AEC remembers the source and re-fetches + re-verifies it on `aec update`; configs that set `refresh.ttl_hours` are also re-fetched automatically once the local copy ages out.
 

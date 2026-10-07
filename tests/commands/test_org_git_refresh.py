@@ -222,6 +222,28 @@ def test_update_reports_pending_and_doctor_fails(remote, paths, home):
     assert len(issues) == 1 and "aec org apply" in issues[0]
 
 
+def test_corrupt_state_is_reported_not_raised(remote, paths, home):
+    from aec.commands.update import _refresh_org_configs
+
+    _enroll_unsigned(remote)
+    paths.state_for("my-org").write_text("{not json", encoding="utf-8")
+
+    [(org_id, status)] = org_cmd.refresh_remote_orgs(paths)
+    assert org_id == "my-org" and status.startswith("error:")
+    assert _refresh_org_configs() is True
+
+
+def test_dead_clone_is_recloned(remote, paths):
+    _enroll_unsigned(remote)
+    repo = paths.org_dir_for("my-org") / "repo"
+    import shutil
+    shutil.rmtree(repo / ".git")  # what a clone killed mid-way leaves behind
+    new_commit = _push_unsigned(remote, "2.0.0")
+
+    assert org_cmd.refresh_remote_orgs(paths) == [("my-org", "pending review")]
+    assert read_state(paths, "my-org").pending["commit"] == new_commit
+
+
 def test_unparseable_fetch_is_verify_failed(remote, paths):
     _enroll_unsigned(remote)
     commit_file(remote, "org/my-org.yaml", "not: [valid\n")
@@ -268,6 +290,20 @@ def test_apply_not_done_restores_and_keeps_staged(remote, paths, home, args, std
     assert (paths.org_dir_for("my-org") / "staged.yaml").exists()
 
 
+def test_apply_interrupted_restores_and_keeps_staged(remote, paths, home):
+    # stdin closed at the guided confirm: the prompt raises instead of answering.
+    _stage_review(remote, paths)
+    before_yaml = paths.config_for("my-org").read_bytes()
+    before_state = read_state(paths, "my-org")
+
+    result = runner.invoke(app, ["org", "apply"], env={"HOME": str(home)}, input="")
+
+    assert result.exit_code != 0
+    assert paths.config_for("my-org").read_bytes() == before_yaml
+    assert read_state(paths, "my-org") == before_state
+    assert (paths.org_dir_for("my-org") / "staged.yaml").exists()
+
+
 def test_decline_review_discards_it(remote, paths):
     commit = _stage_review(remote, paths)
     assert _exit_code(org_cmd._decline_review, paths, commit[:6]) == 13
@@ -277,6 +313,19 @@ def test_decline_review_discards_it(remote, paths):
     st = read_state(paths, "my-org")
     assert st.pending is None and st.config_version == "1.0.0"
     assert not (paths.org_dir_for("my-org") / "staged.yaml").exists()
+
+
+def test_decline_matches_url_hash_without_its_prefix(remote, paths):
+    import dataclasses
+
+    _stage_review(remote, paths)
+    st = read_state(paths, "my-org")
+    write_state(paths, dataclasses.replace(st, pending={**st.pending, "commit": "sha256:" + "ab" * 32}))
+
+    assert "--decline abababababab" in org_cmd.pending_fix(read_state(paths, "my-org"))
+    assert _exit_code(org_cmd._decline_review, paths, "sha256:") == 13
+    org_cmd._decline_review(paths, "abababa")
+    assert read_state(paths, "my-org").pending is None
 
 
 # --------------------------------------------------------------------------- #

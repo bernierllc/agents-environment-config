@@ -27,10 +27,12 @@ PROTO_FLAGS = [
     "-c", "protocol.ssh.allow=always",
 ]
 GIT_TIMEOUT_SECONDS = 120
+MAX_CONFIG_BYTES = 1024 * 1024
 
 _REF_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
-_SCP_RE = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[A-Za-z0-9._/~-]+$")
-_HTTPS_RE = re.compile(r"^https://[^\s]+$")
+_SCP_RE = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9][A-Za-z0-9.-]*:[A-Za-z0-9._/~-]+$")
+# No userinfo in the authority: a token in the url would land in state and output.
+_HTTPS_RE = re.compile(r"^https://[^\s/@]+/[^\s]+$")
 
 
 @dataclass(frozen=True)
@@ -139,4 +141,8 @@ def read_file(dest: Path, rel_path: str) -> Optional[bytes]:
         raise OrgConfigValidationError(
             f"{rel_path!r} resolves outside the repo", field_path="source"
         )
-    return target.read_bytes() if target.is_file() else None
+    if not target.is_file():
+        return None
+    if target.stat().st_size > MAX_CONFIG_BYTES:
+        raise OrgConfigFetchError(f"{rel_path!r} is larger than {MAX_CONFIG_BYTES} bytes")
+    return target.read_bytes()

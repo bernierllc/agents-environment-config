@@ -429,7 +429,14 @@ def _fetch_remote(paths: OrgPaths, st: OrgState):
         return raw, (lambda cfg: _signature_for_url(cfg, st.source_url, None)), hash_config_bytes(raw)
     src = git_source.validate_git_source(st.source_repo, st.source_ref, st.source_path)
     dest = paths.org_dir_for(st.org_id) / "repo"
-    commit = git_source.refresh(src, dest) if dest.exists() else git_source.clone(src, dest)
+    try:
+        commit = git_source.refresh(src, dest) if dest.exists() else git_source.clone(src, dest)
+    except OrgConfigFetchError:
+        if not dest.exists():
+            raise
+        # A clone killed mid-way (timeout) or otherwise broken: start over.
+        shutil.rmtree(dest, ignore_errors=True)
+        commit = git_source.clone(src, dest)
     raw = git_source.read_file(dest, src.path)
     if raw is None:
         raise OrgConfigFetchError(f"{src.path} not found at {src.url}@{src.ref} ({commit[:12]})")
@@ -556,11 +563,15 @@ def refresh_remote_orgs(paths: OrgPaths) -> list[tuple[str, str]]:
     promoted = False
     for enrolled in discover_enrolled_orgs(paths):
         org_id = enrolled.config.org_id
-        st = read_state(paths, org_id)
-        if st is None or st.source_of_record not in ("url", "git"):
+        try:
+            st = read_state(paths, org_id)
+            if st is None or st.source_of_record not in ("url", "git"):
+                continue
+            st = migrate_state(paths, org_id)
+            status, did_promote = _refresh_one(paths, st)
+        except OrgConfigError as exc:  # e.g. corrupt state: report it, refresh the rest
+            results.append((org_id, f"error: {exc}"))
             continue
-        st = migrate_state(paths, org_id)
-        status, did_promote = _refresh_one(paths, st)
         results.append((org_id, status))
         promoted = promoted or did_promote
     if promoted:
@@ -584,7 +595,7 @@ def pending_fix(st: OrgState) -> str:
     if kind == "review":
         return (
             f"org '{st.org_id}' has an unreviewed change ({st.pending.get('summary')}): "
-            f"run `aec org apply`, or `aec org apply --decline {str(st.pending.get('commit'))[:12]}`"
+            f"run `aec org apply`, or `aec org apply --decline {_bare_commit(st.pending.get('commit'))[:12]}`"
         )
     if kind == "trust_change":
         return (
@@ -967,28 +978,33 @@ def apply_cmd(
         perform_enroll(enroll, allow_unsigned=allow_unsigned, yes=yes)
 
     # Promote staged reviews first so the propagation gate sees them as the
-    # enrolled content; roll back if the apply does not happen.
-    backups = _promote_staged_reviews(paths)
-    confirm = (lambda _policy: True) if yes else None
-    outcome = apply_org_policy(
-        paths,
-        mode_override="managed" if managed else None,
-        dry_run=dry_run,
-        confirm=confirm,
-    )
-    for org_id, (old_bytes, old_state) in backups.items():
-        if outcome.skipped_reason is None:
-            _staged_path(paths, org_id).unlink(missing_ok=True)
-        else:
-            paths.config_for(org_id).write_bytes(old_bytes)
-            write_state(paths, old_state)
+    # enrolled content; roll back unless the apply happens (declined, dry-run,
+    # locked, an exception, Ctrl-C).
+    backups: dict = {}
+    outcome = None
+    try:
+        _promote_staged_reviews(paths, backups)
+        outcome = apply_org_policy(
+            paths,
+            mode_override="managed" if managed else None,
+            dry_run=dry_run,
+            confirm=(lambda _policy: True) if yes else None,
+        )
+    finally:
+        applied = outcome is not None and outcome.skipped_reason is None
+        for org_id, (old_bytes, old_state) in backups.items():
+            if applied:
+                _staged_path(paths, org_id).unlink(missing_ok=True)
+            else:
+                paths.config_for(org_id).write_bytes(old_bytes)
+                write_state(paths, old_state)
     if outcome.skipped_reason == "locked":
         raise typer.Exit(code=EXIT_TRUST)
 
 
-def _promote_staged_reviews(paths: OrgPaths) -> dict:
-    """Promote every staged review. Returns ``{org_id: (old_yaml_bytes, old_state)}``."""
-    backups = {}
+def _promote_staged_reviews(paths: OrgPaths, backups: dict) -> None:
+    """Promote every staged review, recording ``{org_id: (old_yaml_bytes, old_state)}``
+    in ``backups`` before each one so a failure part-way can still roll back."""
     for st in pending_orgs(paths):
         staged = _staged_path(paths, st.org_id)
         if st.pending.get("kind") != "review" or not staged.exists():
@@ -998,15 +1014,20 @@ def _promote_staged_reviews(paths: OrgPaths) -> dict:
         cfg = validate_org_config(frontmatter, body)
         backups[st.org_id] = (paths.config_for(st.org_id).read_bytes(), st)
         _promote(paths, st, raw, cfg, st.pending.get("commit"), _now_iso_utc())
-    return backups
+
+
+def _bare_commit(commit) -> str:
+    """A pending commit without the ``sha256:`` a url config hash carries."""
+    return str(commit or "").removeprefix("sha256:")
 
 
 def _decline_review(paths: OrgPaths, commit_prefix: str) -> None:
+    commit_prefix = _bare_commit(commit_prefix)
     if len(commit_prefix) < 7:
         typer.echo("error: --decline needs at least 7 characters of the commit", err=True)
         raise typer.Exit(code=EXIT_VALIDATION)
     pending = pending_orgs(paths)
-    matches = [st for st in pending if str(st.pending.get("commit", "")).startswith(commit_prefix)]
+    matches = [st for st in pending if _bare_commit(st.pending.get("commit")).startswith(commit_prefix)]
     if not matches:
         # A trust_change has no commit to name; say what clears it instead.
         trust = [st for st in pending if st.pending.get("kind") == "trust_change"]

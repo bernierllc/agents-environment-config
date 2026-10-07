@@ -92,11 +92,19 @@ def _refresh_org_configs() -> bool:
 
     Never prompts: anything that needs a person is recorded as ``pending``.
     """
-    from ..lib.org_config import OrgPaths
-    from .org import pending_fix, pending_orgs, refresh_remote_orgs
+    try:
+        from ..lib.org_config import OrgConfigError, OrgPaths
+        from .org import pending_fix, pending_orgs, refresh_remote_orgs
+    except ImportError:  # org-configs extra (PyYAML) or typer not installed
+        return False
 
     paths = OrgPaths.default()
-    results = refresh_remote_orgs(paths)
+    try:
+        results = refresh_remote_orgs(paths)
+        pending = pending_orgs(paths)
+    except OrgConfigError as exc:  # an enrolled config or its state is unreadable
+        Console.error(f"Org configs: {exc} (run `aec doctor`)")
+        return True
     if results:
         Console.print("\nOrg configs:")
     for org_id, status in results:
@@ -106,7 +114,6 @@ def _refresh_org_configs() -> bool:
             Console.print(f"  {org_id}: up to date")
         else:
             Console.warning(f"  {org_id}: {status}")
-    pending = pending_orgs(paths)
     for st in pending:
         Console.warning(pending_fix(st))
     return bool(pending)

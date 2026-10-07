@@ -72,6 +72,8 @@ def test_parse_valid_https_and_scp():
         f"git+{REMOTE_URL}#main:/etc/passwd",
         f"git+{REMOTE_URL}#main",
         f"git+{REMOTE_URL}",
+        "git+https://user:token@example.com/my-org/config.git#main:org.yaml",
+        "git+git@-oProxy:my-org/config.git#main:org.yaml",
     ],
 )
 def test_parse_rejects(spec):
@@ -108,6 +110,15 @@ def test_read_file_rejects_symlink_escape(remote, tmp_path):
     with pytest.raises(OrgConfigValidationError):
         git_source.read_file(dest, src.path)
     assert git_source.read_file(dest, "missing.yaml") is None
+
+
+def test_read_file_rejects_oversized_file(remote, tmp_path):
+    commit_file(remote, "org/big.yaml", "x" * (git_source.MAX_CONFIG_BYTES + 1))
+    src = git_source.parse_git_source(f"git+{REMOTE_URL}#main:org/big.yaml")
+    dest = tmp_path / "clone"
+    git_source.clone(src, dest)
+    with pytest.raises(OrgConfigFetchError):
+        git_source.read_file(dest, src.path)
 
 
 def test_protocol_allow_list_blocks_file_transport(remote, tmp_path):
