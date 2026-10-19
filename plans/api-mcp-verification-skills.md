@@ -55,15 +55,17 @@ Executes the API/MCP verification docs against a **local or test environment onl
 ```json
 { "generated_from": "<git sha>",
   "entries": [ { "surface": "page|rest|mcp|flow", "id": "...", "visibility": "public|internal|admin|draft",
-                 "auth_model": "...", "roles": [], "scopes": [], "tier": null,
+                 "auth_model": "...", "public": null, "roles": [], "scopes": [], "permissions": [], "tier": null, "gated_by": [],
                  "user_types": [], "affected_paths": [], "verified_at": "<sha>" } ] }
 ```
+
+Combination semantics (as built in `api-verification/scripts/matrix.py`): every declared kind (roles, scopes, permissions, tier) must be satisfied, and within a kind the principal needs any one listed value. `public: true` means unauthenticated callers may reach the operation; `visibility` only says who may read the docs, so the two are separate fields. An operation needing both Admin and `billing:write` is therefore `roles: [Admin]` plus `scopes: [billing:write]`; alternatives (Admin OR a scope) are two entries.
 
 The manifest, not an agent's judgment, decides audience. Consumers: the customer-docs agent, the internal-docs agent, `llms.txt` / sitemap / MCP-index build steps, CI.
 
 ## How the docs writer uses it
 
-- Reads the manifest if present. Public/no-auth entries become customer docs; role-gated entries become admin guides; tier-gated entries get an availability note; anything not `public` stays `draft` and never enters crawlable outputs.
+- Reads the manifest if present. Public/no-auth entries become customer docs; role-gated entries become admin guides; tier-gated entries get an availability note; `internal` entries go to internal docs and `admin` entries to admin guides; only `draft` (the default, never inferred) is withheld from everything, and only `public` enters crawlable outputs.
 - No manifest: every claim is marked `unverified` and pages stay `draft`.
 - User flows come from flow docs (`user_types`, ordered steps), not from the agent inferring them.
 
