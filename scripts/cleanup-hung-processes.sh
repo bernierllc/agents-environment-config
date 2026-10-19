@@ -114,12 +114,11 @@ free_kb() {
 
 # Stop/start bookkeeping for the Colima recycle. on_exit makes sure an
 # interrupted run still brings Colima back.
-COLIMA_RUNNING_BEFORE=""
 COLIMA_STOPPED_BY_US=0
 RESTART_FAILED=0
 
-# Start Colima again and restart the containers that were running before the
-# stop, so recycling is a reset rather than a loss of local dev databases.
+# Start Colima again. Containers are not started here: the daemon restarts
+# those whose restart policy is unless-stopped/always, and leaves `no` ones down.
 restart_colima() {
     [ "$COLIMA_STOPPED_BY_US" = 1 ] || return 0
     COLIMA_STOPPED_BY_US=0
@@ -131,19 +130,10 @@ restart_colima() {
         RESTART_FAILED=1
         return 1
     fi
-    if [ -n "$COLIMA_RUNNING_BEFORE" ]; then
-        echo "  Restarting containers that were running before the stop"
-        # Word splitting is intentional: container IDs are single tokens.
-        local ids
-        ids=$(tr '\n' ' ' <<<"$COLIMA_RUNNING_BEFORE")
-        # shellcheck disable=SC2086
-        run_with_timeout 120 docker start $ids >/dev/null 2>&1 || echo "  (some containers failed to restart)"
-    fi
 }
 
 # Stop Colima, then restart it. Usage: recycle_colima
 recycle_colima() {
-    COLIMA_RUNNING_BEFORE=$(run_with_timeout 10 docker ps -q 2>/dev/null || true)
     echo ""
     echo "Recycling Colima (stop, then start)..."
     if ! run_with_timeout 180 colima stop >/dev/null 2>&1; then

@@ -38,7 +38,7 @@ Both scripts include timeouts on Docker commands to prevent hangs when the Docke
 
 The macOS/Linux script detects which runtime backs the `docker` CLI:
 
-- **Colima running:** runs `docker system prune` (stopped containers, unused networks, dangling images, build cache) and removes images unused for 24h+, then recycles the VM (`colima stop`, `colima start`) and restarts the containers that were running before. If Colima fails to come back up, the script exits non-zero and says so.
+- **Colima running:** runs `docker system prune` (stopped containers, unused networks, dangling images, build cache) and removes images unused for 24h+, then recycles the VM (`colima stop`, `colima start`). Containers come back according to their restart policy: `unless-stopped`/`always` ones restart with the daemon, `no` ones stay stopped (for example the byo-* and redis containers). If Colima fails to come back up, the script exits non-zero and says so.
 - **Docker Desktop (or another daemon):** prunes only; nothing is stopped.
 - **No runtime:** Docker cleanup is skipped.
 

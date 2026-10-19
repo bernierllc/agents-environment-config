@@ -214,3 +214,22 @@ def test_restart_is_a_no_op_when_this_run_did_not_stop_colima(tmp_path: Path) ->
     result = _run_snippet(bindir, 'restart_colima\necho "FLAG=$RESTART_FAILED"\n')
     assert "FLAG=0" in result.stdout, result.stdout
     assert "Starting Colima" not in result.stdout, result.stdout
+
+
+def test_recycle_leaves_containers_to_their_restart_policy(tmp_path: Path) -> None:
+    # Colima's daemon restarts containers whose policy is unless-stopped/always.
+    # Containers set to `no` must stay down, so the recycle must never `docker start`.
+    started = tmp_path / "started.log"
+    bindir = _fake_tool(tmp_path, "colima", "exit 0\n")
+    (bindir / "docker").write_text(
+        "#!/bin/bash\n"
+        'case "$1" in\n'
+        '  ps) echo "abc123" ;;\n'
+        f'  start) echo "$@" >> "{started}" ;;\n'
+        "esac\n"
+        "exit 0\n"
+    )
+    (bindir / "docker").chmod(0o755)
+    result = _run_snippet(bindir, "recycle_colima\necho \"FLAG=$RESTART_FAILED\"\n")
+    assert "FLAG=0" in result.stdout, result.stdout
+    assert not started.exists(), f"recycle started containers: {started.read_text()}"
