@@ -1,8 +1,9 @@
 ---
 name: "orchata"
-description: "Use when the user wants a task or project planned and executed end-to-end with multi-agent orchestration — "orchestrate this", "/orchata", "plan and build this", "run this with subagents", or any request to take a feature/project from intake through planning, parallel implementation, and verification while only involving the human for items that genuinely need their hands. Encodes intake questions, model-tier selection, escalation punch lists, and a self-improvement friction loop."
+description: "Use when the user wants a task or project planned and executed end-to-end with multi-agent orchestration — \"orchestrate this\", \"/orchata\", \"plan and build this\", \"run this with subagents\", or any request to take a feature/project from intake through planning, parallel implementation, and verification while only involving the human for items that genuinely need their hands. Encodes intake questions, model-tier selection, escalation punch lists, and a self-improvement friction loop."
 tags: ["skill"]
 ---
+
 
 # Orchata
 

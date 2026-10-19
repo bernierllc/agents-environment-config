@@ -20,6 +20,7 @@ def test_reserved_source_ids():
         "aec.default.rules",
         "aec.default.agents",
         "aec.default.mcps",
+        "aec.default.plugins",
     })
 
 

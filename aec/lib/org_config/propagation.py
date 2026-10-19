@@ -151,7 +151,7 @@ def run_propagation_gate(
 
     import dataclasses
 
-    from .discovery import discover_enrolled_orgs
+    from .discovery import discover_enrolled_orgs, migrate_state
 
     changes = detect_changes(paths, now=now)
     rotations_detected: list = []
@@ -163,11 +163,15 @@ def run_propagation_gate(
         st = read_state(paths, cfg.org_id)
         if st is None:
             continue
+        if st.trust_mode == "dns_anchor":
+            # The domain comes from recorded state, never the on-disk YAML.
+            st = migrate_state(paths, cfg.org_id)
 
         if (
-            cfg.trust_mode == "dns_anchor"
+            st.trust_mode == "dns_anchor"
             and not st.key_rotation_pending
-            and cfg.trust_dns_domain
+            and st.trust_dns_domain
+            and not (st.pending and st.pending.get("kind") == "trust_change")
             and due_for_refresh(
                 last_verified_at=st.last_verified_at,
                 ttl_hours=cfg.refresh_ttl_hours or DNS_PUBKEY_CACHE_HOURS,
@@ -176,7 +180,7 @@ def run_propagation_gate(
         ):
             try:
                 pending = detect_dns_rotation(
-                    dns_domain=cfg.trust_dns_domain,
+                    dns_domain=st.trust_dns_domain,
                     pinned_fingerprint=st.pubkey_fingerprint,
                     fetcher=pubkey_fetcher,
                     now=now,

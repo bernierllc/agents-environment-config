@@ -26,19 +26,49 @@ AEC never hosts org configurations. Each organization publishes their own — ty
 
 ## Enrolling
 
-Enroll a local file or an `https://` URL:
+Enroll a local file, an `https://` URL, or a file in a git repo:
 
 ```bash
 aec org enroll /path/to/your-org-config.yaml --allow-unsigned --yes
-aec org enroll https://acme.example/aec.yaml          # signed configs need no --allow-unsigned
+aec org enroll https://my-org.example/aec.yaml        # signed configs need no --allow-unsigned
+aec org enroll 'git+https://git.example.com/my-org/aec-catalog.git#main:org/my-org.yaml'
 ```
 
-Only `https://` URLs are accepted. AEC remembers the URL and re-fetches + re-verifies it on `aec update`; configs that set `refresh.ttl_hours` are also re-fetched automatically once the local copy ages out.
+Only `https://` URLs are accepted. A git source is `git+<url>#<ref>:<path>`, where `<url>` is `https://…` or `git@host:path`, `<ref>` is a branch or tag, and `<path>` is the config's path inside the repo. AEC clones with your own git credentials (a credential helper or ssh key) and never stores them, so a url with `user:token@` in it is refused and keeps the clone in `~/.aec/orgs/<org_id>.d/repo/`. A signed git config's signature is `<path>.sig` in the same commit.
+
+AEC remembers the source and re-fetches + re-verifies it on `aec update`; configs that set `refresh.ttl_hours` are also re-fetched automatically once the local copy ages out.
+
+To move an enrolled org to a new source (say, from a URL to a git repo) while keeping your conflict resolutions:
+
+```bash
+aec org enroll --replace my-org 'git+https://git.example.com/my-org/aec-catalog.git#main:org/my-org.yaml'
+```
+
+`--replace` refuses an org that is not enrolled, and a source whose `org_id` is different.
+
+### What `aec update` does with an upstream change
+
+`aec update` never prompts. For each url- or git-sourced org:
+
+| Upstream | What happens |
+|---|---|
+| Same content as what you enrolled | Nothing. Any stale pending review is cleared. |
+| Trust anchor changed (trust mode, pinned key, key URL, or DNS domain) | Recorded as a pending **trust change**. Nothing is applied. |
+| Can't fetch, parse, or verify (bad signature, wrong `org_id`) | Recorded as **verify failed**. Your current config is untouched. |
+| Signed, verified, and `install.mode: managed` | Applied. |
+| Anything else (unsigned, or signed but guided/unset) | Staged for **review**: AEC prints what changed and applies nothing. |
+
+If anything is pending, `aec update` finishes its other steps and then exits with code **14**, and `aec doctor` fails until it's cleared:
+
+- **Review:** `aec org apply` applies the staged change (if you decline at the prompt or use `--dry-run`, it stays staged). `aec org apply --decline <commit>` discards it (at least 7 characters of the commit; for a URL source, the config hash shown).
+- **Trust change:** only `aec org enroll --replace <org_id> <source>` at an interactive prompt clears it. `--yes` is refused, and so are `--decline` and `aec org trust-rotate`.
+- **Verify failed:** fix the source, then run `aec update` again.
 
 After enrollment, AEC stores two files under `~/.aec/orgs/`:
 
 - `<org_id>.yaml` — the validated config (a verbatim copy of the source).
-- `<org_id>.state.json` — local state: hash, trust mode, timestamps.
+- `<org_id>.state.json` — local state: hash, trust mode, source, timestamps, and any pending item.
+- `<org_id>.d/` — the git clone (git sources) and a change staged for review.
 
 ## Why "unsigned" matters
 
@@ -122,7 +152,7 @@ aec org apply --enroll https://acme.example/aec.yaml   # enroll then apply in on
 
 ```bash
 aec org list                # all enrolled orgs
-aec org status              # summary incl. trust mode, fingerprint, rotation status
+aec org status              # trust mode, fingerprint, source, last applied (or "never applied"), pending
 aec org show <org_id>       # full validated config as YAML
 aec org resolve --list      # any unresolved cross-org conflicts
 aec doctor                  # "Org configurations" + "Org conflicts" sections
@@ -134,7 +164,7 @@ aec doctor                  # "Org configurations" + "Org conflicts" sections
 aec org remove <org_id> --yes
 ```
 
-Removes both the YAML and the state file. Your `~/.agents-environment-config/` workspace is **not** modified — `aec org remove` only un-enrolls; it does not undo any item installs.
+Removes the YAML, the state file, and the `<org_id>.d/` directory. Your `~/.agents-environment-config/` workspace is **not** modified — `aec org remove` only un-enrolls; it does not undo any item installs.
 
 ## Still deferred to later phases
 

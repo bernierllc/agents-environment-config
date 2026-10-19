@@ -18,10 +18,11 @@ RESERVED_SOURCE_IDS = frozenset({
     "aec.default.rules",
     "aec.default.agents",
     "aec.default.mcps",
+    "aec.default.plugins",
 })
 
 
-ITEM_TYPES = ("skills", "rules", "agents", "mcps")
+ITEM_TYPES = ("skills", "rules", "agents", "mcps", "plugins")
 
 
 DEFAULT_SOURCE_STANCES = ("keep", "replace", "deny")

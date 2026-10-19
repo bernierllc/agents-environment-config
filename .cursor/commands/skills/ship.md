@@ -1,8 +1,9 @@
 ---
 name: "ship"
-description: "Use when work on the current branch is ready to land — "ship this", "/ship", "wrap this up and open the PR", or the end of any implementation session. Runs the closing ritual as one command: verify (typecheck + tests), conventional commit, push, draft PR, external-tracker sync, and a five-line report."
+description: "Use when work on the current branch is ready to land — \"ship this\", \"/ship\", \"wrap this up and open the PR\", or the end of any implementation session. Runs the closing ritual as one command: verify (typecheck + tests), conventional commit, push, PR (ready for review unless drafts are configured), external-tracker sync, and a five-line report."
 tags: ["skill"]
 ---
+
 
 # Ship
 

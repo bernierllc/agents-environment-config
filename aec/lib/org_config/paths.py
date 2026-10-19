@@ -40,6 +40,10 @@ class OrgPaths:
     def config_for(self, org_id: str) -> Path:
         return self.orgs_dir / f"{org_id}.yaml"
 
+    def org_dir_for(self, org_id: str) -> Path:
+        """Per-org working dir (git clone, staged review). ``.d`` keeps it out of the ``*.yaml`` glob."""
+        return self.orgs_dir / f"{org_id}.d"
+
     def state_for(self, org_id: str) -> Path:
         return self.orgs_dir / f"{org_id}.state.json"
 
