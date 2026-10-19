@@ -1,8 +1,9 @@
 ---
 name: "resume"
-description: "Use at the start of a session in a repo with prior work in flight, or when the user says "resume", "/resume", "where were we", "pick up where we left off". Reads checkpointed run state, the activity log, and the external tracker, reconciles them against git reality, and continues from the recorded next action instead of re-planning."
+description: "Use at the start of a session in a repo with prior work in flight, or when the user says \"resume\", \"/resume\", \"where were we\", \"pick up where we left off\". Reads checkpointed run state, the activity log, and the external tracker, reconciles them against git reality, and continues from the recorded next action instead of re-planning."
 tags: ["skill"]
 ---
+
 
 # Resume
 
