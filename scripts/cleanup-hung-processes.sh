@@ -210,7 +210,7 @@ else
     # (Supabase stacks, compose projects) pile up once their containers are gone.
     # Volumes of running containers are kept; stopped ones were removed above.
     echo "  Pruning unused volumes (named included)..."
-    run_with_timeout 60 docker volume prune -a -f 2>/dev/null || echo "  (Volume prune timed out)"
+    run_with_timeout 60 docker volume prune -a -f 2>&1 || echo "  (Volume prune failed or timed out)"
 
     echo "  Pruning unused images (unused 24h+)..."
     run_with_timeout "$DOCKER_TIMEOUT" docker image prune -a -f --filter "until=24h" 2>/dev/null || echo "  (Image prune timed out)"
@@ -338,6 +338,7 @@ for profile in "$HOME/Library/Caches/ms-playwright"/mcp-chrome-*; do
     [ -d "$profile" ] || continue
     last_use="$profile/Local State"
     [ -e "$last_use" ] || last_use="$profile"
+    [ -L "$profile/SingletonLock" ] && continue  # Chrome is running on it
     if find "$last_use" -maxdepth 0 -mtime +30 -print -quit 2>/dev/null | grep -q .; then
         echo "  Removing Playwright MCP profile $(basename "$profile") ($(du -sh "$profile" 2>/dev/null | awk '{print $1}'), unused 30d+)"
         rm -rf "$profile" 2>/dev/null && ((CLAUDE_CLEANED++)) || true
@@ -370,8 +371,11 @@ else
     echo "  brew not found, skipping"
 fi
 
-if command -v npm >/dev/null 2>&1; then
-    clean_pm_cache 120 "Cleaning npm cache" npm cache clean --force
+# Skipped while an install runs: wiping _cacache under it fails with ENOENT/EINTEGRITY.
+if pgrep -f "npm(-cli.js)? (ci|install|i|add|update)( |$)" >/dev/null 2>&1; then
+    echo "  npm install in progress, skipping npm cache clean"
+elif command -v npm >/dev/null 2>&1; then
+    clean_pm_cache 300 "Cleaning npm cache" npm cache clean --force
 else
     echo "  npm not found, skipping"
 fi
