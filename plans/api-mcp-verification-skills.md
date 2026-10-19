@@ -59,6 +59,8 @@ Executes the API/MCP verification docs against a **local or test environment onl
                  "user_types": [], "affected_paths": [], "verified_at": "<sha>" } ] }
 ```
 
+One manifest entry per independently gated operation: a grouped doc with a public GET and an admin-only POST is split into two entries (the writers emit one `access:` block per operation doc, never the most permissive of a group).
+
 Combination semantics (as built in `api-verification/scripts/matrix.py`): every declared kind (roles, scopes, permissions, tier) must be satisfied, and within a kind the principal needs any one listed value. `public: true` means unauthenticated callers may reach the operation; `visibility` only says who may read the docs, so the two are separate fields. The `access:` frontmatter contract in `verification-writer` is extended in this plan to allow several `required_*` kinds at once (today it permits only the fields of the single `auth_model`); existing documents stay valid because every field is optional. An operation needing both Admin and `billing:write` is therefore `roles: [Admin]` plus `scopes: [billing:write]`; alternatives (Admin OR a scope) are two entries.
 
 The manifest, not an agent's judgment, decides audience. Consumers: the customer-docs agent, the internal-docs agent, `llms.txt` / sitemap / MCP-index build steps, CI.
