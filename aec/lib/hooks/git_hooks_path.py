@@ -10,6 +10,8 @@ scripts into, plus whether the husky v8 bootstrap source-line needs to be
 injected.
 """
 
+import json
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,11 +42,33 @@ def _read_core_hooks_path(repo_root: Path) -> Optional[str]:
     return value or None
 
 
+def _husky_major_from_package_json(repo_root: Path) -> Optional[int]:
+    try:
+        pkg = json.loads((repo_root / "package.json").read_text())
+    except (OSError, ValueError):
+        return None
+    for section in ("devDependencies", "dependencies"):
+        spec = (pkg.get(section) or {}).get("husky")
+        if isinstance(spec, str):
+            m = re.search(r"\d+", spec)
+            if m:
+                return int(m.group())
+    return None
+
+
 def _detect_husky(repo_root: Path) -> Optional[str]:
     husky_dir = repo_root / ".husky"
     if not husky_dir.is_dir():
         return None
     underscore = husky_dir / "_"
+    # v9 always writes `_/h`; it also writes a `_/husky.sh` deprecation stub,
+    # so husky.sh alone does not mean v8. `_/` is gitignored, so a fresh
+    # clone or worktree has none: fall back to the declared husky version.
+    if (underscore / "h").is_file():
+        return "v9"
+    major = _husky_major_from_package_json(repo_root)
+    if major is not None and major >= 9:
+        return "v9"
     if not underscore.is_dir():
         # `.husky/` exists but no `_/` — likely v8 pre-install state.
         return "v8"

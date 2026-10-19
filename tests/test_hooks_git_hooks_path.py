@@ -59,6 +59,28 @@ class TestResolveHooksDir:
         assert r.husky_version == "v8"
         assert r.needs_v8_bootstrap is True
 
+    def test_husky_v9_with_deprecation_stub_is_v9(self, tmp_path):
+        from aec.lib.hooks.git_hooks_path import resolve_hooks_dir
+        repo = tmp_path / "repo"
+        _git_init(repo)
+        (repo / ".husky" / "_").mkdir(parents=True)
+        (repo / ".husky" / "_" / "h").write_text("#!/usr/bin/env sh\n")
+        (repo / ".husky" / "_" / "husky.sh").write_text('echo "husky - DEPRECATED"\n')
+        r = resolve_hooks_dir(repo)
+        assert r.husky_version == "v9"
+        assert r.needs_v8_bootstrap is False
+
+    def test_husky_v9_fresh_checkout_uses_package_json(self, tmp_path):
+        from aec.lib.hooks.git_hooks_path import resolve_hooks_dir
+        repo = tmp_path / "repo"
+        _git_init(repo)
+        (repo / ".husky").mkdir()
+        (repo / "package.json").write_text('{"devDependencies": {"husky": "^9.1.7"}}')
+        r = resolve_hooks_dir(repo)
+        assert r.hooks_dir == repo / ".husky"
+        assert r.husky_version == "v9"
+        assert r.needs_v8_bootstrap is False
+
     def test_custom_core_hooks_path_non_husky(self, tmp_path):
         from aec.lib.hooks.git_hooks_path import resolve_hooks_dir
         repo = tmp_path / "repo"
