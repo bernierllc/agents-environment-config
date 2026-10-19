@@ -85,7 +85,110 @@ is_process_older_than_minutes() {
     return 1
 }
 
+# Which Docker runtime backs the CLI: "colima" (VM running), "desktop" (another
+# daemon answers) or "none". A stopped Colima is never reported as "colima".
+detect_docker_runtime() {
+    if command -v colima >/dev/null 2>&1 && colima status >/dev/null 2>&1; then
+        echo colima
+    elif run_with_timeout 10 docker info >/dev/null 2>&1; then
+        echo desktop
+    else
+        echo none
+    fi
+}
+
+# Poll until the Docker daemon answers. Usage: wait_for_docker SECONDS
+wait_for_docker() {
+    local waited=0
+    until run_with_timeout 10 docker info >/dev/null 2>&1; do
+        [ "$waited" -ge "$1" ] && return 1
+        sleep 2
+        waited=$((waited + 2))
+    done
+}
+
+# Free space on the volume holding $HOME, in KiB.
+free_kb() {
+    df -Pk "$HOME" | awk 'NR==2 {print $4}'
+}
+
+# Stop/start bookkeeping for the Colima recycle. on_exit makes sure an
+# interrupted run still brings Colima back.
+COLIMA_RUNNING_BEFORE=""
+COLIMA_STOPPED_BY_US=0
+RESTART_FAILED=0
+
+# Start Colima again and restart the containers that were running before the
+# stop, so recycling is a reset rather than a loss of local dev databases.
+restart_colima() {
+    [ "$COLIMA_STOPPED_BY_US" = 1 ] || return 0
+    COLIMA_STOPPED_BY_US=0
+    echo "  Starting Colima..."
+    if run_with_timeout 300 colima start >/dev/null 2>&1 && wait_for_docker 120; then
+        echo "  Colima is back up"
+    else
+        echo "  ERROR: Colima did not come back up. Run 'colima start' by hand." >&2
+        RESTART_FAILED=1
+        return 1
+    fi
+    if [ -n "$COLIMA_RUNNING_BEFORE" ]; then
+        echo "  Restarting containers that were running before the stop"
+        # Word splitting is intentional: container IDs are single tokens.
+        local ids
+        ids=$(tr '\n' ' ' <<<"$COLIMA_RUNNING_BEFORE")
+        # shellcheck disable=SC2086
+        run_with_timeout 120 docker start $ids >/dev/null 2>&1 || echo "  (some containers failed to restart)"
+    fi
+}
+
+# Stop Colima, then restart it. Usage: recycle_colima
+recycle_colima() {
+    COLIMA_RUNNING_BEFORE=$(run_with_timeout 10 docker ps -q 2>/dev/null || true)
+    echo ""
+    echo "Recycling Colima (stop, then start)..."
+    if ! run_with_timeout 180 colima stop >/dev/null 2>&1; then
+        echo "  colima stop failed or timed out; leaving Colima as it is"
+        return 0
+    fi
+    COLIMA_STOPPED_BY_US=1
+    restart_colima
+}
+
+# Compose stacks whose project directory no longer exists (a removed worktree).
+# Reported only: a running stack may still be in use, so nothing is stopped.
+report_orphan_compose_stacks() {
+    local name dir
+    while IFS=$'\t' read -r name dir; do
+        [ -n "$name" ] || continue
+        if [ -n "$dir" ] && [ ! -d "$dir" ]; then
+            echo "  [REPORT] compose stack '$name' runs from a missing directory ($dir)"
+            echo "           stop it with: docker ps -q -f label=com.docker.compose.project=$name | xargs docker stop"
+        fi
+    done < <(run_with_timeout 10 docker ps --filter label=com.docker.compose.project \
+        --format '{{.Label "com.docker.compose.project"}}{{"\t"}}{{.Label "com.docker.compose.project.working_dir"}}' \
+        2>/dev/null | sort -u || true)
+}
+
+# Run a package-manager cache clean in the background. Its output goes to
+# $PM_LOG_DIR/NAME.log so parallel jobs don't interleave.
+# Usage: start_pm_job NAME SECONDS label command [args...]
+PM_JOB_NAMES=()
+start_pm_job() {
+    local name="$1"
+    shift
+    PM_JOB_NAMES+=("$name")
+    clean_pm_cache "$@" >"$PM_LOG_DIR/$name.log" 2>&1 &
+}
+
+on_exit() {
+    restart_colima || true
+    [ -n "${PM_LOG_DIR:-}" ] && rm -rf "$PM_LOG_DIR"
+}
+
 KILLED_COUNT=0
+trap on_exit EXIT
+trap 'exit 130' INT TERM
+FREE_BEFORE_KB=$(free_kb)
 
 echo "Checking for hung processes..."
 echo "================================="
@@ -181,10 +284,16 @@ echo ""
 echo "Starting Docker cleanup..."
 echo "================================="
 
-if ! docker info >/dev/null 2>&1; then
-    echo "Docker is not running, skipping cleanup"
+DOCKER_TIMEOUT=60
+DOCKER_RUNTIME=$(detect_docker_runtime)
+
+if ! command -v docker >/dev/null 2>&1; then
+    echo "docker CLI not installed, skipping cleanup"
+elif [ "$DOCKER_RUNTIME" = "none" ]; then
+    echo "No Docker runtime running (Colima and Docker Desktop are both down), skipping cleanup"
 else
-    DOCKER_TIMEOUT=60
+    echo "Runtime: $DOCKER_RUNTIME"
+    report_orphan_compose_stacks
 
     echo ""
     echo "Current Docker disk usage:"
@@ -203,11 +312,13 @@ else
     echo "  Running docker system prune..."
     run_with_timeout "$DOCKER_TIMEOUT" docker system prune -f 2>&1 || echo "  (Prune timed out)"
 
-    echo "  Pruning unused volumes..."
-    run_with_timeout 30 docker volume prune -f 2>/dev/null || echo "  (Volume prune timed out)"
-
+    # No `volume prune`: an unused volume is often a stopped dev database's data.
     echo "  Pruning unused images (unused 24h+)..."
     run_with_timeout "$DOCKER_TIMEOUT" docker image prune -a -f --filter "until=24h" 2>/dev/null || echo "  (Image prune timed out)"
+
+    if [ "$DOCKER_RUNTIME" = "colima" ]; then
+        recycle_colima
+    fi
 
     echo ""
     echo "Docker disk usage after cleanup:"
@@ -227,8 +338,9 @@ CACHE_DIRS_DELETED=0
 CACHE_BYTES_FREED=0
 
 if [ -d "$PROJECTS_DIR" ]; then
-    # Known cache directory patterns to clean
-    CACHE_PATTERNS=(".next" ".nuxt" ".turbo" ".parcel-cache" ".cache" "dist" ".output" ".svelte-kit")
+    # Known cache directory patterns to clean. `dist` is deliberately absent:
+    # it is build output that workspace consumers import, not a cache.
+    CACHE_PATTERNS=(".next" ".nuxt" ".turbo" ".parcel-cache" ".cache" ".output" ".svelte-kit")
 
     for pattern in "${CACHE_PATTERNS[@]}"; do
         while IFS= read -r cache_dir; do
@@ -333,36 +445,52 @@ echo ""
 echo "Starting package manager cache cleanup..."
 echo "================================="
 
+# The caches are independent, so they run concurrently; the slowest one sets the wall time.
+PM_LOG_DIR=$(mktemp -d)
+
 if command -v pnpm >/dev/null 2>&1; then
-    clean_pm_cache 120 "Pruning pnpm store" pnpm store prune
+    start_pm_job pnpm 120 "Pruning pnpm store" pnpm store prune
 else
     echo "  pnpm not found, skipping"
 fi
 
 if command -v yarn >/dev/null 2>&1; then
-    clean_pm_cache 120 "Cleaning yarn cache" yarn cache clean
+    start_pm_job yarn 120 "Cleaning yarn cache" yarn cache clean
 else
     echo "  yarn not found, skipping"
 fi
 
 if command -v brew >/dev/null 2>&1; then
-    clean_pm_cache 300 "Running brew cleanup" brew cleanup
+    start_pm_job brew 300 "Running brew cleanup" brew cleanup
 else
     echo "  brew not found, skipping"
 fi
 
 if command -v pip >/dev/null 2>&1; then
-    clean_pm_cache 120 "Purging pip cache" pip cache purge
+    start_pm_job pip 120 "Purging pip cache" pip cache purge
 elif command -v pip3 >/dev/null 2>&1; then
-    clean_pm_cache 120 "Purging pip3 cache" pip3 cache purge
+    start_pm_job pip 120 "Purging pip3 cache" pip3 cache purge
 else
     echo "  pip not found, skipping"
 fi
 
+wait
+for name in "${PM_JOB_NAMES[@]}"; do
+    cat "$PM_LOG_DIR/$name.log"
+done
+
 echo ""
 echo "Package manager cache cleanup complete"
 
+FREE_AFTER_KB=$(free_kb)
+GIB=1048576
 echo ""
 echo "================================="
 echo "All cleanup tasks complete"
+echo "Free space: $((FREE_AFTER_KB / GIB)) GiB (was $((FREE_BEFORE_KB / GIB)) GiB, change $(((FREE_AFTER_KB - FREE_BEFORE_KB) / GIB)) GiB)"
 echo "================================="
+
+if [ "$RESTART_FAILED" != 0 ]; then
+    exit 1
+fi
+exit 0

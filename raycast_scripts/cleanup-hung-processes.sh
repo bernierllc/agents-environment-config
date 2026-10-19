@@ -25,4 +25,6 @@ if [ ! -f "$CLEANUP_SCRIPT" ]; then
     exit 1
 fi
 
-exec "$CLEANUP_SCRIPT"
+# Not `exec`: that replaces this shell, and a sourced caller (the `cleanup`
+# shell function) would be closed when the script finished.
+"$CLEANUP_SCRIPT"

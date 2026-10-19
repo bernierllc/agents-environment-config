@@ -130,3 +130,87 @@ def test_ctrl_c_aborts_the_script_through_the_timeout_wrapper() -> None:
     out, _ = proc.communicate(timeout=15)
     assert proc.returncode == -signal.SIGINT, (proc.returncode, out)
     assert "STEP2_RAN" not in out, out
+
+
+def _run_snippet(bindir: Path, body: str, timeout: int = 20) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["bash", "-c", _helper_prelude() + "\n" + body],
+        env=_env(bindir),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+@pytest.mark.parametrize(
+    ("colima_status", "docker_info", "expected"),
+    [
+        (0, 0, "colima"),  # VM up: colima wins even though docker answers too
+        (1, 0, "desktop"),  # colima stopped, another daemon answers
+        (1, 1, "none"),  # nothing running
+    ],
+)
+def test_detect_runtime_never_reports_a_stopped_colima(tmp_path: Path, colima_status: int, docker_info: int, expected: str) -> None:
+    _fake_tool(tmp_path, "colima", f"exit {colima_status}\n")
+    bindir = _fake_tool(tmp_path, "docker", f"exit {docker_info}\n")
+    result = _run_snippet(bindir, "detect_docker_runtime\n")
+    assert result.stdout.strip() == expected, result.stderr
+
+
+def test_pm_jobs_run_concurrently_and_log_in_start_order(tmp_path: Path) -> None:
+    bindir = _fake_tool(tmp_path, "pnpm", "sleep 2\necho pnpm-done\n")
+    _fake_tool(tmp_path, "yarn", "sleep 2\necho yarn-done\n")
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    body = (
+        f'PM_LOG_DIR="{log_dir}"\n'
+        'start_pm_job pnpm 10 "Pruning pnpm store" pnpm store prune\n'
+        'start_pm_job yarn 10 "Cleaning yarn cache" yarn cache clean\n'
+        "wait\n"
+        'for name in "${PM_JOB_NAMES[@]}"; do cat "$PM_LOG_DIR/$name.log"; done\n'
+    )
+    start = time.monotonic()
+    result = _run_snippet(bindir, body)
+    elapsed = time.monotonic() - start
+    assert elapsed < 3.5, f"jobs ran one after another ({elapsed:.1f}s for two 2s tools)"
+    assert "pnpm-done" in result.stdout and "yarn-done" in result.stdout, result.stdout
+    assert result.stdout.index("pnpm-done") < result.stdout.index("yarn-done")
+
+
+def test_wait_for_docker_gives_up_after_the_deadline(tmp_path: Path) -> None:
+    bindir = _fake_tool(tmp_path, "docker", "exit 1\n")
+    start = time.monotonic()
+    result = _run_snippet(bindir, "wait_for_docker 4 && echo UP || echo DOWN\n")
+    elapsed = time.monotonic() - start
+    assert "DOWN" in result.stdout, result.stdout
+    assert elapsed < 10, f"wait_for_docker overran its 4s deadline ({elapsed:.1f}s)"
+
+
+def test_orphan_stack_report_names_only_stacks_whose_directory_is_gone(tmp_path: Path) -> None:
+    live = tmp_path / "live-worktree"
+    live.mkdir()
+    gone = tmp_path / "removed-worktree"
+    bindir = _fake_tool(
+        tmp_path,
+        "docker",
+        f'printf "byo-live\\t{live}\\nbyo-live\\t{live}\\nbyo-gone\\t{gone}\\n"\n',
+    )
+    result = _run_snippet(bindir, "report_orphan_compose_stacks\n")
+    assert "byo-gone" in result.stdout, result.stdout
+    assert "byo-live" not in result.stdout, result.stdout
+
+
+def test_failed_colima_restart_is_reported_and_flagged(tmp_path: Path) -> None:
+    # `colima start` fails at once, so wait_for_docker is never reached.
+    bindir = _fake_tool(tmp_path, "colima", "exit 1\n")
+    body = 'COLIMA_STOPPED_BY_US=1\nrestart_colima || true\necho "FLAG=$RESTART_FAILED"\n'
+    result = _run_snippet(bindir, body)
+    assert "FLAG=1" in result.stdout, result.stdout
+    assert "did not come back up" in result.stderr, result.stderr
+
+
+def test_restart_is_a_no_op_when_this_run_did_not_stop_colima(tmp_path: Path) -> None:
+    bindir = _fake_tool(tmp_path, "colima", "exit 1\n")
+    result = _run_snippet(bindir, 'restart_colima\necho "FLAG=$RESTART_FAILED"\n')
+    assert "FLAG=0" in result.stdout, result.stdout
+    assert "Starting Colima" not in result.stdout, result.stdout
