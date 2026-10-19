@@ -43,7 +43,7 @@ Findings report (same format as verification-writer's): routes/tools analyzed, m
 Executes the API/MCP verification docs against a **local or test environment only**:
 
 - REST via Playwright `APIRequestContext`; MCP via the MCP SDK client over stdio or HTTP.
-- **Role/scope matrix:** for each item, call as every declared role/scope/tier plus unauthenticated, assert the allowed ones succeed and the others are denied. A mismatch between `access:` and actual behavior is the headline finding (doc wrong or code wrong; never silently update either).
+- **Role/scope matrix:** for each item, call as every declared role/scope/permission/tier plus unauthenticated (principals.json lists roles, scopes, permissions and tier per principal; a permission-gated operation is probed with a principal holding it and an authenticated one lacking it), assert the allowed ones succeed and the others are denied. A mismatch between `access:` and actual behavior is the headline finding (doc wrong or code wrong; never silently update either).
 - Logs, fixes-or-findings and the run summary follow browser-verification's structure.
 - Safety: test credentials from `.env*` only, refuses production base URLs, no secrets or tokens written to docs or logs, destructive tools run only against seeded fixtures.
 - A generator step (verification docs to persisted Playwright API tests) is **deferred**; the runner executes docs directly first. Add the generator only if regression-test persistence proves necessary.
@@ -59,13 +59,13 @@ Executes the API/MCP verification docs against a **local or test environment onl
                  "user_types": [], "affected_paths": [], "verified_at": "<sha>" } ] }
 ```
 
-Combination semantics (as built in `api-verification/scripts/matrix.py`): every declared kind (roles, scopes, permissions, tier) must be satisfied, and within a kind the principal needs any one listed value. `public: true` means unauthenticated callers may reach the operation; `visibility` only says who may read the docs, so the two are separate fields. An operation needing both Admin and `billing:write` is therefore `roles: [Admin]` plus `scopes: [billing:write]`; alternatives (Admin OR a scope) are two entries.
+Combination semantics (as built in `api-verification/scripts/matrix.py`): every declared kind (roles, scopes, permissions, tier) must be satisfied, and within a kind the principal needs any one listed value. `public: true` means unauthenticated callers may reach the operation; `visibility` only says who may read the docs, so the two are separate fields. The `access:` frontmatter contract in `verification-writer` is extended in this plan to allow several `required_*` kinds at once (today it permits only the fields of the single `auth_model`); existing documents stay valid because every field is optional. An operation needing both Admin and `billing:write` is therefore `roles: [Admin]` plus `scopes: [billing:write]`; alternatives (Admin OR a scope) are two entries.
 
 The manifest, not an agent's judgment, decides audience. Consumers: the customer-docs agent, the internal-docs agent, `llms.txt` / sitemap / MCP-index build steps, CI.
 
 ## How the docs writer uses it
 
-- Reads the manifest if present. Public/no-auth entries become customer docs; role-gated entries become admin guides; tier-gated entries get an availability note; `internal` entries go to internal docs and `admin` entries to admin guides; only `draft` (the default, never inferred) is withheld from everything, and only `public` enters crawlable outputs.
+- Reads the manifest if present. The destination comes from `visibility` alone: `public` entries become customer docs, `internal` entries internal docs, `admin` entries admin guides. Roles, scopes and tiers only describe access and availability inside that page (a `visibility: public` operation gated to `member` is customer documentation that says so);  only `draft` (the default, never inferred) is withheld from everything, and only `public` enters crawlable outputs.
 - No manifest: every claim is marked `unverified` and pages stay `draft`.
 - User flows come from flow docs (`user_types`, ordered steps), not from the agent inferring them.
 
