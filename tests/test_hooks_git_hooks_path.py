@@ -94,6 +94,17 @@ class TestResolveHooksDir:
         assert r.husky_version is None
         assert r.needs_v8_bootstrap is False
 
+    def test_linked_worktree_uses_common_hooks_dir(self, tmp_path):
+        from aec.lib.hooks.git_hooks_path import resolve_hooks_dir
+        repo = tmp_path / "repo"
+        _git_init(repo)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
+                        "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+        wt = repo / ".worktrees" / "wt"
+        subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", str(wt)], check=True)
+        r = resolve_hooks_dir(wt)
+        assert r.hooks_dir.resolve() == (repo / ".git" / "hooks").resolve()
+
     def test_no_git_repo_falls_back_to_git_hooks(self, tmp_path):
         from aec.lib.hooks.git_hooks_path import resolve_hooks_dir
         repo = tmp_path / "repo"

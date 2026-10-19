@@ -28,10 +28,11 @@ class HooksDirResolution:
     needs_v8_bootstrap: bool
 
 
-def _read_core_hooks_path(repo_root: Path) -> Optional[str]:
+def _git_hooks_path(repo_root: Path) -> Optional[Path]:
     try:
         result = subprocess.run(
-            ["git", "-C", str(repo_root), "config", "--get", "core.hooksPath"],
+            ["git", "-C", str(repo_root), "rev-parse",
+             "--path-format=absolute", "--git-path", "hooks"],
             capture_output=True, text=True, check=False,
         )
     except (FileNotFoundError, OSError):
@@ -39,7 +40,7 @@ def _read_core_hooks_path(repo_root: Path) -> Optional[str]:
     if result.returncode != 0:
         return None
     value = result.stdout.strip()
-    return value or None
+    return Path(value) if value else None
 
 
 def _husky_major_from_package_json(repo_root: Path) -> Optional[int]:
@@ -87,8 +88,9 @@ def resolve_hooks_dir(repo_root: Path) -> HooksDirResolution:
       1. If `.husky/` exists, target `.husky/<name>` regardless of
          `core.hooksPath` (husky v9 sets it to `.husky/_/` but user hooks
          belong at `.husky/<name>`).
-      2. If `core.hooksPath` is configured, honor it.
-      3. Default to `.git/hooks/`.
+      2. Otherwise git's own hooks dir: `core.hooksPath` if set, else the
+         (common) `.git/hooks/`, which also covers linked worktrees.
+      3. Not a git repo: `.git/hooks/`.
     """
     husky_version = _detect_husky(repo_root)
     if husky_version is not None:
@@ -98,13 +100,12 @@ def resolve_hooks_dir(repo_root: Path) -> HooksDirResolution:
             needs_v8_bootstrap=(husky_version == "v8"),
         )
 
-    configured = _read_core_hooks_path(repo_root)
-    if configured:
-        path = Path(configured)
-        if not path.is_absolute():
-            path = repo_root / path
+    # `--git-path hooks` honors core.hooksPath and resolves a linked
+    # worktree (where `.git` is a file) to the common hooks dir.
+    hooks = _git_hooks_path(repo_root)
+    if hooks is not None:
         return HooksDirResolution(
-            hooks_dir=path,
+            hooks_dir=hooks,
             husky_version=None,
             needs_v8_bootstrap=False,
         )
