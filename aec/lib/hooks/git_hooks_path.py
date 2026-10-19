@@ -31,8 +31,9 @@ class HooksDirResolution:
 def _git_hooks_path(repo_root: Path) -> Optional[Path]:
     try:
         result = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse",
-             "--path-format=absolute", "--git-path", "hooks"],
+            # no --path-format=absolute (git >= 2.31): the relative answer is
+            # relative to -C, and joining an absolute one leaves it unchanged
+            ["git", "-C", str(repo_root), "rev-parse", "--git-path", "hooks"],
             capture_output=True, text=True, check=False,
         )
     except (FileNotFoundError, OSError):
@@ -40,7 +41,7 @@ def _git_hooks_path(repo_root: Path) -> Optional[Path]:
     if result.returncode != 0:
         return None
     value = result.stdout.strip()
-    return Path(value) if value else None
+    return repo_root / value if value else None
 
 
 def _husky_major_from_package_json(repo_root: Path) -> Optional[int]:
