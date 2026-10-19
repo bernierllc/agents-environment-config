@@ -130,3 +130,18 @@ def test_ctrl_c_aborts_the_script_through_the_timeout_wrapper() -> None:
     out, _ = proc.communicate(timeout=15)
     assert proc.returncode == -signal.SIGINT, (proc.returncode, out)
     assert "STEP2_RAN" not in out, out
+
+
+def test_pm_cache_runs_from_home_not_the_callers_repo(tmp_path: Path) -> None:
+    # Regression: run from a repo whose .npmrc has an unset ${NPM_TOKEN},
+    # `yarn cache clean` failed. The caches are global, so run from $HOME.
+    bindir = _fake_tool(tmp_path, "yarn", 'echo "cwd=$PWD"\n')
+    home = tmp_path / "home"
+    home.mkdir()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    script = _helper_prelude() + '\nclean_pm_cache 5 "Cleaning yarn cache" yarn cache clean\n'
+    result = subprocess.run(
+        ["bash", "-c", script], cwd=repo, env=_env(bindir, {"HOME": str(home)}), capture_output=True, text=True, timeout=15
+    )
+    assert f"cwd={home}" in result.stdout, result.stdout

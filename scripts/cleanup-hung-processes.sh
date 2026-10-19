@@ -42,12 +42,15 @@ run_with_timeout() {
 # - COREPACK_ENABLE_NETWORK=0: a missing tool fails fast instead of being
 #   downloaded by a cleanup script.
 # - run_with_timeout: same guard the Docker steps already have.
+# - cd "$HOME": these caches are global, but the tools still read the caller's
+#   project config, and a project .npmrc with an unset ${NPM_TOKEN} makes
+#   `yarn cache clean` fail when the script runs from that repo.
 clean_pm_cache() {
     local seconds="$1" label="$2"
     shift 2
     echo "  $label..."
     local out
-    if out=$(COREPACK_ENABLE_NETWORK=0 run_with_timeout "$seconds" "$@" </dev/null 2>&1); then
+    if out=$(cd "$HOME" && COREPACK_ENABLE_NETWORK=0 run_with_timeout "$seconds" "$@" </dev/null 2>&1); then
         echo "    $(tail -n1 <<<"$out")"
     else
         echo "    ($label failed or timed out: $(tail -n1 <<<"$out"))"
@@ -203,8 +206,17 @@ else
     echo "  Running docker system prune..."
     run_with_timeout "$DOCKER_TIMEOUT" docker system prune -f 2>&1 || echo "  (Prune timed out)"
 
-    echo "  Pruning unused volumes..."
-    run_with_timeout 30 docker volume prune -f 2>/dev/null || echo "  (Volume prune timed out)"
+    # Default is anonymous-only: named volumes (Supabase stacks, compose projects)
+    # hold databases, and a stopped stack's volumes are unreferenced once its
+    # containers are removed above. Set CLEANUP_PRUNE_NAMED_VOLUMES=1 to also
+    # delete those (-a), e.g. when local DBs are ephemeral.
+    if [ "${CLEANUP_PRUNE_NAMED_VOLUMES:-0}" = "1" ]; then
+        echo "  Pruning unused volumes (named included)..."
+        run_with_timeout 60 docker volume prune -a -f 2>&1 || echo "  (Volume prune failed or timed out)"
+    else
+        echo "  Pruning anonymous volumes (set CLEANUP_PRUNE_NAMED_VOLUMES=1 to include named)..."
+        run_with_timeout 60 docker volume prune -f 2>&1 || echo "  (Volume prune failed or timed out)"
+    fi
 
     echo "  Pruning unused images (unused 24h+)..."
     run_with_timeout "$DOCKER_TIMEOUT" docker image prune -a -f --filter "until=24h" 2>/dev/null || echo "  (Image prune timed out)"
@@ -325,6 +337,24 @@ if [ -d "$CLAUDE_CACHE" ]; then
     fi
 fi
 
+# 5. Playwright MCP browser profiles (~/Library/Caches/ms-playwright/mcp-chrome-*),
+#    one per workspace, unused for 30 days. Chrome rewrites "Local State" on every
+#    exit, so its mtime is the profile's last use.
+for profile in "$HOME/Library/Caches/ms-playwright"/mcp-chrome-*; do
+    [ -d "$profile" ] || continue
+    last_use="$profile/Local State"
+    [ -e "$last_use" ] || last_use="$profile"
+    # SingletonLock -> "<host>-<pid>"; a crash leaves it behind, so skip only if that pid is alive.
+    if [ -L "$profile/SingletonLock" ]; then
+        lock_pid=$(readlink "$profile/SingletonLock" 2>/dev/null | sed 's/.*-//')
+        kill -0 "$lock_pid" 2>/dev/null && continue
+    fi
+    if find "$last_use" -maxdepth 0 -mtime +30 -print -quit 2>/dev/null | grep -q .; then
+        echo "  Removing Playwright MCP profile $(basename "$profile") ($(du -sh "$profile" 2>/dev/null | awk '{print $1}'), unused 30d+)"
+        rm -rf "$profile" 2>/dev/null && ((CLAUDE_CLEANED++)) || true
+    fi
+done
+
 echo ""
 echo "  Claude cleanup: $CLAUDE_CLEANED items cleaned"
 
@@ -346,9 +376,22 @@ else
 fi
 
 if command -v brew >/dev/null 2>&1; then
-    clean_pm_cache 300 "Running brew cleanup" brew cleanup
+    clean_pm_cache 300 "Running brew cleanup" brew cleanup --prune=all
 else
     echo "  brew not found, skipping"
+fi
+
+# Skipped while an install runs: wiping _cacache under it fails with ENOENT/EINTEGRITY.
+if pgrep -f "npm(-cli.js)? (ci|clean-install|ic|install-clean|install|i|in|ins|inst|insta|instal|isntall|add|update|up|upgrade)( |$)" >/dev/null 2>&1; then
+    echo "  npm install in progress, skipping npm cache clean"
+elif command -v npm >/dev/null 2>&1; then
+    clean_pm_cache 300 "Cleaning npm cache" npm cache clean --force
+else
+    echo "  npm not found, skipping"
+fi
+
+if command -v uv >/dev/null 2>&1; then
+    clean_pm_cache 120 "Pruning uv cache" uv cache prune
 fi
 
 if command -v pip >/dev/null 2>&1; then
@@ -358,6 +401,16 @@ elif command -v pip3 >/dev/null 2>&1; then
 else
     echo "  pip not found, skipping"
 fi
+
+# App updaters (Sparkle, Squirrel's ShipIt) leave staged updates behind; Codex's
+# Sparkle cache alone held 6.9GB. Anything staged 7d+ ago is long installed.
+for staged in "$HOME"/Library/Caches/*/org.sparkle-project.Sparkle/Installation "$HOME"/Library/Caches/*.ShipIt; do
+    [ -d "$staged" ] || continue
+    if find "$staged" -maxdepth 0 -mtime +7 -print -quit 2>/dev/null | grep -q .; then
+        echo "  Removing stale app update $staged ($(du -sh "$staged" 2>/dev/null | awk '{print $1}'))"
+        rm -rf "$staged" 2>/dev/null || true
+    fi
+done
 
 echo ""
 echo "Package manager cache cleanup complete"
