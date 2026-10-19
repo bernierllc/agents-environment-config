@@ -4,7 +4,6 @@ description: "Use in any TypeScript repo where Claude Code edits files. Installs
 tags: ["skill"]
 ---
 
-
 # Type-check on edit
 
 ## What it installs
