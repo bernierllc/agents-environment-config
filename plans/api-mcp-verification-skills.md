@@ -54,7 +54,7 @@ Executes the API/MCP verification docs against a **local or test environment onl
 
 ```json
 { "generated_from": "<git sha>",
-  "entries": [ { "surface": "page|rest|mcp|flow", "id": "...", "visibility": "public|internal|admin|draft",
+  "entries": [ { "surface": "page|rest|mcp", "id": "...", "visibility": "public|internal|admin|draft",
                  "auth_model": "...", "public": null, "roles": [], "scopes": [], "permissions": [], "tier": null, "gated_by": [],
                  "user_types": [], "affected_paths": [], "verified_at": "<sha>" } ] }
 ```
@@ -69,7 +69,7 @@ The manifest, not an agent's judgment, decides audience. Static discovery is not
 
 - Reads the manifest if present. The destination comes from `visibility` alone: `public` entries become customer docs, `internal` entries internal docs, `admin` entries admin guides. Roles, scopes and tiers only describe access and availability inside that page (a `visibility: public` operation gated to `member` is customer documentation that says so);  only `draft` (the default, never inferred) is withheld from everything, and only `public` enters crawlable outputs.
 - No manifest: every claim is marked `unverified` and pages stay `draft`.
-- User flows come from flow docs (`user_types`, ordered steps), not from the agent inferring them.
+- User flows come from flow docs (`user_types`, ordered steps), not from the agent inferring them. Flow docs have no `access:` block (the incumbent contract gives them none), so the manifest has no `flow` entries. A flow is published only when every page, endpoint or tool it names is a `public` manifest entry with a current `verified_at`; otherwise the flow is withheld as draft. Its audience is derived from its steps, never authored separately.
 
 ## Feedback loop between agents and skills
 
