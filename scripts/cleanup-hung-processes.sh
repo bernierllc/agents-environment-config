@@ -206,11 +206,17 @@ else
     echo "  Running docker system prune..."
     run_with_timeout "$DOCKER_TIMEOUT" docker system prune -f 2>&1 || echo "  (Prune timed out)"
 
-    # -a: without it Docker only prunes anonymous volumes, so named ones
-    # (Supabase stacks, compose projects) pile up once their containers are gone.
-    # Volumes of running containers are kept; stopped ones were removed above.
-    echo "  Pruning unused volumes (named included)..."
-    run_with_timeout 60 docker volume prune -a -f 2>&1 || echo "  (Volume prune failed or timed out)"
+    # Default is anonymous-only: named volumes (Supabase stacks, compose projects)
+    # hold databases, and a stopped stack's volumes are unreferenced once its
+    # containers are removed above. Set CLEANUP_PRUNE_NAMED_VOLUMES=1 to also
+    # delete those (-a), e.g. when local DBs are ephemeral.
+    if [ "${CLEANUP_PRUNE_NAMED_VOLUMES:-0}" = "1" ]; then
+        echo "  Pruning unused volumes (named included)..."
+        run_with_timeout 60 docker volume prune -a -f 2>&1 || echo "  (Volume prune failed or timed out)"
+    else
+        echo "  Pruning anonymous volumes (set CLEANUP_PRUNE_NAMED_VOLUMES=1 to include named)..."
+        run_with_timeout 60 docker volume prune -f 2>&1 || echo "  (Volume prune failed or timed out)"
+    fi
 
     echo "  Pruning unused images (unused 24h+)..."
     run_with_timeout "$DOCKER_TIMEOUT" docker image prune -a -f --filter "until=24h" 2>/dev/null || echo "  (Image prune timed out)"
