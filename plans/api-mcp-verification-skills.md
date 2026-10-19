@@ -29,7 +29,7 @@ Two new skills plus one shared artifact, mirroring the UI chain.
 Analyzes the codebase and emits `docs/verification/api/*.md` and `docs/verification/mcp/*.md`, one file per resource or tool group, same front-matter conventions as page docs:
 
 - `surface: rest | mcp`, `path` or `tool`, `version`, `generated_by`, `affected_paths`.
-- `access:` identical schema to pages, extended with `tier` (entitlement/plan gate) and `visibility: public | internal | admin | draft` (default `draft`).
+- `access:` identical schema to pages, extended with `tier` (entitlement/plan gate) and `visibility: public | internal | admin | draft` (default `draft`). Visibility is authored by a person in the doc's frontmatter and reviewed in the PR like any doc change; the writers always emit `draft` for new docs and never infer or overwrite it, and the generated manifest is never hand-edited. Promotion to `public`, `internal` or `admin` is that one-line frontmatter edit.
 - MCP extras: tool `annotations` (`readOnlyHint`, `destructiveHint`), input/output schema summary, required scope.
 - Role sections ("As Admin", "As Member", "Unauthenticated") with items in the existing item format; authorization-boundary items (wrong role gets 403/denied) are first-class, not deep-only extras.
 - Flow docs may span surfaces (UI step, then API call, then MCP tool) so user flows stay in one place.
@@ -45,7 +45,7 @@ Executes the API/MCP verification docs against a **local or test environment onl
 - REST via Playwright `APIRequestContext`; MCP via the MCP SDK client over stdio or HTTP.
 - **Role/scope matrix:** for each item, call as every declared role/scope/permission/tier plus unauthenticated (principals.json lists roles, scopes, permissions and tier per principal; a permission-gated operation is probed with a principal holding it and an authenticated one lacking it), assert the allowed ones succeed and the others are denied. A mismatch between `access:` and actual behavior is the headline finding (doc wrong or code wrong; never silently update either).
 - Logs, fixes-or-findings and the run summary follow browser-verification's structure.
-- Safety: test credentials from `.env*` only, refuses production base URLs, no secrets or tokens written to docs or logs, destructive tools run only against seeded fixtures.
+- Safety: test credentials from `.env*` only, allowlist, not heuristic: the runner refuses any base URL that is not loopback, private-range, link-local-excluded, `.local`/`.localhost`/`.test`/`.internal`, or named in `API_VERIFICATION_ALLOWED_HOSTS` (a production URL with no recognizable marker is refused by default), no secrets or tokens written to docs or logs, destructive tools run only against seeded fixtures.
 - A generator step (verification docs to persisted Playwright API tests) is **deferred**; the runner executes docs directly first. Add the generator only if regression-test persistence proves necessary.
 
 ### 3. Access manifest (shared, generated, never hand-edited)
@@ -63,7 +63,7 @@ One manifest entry per independently gated operation: a grouped doc with a publi
 
 Combination semantics (as built in `api-verification/scripts/matrix.py`): every declared kind (roles, scopes, permissions, tier) must be satisfied, and within a kind the principal needs any one listed value. `public: true` means unauthenticated callers may reach the operation; `visibility` only says who may read the docs, so the two are separate fields. The `access:` frontmatter contract in `verification-writer` is extended in this plan to allow several `required_*` kinds at once (today it permits only the fields of the single `auth_model`); existing documents stay valid because every field is optional. An operation needing both Admin and `billing:write` is therefore `roles: [Admin]` plus `scopes: [billing:write]`; alternatives (Admin OR a scope) are two entries.
 
-The manifest, not an agent's judgment, decides audience. Consumers: the customer-docs agent, the internal-docs agent, `llms.txt` / sitemap / MCP-index build steps, CI.
+The manifest, not an agent's judgment, decides audience. Static discovery is not verification: `verified_at` is written only by the runner (`matrix.py evaluate` with zero mismatches, stamped with the git SHA it ran against). Consumers send an entry into crawlable outputs only when `visibility` is `public` AND `verified_at` matches the current SHA of its `affected_paths`; otherwise it is treated as unverified and kept `draft`. Consumers: the customer-docs agent, the internal-docs agent, `llms.txt` / sitemap / MCP-index build steps, CI.
 
 ## How the docs writer uses it
 
