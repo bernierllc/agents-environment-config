@@ -344,7 +344,11 @@ for profile in "$HOME/Library/Caches/ms-playwright"/mcp-chrome-*; do
     [ -d "$profile" ] || continue
     last_use="$profile/Local State"
     [ -e "$last_use" ] || last_use="$profile"
-    [ -L "$profile/SingletonLock" ] && continue  # Chrome is running on it
+    # SingletonLock -> "<host>-<pid>"; a crash leaves it behind, so skip only if that pid is alive.
+    if [ -L "$profile/SingletonLock" ]; then
+        lock_pid=$(readlink "$profile/SingletonLock" 2>/dev/null | sed 's/.*-//')
+        kill -0 "$lock_pid" 2>/dev/null && continue
+    fi
     if find "$last_use" -maxdepth 0 -mtime +30 -print -quit 2>/dev/null | grep -q .; then
         echo "  Removing Playwright MCP profile $(basename "$profile") ($(du -sh "$profile" 2>/dev/null | awk '{print $1}'), unused 30d+)"
         rm -rf "$profile" 2>/dev/null && ((CLAUDE_CLEANED++)) || true
@@ -378,7 +382,7 @@ else
 fi
 
 # Skipped while an install runs: wiping _cacache under it fails with ENOENT/EINTEGRITY.
-if pgrep -f "npm(-cli.js)? (ci|install|i|add|update)( |$)" >/dev/null 2>&1; then
+if pgrep -f "npm(-cli.js)? (ci|clean-install|ic|install-clean|install|i|in|ins|inst|insta|instal|isntall|add|update|up|upgrade)( |$)" >/dev/null 2>&1; then
     echo "  npm install in progress, skipping npm cache clean"
 elif command -v npm >/dev/null 2>&1; then
     clean_pm_cache 300 "Cleaning npm cache" npm cache clean --force
