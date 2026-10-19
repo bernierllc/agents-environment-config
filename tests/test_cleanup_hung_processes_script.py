@@ -233,3 +233,10 @@ def test_recycle_leaves_containers_to_their_restart_policy(tmp_path: Path) -> No
     result = _run_snippet(bindir, "recycle_colima\necho \"FLAG=$RESTART_FAILED\"\n")
     assert "FLAG=0" in result.stdout, result.stdout
     assert not started.exists(), f"recycle started containers: {started.read_text()}"
+
+
+def test_windows_script_never_prunes_volumes() -> None:
+    # Same policy as the bash script: an unused volume can hold a stopped dev
+    # database, so no volume prune on any platform.
+    ps1 = SCRIPT.with_suffix(".ps1").read_text()
+    assert "docker volume prune" not in ps1, "volume prune would delete stopped dev databases"

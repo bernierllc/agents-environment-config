@@ -127,11 +127,7 @@ try {
         }
         Remove-Job $job -Force -ErrorAction SilentlyContinue
 
-        Write-Host "  Pruning unused volumes..."
-        $job = Start-Job { docker volume prune -f }
-        if (-not (Wait-Job $job -Timeout 30)) { Stop-Job $job }
-        Remove-Job $job -Force -ErrorAction SilentlyContinue
-
+        # No `volume prune`: an unused volume is often a stopped dev database's data.
         Write-Host "  Pruning unused images (unused 24h+)..."
         $job = Start-Job { docker image prune -a -f --filter "until=24h" }
         if (-not (Wait-Job $job -Timeout $timeoutSec)) {
