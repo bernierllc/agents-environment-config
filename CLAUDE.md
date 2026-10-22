@@ -58,3 +58,8 @@ AEC is a product for anyone who installs it, not the maintainer's personal setup
 ```bash
 python3 scripts/generate-agent-files.py
 ```
+
+## Scripts
+
+- `scripts/prune-merged-worktrees.sh` — removes clean worktrees under `~/projects/**/.worktrees` whose PR has merged, deletes the local branch, prunes the pnpm store. `DRY_RUN=1` to preview. Runs daily at 4:00 via `launchd/com.mattbernier.prune-merged-worktrees.plist` (install: copy to `~/Library/LaunchAgents/` and `launchctl load`). Log: `~/Library/Logs/prune-merged-worktrees.log`.
+- `scripts/cleanup-hung-processes.sh` — kills hung processes and runs Docker cleanup; daily at 23:00 and 03:00 via `~/Library/LaunchAgents/com.mattbernier.cleanup-hung-processes.plist` (untracked).
