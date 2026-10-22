@@ -61,5 +61,5 @@ python3 scripts/generate-agent-files.py
 
 ## Scripts
 
-- `scripts/prune-merged-worktrees.sh` — removes clean worktrees under `~/projects/**/.worktrees` whose PR has merged, deletes the local branch, prunes the pnpm store. `DRY_RUN=1` to preview. Runs daily at 4:00 via `launchd/com.mattbernier.prune-merged-worktrees.plist` (install: copy to `~/Library/LaunchAgents/` and `launchctl load`). Log: `~/Library/Logs/prune-merged-worktrees.log`.
-- `scripts/cleanup-hung-processes.sh` — kills hung processes and runs Docker cleanup; daily at 23:00 and 03:00 via `~/Library/LaunchAgents/com.mattbernier.cleanup-hung-processes.plist` (untracked).
+- `scripts/prune-merged-worktrees.sh` — removes linked git worktrees under `$PROJECTS_ROOT` (default `~/projects`, two levels deep) whose branch has a merged PR and whose HEAD is exactly the merged commit, then deletes the local branch. Keeps and reports dirty worktrees, unpushed commits, reused branch names with an open PR, and ignored `.env*` files. `DRY_RUN=1` previews. Needs `gh` authenticated. Schedule it daily with cron or launchd.
+- `scripts/cleanup-hung-processes.sh` — kills hung processes, prunes Docker and package-manager caches. Schedule it daily the same way.
