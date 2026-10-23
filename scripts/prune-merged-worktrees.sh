@@ -1,7 +1,7 @@
 #!/bin/bash
 # Removes linked git worktrees whose branch has a merged PR and whose HEAD is exactly the commit
 # GitHub merged, then deletes the local branch. Kept and reported: dirty worktrees, a HEAD past the
-# merged commit (unpushed work), a branch name with a newer open PR, ignored .env* files in the tree.
+# merged commit (unpushed work), a branch name with a newer open PR, ignored .env* files in the tree (real files, not symlinks).
 # Scans $PROJECTS_ROOT (default ~/projects) one and two levels deep. DRY_RUN=1 only prints.
 # Idempotent; schedule it daily with cron or launchd.
 set -uo pipefail
@@ -42,7 +42,9 @@ for gitdir in "$ROOT"/*/.git "$ROOT"/*/*/.git; do
         if [ "$(git -C "$path" rev-parse HEAD)" != "$sha" ]; then
           echo "keep    $path  ($branch: HEAD is not the merged commit, may hold unpushed commits)"; continue
         fi
-        if git -C "$path" ls-files -o -i --exclude-standard | grep -q -E '(^|/)\.env'; then
+        # a symlinked .env (worktree setup links the primary checkout's) holds no data: only real files keep the tree
+        if git -C "$path" ls-files -o -i --exclude-standard | grep -E '(^|/)\.env' \
+             | while IFS= read -r f; do [ -L "$path/$f" ] || echo "$f"; done | grep -q .; then
           echo "keep    $path  ($branch: holds ignored .env files)"; continue
         fi
         kb="$(du -sk "$path" 2>/dev/null | cut -f1)"; mb=$(( ${kb:-0} / 1024 ))
