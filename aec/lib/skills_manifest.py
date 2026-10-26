@@ -155,15 +155,20 @@ def parse_yaml_frontmatter(text: str) -> Optional[dict]:
     """Parse YAML frontmatter from a markdown file.
 
     Simple parser that handles key: value pairs without requiring PyYAML.
-    Supports string values only (which is all SKILL.md uses).
+    Supports string values only, including folded (>) and literal (|)
+    block scalars, which agent files use for long descriptions.
     """
     match = re.match(r"^---\s*\n(.*?)\n---", text, re.DOTALL)
     if not match:
         return None
 
     result = {}
-    for line in match.group(1).strip().split("\n"):
-        line = line.strip()
+    lines = match.group(1).strip().split("\n")
+    i = 0
+    while i < len(lines):
+        raw = lines[i]
+        i += 1
+        line = raw.strip()
         if not line or line.startswith("#"):
             continue
         colon_idx = line.find(":")
@@ -171,8 +176,19 @@ def parse_yaml_frontmatter(text: str) -> Optional[dict]:
             continue
         key = line[:colon_idx].strip()
         value = line[colon_idx + 1:].strip()
+        if re.fullmatch(r"[>|][-+]?", value):
+            # Block scalar: the value is the following lines indented deeper than the key.
+            indent = len(raw) - len(raw.lstrip())
+            block = []
+            while i < len(lines) and (
+                not lines[i].strip() or len(lines[i]) - len(lines[i].lstrip()) > indent
+            ):
+                block.append(lines[i].strip())
+                i += 1
+            # ponytail: folded blank-line paragraph breaks collapse to spaces; fine for one-line display
+            value = " ".join(b for b in block if b) if value[0] == ">" else "\n".join(block).strip()
         # Strip surrounding quotes
-        if len(value) >= 2 and value[0] in ('"', "'") and value[-1] == value[0]:
+        elif len(value) >= 2 and value[0] in ('"', "'") and value[-1] == value[0]:
             value = value[1:-1]
         result[key] = value
     return result

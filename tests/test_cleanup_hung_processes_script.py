@@ -240,3 +240,17 @@ def test_windows_script_never_prunes_volumes() -> None:
     # database, so no volume prune on any platform.
     ps1 = SCRIPT.with_suffix(".ps1").read_text()
     assert "docker volume prune" not in ps1, "volume prune would delete stopped dev databases"
+
+def test_pm_cache_runs_from_home_not_the_callers_repo(tmp_path: Path) -> None:
+    # Regression: run from a repo whose .npmrc has an unset ${NPM_TOKEN},
+    # `yarn cache clean` failed. The caches are global, so run from $HOME.
+    bindir = _fake_tool(tmp_path, "yarn", 'echo "cwd=$PWD"\n')
+    home = tmp_path / "home"
+    home.mkdir()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    script = _helper_prelude() + '\nclean_pm_cache 5 "Cleaning yarn cache" yarn cache clean\n'
+    result = subprocess.run(
+        ["bash", "-c", script], cwd=repo, env=_env(bindir, {"HOME": str(home)}), capture_output=True, text=True, timeout=15
+    )
+    assert f"cwd={home}" in result.stdout, result.stdout

@@ -195,8 +195,8 @@ def generate_frontmatter(name: str, description: str = "", tags: List[str] = Non
         tags = []
     
     frontmatter = f"""---
-name: "{name}"
-description: "{description}"
+name: {json.dumps(name, ensure_ascii=False)}
+description: {json.dumps(description, ensure_ascii=False)}
 tags: {json.dumps(tags)}
 ---
 

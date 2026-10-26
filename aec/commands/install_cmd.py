@@ -9,6 +9,7 @@ import subprocess
 from ..lib import Console
 from ..lib.config import get_repo_root
 from ..lib.filesystem import installed_dst_path, remove_installed_item
+from ..lib.hooks.git_hooks_path import resolve_hooks_dir
 from ..lib.manifest_v2 import (
     load_manifest, save_manifest, record_install, record_mcp_install, record_plugin_install,
 )
@@ -792,8 +793,8 @@ def _wire_git_hooks(repo_path: Path) -> None:
                 Console.info(f"  Add verification-playwright to {lefthook_file} manually")
                 break
         else:
-            # Raw .git/hooks
-            git_hook = repo_path / ".git" / "hooks" / hook_name
+            # Raw git hooks dir (honors core.hooksPath and linked worktrees)
+            git_hook = resolve_hooks_dir(repo_path).hooks_dir / hook_name
             if git_hook.exists():
                 content = git_hook.read_text()
                 if _HOOK_BEGIN not in content:

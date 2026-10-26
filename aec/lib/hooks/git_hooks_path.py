@@ -10,6 +10,8 @@ scripts into, plus whether the husky v8 bootstrap source-line needs to be
 injected.
 """
 
+import json
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,10 +28,12 @@ class HooksDirResolution:
     needs_v8_bootstrap: bool
 
 
-def _read_core_hooks_path(repo_root: Path) -> Optional[str]:
+def _git_hooks_path(repo_root: Path) -> Optional[Path]:
     try:
         result = subprocess.run(
-            ["git", "-C", str(repo_root), "config", "--get", "core.hooksPath"],
+            # no --path-format=absolute (git >= 2.31): the relative answer is
+            # relative to -C, and joining an absolute one leaves it unchanged
+            ["git", "-C", str(repo_root), "rev-parse", "--git-path", "hooks"],
             capture_output=True, text=True, check=False,
         )
     except (FileNotFoundError, OSError):
@@ -37,7 +41,21 @@ def _read_core_hooks_path(repo_root: Path) -> Optional[str]:
     if result.returncode != 0:
         return None
     value = result.stdout.strip()
-    return value or None
+    return repo_root / value if value else None
+
+
+def _husky_major_from_package_json(repo_root: Path) -> Optional[int]:
+    try:
+        pkg = json.loads((repo_root / "package.json").read_text())
+    except (OSError, ValueError):
+        return None
+    for section in ("devDependencies", "dependencies"):
+        spec = (pkg.get(section) or {}).get("husky")
+        if isinstance(spec, str):
+            m = re.search(r"\d+", spec)
+            if m:
+                return int(m.group())
+    return None
 
 
 def _detect_husky(repo_root: Path) -> Optional[str]:
@@ -45,6 +63,14 @@ def _detect_husky(repo_root: Path) -> Optional[str]:
     if not husky_dir.is_dir():
         return None
     underscore = husky_dir / "_"
+    # v9 always writes `_/h`; it also writes a `_/husky.sh` deprecation stub,
+    # so husky.sh alone does not mean v8. `_/` is gitignored, so a fresh
+    # clone or worktree has none: fall back to the declared husky version.
+    if (underscore / "h").is_file():
+        return "v9"
+    major = _husky_major_from_package_json(repo_root)
+    if major is not None and major >= 9:
+        return "v9"
     if not underscore.is_dir():
         # `.husky/` exists but no `_/` — likely v8 pre-install state.
         return "v8"
@@ -63,8 +89,9 @@ def resolve_hooks_dir(repo_root: Path) -> HooksDirResolution:
       1. If `.husky/` exists, target `.husky/<name>` regardless of
          `core.hooksPath` (husky v9 sets it to `.husky/_/` but user hooks
          belong at `.husky/<name>`).
-      2. If `core.hooksPath` is configured, honor it.
-      3. Default to `.git/hooks/`.
+      2. Otherwise git's own hooks dir: `core.hooksPath` if set, else the
+         (common) `.git/hooks/`, which also covers linked worktrees.
+      3. Not a git repo: `.git/hooks/`.
     """
     husky_version = _detect_husky(repo_root)
     if husky_version is not None:
@@ -74,13 +101,12 @@ def resolve_hooks_dir(repo_root: Path) -> HooksDirResolution:
             needs_v8_bootstrap=(husky_version == "v8"),
         )
 
-    configured = _read_core_hooks_path(repo_root)
-    if configured:
-        path = Path(configured)
-        if not path.is_absolute():
-            path = repo_root / path
+    # `--git-path hooks` honors core.hooksPath and resolves a linked
+    # worktree (where `.git` is a file) to the common hooks dir.
+    hooks = _git_hooks_path(repo_root)
+    if hooks is not None:
         return HooksDirResolution(
-            hooks_dir=path,
+            hooks_dir=hooks,
             husky_version=None,
             needs_v8_bootstrap=False,
         )

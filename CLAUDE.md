@@ -58,3 +58,8 @@ AEC is a product for anyone who installs it, not the maintainer's personal setup
 ```bash
 python3 scripts/generate-agent-files.py
 ```
+
+## Scripts
+
+- `scripts/prune-merged-worktrees.sh` — removes linked git worktrees under `$PROJECTS_ROOT` (default `~/projects`, two levels deep) whose branch has a merged PR and whose HEAD is exactly the merged commit, then deletes the local branch. Keeps and reports dirty worktrees, unpushed commits, reused branch names with an open PR, and ignored `.env*` files. `DRY_RUN=1` previews. Needs `gh` authenticated. Schedule it daily with cron or launchd.
+- `scripts/cleanup-hung-processes.sh` — kills hung processes, prunes Docker and package-manager caches. Schedule it daily the same way.

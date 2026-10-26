@@ -18,18 +18,22 @@ def _get_manifest_path() -> Path:
     return INSTALLED_MANIFEST_V2
 
 
-def run_update() -> None:
-    """Fetch latest AEC repo + submodules, report what's outdated."""
+def run_update() -> bool:
+    """Fetch latest AEC repo + submodules, report what's outdated.
+
+    Returns True when an org config is left pending (review, trust change,
+    or failed refresh), so the CLI can exit ``EXIT_PENDING``.
+    """
     repo = get_repo_root()
     if repo is None:
         Console.error("AEC repo not found. Run `aec setup` first.")
-        return
+        return False
 
     Console.print("Pulling latest...", end=" ")
     if not fetch_latest(repo):
         Console.print("failed!")
         Console.error("Could not pull latest. Check your network and git status.")
-        return
+        return False
     Console.print("done.")
 
     manifest_path = _get_manifest_path()
@@ -76,36 +80,43 @@ def run_update() -> None:
     else:
         Console.print("\nEverything is up to date.")
 
-    _refresh_org_configs()
+    org_pending = _refresh_org_configs()
 
     # Informational: surface agent-blurb drift after update
     check_blurb_drift(root=repo)
+    return org_pending
 
 
-def _refresh_org_configs() -> None:
-    """Re-fetch url-sourced org configs after an update. Best-effort."""
+def _refresh_org_configs() -> bool:
+    """Refresh url- and git-sourced org configs. Returns True if any org is pending.
+
+    Never prompts: anything that needs a person is recorded as ``pending``.
+    """
     try:
         from ..lib.org_config import OrgConfigError, OrgPaths
-        from .org import refresh_url_sourced_orgs
-    except ImportError:
-        return
+        from .org import pending_fix, pending_orgs, refresh_remote_orgs
+    except ImportError:  # org-configs extra (PyYAML) or typer not installed
+        return False
 
     paths = OrgPaths.default()
     try:
-        results = refresh_url_sourced_orgs(paths)
-    except OrgConfigError:
-        return
-    if not results:
-        return
-
-    Console.print("\nOrg configs:")
+        results = refresh_remote_orgs(paths)
+        pending = pending_orgs(paths)
+    except OrgConfigError as exc:  # an enrolled config or its state is unreadable
+        Console.error(f"Org configs: {exc} (run `aec doctor`)")
+        return True
+    if results:
+        Console.print("\nOrg configs:")
     for org_id, status in results:
         if status == "updated":
-            Console.print(f"  {org_id}: re-fetched and re-verified")
+            Console.print(f"  {org_id}: re-fetched, verified, and applied")
         elif status == "unchanged":
             Console.print(f"  {org_id}: up to date")
         else:
             Console.warning(f"  {org_id}: {status}")
+    for st in pending:
+        Console.warning(pending_fix(st))
+    return bool(pending)
 
 
 def check_blurb_drift(root: Path) -> int:

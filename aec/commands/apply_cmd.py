@@ -92,11 +92,8 @@ def _apply_plugins(plugins: list, *, source_dirs: dict, yes: bool) -> None:
     import subprocess
 
     from ..lib.config import detect_agents
-    from ..lib.installed_store import record_item_install
     from ..lib.loadout import LoadoutError, load_loadout
-    from ..lib.manifest_v2 import load_manifest, record_plugin_install, save_manifest
-    from ..lib.claude_plugins import installed_record
-    from ..lib.plugin_install import install_plugin
+    from ..lib.plugin_install import install_and_record
     from ..lib.preferences import get_setting
     from ..lib.prompt_catalog.lifecycle_area import APPLY_PLUGINS_CONFIRM
     from ..lib.prompts import prompt
@@ -139,19 +136,11 @@ def _apply_plugins(plugins: list, *, source_dirs: dict, yes: bool) -> None:
         except LoadoutError as exc:
             Console.warning(f"Invalid plugin '{name}': {exc}; skipping.")
             continue
-        result = install_plugin(
-            manifest_def, detected,
+        version = install_and_record(
+            manifest_def, scope_key, name, detected,
             runner=runner, confirm=confirm, printer=Console.print, pref=pref,
+            manifest_path=manifest_path,
         )
-        version, plugin_id = installed_record(manifest_def, result)
-        manifest = load_manifest(manifest_path)
-        record_plugin_install(
-            manifest, scope_key, name, version,
-            install_type=result["install_type"], targets=result["targets"],
-            plugin_id=plugin_id,
-        )
-        save_manifest(manifest, manifest_path)
-        record_item_install("plugin", name, version)
         Console.success(f"Applied plugin: {name} v{version}")
 
 

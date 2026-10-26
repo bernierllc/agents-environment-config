@@ -1,6 +1,6 @@
 ---
 name: "resume"
-description: "Use at the start of a session in a repo with prior work in flight, or when the user says "resume", "/resume", "where were we", "pick up where we left off". Reads checkpointed run state, the activity log, and the external tracker, reconciles them against git reality, and continues from the recorded next action instead of re-planning."
+description: "Use at the start of a session in a repo with prior work in flight, or when the user says \"resume\", \"/resume\", \"where were we\", \"pick up where we left off\". Reads checkpointed run state, the activity log, and the external tracker, reconciles them against git reality, and continues from the recorded next action instead of re-planning."
 tags: ["skill"]
 ---
 
@@ -39,6 +39,17 @@ re-plan** — a run that is already mapped gets picked up at its first non-done 
 For each claim in run-state / tracker rows, check it against git and the world before
 acting on it. One line per drift found:
 
+- **Staleness first:** an in-flight run whose newest activity is more than 7 days old
+  is stale. Newest activity = the latest step `timestamp` in the file or the file's own
+  age, whichever is more recent. File age, as epoch seconds compared with
+  `$(( $(date +%s) - 604800 ))`: for a file git tracks with no uncommitted changes
+  (`git diff --quiet HEAD -- <path>`), its last commit,
+  `git log -1 --format=%ct [<branch>] -- <path>` (a clone or checkout resets the
+  working-tree mtime, so mtime would make an old checkpoint look fresh); for an
+  untracked or locally modified file, its mtime, `stat -f %m <path>` (macOS) or `stat -c %Y <path>` (Linux).
+  Stale → say so in one line with the age and handle it as a conflicting state
+  (step 3): no branch switch, no executing steps. The world has likely moved on since
+  it was written, so never resume from it unasked.
 - run-state names a different branch than the checkout → the run belongs to the
   recorded branch: switch to it when the working tree is clean; dirty tree or any
   doubt → present it as a conflicting state (step 3) and pause. Never execute the
@@ -51,13 +62,13 @@ acting on it. One line per drift found:
 
 ## 3. Continue
 
-- **In-flight run found:** state the run's objective in one line, then execute from the
-  first non-done step / `next_action`. Do not re-derive the plan. Keep the existing
-  checkpoint discipline: update run-state (and tracker, when configured) after every
-  completed step.
+- **In-flight run found, not stale, no conflict:** state the run's objective in one
+  line, then execute from the first non-done step / `next_action`. Do not re-derive the
+  plan. Keep the existing checkpoint discipline: update run-state (and tracker, when
+  configured) after every completed step.
 - **No run in flight:** report clean state in ≤5 lines — current branch, last commit,
   any open tracker rows for this repo — and ask nothing; wait for direction unless the
   open rows make the next task obvious.
-- **Conflicting states** (two runs, or state contradicting git in a way you can't
-  resolve): present the conflict in a few lines and let the user pick. This is the only
-  case where resume pauses.
+- **Conflicting states** (two runs, a stale run, or state contradicting git in a way
+  you can't resolve): present the conflict in a few lines and let the user pick. This is
+  the only case where resume pauses.

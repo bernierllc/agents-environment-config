@@ -1,6 +1,7 @@
 """Schema validator for org-config overlays (Phase 1)."""
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .allow_lists import (
@@ -22,6 +23,8 @@ from .schema import (
 
 
 _STANCE_VALUES = {s.value for s in Stance}
+# org_id names files and dirs under ~/.aec/orgs/, so it can never carry a path.
+_ORG_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 
 
 def _require(d: dict, key: str, field_path: str) -> Any:
@@ -38,6 +41,10 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
         )
 
     org_id = _require(frontmatter, "org_id", "org_id")
+    if not isinstance(org_id, str) or not _ORG_ID_RE.match(org_id):
+        raise OrgConfigValidationError(
+            f"org_id must match {_ORG_ID_RE.pattern}, got {org_id!r}", field_path="org_id"
+        )
     org_name = _require(frontmatter, "org_name", "org_name")
     config_version = _require(frontmatter, "config_version", "config_version")
     description = frontmatter.get("description")
@@ -137,6 +144,12 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
                     field_path=f"{base_path}.stance",
                 )
             version = policy_dict.get("version")
+            if type_name == "plugins" and (stance_raw == "pinned" or version is not None):
+                raise OrgConfigValidationError(
+                    "plugin versions are owned by the agent's plugin manager, so a "
+                    "plugin cannot be pinned or given a version; use stance 'required'",
+                    field_path=f"{base_path}.{'version' if version is not None else 'stance'}",
+                )
             validated[item_name] = ItemPolicy(
                 source=source,
                 stance=Stance(stance_raw),

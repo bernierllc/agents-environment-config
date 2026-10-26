@@ -79,6 +79,7 @@ Reserved source IDs (always available, do not declare):
 - `aec.default.rules`
 - `aec.default.agents`
 - `aec.default.mcps`
+- `aec.default.plugins`
 
 `sources.custom[]` lets you pull from your own Git repos:
 
@@ -90,7 +91,7 @@ custom:
     contributes: ["skills"]
 ```
 
-`id` must be unique and not collide with reserved IDs. `contributes` is a non-empty subset of `["skills", "rules", "agents", "mcps"]`.
+`id` must be unique and not collide with reserved IDs. `contributes` is a non-empty subset of `["skills", "rules", "agents", "mcps", "plugins"]`.
 
 ## Items
 
@@ -118,6 +119,12 @@ Required fields: `source` (must be a reserved or declared custom ID) and `stance
 | `silent` | No prompts about this item; useful for org-internal experiments. |
 
 `version` is optional except when stance is `pinned` (then required).
+
+### Plugins
+
+`items.plugins.<name>` uses the catalog plugin name (for example `my-plugin`). `required` and `recommended` install it, `blocked` uninstalls it, `silent` only records it. Installs run through the same loadout engine as `aec apply`, so a user's `plugins.execution=instructions-only` setting still prints the commands instead of running them. In managed mode there is no per-plugin confirmation; the policy is the approval.
+
+Plugin versions belong to the agent's plugin manager (for example Claude Code), so `pinned` and `version` are rejected for plugins. Use `required`.
 
 ## install.preferences (closed allow-list)
 
@@ -153,13 +160,20 @@ Users apply your policy with `aec org apply` (or `aec org apply --enroll <url>` 
 
 ## Delivery & refresh
 
-Configs can be enrolled from a local file **or** an `https://` URL:
+Configs can be enrolled from a local file, an `https://` URL, or a file in a git repo:
 
 ```bash
-aec org enroll https://acme.example/aec.yaml
+aec org enroll https://my-org.example/aec.yaml
+aec org enroll 'git+https://git.example.com/my-org/aec-catalog.git#main:org/my-org.yaml'
 ```
 
-AEC records the URL and re-fetches + re-verifies it on `aec update`. To also auto-refetch on ordinary invocations once the local copy ages out, set a TTL:
+For a git source, commit the signature next to the config as `<path>.sig` (signed modes). Users clone with their own git credentials, so a private repo works for anyone who can already read it.
+
+AEC records the source and re-fetches + re-verifies it on `aec update`. What a user's machine does with your change depends on how you ship it:
+
+- **Signed + `install.mode: managed`:** applied on the user's next `aec update`.
+- **Unsigned, or signed and guided/unset:** staged for the user to review with `aec org apply`.
+- **A trust-anchor change** (trust mode, pinned key, key URL, DNS domain): never applied automatically. Each user must re-enroll interactively with `aec org enroll --replace <org_id> <source>`. Plan a key or mode change as a coordinated rollout. To also auto-refetch on ordinary invocations once the local copy ages out, set a TTL:
 
 ```yaml
 refresh:
