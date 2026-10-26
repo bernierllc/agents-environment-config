@@ -504,3 +504,28 @@ class TestParseDependencies:
 
         result = parse_skill_frontmatter(skill_dir)
         assert result is None
+
+
+class TestParseYamlFrontmatterBlockScalars:
+    """Folded (>) and literal (|) values span the indented lines below the key."""
+
+    def test_folded_and_literal_values(self):
+        from aec.lib.skills_manifest import parse_yaml_frontmatter
+
+        fm = parse_yaml_frontmatter(
+            "---\n"
+            "name: Auditor\n"
+            "description: >\n"
+            "  Evidence-driven auditor of delivery.\n"
+            "  Produces root-cause findings.\n"
+            "notes: |-\n"
+            "  line one\n"
+            "  line two\n"
+            "version: 1.0.0\n"
+            "---\n"
+            "# Body\n"
+        )
+        assert fm["description"] == "Evidence-driven auditor of delivery. Produces root-cause findings."
+        assert fm["notes"] == "line one\nline two"
+        assert fm["version"] == "1.0.0"
+        assert fm["name"] == "Auditor"
