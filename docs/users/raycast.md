@@ -42,6 +42,6 @@ The macOS/Linux script detects which runtime backs the `docker` CLI:
 - **Docker Desktop (or another daemon):** prunes only; nothing is stopped. This includes a Colima VM that runs while the CLI targets another daemon.
 - **No runtime:** Docker cleanup is skipped.
 
-Anonymous volumes are pruned. Named volumes are kept: they often hold a stopped dev database's data. Set `CLEANUP_PRUNE_NAMED_VOLUMES=1` to prune them too. Compose stacks whose project directory no longer exists (a removed worktree) are reported with the command to stop them, but never stopped automatically.
+Anonymous volumes are pruned, including those of containers the cleanup just removed: a stopped database whose data sits in an anonymous volume loses that data. Keep dev data in named volumes, which are kept: they often hold a stopped dev database's data. Set `CLEANUP_PRUNE_NAMED_VOLUMES=1` to prune them too. Compose stacks whose project directory no longer exists (a removed worktree) are reported with the command to stop them, but never stopped automatically.
 
 From the terminal, the `cleanup` shell function runs the script as a subprocess, so the shell stays open when it finishes.

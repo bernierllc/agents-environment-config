@@ -165,11 +165,11 @@ recycle_colima() {
     fi
     echo ""
     echo "Recycling Colima (stop, then start)..."
-    if ! run_with_timeout 180 colima stop >/dev/null 2>&1; then
-        echo "  colima stop failed or timed out; leaving Colima as it is"
-        return 0
-    fi
+    # Set before stopping: a stop that fails or times out partway can still leave the VM down.
     COLIMA_STOPPED_BY_US=1
+    if ! run_with_timeout 180 colima stop >/dev/null 2>&1; then
+        echo "  colima stop failed or timed out; starting Colima in case it stopped partway"
+    fi
     restart_colima
 }
 

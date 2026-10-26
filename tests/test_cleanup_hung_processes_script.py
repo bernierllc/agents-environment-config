@@ -278,6 +278,22 @@ def test_recycle_is_skipped_unless_opted_in(tmp_path: Path) -> None:
     assert not stopped.exists(), f"colima ran without opt-in: {stopped.read_text()}"
 
 
+def test_failed_stop_still_starts_colima_back(tmp_path: Path) -> None:
+    # A stop that fails partway can leave the VM down: the recycle must still try to start it.
+    log = tmp_path / "colima.log"
+    bindir = _fake_tool(
+        tmp_path,
+        "colima",
+        f'echo "$@" >> "{log}"\ncase "$1" in\n  stop) exit 1 ;;\n  start) exit 0 ;;\nesac\n',
+    )
+    (bindir / "docker").write_text("#!/bin/bash\nexit 0\n")
+    (bindir / "docker").chmod(0o755)
+    result = _run_snippet(bindir, "CLEANUP_RECYCLE_COLIMA=1\nrecycle_colima\necho \"FLAG=$RESTART_FAILED\"\n")
+    assert "starting Colima" in result.stdout, result.stdout
+    assert log.read_text().splitlines() == ["stop", "start"], log.read_text()
+    assert "FLAG=0" in result.stdout, result.stdout
+
+
 def test_recycle_leaves_containers_to_their_restart_policy(tmp_path: Path) -> None:
     # Colima's daemon restarts containers whose policy is unless-stopped/always.
     # Containers set to `no` must stay down, so the recycle must never `docker start`.
