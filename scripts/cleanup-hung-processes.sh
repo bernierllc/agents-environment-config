@@ -92,9 +92,12 @@ is_process_older_than_minutes() {
 # starts, stops and recycles.
 COLIMA_DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
 
-# Endpoint the Docker CLI will talk to: DOCKER_HOST wins, else the current context.
+# Endpoint the Docker CLI will talk to. Precedence per `docker --help`:
+# DOCKER_CONTEXT, then DOCKER_HOST, then the current context.
 active_docker_endpoint() {
-    if [ -n "${DOCKER_HOST:-}" ]; then
+    if [ -n "${DOCKER_CONTEXT:-}" ]; then
+        run_with_timeout 10 docker context inspect "$DOCKER_CONTEXT" --format '{{.Endpoints.docker.Host}}' 2>/dev/null
+    elif [ -n "${DOCKER_HOST:-}" ]; then
         echo "$DOCKER_HOST"
     else
         run_with_timeout 10 docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null
@@ -138,14 +141,15 @@ RESTART_FAILED=0
 # Start Colima again. Containers are not started here: the daemon restarts
 # those whose restart policy is unless-stopped/always, and leaves `no` ones down.
 restart_colima() {
-    [ "$COLIMA_STOPPED_BY_US" = 1 ] && [ "$RESTART_FAILED" = 0 ] || return 0
+    [ "$COLIMA_STOPPED_BY_US" = 1 ] || return 0
     echo "  Starting Colima..."
-    # The flag clears only once Colima is up, so an interrupt during `colima start`
-    # still leaves the EXIT handler responsible for the restart.
+    # An interrupt does not reach the else branch: the INT/TERM trap exits first,
+    # so the flag stays set and the EXIT handler retries the start.
     if run_with_timeout 300 colima start >/dev/null 2>&1 && wait_for_docker 120; then
         COLIMA_STOPPED_BY_US=0
         echo "  Colima is back up"
     else
+        COLIMA_STOPPED_BY_US=0
         echo "  ERROR: Colima did not come back up. Run 'colima start' by hand." >&2
         RESTART_FAILED=1
         return 1

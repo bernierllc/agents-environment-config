@@ -231,13 +231,42 @@ def test_restart_is_a_no_op_when_this_run_did_not_stop_colima(tmp_path: Path) ->
     assert "Starting Colima" not in result.stdout, result.stdout
 
 
-def test_failed_start_keeps_the_restart_owed_for_the_exit_handler(tmp_path: Path) -> None:
-    # An interrupt during `colima start` must leave COLIMA_STOPPED_BY_US set, so
-    # on_exit tries the start again rather than treating the VM as handled.
-    bindir = _fake_tool(tmp_path, "colima", "exit 1\n")
-    body = 'COLIMA_STOPPED_BY_US=1\nrestart_colima || true\necho "OWED=$COLIMA_STOPPED_BY_US"\n'
+def test_failed_start_is_reported_once_and_not_retried_on_exit(tmp_path: Path) -> None:
+    # A start that fails normally is reported; the EXIT handler must not start it again.
+    starts = tmp_path / "starts.log"
+    bindir = _fake_tool(tmp_path, "colima", f'echo start >> "{starts}"\nexit 1\n')
+    body = 'COLIMA_STOPPED_BY_US=1\nrestart_colima || true\nrestart_colima || true\necho "FLAG=$RESTART_FAILED"\n'
     result = _run_snippet(bindir, body)
-    assert "OWED=1" in result.stdout, result.stdout
+    assert "FLAG=1" in result.stdout, result.stdout
+    assert starts.read_text().count("start") == 1, starts.read_text()
+
+
+def test_interrupt_during_start_leaves_the_exit_handler_to_retry(tmp_path: Path) -> None:
+    # Ctrl-C while `colima start` runs must not count as a failed start: the INT
+    # trap exits, the EXIT handler runs restart_colima again, and the VM comes back.
+    starts = tmp_path / "starts.log"
+    bindir = _fake_tool(tmp_path, "colima", f'echo start >> "{starts}"\nsleep 3\nexit 1\n')
+    body = (
+        "trap 'exit 130' INT TERM\n"
+        "trap 'restart_colima || true' EXIT\n"
+        "COLIMA_STOPPED_BY_US=1\n"
+        "(sleep 1; kill -INT $$) &\n"
+        "restart_colima\n"
+    )
+    _run_snippet(bindir, body, timeout=30)
+    assert starts.read_text().count("start") == 2, starts.read_text()
+
+
+def test_docker_context_overrides_docker_host(tmp_path: Path) -> None:
+    # `docker --help`: DOCKER_CONTEXT overrides DOCKER_HOST, so the endpoint comes from the context.
+    bindir = _fake_tool(
+        tmp_path,
+        "docker",
+        'case "$*" in\n  "context inspect ssh-remote "*) echo "ssh://remote" ;;\n  *) echo "unix:///wrong.sock" ;;\nesac\n',
+    )
+    body = "export DOCKER_HOST=unix:///colima.sock\nexport DOCKER_CONTEXT=ssh-remote\nactive_docker_endpoint\n"
+    result = _run_snippet(bindir, body)
+    assert result.stdout.strip() == "ssh://remote", result.stderr
 
 
 def test_recycle_is_skipped_unless_opted_in(tmp_path: Path) -> None:
