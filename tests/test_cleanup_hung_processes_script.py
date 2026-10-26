@@ -6,12 +6,13 @@ Regression: `yarn` resolved to node's Corepack shim, which prompts
 piped into `tail -1` the prompt was invisible and the script hung forever.
 """
 
+from __future__ import annotations
+
 import os
 import signal
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional
 
 import pytest
 
@@ -59,7 +60,7 @@ def _prelude_with_network_allowed() -> str:
     return prelude.replace(prefix, "")
 
 
-def _env(bindir: Path, extra: Optional[dict] = None) -> dict:
+def _env(bindir: Path, extra: dict | None = None) -> dict:
     env = {**os.environ, **(extra or {}), "PATH": f"{bindir}:{os.environ['PATH']}"}
     env.pop("COREPACK_ENABLE_NETWORK", None)  # the script sets it; ambient values must not steer the fakes
     return env
@@ -71,7 +72,7 @@ def _run_clean_pm_cache(bindir: Path, env_extra: dict, timeout_s: int = 2) -> su
     return subprocess.run(
         ["bash", "-c", script],
         env=env,
-        capture_output=True,
+        check=False, capture_output=True,
         text=True,
         timeout=15,
         stdin=None,  # inherit: on a TTY this is exactly the hang scenario
@@ -95,7 +96,7 @@ def test_stdin_guard_stops_prompt_from_blocking(fake_yarn: Path) -> None:
     start = time.monotonic()
     try:
         result = subprocess.run(
-            ["bash", "-c", script], env=env, stdin=read_end, capture_output=True, text=True, timeout=15
+            ["bash", "-c", script], env=env, stdin=read_end, check=False, capture_output=True, text=True, timeout=15
         )
     finally:
         os.close(read_end)
@@ -112,7 +113,7 @@ def test_timeout_kills_children_holding_the_pipe(tmp_path: Path) -> None:
     script = _helper_prelude() + '\nclean_pm_cache 1 "Cleaning yarn cache" yarn cache clean\n'
     env = _env(bindir)
     start = time.monotonic()
-    result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True, timeout=20)
+    result = subprocess.run(["bash", "-c", script], env=env, check=False, capture_output=True, text=True, timeout=20)
     elapsed = time.monotonic() - start
     assert "failed or timed out" in result.stdout, result.stdout
     assert elapsed < 10, f"grandchild kept the step alive for {elapsed:.1f}s"
@@ -136,24 +137,36 @@ def _run_snippet(bindir: Path, body: str, timeout: int = 20) -> subprocess.Compl
     return subprocess.run(
         ["bash", "-c", _helper_prelude() + "\n" + body],
         env=_env(bindir),
-        capture_output=True,
+        check=False, capture_output=True,
         text=True,
         timeout=timeout,
     )
 
 
+COLIMA_SOCKET = "unix://${HOME}/.colima/default/docker.sock"
+DESKTOP_SOCKET = "unix:///var/run/docker.sock"
+
+
 @pytest.mark.parametrize(
-    ("colima_status", "docker_info", "expected"),
+    ("colima_status", "cli_endpoint", "docker_info", "expected"),
     [
-        (0, 0, "colima"),  # VM up: colima wins even though docker answers too
-        (1, 0, "desktop"),  # colima stopped, another daemon answers
-        (1, 1, "none"),  # nothing running
+        (0, COLIMA_SOCKET, 0, "colima"),  # VM up and the CLI targets it
+        (0, DESKTOP_SOCKET, 0, "desktop"),  # VM up, but the CLI targets another daemon
+        (1, COLIMA_SOCKET, 1, "none"),  # CLI targets Colima, which is stopped
+        (1, DESKTOP_SOCKET, 0, "desktop"),  # colima stopped, another daemon answers
+        (1, DESKTOP_SOCKET, 1, "none"),  # nothing running
     ],
 )
-def test_detect_runtime_never_reports_a_stopped_colima(tmp_path: Path, colima_status: int, docker_info: int, expected: str) -> None:
+def test_detect_runtime_follows_the_cli_endpoint(
+    tmp_path: Path, colima_status: int, cli_endpoint: str, docker_info: int, expected: str
+) -> None:
     _fake_tool(tmp_path, "colima", f"exit {colima_status}\n")
-    bindir = _fake_tool(tmp_path, "docker", f"exit {docker_info}\n")
-    result = _run_snippet(bindir, "detect_docker_runtime\n")
+    bindir = _fake_tool(
+        tmp_path,
+        "docker",
+        f'case "$1" in\n  context) echo "{cli_endpoint}" ;;\n  *) exit {docker_info} ;;\nesac\n',
+    )
+    result = _run_snippet(bindir, "unset DOCKER_HOST\ndetect_docker_runtime\n")
     assert result.stdout.strip() == expected, result.stderr
 
 
@@ -178,12 +191,14 @@ def test_pm_jobs_run_concurrently_and_log_in_start_order(tmp_path: Path) -> None
 
 
 def test_wait_for_docker_gives_up_after_the_deadline(tmp_path: Path) -> None:
-    bindir = _fake_tool(tmp_path, "docker", "exit 1\n")
+    # Each `docker info` hangs 3s, longer than the 2s deadline. Counting only
+    # sleeps would retry once more; the wall clock stops at the first check past 2s.
+    bindir = _fake_tool(tmp_path, "docker", "sleep 3\nexit 1\n")
     start = time.monotonic()
-    result = _run_snippet(bindir, "wait_for_docker 4 && echo UP || echo DOWN\n")
+    result = _run_snippet(bindir, "wait_for_docker 2 && echo UP || echo DOWN\n")
     elapsed = time.monotonic() - start
     assert "DOWN" in result.stdout, result.stdout
-    assert elapsed < 10, f"wait_for_docker overran its 4s deadline ({elapsed:.1f}s)"
+    assert elapsed < 6, f"wait_for_docker overran its 2s deadline ({elapsed:.1f}s)"
 
 
 def test_orphan_stack_report_names_only_stacks_whose_directory_is_gone(tmp_path: Path) -> None:
@@ -216,6 +231,69 @@ def test_restart_is_a_no_op_when_this_run_did_not_stop_colima(tmp_path: Path) ->
     assert "Starting Colima" not in result.stdout, result.stdout
 
 
+def test_failed_start_is_reported_once_and_not_retried_on_exit(tmp_path: Path) -> None:
+    # A start that fails normally is reported; the EXIT handler must not start it again.
+    starts = tmp_path / "starts.log"
+    bindir = _fake_tool(tmp_path, "colima", f'echo start >> "{starts}"\nexit 1\n')
+    body = 'COLIMA_STOPPED_BY_US=1\nrestart_colima || true\nrestart_colima || true\necho "FLAG=$RESTART_FAILED"\n'
+    result = _run_snippet(bindir, body)
+    assert "FLAG=1" in result.stdout, result.stdout
+    assert starts.read_text().count("start") == 1, starts.read_text()
+
+
+def test_interrupt_during_start_leaves_the_exit_handler_to_retry(tmp_path: Path) -> None:
+    # Ctrl-C while `colima start` runs must not count as a failed start: the INT
+    # trap exits, the EXIT handler runs restart_colima again, and the VM comes back.
+    starts = tmp_path / "starts.log"
+    bindir = _fake_tool(tmp_path, "colima", f'echo start >> "{starts}"\nsleep 3\nexit 1\n')
+    body = (
+        "trap 'exit 130' INT TERM\n"
+        "trap 'restart_colima || true' EXIT\n"
+        "COLIMA_STOPPED_BY_US=1\n"
+        "(sleep 1; kill -INT $$) &\n"
+        "restart_colima\n"
+    )
+    _run_snippet(bindir, body, timeout=30)
+    assert starts.read_text().count("start") == 2, starts.read_text()
+
+
+def test_docker_context_overrides_docker_host(tmp_path: Path) -> None:
+    # `docker --help`: DOCKER_CONTEXT overrides DOCKER_HOST, so the endpoint comes from the context.
+    bindir = _fake_tool(
+        tmp_path,
+        "docker",
+        'case "$*" in\n  "context inspect ssh-remote "*) echo "ssh://remote" ;;\n  *) echo "unix:///wrong.sock" ;;\nesac\n',
+    )
+    body = "export DOCKER_HOST=unix:///colima.sock\nexport DOCKER_CONTEXT=ssh-remote\nactive_docker_endpoint\n"
+    result = _run_snippet(bindir, body)
+    assert result.stdout.strip() == "ssh://remote", result.stderr
+
+
+def test_recycle_is_skipped_unless_opted_in(tmp_path: Path) -> None:
+    # Stopping the VM interrupts every container in it, so ordinary cleanups must not.
+    stopped = tmp_path / "stopped.log"
+    bindir = _fake_tool(tmp_path, "colima", f'echo "$@" >> "{stopped}"\nexit 0\n')
+    result = _run_snippet(bindir, "recycle_colima\necho \"FLAG=$RESTART_FAILED\"\n")
+    assert "recycle skipped" in result.stdout, result.stdout
+    assert not stopped.exists(), f"colima ran without opt-in: {stopped.read_text()}"
+
+
+def test_failed_stop_still_starts_colima_back(tmp_path: Path) -> None:
+    # A stop that fails partway can leave the VM down: the recycle must still try to start it.
+    log = tmp_path / "colima.log"
+    bindir = _fake_tool(
+        tmp_path,
+        "colima",
+        f'echo "$@" >> "{log}"\ncase "$1" in\n  stop) exit 1 ;;\n  start) exit 0 ;;\nesac\n',
+    )
+    (bindir / "docker").write_text("#!/bin/bash\nexit 0\n")
+    (bindir / "docker").chmod(0o755)
+    result = _run_snippet(bindir, "CLEANUP_RECYCLE_COLIMA=1\nrecycle_colima\necho \"FLAG=$RESTART_FAILED\"\n")
+    assert "starting Colima" in result.stdout, result.stdout
+    assert log.read_text().splitlines() == ["stop", "start"], log.read_text()
+    assert "FLAG=0" in result.stdout, result.stdout
+
+
 def test_recycle_leaves_containers_to_their_restart_policy(tmp_path: Path) -> None:
     # Colima's daemon restarts containers whose policy is unless-stopped/always.
     # Containers set to `no` must stay down, so the recycle must never `docker start`.
@@ -230,7 +308,7 @@ def test_recycle_leaves_containers_to_their_restart_policy(tmp_path: Path) -> No
         "exit 0\n"
     )
     (bindir / "docker").chmod(0o755)
-    result = _run_snippet(bindir, "recycle_colima\necho \"FLAG=$RESTART_FAILED\"\n")
+    result = _run_snippet(bindir, "CLEANUP_RECYCLE_COLIMA=1\nrecycle_colima\necho \"FLAG=$RESTART_FAILED\"\n")
     assert "FLAG=0" in result.stdout, result.stdout
     assert not started.exists(), f"recycle started containers: {started.read_text()}"
 
@@ -251,6 +329,6 @@ def test_pm_cache_runs_from_home_not_the_callers_repo(tmp_path: Path) -> None:
     repo.mkdir()
     script = _helper_prelude() + '\nclean_pm_cache 5 "Cleaning yarn cache" yarn cache clean\n'
     result = subprocess.run(
-        ["bash", "-c", script], cwd=repo, env=_env(bindir, {"HOME": str(home)}), capture_output=True, text=True, timeout=15
+        ["bash", "-c", script], cwd=repo, env=_env(bindir, {"HOME": str(home)}), check=False, capture_output=True, text=True, timeout=15
     )
     assert f"cwd={home}" in result.stdout, result.stdout

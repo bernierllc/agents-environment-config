@@ -88,10 +88,28 @@ is_process_older_than_minutes() {
     return 1
 }
 
-# Which Docker runtime backs the CLI: "colima" (VM running), "desktop" (another
-# daemon answers) or "none". A stopped Colima is never reported as "colima".
+# The daemon socket of the default Colima profile, the only one this script
+# starts, stops and recycles.
+COLIMA_DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
+
+# Endpoint the Docker CLI will talk to. Precedence per `docker --help`:
+# DOCKER_CONTEXT, then DOCKER_HOST, then the current context.
+active_docker_endpoint() {
+    if [ -n "${DOCKER_CONTEXT:-}" ]; then
+        run_with_timeout 10 docker context inspect "$DOCKER_CONTEXT" --format '{{.Endpoints.docker.Host}}' 2>/dev/null
+    elif [ -n "${DOCKER_HOST:-}" ]; then
+        echo "$DOCKER_HOST"
+    else
+        run_with_timeout 10 docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null
+    fi
+}
+
+# Which Docker runtime backs the CLI: "colima" (VM running and the CLI targets
+# its socket), "desktop" (another daemon answers) or "none". `colima status`
+# alone is not enough: with another daemon in use, the CLI would not talk to Colima.
 detect_docker_runtime() {
-    if command -v colima >/dev/null 2>&1 && colima status >/dev/null 2>&1; then
+    if command -v colima >/dev/null 2>&1 && colima status >/dev/null 2>&1 \
+        && [ "$(active_docker_endpoint)" = "$COLIMA_DOCKER_HOST" ]; then
         echo colima
     elif run_with_timeout 10 docker info >/dev/null 2>&1; then
         echo desktop
@@ -101,12 +119,12 @@ detect_docker_runtime() {
 }
 
 # Poll until the Docker daemon answers. Usage: wait_for_docker SECONDS
+# The deadline is wall-clock: a hung `docker info` can take most of the timeout.
 wait_for_docker() {
-    local waited=0
+    local deadline=$((SECONDS + $1))
     until run_with_timeout 10 docker info >/dev/null 2>&1; do
-        [ "$waited" -ge "$1" ] && return 1
+        [ "$SECONDS" -ge "$deadline" ] && return 1
         sleep 2
-        waited=$((waited + 2))
     done
 }
 
@@ -124,26 +142,34 @@ RESTART_FAILED=0
 # those whose restart policy is unless-stopped/always, and leaves `no` ones down.
 restart_colima() {
     [ "$COLIMA_STOPPED_BY_US" = 1 ] || return 0
-    COLIMA_STOPPED_BY_US=0
     echo "  Starting Colima..."
+    # An interrupt does not reach the else branch: the INT/TERM trap exits first,
+    # so the flag stays set and the EXIT handler retries the start.
     if run_with_timeout 300 colima start >/dev/null 2>&1 && wait_for_docker 120; then
+        COLIMA_STOPPED_BY_US=0
         echo "  Colima is back up"
     else
+        COLIMA_STOPPED_BY_US=0
         echo "  ERROR: Colima did not come back up. Run 'colima start' by hand." >&2
         RESTART_FAILED=1
         return 1
     fi
 }
 
-# Stop Colima, then restart it. Usage: recycle_colima
+# Stop Colima, then restart it. Opt-in: it shuts down the VM and every container
+# in it. Usage: recycle_colima (with CLEANUP_RECYCLE_COLIMA=1)
 recycle_colima() {
-    echo ""
-    echo "Recycling Colima (stop, then start)..."
-    if ! run_with_timeout 180 colima stop >/dev/null 2>&1; then
-        echo "  colima stop failed or timed out; leaving Colima as it is"
+    if [ "${CLEANUP_RECYCLE_COLIMA:-0}" != "1" ]; then
+        echo "  Colima recycle skipped (set CLEANUP_RECYCLE_COLIMA=1 to stop and restart the VM)"
         return 0
     fi
+    echo ""
+    echo "Recycling Colima (stop, then start)..."
+    # Set before stopping: a stop that fails or times out partway can still leave the VM down.
     COLIMA_STOPPED_BY_US=1
+    if ! run_with_timeout 180 colima stop >/dev/null 2>&1; then
+        echo "  colima stop failed or timed out; starting Colima in case it stopped partway"
+    fi
     restart_colima
 }
 
