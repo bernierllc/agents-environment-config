@@ -517,7 +517,7 @@ class TestParseYamlFrontmatterBlockScalars:
             "name: Auditor\n"
             "description: >\n"
             "  Evidence-driven auditor of delivery.\n"
-            "  Produces root-cause findings.\n"
+            "  Produces root-cause findings: ranked by impact.\n"
             "notes: |-\n"
             "  line one\n"
             "  line two\n"
@@ -525,7 +525,10 @@ class TestParseYamlFrontmatterBlockScalars:
             "---\n"
             "# Body\n"
         )
-        assert fm["description"] == "Evidence-driven auditor of delivery. Produces root-cause findings."
+        assert fm["description"] == (
+            "Evidence-driven auditor of delivery. Produces root-cause findings: ranked by impact."
+        )
+        assert "Produces root-cause findings" not in fm  # colon in block text is not a key
         assert fm["notes"] == "line one\nline two"
         assert fm["version"] == "1.0.0"
         assert fm["name"] == "Auditor"
