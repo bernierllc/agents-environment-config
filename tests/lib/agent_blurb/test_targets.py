@@ -55,3 +55,18 @@ class TestResolvePathForAgentKey:
             resolve_path_for_agent_key(
                 "not-a-real-agent", scope="project", root=tmp_path
             )
+
+
+class TestImportedFileIsCanonical:
+    def test_claude_importing_agents_drops_claude(self, tmp_path):
+        (tmp_path / "AGENTS.md").write_text("# a\n")
+        (tmp_path / "CLAUDE.md").write_text("# c\n\n@AGENTS.md\n")
+        names = {t.path.name for t in discover_targets("project", tmp_path)}
+        assert "AGENTS.md" in names
+        assert "CLAUDE.md" not in names
+
+    def test_import_of_unrelated_file_keeps_both(self, tmp_path):
+        (tmp_path / "AGENTS.md").write_text("# a\n")
+        (tmp_path / "CLAUDE.md").write_text("@docs/other.md\n")
+        names = {t.path.name for t in discover_targets("project", tmp_path)}
+        assert {"AGENTS.md", "CLAUDE.md"} <= names

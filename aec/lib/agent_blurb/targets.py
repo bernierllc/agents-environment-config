@@ -4,6 +4,7 @@ Reuses existing AEC helpers (`get_agent_global_file`, `get_agent_project_file`,
 `load_agent_registry`) so path-resolution logic lives in one place.
 """
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -41,7 +42,32 @@ def discover_targets(
         path = _resolve_path(agent_key, scope=scope, root=root)
         if path is not None and path.exists():
             out.append(AgentTarget(agent_key=agent_key, path=path))
-    return out
+    return drop_importers(out)
+
+
+_IMPORT_LINE = re.compile(r"^\s*@(\S+)\s*$", re.MULTILINE)
+
+
+def _imported_paths(path: Path) -> set:
+    """Resolved paths named by ``@file`` import lines in ``path``."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    return {
+        (path.parent / Path(m).expanduser()).resolve()
+        for m in _IMPORT_LINE.findall(text)
+    }
+
+
+def drop_importers(targets: List[AgentTarget]) -> List[AgentTarget]:
+    """Drop every target that ``@``-imports another target.
+
+    The agent reads the imported file through the import, so a block written
+    into both files is loaded twice. The imported file is the canonical one.
+    """
+    resolved = {t.path.resolve() for t in targets}
+    return [
+        t for t in targets
+        if not (_imported_paths(t.path) & (resolved - {t.path.resolve()}))
+    ]
 
 
 def resolve_path_for_agent_key(

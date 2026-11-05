@@ -16,6 +16,8 @@ from aec.lib.agent_blurb.profile import (
     ITEM_TYPES,
     READ_ONLY_COMMANDS,
     DESTRUCTIVE_COMMANDS,
+    MAINTENANCE_COMMANDS,
+    MAINTENANCE_STANCE,
 )
 
 BLOCK_VERSION = "v1"
@@ -40,33 +42,43 @@ def shipped_template_hash() -> str:
     return sha256_short(_read_template())
 
 
-def _format_auto_list(matrix: Dict[str, Dict[str, str]]) -> str:
+def _maintenance_stance(profile: str) -> str:
+    return MAINTENANCE_STANCE.get(profile, "ask")
+
+
+def _format_auto_list(matrix: Dict[str, Dict[str, str]], profile: str) -> str:
     lines = []
     for cmd in sorted(READ_ONLY_COMMANDS):
         lines.append(f"- `aec {cmd}` — read-only (always auto)")
     for itype in ITEM_TYPES:
         if matrix[itype]["additive"] == "auto":
             lines.append(f"- `aec install {itype[:-1]} <name>` — install a {itype[:-1]} ({itype}: additive=auto)")
+    if _maintenance_stance(profile) == "auto":
+        for cmd in sorted(MAINTENANCE_COMMANDS):
+            lines.append(f"- `aec {cmd}` — update installed items (maintenance=auto)")
     return "\n".join(lines)
 
 
-def _format_ask_list(matrix: Dict[str, Dict[str, str]]) -> str:
+def _format_ask_list(matrix: Dict[str, Dict[str, str]], profile: str) -> str:
     lines = []
     for itype in ITEM_TYPES:
         if matrix[itype]["additive"] == "ask":
             lines.append(f"- `aec install {itype[:-1]} <name>` ({itype}: additive=ask)")
+    if _maintenance_stance(profile) == "ask":
+        for cmd in sorted(MAINTENANCE_COMMANDS):
+            lines.append(f"- `aec {cmd}` — update installed items (maintenance=ask)")
     for cmd in sorted(DESTRUCTIVE_COMMANDS):
         lines.append(f"- `aec {cmd}` — destructive (always ask)")
     return "\n".join(lines)
 
 
-def _render_body(matrix: Dict[str, Dict[str, str]]) -> str:
+def _render_body(matrix: Dict[str, Dict[str, str]], profile: str) -> str:
     """Render the body content between start and end markers (excluding markers)."""
     tmpl = _read_template()
     return (
         tmpl
-        .replace("{{AUTO_LIST}}", _format_auto_list(matrix))
-        .replace("{{ASK_LIST}}", _format_ask_list(matrix))
+        .replace("{{AUTO_LIST}}", _format_auto_list(matrix, profile))
+        .replace("{{ASK_LIST}}", _format_ask_list(matrix, profile))
     )
 
 
@@ -82,7 +94,7 @@ def render_block(
     The start marker contains: block-version, schema, aec version,
     template-hash, content-hash, profile, scope.
     """
-    inner = _render_body(matrix)
+    inner = _render_body(matrix, profile)
     tmpl_hash = shipped_template_hash()
     content_hash = content_hash_of(inner)
     start = (
