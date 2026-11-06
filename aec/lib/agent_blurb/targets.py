@@ -25,16 +25,20 @@ class AgentTarget:
 
 
 def discover_targets(
-    scope: str, root: Optional[Path] = None
+    scope: str, root: Optional[Path] = None, canonical: bool = True
 ) -> List[AgentTarget]:
     """Return all existing agent instruction files for ``scope``.
 
     Walks the agent registry in declared order and returns one
     :class:`AgentTarget` per agent whose instruction file exists on disk.
+    Files that ``@``-import another target are dropped (see
+    :func:`drop_importers`) unless ``canonical`` is False.
 
     Args:
         scope: ``"project"`` or ``"global"``.
         root: Required for ``project`` scope; ignored for ``global``.
+        canonical: ``False`` keeps importer files, for resolving an explicit
+            selection with :func:`canonicalize`.
     """
     registry = load_agent_registry()
     out: List[AgentTarget] = []
@@ -42,18 +46,25 @@ def discover_targets(
         path = _resolve_path(agent_key, scope=scope, root=root)
         if path is not None and path.exists():
             out.append(AgentTarget(agent_key=agent_key, path=path))
-    return drop_importers(out)
+    return drop_importers(out) if canonical else out
 
 
-_IMPORT_LINE = re.compile(r"^\s*@(\S+)\s*$", re.MULTILINE)
+# Claude Code ignores imports inside fenced code blocks and code spans.
+_CODE_FENCE = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.MULTILINE | re.DOTALL)
+_CODE_SPAN = re.compile(r"`[^`\n]*`")
+# An import is ``@path`` at the start of a word, anywhere in a line (not the
+# ``@`` inside an email address).
+_IMPORT_REF = re.compile(r"(?<!\S)@([^\s`]+)")
+_TRAILING_PUNCT = ".,;:!?)\"'"
 
 
 def _imported_paths(path: Path) -> set:
-    """Resolved paths named by ``@file`` import lines in ``path``."""
+    """Resolved paths named by ``@file`` imports in ``path``."""
     text = path.read_text(encoding="utf-8", errors="replace")
+    text = _CODE_SPAN.sub("", _CODE_FENCE.sub("", text))
     return {
-        (path.parent / Path(m).expanduser()).resolve()
-        for m in _IMPORT_LINE.findall(text)
+        (path.parent / Path(m.rstrip(_TRAILING_PUNCT)).expanduser()).resolve()
+        for m in _IMPORT_REF.findall(text)
     }
 
 
@@ -68,6 +79,25 @@ def drop_importers(targets: List[AgentTarget]) -> List[AgentTarget]:
         t for t in targets
         if not (_imported_paths(t.path) & (resolved - {t.path.resolve()}))
     ]
+
+
+def canonicalize(
+    selected: List[AgentTarget], existing: List[AgentTarget]
+) -> List[AgentTarget]:
+    """Replace each selected importer with the existing target it imports.
+
+    An explicit selection of an importer (``CLAUDE.md`` importing
+    ``AGENTS.md``) resolves to the imported file instead of vanishing.
+    Result is de-duplicated, in ``selected`` order.
+    """
+    by_path = {t.path.resolve(): t for t in existing}
+    out: List[AgentTarget] = []
+    for t in selected:
+        imported = _imported_paths(t.path) & (set(by_path) - {t.path.resolve()})
+        for target in ([by_path[p] for p in sorted(imported)] or [t]):
+            if target not in out:
+                out.append(target)
+    return out
 
 
 def resolve_path_for_agent_key(

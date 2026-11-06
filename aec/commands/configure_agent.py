@@ -17,7 +17,7 @@ from aec.lib.agent_blurb.render import (
     render_block, shipped_template_hash, sha256_short, extract_inner_body,
 )
 from aec.lib.agent_blurb.targets import (
-    discover_targets, AgentTarget, resolve_path_for_agent_key,
+    discover_targets, canonicalize, AgentTarget, resolve_path_for_agent_key,
 )
 from aec.lib.atomic_write import atomic_write_text
 from aec.lib.console import Console
@@ -74,7 +74,11 @@ def _resolve_targets(
         return detected
     if agent_files:
         wanted = {x.strip() for x in agent_files.split(",")}
-        return [t for t in detected if t.path.name in wanted or t.agent_key in wanted]
+        existing = discover_targets(scope=scope, root=root, canonical=False)
+        return canonicalize(
+            [t for t in existing if t.path.name in wanted or t.agent_key in wanted],
+            existing,
+        )
     if not interactive:
         return detected
     return _prompt_agent_files(detected)

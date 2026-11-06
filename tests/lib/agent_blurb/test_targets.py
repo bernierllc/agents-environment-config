@@ -70,3 +70,39 @@ class TestImportedFileIsCanonical:
         (tmp_path / "CLAUDE.md").write_text("@docs/other.md\n")
         names = {t.path.name for t in discover_targets("project", tmp_path)}
         assert {"AGENTS.md", "CLAUDE.md"} <= names
+
+    def test_inline_import_is_detected(self, tmp_path):
+        (tmp_path / "AGENTS.md").write_text("# a\n")
+        (tmp_path / "CLAUDE.md").write_text("See @AGENTS.md for shared instructions.\n")
+        names = {t.path.name for t in discover_targets("project", tmp_path)}
+        assert "CLAUDE.md" not in names
+
+    def test_import_inside_code_fence_or_span_is_ignored(self, tmp_path):
+        (tmp_path / "AGENTS.md").write_text("# a\n")
+        (tmp_path / "CLAUDE.md").write_text(
+            "Example:\n\n```\n@AGENTS.md\n```\n\nOr inline `@AGENTS.md`.\n"
+            "Mail me@AGENTS.md.example\n"
+        )
+        names = {t.path.name for t in discover_targets("project", tmp_path)}
+        assert {"AGENTS.md", "CLAUDE.md"} <= names
+
+
+class TestCanonicalize:
+    def test_explicit_importer_resolves_to_imported_target(self, tmp_path):
+        from aec.lib.agent_blurb.targets import canonicalize
+
+        (tmp_path / "AGENTS.md").write_text("# a\n")
+        (tmp_path / "CLAUDE.md").write_text("@AGENTS.md\n")
+        existing = discover_targets("project", tmp_path, canonical=False)
+        claude = [t for t in existing if t.path.name == "CLAUDE.md"]
+        got = canonicalize(claude, existing)
+        assert [t.path.name for t in got] == ["AGENTS.md"]
+
+    def test_selecting_importer_and_imported_dedupes(self, tmp_path):
+        from aec.lib.agent_blurb.targets import canonicalize
+
+        (tmp_path / "AGENTS.md").write_text("# a\n")
+        (tmp_path / "CLAUDE.md").write_text("@AGENTS.md\n")
+        existing = discover_targets("project", tmp_path, canonical=False)
+        got = canonicalize(existing, existing)
+        assert [t.path.name for t in got] == ["AGENTS.md"]
