@@ -99,3 +99,19 @@ class TestCheckAfterInstall:
             result = runner.invoke(app, ["configure-agent", "--check", "--scope", "project"])
             assert result.exit_code != 0
             assert "manual" in result.output.lower() or "drift" in result.output.lower()
+
+
+class TestExplicitImporterSelection:
+    def test_agent_files_claude_installs_into_imported_agents_md(
+        self, project_with_agent_files
+    ):
+        root = project_with_agent_files
+        (root / "CLAUDE.md").write_text("# CLAUDE.md\n\n@AGENTS.md\n")
+        result = runner.invoke(
+            app,
+            ["configure-agent", "--scope", "project", "--profile", "balanced",
+             "--agent-files", "claude", "--yes"],
+        )
+        assert result.exit_code == 0, result.output
+        assert find_block((root / "AGENTS.md").read_text()) is not None
+        assert find_block((root / "CLAUDE.md").read_text()) is None
