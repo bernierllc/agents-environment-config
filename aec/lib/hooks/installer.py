@@ -253,25 +253,35 @@ def _merge_cursor_entries(config: dict, entries: List[dict]) -> dict:
     return cfg
 
 
-def _remove_from_claude(config: dict, event_key: str, fingerprint: str) -> dict:
+def _remove_from_claude(
+    config: dict, event_key: str, fingerprint: str, *, prune: bool = True
+) -> dict:
+    """Drop one entry. `prune=False` keeps an emptied event list in place so a
+    reinstall that re-adds to it doesn't move the key to the end of the file."""
     settings = dict(config) if config else {}
     hooks = settings.get("hooks", {})
     if event_key not in hooks:
         return settings
     hooks[event_key] = [e for e in hooks[event_key] if fingerprint_hook(e) != fingerprint]
-    if not hooks[event_key]:
-        del hooks[event_key]
-    if not hooks:
-        settings.pop("hooks", None)
+    if prune:
+        _prune_empty_events(settings)
     return settings
 
 
-def _remove_from_gemini(config: dict, event_key: str, fingerprint: str) -> dict:
-    return _remove_from_claude(config, event_key, fingerprint)
+def _prune_empty_events(settings: dict) -> None:
+    hooks = settings.get("hooks", {})
+    for key in [k for k, v in hooks.items() if not v]:
+        del hooks[key]
+    if "hooks" in settings and not hooks:
+        settings.pop("hooks")
 
 
-def _remove_from_cursor(config: dict, event_key: str, fingerprint: str) -> dict:
-    return _remove_from_claude(config, event_key, fingerprint)
+def _remove_from_gemini(config: dict, event_key: str, fingerprint: str, **kw) -> dict:
+    return _remove_from_claude(config, event_key, fingerprint, **kw)
+
+
+def _remove_from_cursor(config: dict, event_key: str, fingerprint: str, **kw) -> dict:
+    return _remove_from_claude(config, event_key, fingerprint, **kw)
 
 
 def install_item_hooks(
@@ -354,19 +364,37 @@ def install_item_hooks(
     # the new one — and the stale copy keeps firing.
     snapshot = _snapshot_configs(repo_root, st.hooks_installed, rendered)
     try:
+        keep = frozenset(
+            (agent, e["event_key"], fingerprint_hook(e["payload"]))
+            for agent, entries in rendered if agent != "git" for e in entries
+        )
         _remove_recorded_hooks(
             repo_root, st.hooks_installed, item_type=item_type, item_key=item_key,
+            keep=keep, prune=False,
         )
         _install_rendered(
             repo_root, rendered, st, skipped, item_type, item_key, item_version,
             agents, hooks_json, allow_custom_check,
         )
+        _prune_agent_configs(repo_root)
         hook_state.save_state(repo_root, st)
     except Exception:
         # All or nothing: a config or state write that fails part-way must not
         # leave earlier agents retracted, or hooks live that state doesn't record.
         _restore_configs(snapshot)
         raise
+
+
+def _prune_agent_configs(repo_root: Path) -> None:
+    """Drop event lists a reinstall left empty (see `_remove_recorded_hooks`)."""
+    for rel in (".claude/settings.json", ".gemini/settings.json", ".cursor/hooks.json"):
+        path = repo_root / rel
+        if not path.is_file():
+            continue
+        config = json.loads(path.read_text())
+        if any(not v for v in config.get("hooks", {}).values()):
+            _prune_empty_events(config)
+            atomic_write_json(path, config)
 
 
 def _install_rendered(
@@ -421,8 +449,14 @@ def _restore_configs(snapshot: dict) -> None:
 
 def _remove_recorded_hooks(
     repo_root: Path, hooks_installed: List[dict], *, item_type: str, item_key: str,
+    keep: frozenset = frozenset(), prune: bool = True,
 ) -> None:
     """Delete every hook payload recorded in state from its agent config file.
+
+    `keep` holds (agent, event_key, fingerprint) triples a reinstall is about to
+    write again: they are left untouched, so an unchanged hook keeps its place
+    in the file and a reinstall with no change writes no diff. `prune=False`
+    leaves emptied event lists for the caller to prune once it has re-added.
 
     Settings entries are deduped by fingerprint on merge, so two items that
     render the same payload share one entry; it stays while another item's
@@ -441,14 +475,15 @@ def _remove_recorded_hooks(
         agent = installed["agent"]
         event_key = installed["target_json_pointer"].split("/")[2]
         fp = installed["content_fingerprint"]
-        if agent != "git" and (agent, event_key, fp) in co_owned:
+        if agent != "git" and ((agent, event_key, fp) in co_owned
+                               or (agent, event_key, fp) in keep):
             continue
         if agent == "claude":
-            _remove_claude(repo_root, event_key, fp)
+            _remove_claude(repo_root, event_key, fp, prune=prune)
         elif agent == "gemini":
-            _remove_gemini(repo_root, event_key, fp)
+            _remove_gemini(repo_root, event_key, fp, prune=prune)
         elif agent == "cursor":
-            _remove_cursor(repo_root, event_key, fp)
+            _remove_cursor(repo_root, event_key, fp, prune=prune)
         elif agent == "git":
             _remove_git(repo_root, event_key, installed, item_type, item_key)
 
@@ -469,30 +504,30 @@ def remove_item_hooks(
         raise
 
 
-def _remove_claude(repo_root: Path, event_key: str, fp: str) -> None:
+def _remove_claude(repo_root: Path, event_key: str, fp: str, *, prune: bool = True) -> None:
     settings_path = repo_root / ".claude/settings.json"
     if not settings_path.exists():
         return
     existing = json.loads(settings_path.read_text())
-    updated = _remove_from_claude(existing, event_key, fp)
+    updated = _remove_from_claude(existing, event_key, fp, prune=prune)
     atomic_write_json(settings_path, updated)
 
 
-def _remove_gemini(repo_root: Path, event_key: str, fp: str) -> None:
+def _remove_gemini(repo_root: Path, event_key: str, fp: str, *, prune: bool = True) -> None:
     settings_path = repo_root / ".gemini/settings.json"
     if not settings_path.exists():
         return
     existing = json.loads(settings_path.read_text())
-    updated = _remove_from_gemini(existing, event_key, fp)
+    updated = _remove_from_gemini(existing, event_key, fp, prune=prune)
     atomic_write_json(settings_path, updated)
 
 
-def _remove_cursor(repo_root: Path, event_key: str, fp: str) -> None:
+def _remove_cursor(repo_root: Path, event_key: str, fp: str, *, prune: bool = True) -> None:
     settings_path = repo_root / ".cursor/hooks.json"
     if not settings_path.exists():
         return
     existing = json.loads(settings_path.read_text())
-    updated = _remove_from_cursor(existing, event_key, fp)
+    updated = _remove_from_cursor(existing, event_key, fp, prune=prune)
     atomic_write_json(settings_path, updated)
 
 

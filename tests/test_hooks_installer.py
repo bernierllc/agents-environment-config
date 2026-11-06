@@ -658,3 +658,64 @@ class TestRepoLocalScriptRendering:
         settings = json.loads((repo_root / ".claude/settings.json").read_text())
         cmd = settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
         assert cmd == f"/bin/sh {script}"
+
+
+class TestReinstallKeepsSettingsOrder:
+    """A reinstall must not move event keys or entries, so it shows no diff."""
+
+    @staticmethod
+    def _item(item_dir: Path, version: str, command: str) -> None:
+        _write_item(item_dir, hooks=[{
+            "id": "h", "event": "pre_tool_use", "command": command, "description": "d",
+        }])
+        data = json.loads((item_dir / "hooks.json").read_text())
+        data["version"] = version
+        (item_dir / "hooks.json").write_text(json.dumps(data))
+
+    def _install(self, repo_root, item_dir, version):
+        from aec.lib.hooks.installer import install_item_hooks
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version=version, repo_root=repo_root, agents=["claude"],
+        )
+
+    def test_reinstall_unchanged_is_byte_identical(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        self._item(item_dir, "1.0.0", "echo one")
+        self._install(repo_root, item_dir, "1.0.0")
+        path = repo_root / ".claude/settings.json"
+        # Other keys after `hooks`, as in a real shared settings file.
+        data = json.loads(path.read_text())
+        data["permissions"] = {"allow": []}
+        path.write_text(json.dumps(data, indent=2) + "\n")
+        self._install(repo_root, item_dir, "1.0.0")
+        again = json.loads(path.read_text())
+        assert list(again) == ["hooks", "permissions"]
+
+    def test_changed_sole_hook_keeps_event_key_position(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        self._item(item_dir, "1.0.0", "echo one")
+        self._install(repo_root, item_dir, "1.0.0")
+        path = repo_root / ".claude/settings.json"
+        data = json.loads(path.read_text())
+        data["hooks"]["PostToolUse"] = [{"matcher": "x", "hooks": [{"type": "command", "command": "y"}]}]
+        path.write_text(json.dumps(data))
+        self._item(item_dir, "1.0.1", "echo two")
+        self._install(repo_root, item_dir, "1.0.1")
+        hooks = json.loads(path.read_text())["hooks"]
+        assert list(hooks) == ["PreToolUse", "PostToolUse"]
+        assert "echo two" in json.dumps(hooks["PreToolUse"])
+        assert "echo one" not in json.dumps(hooks)
+
+    def test_event_dropped_by_new_version_is_pruned(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        self._item(item_dir, "1.0.0", "echo one")
+        self._install(repo_root, item_dir, "1.0.0")
+        _write_item(item_dir, hooks=[{
+            "id": "h", "event": "on_file_edit", "command": "echo two", "description": "d"}])
+        self._install(repo_root, item_dir, "1.0.0")
+        hooks = json.loads((repo_root / ".claude/settings.json").read_text())["hooks"]
+        assert list(hooks) == ["PostToolUse"]
