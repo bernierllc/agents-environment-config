@@ -104,6 +104,13 @@ class TestImportedFileIsCanonical:
         names = {t.path.name for t in discover_targets("project", tmp_path)}
         assert {"AGENTS.md", "CLAUDE.md"} <= names
 
+    @pytest.mark.parametrize("body", ["Example:\n\n    @AGENTS.md\n", "\t@AGENTS.md\n"])
+    def test_indented_code_block_is_ignored(self, tmp_path, body):
+        (tmp_path / "AGENTS.md").write_text("# a\n")
+        (tmp_path / "CLAUDE.md").write_text(body)
+        names = {t.path.name for t in discover_targets("project", tmp_path)}
+        assert {"AGENTS.md", "CLAUDE.md"} <= names
+
     def test_double_backtick_span_is_ignored(self, tmp_path):
         (tmp_path / "AGENTS.md").write_text("# a\n")
         (tmp_path / "CLAUDE.md").write_text("Use ``@AGENTS.md`` to import.\n")

@@ -56,6 +56,9 @@ _CODE_FENCE = re.compile(
     re.MULTILINE | re.DOTALL,
 )
 # A span opens and closes with the same run of backticks (``@x`` is one span).
+# shortcut: indented code = 4+ spaces/tab after a blank line or at file start;
+# list-item continuation lines are not told apart. Upgrade if that misfires.
+_INDENTED_CODE = re.compile(r"(?:\A|(?<=\n\n))(?:(?: {4}|\t)[^\n]*(?:\n|\Z))+")
 _CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)[^\n]*?(?<!`)\1(?!`)")
 # An import is ``@path`` at the start of a word, anywhere in a line (not the
 # ``@`` inside an email address).
@@ -72,7 +75,7 @@ def _imported_paths(target: AgentTarget) -> set:
         return set()
     path = target.path
     text = path.read_text(encoding="utf-8", errors="replace")
-    text = _CODE_SPAN.sub("", _CODE_FENCE.sub("", text))
+    text = _CODE_SPAN.sub("", _INDENTED_CODE.sub("", _CODE_FENCE.sub("", text)))
     out = set()
     for m in _IMPORT_REF.findall(text):
         try:
