@@ -67,6 +67,18 @@ def _is_repo_local(script_path: Path, repo_root: Path) -> bool:
 CLAUDE_PROJECT_DIR_PREFIX = '"$CLAUDE_PROJECT_DIR"/'
 
 
+# Shell that prints the main checkout's root: the parent of the git common dir,
+# which is the same directory in the primary checkout and in every linked
+# worktree. Falls back to $CLAUDE_PROJECT_DIR when git can't answer (not a repo,
+# bare layout), so the fallback lookup simply misses and the hook reports OFF.
+# `cd`+`pwd` rather than `--path-format=absolute`, which needs git >= 2.31.
+MAIN_CHECKOUT_ASSIGN = (
+    'r=$(cd "$CLAUDE_PROJECT_DIR" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)/.." 2>/dev/null '
+    '&& pwd || printf %s "$CLAUDE_PROJECT_DIR")'
+)
+MAIN_CHECKOUT_PREFIX = '"$r"/'
+
+
 def _render_script_path(script_path: Path, repo_root: Path, agent: str) -> str:
     """Render `script_path` the way `agent` should see it."""
     try:
@@ -181,15 +193,23 @@ def _resolve_script_commands(
                 # tracks +x itself, so a chmod here is an unstaged mode change
                 # that every clone, worktree and CI checkout lacks.
                 rendered = _render_script_path(script_path, repo_root, agent)
-                pieces = [shlex.quote(p) for p in interpreter_for(script_path)]
-                pieces.append(rendered)
-                pieces += [shlex.quote(p) for p in extra]
-                cmd = " ".join(pieces)
+                interp = [shlex.quote(p) for p in interpreter_for(script_path)]
+                extra_q = [shlex.quote(p) for p in extra]
+                cmd = " ".join(interp + [rendered] + extra_q)
                 if agent in _SHELL_GUARD_AGENTS and _is_repo_local(
                     script_path, repo_root
                 ):
                     notice = (missing_script_notice(agent, item_ref, h.id)
                               if h.blocking else "")
+                    if agent == "claude":
+                        # Installed skills are often gitignored, so a linked
+                        # worktree has none: fall back to the main checkout's
+                        # copy before declaring the hook off.
+                        main_path = MAIN_CHECKOUT_PREFIX + shlex.quote(
+                            str(script_path.relative_to(repo_root)))
+                        main_cmd = " ".join(interp + [main_path] + extra_q)
+                        notice = (f"{MAIN_CHECKOUT_ASSIGN}; "
+                                  + guard_script_command(main_path, main_cmd, notice))
                     cmd = guard_script_command(rendered, cmd, notice)
         resolved[h.id] = cmd
     return resolved
