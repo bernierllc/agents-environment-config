@@ -24,9 +24,20 @@ PROFILES: Dict[str, Dict[str, Dict[str, str]]] = {
 }
 
 
+# Routine upkeep of already-installed items. Whether an agent may run these
+# unprompted depends on the profile (see MAINTENANCE_STANCE); a custom
+# profile always asks.
+MAINTENANCE_STANCE: Dict[str, str] = {
+    "conservative": "ask",
+    "balanced": "auto",
+    "permissive": "auto",
+}
+
+
 class CommandClass(str, Enum):
     READ_ONLY = "read_only"
     ADDITIVE = "additive"
+    MAINTENANCE = "maintenance"
     DESTRUCTIVE = "destructive"
 
 
@@ -37,9 +48,10 @@ READ_ONLY_COMMANDS = frozenset({
 
 ADDITIVE_COMMANDS = frozenset({"install"})
 
+MAINTENANCE_COMMANDS = frozenset({"update", "upgrade"})
+
 DESTRUCTIVE_COMMANDS = frozenset({
-    "uninstall", "update", "upgrade", "untrack", "setup", "prune",
-    "configure-agent",
+    "uninstall", "untrack", "setup", "prune", "configure-agent",
 })
 
 
@@ -64,4 +76,6 @@ def classify_command(cmd: str) -> CommandClass:
         return CommandClass.READ_ONLY
     if cmd in ADDITIVE_COMMANDS:
         return CommandClass.ADDITIVE
+    if cmd in MAINTENANCE_COMMANDS:
+        return CommandClass.MAINTENANCE
     return CommandClass.DESTRUCTIVE

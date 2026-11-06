@@ -65,7 +65,7 @@ class TestClassifyCommand:
     def test_additive(self, cmd):
         assert classify_command(cmd) == CommandClass.ADDITIVE
 
-    @pytest.mark.parametrize("cmd", ["uninstall", "update", "upgrade", "untrack", "prune"])
+    @pytest.mark.parametrize("cmd", ["uninstall", "untrack", "prune"])
     def test_destructive(self, cmd):
         assert classify_command(cmd) == CommandClass.DESTRUCTIVE
 
@@ -79,5 +79,7 @@ class TestReadOnlyAndDestructiveSets:
         assert "untrack" in DESTRUCTIVE_COMMANDS
         assert "untrack" not in READ_ONLY_COMMANDS
 
-    def test_update_is_destructive(self):
-        assert "update" in DESTRUCTIVE_COMMANDS
+    @pytest.mark.parametrize("cmd", ["update", "upgrade"])
+    def test_update_and_upgrade_are_maintenance(self, cmd):
+        assert classify_command(cmd) == CommandClass.MAINTENANCE
+        assert cmd not in DESTRUCTIVE_COMMANDS
