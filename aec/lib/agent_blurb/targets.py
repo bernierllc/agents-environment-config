@@ -55,15 +55,22 @@ _CODE_FENCE = re.compile(
     r"^ {0,3}(`{3,}|~{3,})[^\n]*\n.*?(?:^ {0,3}\1[`~]*[ \t]*$|\Z)",
     re.MULTILINE | re.DOTALL,
 )
-_CODE_SPAN = re.compile(r"`[^`\n]*`")
+# A span opens and closes with the same run of backticks (``@x`` is one span).
+_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)[^\n]*?(?<!`)\1(?!`)")
 # An import is ``@path`` at the start of a word, anywhere in a line (not the
 # ``@`` inside an email address).
 _IMPORT_REF = re.compile(r"(?<!\S)@([^\s`]+)")
 _TRAILING_PUNCT = ".,;:!?)\"'"
+# Only these agents expand ``@file`` imports. Codex injects AGENTS.md as-is, so
+# an ``@GEMINI.md`` mention there is prose, not an import.
+_IMPORTING_AGENTS = frozenset({"claude", "gemini", "qwen"})
 
 
-def _imported_paths(path: Path) -> set:
-    """Resolved paths named by ``@file`` imports in ``path``."""
+def _imported_paths(target: AgentTarget) -> set:
+    """Resolved paths ``target`` imports with ``@file`` (empty if it can't import)."""
+    if target.agent_key not in _IMPORTING_AGENTS:
+        return set()
+    path = target.path
     text = path.read_text(encoding="utf-8", errors="replace")
     text = _CODE_SPAN.sub("", _CODE_FENCE.sub("", text))
     out = set()
@@ -85,7 +92,7 @@ def drop_importers(targets: List[AgentTarget]) -> List[AgentTarget]:
     resolved = {t.path.resolve() for t in targets}
     return [
         t for t in targets
-        if not (_imported_paths(t.path) & (resolved - {t.path.resolve()}))
+        if not (_imported_paths(t) & (resolved - {t.path.resolve()}))
     ]
 
 
@@ -103,7 +110,7 @@ def canonicalize(
 
     def leaves(t: AgentTarget, seen: frozenset) -> List[AgentTarget]:
         seen = seen | {t.path.resolve()}
-        nxt = (_imported_paths(t.path) & set(by_path)) - seen
+        nxt = (_imported_paths(t) & set(by_path)) - seen
         if not nxt:
             return [t]
         return [leaf for p in sorted(nxt) for leaf in leaves(by_path[p], seen)]

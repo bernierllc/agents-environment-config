@@ -104,6 +104,18 @@ class TestImportedFileIsCanonical:
         names = {t.path.name for t in discover_targets("project", tmp_path)}
         assert {"AGENTS.md", "CLAUDE.md"} <= names
 
+    def test_double_backtick_span_is_ignored(self, tmp_path):
+        (tmp_path / "AGENTS.md").write_text("# a\n")
+        (tmp_path / "CLAUDE.md").write_text("Use ``@AGENTS.md`` to import.\n")
+        names = {t.path.name for t in discover_targets("project", tmp_path)}
+        assert {"AGENTS.md", "CLAUDE.md"} <= names
+
+    def test_agent_without_import_support_keeps_its_file(self, tmp_path):
+        (tmp_path / "GEMINI.md").write_text("# g\n")
+        (tmp_path / "AGENTS.md").write_text("See @GEMINI.md for Gemini guidance.\n")
+        names = {t.path.name for t in discover_targets("project", tmp_path)}
+        assert {"AGENTS.md", "GEMINI.md"} <= names
+
     def test_trailing_punctuation_is_stripped(self, tmp_path):
         (tmp_path / "AGENTS.md").write_text("# a\n")
         (tmp_path / "CLAUDE.md").write_text("(see @AGENTS.md).\n")
@@ -115,12 +127,13 @@ class TestCanonicalize:
     def test_chain_resolves_to_last_file(self, tmp_path):
         from aec.lib.agent_blurb.targets import canonicalize
 
-        (tmp_path / "GEMINI.md").write_text("# g\n")
-        (tmp_path / "AGENTS.md").write_text("@GEMINI.md\n")
-        (tmp_path / "CLAUDE.md").write_text("@AGENTS.md\n")
+        (tmp_path / "QWEN.md").write_text("# q\n")
+        (tmp_path / "GEMINI.md").write_text("@QWEN.md\n")
+        (tmp_path / "CLAUDE.md").write_text("@GEMINI.md\n")
         existing = discover_targets("project", tmp_path, canonical=False)
-        got = canonicalize([t for t in existing if t.path.name != "GEMINI.md"], existing)
-        assert [t.path.name for t in got] == ["GEMINI.md"]
+        selected = [t for t in existing if t.path.name != "QWEN.md"]
+        got = canonicalize(selected, existing)
+        assert [t.path.name for t in got] == ["QWEN.md"]
 
     def test_explicit_importer_resolves_to_imported_target(self, tmp_path):
         from aec.lib.agent_blurb.targets import canonicalize
