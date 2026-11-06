@@ -49,8 +49,12 @@ def discover_targets(
     return drop_importers(out) if canonical else out
 
 
-# Claude Code ignores imports inside fenced code blocks and code spans.
-_CODE_FENCE = re.compile(r"^(```|~~~).*?^\1[^\n]*$", re.MULTILINE | re.DOTALL)
+# Claude Code ignores imports inside fenced code blocks and code spans. A fence
+# closes on a line of at least the same length; an unclosed one runs to EOF.
+_CODE_FENCE = re.compile(
+    r"^ {0,3}(`{3,}|~{3,})[^\n]*\n.*?(?:^ {0,3}\1[`~]*[ \t]*$|\Z)",
+    re.MULTILINE | re.DOTALL,
+)
 _CODE_SPAN = re.compile(r"`[^`\n]*`")
 # An import is ``@path`` at the start of a word, anywhere in a line (not the
 # ``@`` inside an email address).
@@ -62,10 +66,14 @@ def _imported_paths(path: Path) -> set:
     """Resolved paths named by ``@file`` imports in ``path``."""
     text = path.read_text(encoding="utf-8", errors="replace")
     text = _CODE_SPAN.sub("", _CODE_FENCE.sub("", text))
-    return {
-        (path.parent / Path(m.rstrip(_TRAILING_PUNCT)).expanduser()).resolve()
-        for m in _IMPORT_REF.findall(text)
-    }
+    out = set()
+    for m in _IMPORT_REF.findall(text):
+        try:
+            out.add((path.parent / Path(m.rstrip(_TRAILING_PUNCT)).expanduser()).resolve())
+        except (RuntimeError, ValueError, OSError):
+            # Prose such as "@~nosuchuser" is not a resolvable import; skip it.
+            continue
+    return out
 
 
 def drop_importers(targets: List[AgentTarget]) -> List[AgentTarget]:
@@ -84,17 +92,25 @@ def drop_importers(targets: List[AgentTarget]) -> List[AgentTarget]:
 def canonicalize(
     selected: List[AgentTarget], existing: List[AgentTarget]
 ) -> List[AgentTarget]:
-    """Replace each selected importer with the existing target it imports.
+    """Replace each selected importer with the existing target(s) it imports.
 
     An explicit selection of an importer (``CLAUDE.md`` importing
-    ``AGENTS.md``) resolves to the imported file instead of vanishing.
+    ``AGENTS.md``) resolves to the imported file instead of vanishing; chains
+    (A imports B imports C) resolve to the last file.
     Result is de-duplicated, in ``selected`` order.
     """
     by_path = {t.path.resolve(): t for t in existing}
+
+    def leaves(t: AgentTarget, seen: frozenset) -> List[AgentTarget]:
+        seen = seen | {t.path.resolve()}
+        nxt = (_imported_paths(t.path) & set(by_path)) - seen
+        if not nxt:
+            return [t]
+        return [leaf for p in sorted(nxt) for leaf in leaves(by_path[p], seen)]
+
     out: List[AgentTarget] = []
     for t in selected:
-        imported = _imported_paths(t.path) & (set(by_path) - {t.path.resolve()})
-        for target in ([by_path[p] for p in sorted(imported)] or [t]):
+        for target in leaves(t, frozenset()):
             if target not in out:
                 out.append(target)
     return out

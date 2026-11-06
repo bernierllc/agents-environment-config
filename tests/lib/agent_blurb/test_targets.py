@@ -86,8 +86,42 @@ class TestImportedFileIsCanonical:
         names = {t.path.name for t in discover_targets("project", tmp_path)}
         assert {"AGENTS.md", "CLAUDE.md"} <= names
 
+    @pytest.mark.parametrize("body", [
+        "```\n@AGENTS.md\n",                              # unterminated fence
+        "````\n```\n@AGENTS.md\n```\n````\n",            # nested fence
+        "~~~\n@AGENTS.md\n~~~\n",                        # tilde fence
+        "  ```\n@AGENTS.md\n  ```\n",                    # indented fence
+    ])
+    def test_import_inside_any_fence_is_ignored(self, tmp_path, body):
+        (tmp_path / "AGENTS.md").write_text("# a\n")
+        (tmp_path / "CLAUDE.md").write_text(body)
+        names = {t.path.name for t in discover_targets("project", tmp_path)}
+        assert {"AGENTS.md", "CLAUDE.md"} <= names
+
+    def test_unresolvable_tilde_user_is_prose_not_a_crash(self, tmp_path):
+        (tmp_path / "AGENTS.md").write_text("# a\n")
+        (tmp_path / "CLAUDE.md").write_text("ping @~nosuchuser-xyz about it\n")
+        names = {t.path.name for t in discover_targets("project", tmp_path)}
+        assert {"AGENTS.md", "CLAUDE.md"} <= names
+
+    def test_trailing_punctuation_is_stripped(self, tmp_path):
+        (tmp_path / "AGENTS.md").write_text("# a\n")
+        (tmp_path / "CLAUDE.md").write_text("(see @AGENTS.md).\n")
+        names = {t.path.name for t in discover_targets("project", tmp_path)}
+        assert "CLAUDE.md" not in names
+
 
 class TestCanonicalize:
+    def test_chain_resolves_to_last_file(self, tmp_path):
+        from aec.lib.agent_blurb.targets import canonicalize
+
+        (tmp_path / "GEMINI.md").write_text("# g\n")
+        (tmp_path / "AGENTS.md").write_text("@GEMINI.md\n")
+        (tmp_path / "CLAUDE.md").write_text("@AGENTS.md\n")
+        existing = discover_targets("project", tmp_path, canonical=False)
+        got = canonicalize([t for t in existing if t.path.name != "GEMINI.md"], existing)
+        assert [t.path.name for t in got] == ["GEMINI.md"]
+
     def test_explicit_importer_resolves_to_imported_target(self, tmp_path):
         from aec.lib.agent_blurb.targets import canonicalize
 
