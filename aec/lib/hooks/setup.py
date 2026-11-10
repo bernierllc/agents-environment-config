@@ -90,6 +90,8 @@ def configured_hooks(hf, repo_root, state):
         for name, default in hf.directories.items():
             selected = chosen[name]
             hook.command = hook.command.replace("{directory:" + name + "}", shlex.quote(selected))
+            if hook.match:
+                hook.match = hook.match.replace(default + "/", selected + "/")
             if hook.when:
                 for field in ("repo_has", "repo_has_any", "repo_lacks"):
                     paths = getattr(hook.when, field)

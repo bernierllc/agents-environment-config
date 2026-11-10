@@ -149,3 +149,102 @@ def test_undeclared_directory_token_fails_before_install(tmp_path):
     with pytest.raises(ValueError, match="undeclared directory: typo"):
         install(tmp_path, item, assume_yes=True)
     assert not (tmp_path / "docs/reports").exists()
+
+
+@pytest.mark.parametrize("same_tree", [False, True])
+def test_upgrade_setup_failure_stays_retryable(tmp_path, same_tree):
+    import shutil
+    from aec.commands.upgrade import _upgrade_scope
+    from aec.lib.manifest_v2 import load_manifest, record_install, get_installed
+    source = tmp_path / "catalog"
+    source.mkdir()
+    item = item_at(source / "example")
+    (item / "SKILL.md").write_text("---\nname: example\nversion: 1.0.0\ndescription: example\n---\n")
+    repo = tmp_path / "project"
+    destination = repo / ".claude/skills/example"
+    destination.parent.mkdir(parents=True)
+    shutil.copytree(item, destination)
+    if not same_tree:
+        (destination / "SKILL.md").write_text("---\nname: example\nversion: 0.9.0\ndescription: example\n---\n")
+    from aec.lib.skills_manifest import hash_skill_directory
+    manifest = load_manifest(tmp_path / "manifest.json")
+    record_install(manifest, str(repo), "skills", "example", "0.9.0", hash_skill_directory(destination))
+    # Identical installed/source trees exercise adoption as well as failed-setup retry.
+    with pytest.raises(PromptUnanswered):
+        _upgrade_scope(manifest, str(repo), {"skills": source}, yes=False, dry_run=False)
+    assert get_installed(manifest, str(repo), "skills")["example"]["version"] == "0.9.0"
+    set_answers({"install.directory.reports": "quality/reports", "install.hooks.enable.skill.example": True})
+    assert _upgrade_scope(manifest, str(repo), {"skills": source}, yes=False, dry_run=False)
+    assert get_installed(manifest, str(repo), "skills")["example"]["version"] == "1.0.0"
+    assert (repo / "quality/reports").is_dir()
+    assert load_state(repo, "skill", "example").hooks_installed
+
+
+def test_real_fresh_playwright_pipeline_copies_only_hook_scripts(tmp_path):
+    import shutil
+    from aec.commands.install_cmd import _post_install_playwright_pipeline
+    from aec.lib.scope import Scope
+    repo = tmp_path / "project"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    scope = Scope(is_global=False, repo_path=repo)
+    source = Path(__file__).resolve().parents[1] / ".claude/skills/playwright-test-generator"
+    shutil.copytree(source, scope.skills_dir / source.name,
+                    ignore=shutil.ignore_patterns("node_modules", ".git"))
+    _post_install_playwright_pipeline(source.name, scope, yes=True)
+    assert (repo / "docs/verification").is_dir()
+    assert (repo / "scripts/verification-playwright/hooks/pre-commit.sh").is_file()
+    assert not (repo / "scripts/verification-playwright/hooks/__tests__").exists()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_declarative_apply_honors_hook_opt_out(tmp_path, enabled):
+    from aec.lib.apply_core import DesiredItem, plan_apply, execute_apply
+    from aec.lib.manifest_v2 import load_manifest
+    source = tmp_path / "catalog"
+    source.mkdir()
+    item_at(source / "example")
+    repo = tmp_path / "project"
+    manifest_path = tmp_path / "manifest.json"
+    available = {"skills": {"example": {"version": "1.0.0", "path": "example"}}}
+    plan = plan_apply([DesiredItem("skill", "example", str(repo))],
+                      manifest=load_manifest(manifest_path), available_by_type=available)
+    result = execute_apply(plan, source_dirs={"skills": source}, available_by_type=available,
+                           manifest_path=manifest_path, install_hooks=enabled)
+    assert not result.errors and len(result.applied) == 1
+    assert bool(load_state(repo, "skill", "example").hooks_installed) is enabled
+
+
+def test_declarative_apply_reports_failure_and_continues(tmp_path):
+    from aec.lib.apply_core import DesiredItem, plan_apply, execute_apply
+    from aec.lib.manifest_v2 import load_manifest, get_installed
+    source = tmp_path / "catalog"
+    source.mkdir()
+    broken = item_at(source / "broken")
+    (broken / "hooks.json").write_text('{"version":"1.0.0","hooks":[{}]}')
+    item_at(source / "healthy")
+    repo = tmp_path / "project"
+    manifest_path = tmp_path / "manifest.json"
+    available = {"skills": {name: {"version": "1.0.0", "path": name} for name in ("broken", "healthy")}}
+    plan = plan_apply([DesiredItem("skill", name, str(repo)) for name in ("broken", "healthy")],
+                      manifest=load_manifest(manifest_path), available_by_type=available)
+    result = execute_apply(plan, source_dirs={"skills": source}, available_by_type=available,
+                           manifest_path=manifest_path)
+    assert len(result.errors) == 1 and result.errors[0][0].item.name == "broken"
+    assert [entry.item.name for entry in result.applied] == ["healthy"]
+    assert "broken" not in get_installed(load_manifest(manifest_path), str(repo), "skills")
+
+
+def test_custom_directory_browser_and_api_readers(tmp_path):
+    import sys
+    skills = Path(__file__).resolve().parents[1] / ".claude/skills"
+    custom = tmp_path / "quality docs/checks"
+    (custom / "pages").mkdir(parents=True)
+    (custom / "pages/home.md").write_text("# Home")
+    (tmp_path / ".aec").mkdir()
+    (tmp_path / ".aec/directories.json").write_text(json.dumps({"verification": "quality docs/checks"}))
+    for reader in ("browser-verification", "playwright-test-runner"):
+        subprocess.run(["bash", str(skills / reader / "scripts/preflight.sh"), "--root", str(tmp_path)], check=True)
+    (custom / "access-manifest.json").write_text(json.dumps({"entries": [{"surface": "rest", "id": "GET /health", "visibility": "public"}]}))
+    (custom / "principals.json").write_text(json.dumps({"principals": {"anonymous": {}}}))
+    result = subprocess.run([sys.executable, str(skills / "api-verification/scripts/matrix.py"), "plan"], cwd=tmp_path, check=True, capture_output=True, text=True)
+    assert json.loads(result.stdout)[0]["id"] == "GET /health"

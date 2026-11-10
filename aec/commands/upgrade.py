@@ -593,6 +593,7 @@ def _upgrade_scope(
                     existing_path, src_path, info, assume_yes=yes
                 )
                 if plan == "sync_manifest":
+                    _refresh_upgrade_hooks(scope, item_type, name, avail_v, existing_path, yes)
                     sh = hash_skill_directory(src_path)
                     record_install(
                         manifest, scope, item_type, name, avail_v, sh,
@@ -641,6 +642,8 @@ def _upgrade_scope(
             else:
                 shutil.copy2(src_path, dst_path)
 
+            _refresh_upgrade_hooks(scope, item_type, name, avail_v, dst_path, yes)
+
             content_hash = hash_skill_directory(dst_path) if dst_path.is_dir() else ""
             record_install(
                 manifest, scope, item_type, name, avail_v, content_hash,
@@ -652,33 +655,26 @@ def _upgrade_scope(
 
             Console.success(f"  {item_type[:-1]}  {name}  {inst_v} -> {avail_v}")
 
-            # Refresh hooks (per-repo only). Remove old, install new from new tree.
-            if scope != "global":
-                try:
-                    from ..lib.hooks.lifecycle import (
-                        install_hooks_for_item,
-                        remove_hooks_for_item,
-                    )
-                    repo_root = Path(scope)
-                    if not (dst_path / "hooks.json").exists():
-                        remove_hooks_for_item(item_type=item_type[:-1], item_key=name, repo_root=repo_root)
-                    install_hooks_for_item(
-                        item_type=item_type[:-1],
-                        item_key=name,
-                        item_version=avail_v,
-                        item_dir=dst_path,
-                        repo_root=repo_root,
-                        allow_custom_check=yes,
-                        assume_yes=yes,
-                    )
-                except PermissionError as e:
-                    Console.warning(f"  hooks not refreshed: {e}")
-                except Exception as e:  # noqa: BLE001
-                    Console.warning(f"  hooks refresh failed for {name}: {e}")
-
             upgraded = True
 
     return upgraded
+
+
+def _refresh_upgrade_hooks(scope, item_type, name, version, item_dir, yes):
+    """Finish setup before recording the new version, including retry/adoption."""
+    if scope == "global":
+        return
+    from ..lib.hooks.lifecycle import install_hooks_for_item, remove_hooks_for_item
+
+    repo_root = Path(scope)
+    if not (item_dir / "hooks.json").exists():
+        remove_hooks_for_item(item_type=item_type[:-1], item_key=name, repo_root=repo_root)
+        return
+    install_hooks_for_item(
+        item_type=item_type[:-1], item_key=name, item_version=version,
+        item_dir=item_dir, repo_root=repo_root,
+        allow_custom_check=yes, assume_yes=yes,
+    )
 
 
 def _find_outdated_repos(

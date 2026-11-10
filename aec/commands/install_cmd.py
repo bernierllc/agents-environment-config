@@ -325,6 +325,7 @@ def _install_single_item(
     item_info: dict,
     installed_as: str = "explicit",
     yes: bool = False,
+    install_hooks: bool = True,
 ) -> None:
     """Copy ``src`` to ``dst`` and record the install in the manifest.
 
@@ -339,6 +340,19 @@ def _install_single_item(
     else:
         shutil.copy2(src, dst)
 
+    if install_hooks and scope_key != "global":
+        from ..lib.hooks.lifecycle import install_hooks_for_item
+        try:
+            install_hooks_for_item(
+                item_type=item_type, item_key=name,
+                item_version=item_info.get("version", "0.0.0"),
+                item_dir=dst, repo_root=Path(scope_key),
+                allow_custom_check=yes, assume_yes=yes,
+            )
+        except Exception as exc:
+            Console.error(f"{name} files installed, but hook setup failed: {exc}")
+            raise
+
     content_hash = hash_skill_directory(dst) if dst.is_dir() else ""
     manifest = load_manifest(manifest_file)
     record_install(
@@ -351,18 +365,6 @@ def _install_single_item(
     # Dual-write to per-type installed file (best-effort during transition)
     record_item_install(item_type, name, item_info.get("version", "0.0.0"), content_hash)
 
-    if scope_key != "global":
-        from ..lib.hooks.lifecycle import install_hooks_for_item
-        try:
-            install_hooks_for_item(
-                item_type=item_type, item_key=name,
-                item_version=item_info.get("version", "0.0.0"),
-                item_dir=dst, repo_root=Path(scope_key),
-                allow_custom_check=yes, assume_yes=yes,
-            )
-        except Exception as exc:
-            Console.error(f"{name} files installed, but hook setup failed: {exc}")
-            raise SystemExit(1) from exc
 
 
 def _resolve_and_prompt_deps(
@@ -751,6 +753,8 @@ def _post_install_playwright_pipeline(name: str, scope: Scope, yes: bool = False
     if skill_templates.is_dir() and load_state(repo_path, "skill", name).hooks_enabled is not False:
         hooks_dst.mkdir(parents=True, exist_ok=True)
         for hook_file in skill_templates.iterdir():
+            if not hook_file.is_file() or hook_file.suffix != ".sh":
+                continue
             dst_hook = hooks_dst / hook_file.name
             shutil.copy2(hook_file, dst_hook)
             dst_hook.chmod(0o755)
