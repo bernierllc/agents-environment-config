@@ -44,7 +44,7 @@ def test_refresh_rewires_when_catalog_version_moves(catalog):
     from aec.lib import catalog_hooks
     from aec.lib.hooks.state import load_state
 
-    assert catalog_hooks.wire(catalog, "skill", "my-skill")
+    assert catalog_hooks.wire(catalog, "skill", "my-skill", assume_yes=True)
     assert catalog_hooks.refresh(catalog) == []
 
     _skill(catalog, "1.1.0")  # a submodule bump
@@ -56,7 +56,7 @@ def test_refresh_rewires_when_catalog_version_moves(catalog):
 def test_refresh_unwires_items_that_left_the_catalog(catalog):
     from aec.lib import catalog_hooks
 
-    catalog_hooks.wire(catalog, "skill", "my-skill")
+    catalog_hooks.wire(catalog, "skill", "my-skill", assume_yes=True)
     shutil.rmtree(catalog / ".claude" / "skills" / "my-skill")
 
     assert catalog_hooks.refresh(catalog) == ["my-skill: removed from catalog, hooks unwired"]
@@ -66,7 +66,7 @@ def test_refresh_unwires_items_that_left_the_catalog(catalog):
 def test_unwire_never_touches_item_files(catalog):
     from aec.lib import catalog_hooks
 
-    catalog_hooks.wire(catalog, "skill", "my-skill")
+    catalog_hooks.wire(catalog, "skill", "my-skill", assume_yes=True)
     assert catalog_hooks.unwire(catalog, "skill", "my-skill")
     assert (catalog / ".claude" / "skills" / "my-skill" / "hooks.json").exists()
     assert not catalog_hooks.unwire(catalog, "skill", "my-skill")
@@ -76,7 +76,7 @@ def test_refresh_dry_run_reports_without_rewiring(catalog):
     from aec.lib import catalog_hooks
     from aec.lib.hooks.state import load_state
 
-    catalog_hooks.wire(catalog, "skill", "my-skill")
+    catalog_hooks.wire(catalog, "skill", "my-skill", assume_yes=True)
     _skill(catalog, "1.1.0")
     assert catalog_hooks.refresh(catalog, dry_run=True) == ["my-skill: 1.0.0 -> 1.1.0"]
     assert load_state(catalog, "skill", "my-skill").item_version == "1.0.0"
@@ -87,7 +87,7 @@ def test_refresh_keeps_custom_check_consent(catalog):
     from aec.lib.hooks.state import load_state
 
     _skill(catalog, "1.0.0", when={"custom_check": "true"})
-    catalog_hooks.wire(catalog, "skill", "my-skill", allow_custom_check=True)
+    catalog_hooks.wire(catalog, "skill", "my-skill", allow_custom_check=True, assume_yes=True)
     _skill(catalog, "1.1.0", when={"custom_check": "true"})
 
     # a plain `aec upgrade` (no --yes) still honours consent given at install
@@ -100,7 +100,7 @@ def test_failed_refresh_keeps_previous_hooks(catalog):
     from aec.lib import catalog_hooks
     from aec.lib.hooks.state import load_state
 
-    catalog_hooks.wire(catalog, "skill", "my-skill")
+    catalog_hooks.wire(catalog, "skill", "my-skill", assume_yes=True)
     _skill(catalog, "1.1.0", hooks_version="9.9.9")  # hooks.json fails validation
 
     [line] = catalog_hooks.refresh(catalog)
@@ -113,7 +113,7 @@ def test_failed_refresh_keeps_previous_hooks(catalog):
 def test_refresh_with_missing_script_keeps_previous_hooks(catalog):
     from aec.lib import catalog_hooks
 
-    catalog_hooks.wire(catalog, "skill", "my-skill")
+    catalog_hooks.wire(catalog, "skill", "my-skill", assume_yes=True)
     before = (catalog / ".claude" / "settings.json").read_text()
     skill = _skill(catalog, "1.1.0")
     (skill / "scripts" / "guard.py").unlink()  # valid hooks.json, fails at render
@@ -127,7 +127,7 @@ def test_refresh_write_failure_restores_every_agent(catalog):
     from aec.lib import catalog_hooks
     from aec.lib.hooks import installer
 
-    catalog_hooks.wire(catalog, "skill", "my-skill")
+    catalog_hooks.wire(catalog, "skill", "my-skill", assume_yes=True)
     settings = catalog / ".claude" / "settings.json"
     before = settings.read_text()
     _skill(catalog, "1.1.0")
@@ -144,10 +144,10 @@ def test_wire_unwires_when_item_no_longer_ships_hooks(catalog):
     from aec.lib.hooks.state import STATE_DIR
 
     skill = catalog / ".claude" / "skills" / "my-skill"
-    catalog_hooks.wire(catalog, "skill", "my-skill")
+    catalog_hooks.wire(catalog, "skill", "my-skill", assume_yes=True)
     (skill / "hooks.json").unlink()
 
-    assert catalog_hooks.wire(catalog, "skill", "my-skill") is False
+    assert catalog_hooks.wire(catalog, "skill", "my-skill", assume_yes=True) is False
     assert not list((catalog / STATE_DIR).glob("*.json"))
     assert "my-skill" not in (catalog / ".claude" / "settings.json").read_text()
 
@@ -156,7 +156,7 @@ def test_refresh_state_write_failure_restores_configs(catalog):
     from aec.lib import catalog_hooks
     from aec.lib.hooks import installer
 
-    catalog_hooks.wire(catalog, "skill", "my-skill")
+    catalog_hooks.wire(catalog, "skill", "my-skill", assume_yes=True)
     settings = catalog / ".claude" / "settings.json"
     before = settings.read_text()
     skill = _skill(catalog, "1.1.0")
@@ -174,7 +174,7 @@ def test_refresh_isolates_one_items_failure(catalog):
     from aec.lib import catalog_hooks
     from aec.lib.hooks.state import STATE_DIR, load_state
 
-    catalog_hooks.wire(catalog, "skill", "my-skill")
+    catalog_hooks.wire(catalog, "skill", "my-skill", assume_yes=True)
     state_dir = catalog / STATE_DIR
     (state_dir / "skill.aaa-broken.json").write_text((state_dir / "skill.my-skill.json").read_text())
     _skill(catalog, "1.1.0")
@@ -197,7 +197,7 @@ def test_failed_unwire_restores_hooks_and_state(catalog):
     from aec.lib.hooks import installer
     from aec.lib.hooks.state import load_state
 
-    catalog_hooks.wire(catalog, "skill", "my-skill")
+    catalog_hooks.wire(catalog, "skill", "my-skill", assume_yes=True)
     settings = catalog / ".claude" / "settings.json"
     before = settings.read_text()
     shutil.rmtree(catalog / ".claude" / "skills" / "my-skill")  # left the catalog
@@ -229,7 +229,7 @@ def test_refresh_unwires_when_hooks_json_goes_without_a_version_bump(catalog):
     from aec.lib import catalog_hooks
     from aec.lib.hooks.state import STATE_DIR
 
-    catalog_hooks.wire(catalog, "skill", "my-skill")
+    catalog_hooks.wire(catalog, "skill", "my-skill", assume_yes=True)
     (catalog / ".claude" / "skills" / "my-skill" / "hooks.json").unlink()
 
     assert catalog_hooks.refresh(catalog) == ["my-skill: no hooks.json, hooks unwired"]
@@ -247,13 +247,13 @@ def test_directory_form_rule_wires_from_its_directory(catalog):
         "command": "aec run-script rule:my-rule guard.py",
         "description": "t", "blocking": True, "timeout_ms": 1000,
     }]}))
-    assert catalog_hooks.wire(catalog, "rule", "my-rule")
+    assert catalog_hooks.wire(catalog, "rule", "my-rule", assume_yes=True)
 
 
 def test_refresh_unwires_when_new_version_drops_hooks_json(catalog):
     from aec.lib import catalog_hooks
 
-    catalog_hooks.wire(catalog, "skill", "my-skill")
+    catalog_hooks.wire(catalog, "skill", "my-skill", assume_yes=True)
     skill = _skill(catalog, "1.1.0")
     (skill / "hooks.json").unlink()
 
@@ -270,7 +270,7 @@ def test_wire_reads_items_from_the_checkout_it_wires(temp_dir):
     _skill(worktree, "1.1.0")
     with patch("aec.lib.sources.get_repo_root", return_value=primary):
         item_dir, version = catalog_hooks._catalog_item(worktree, "skill", "my-skill")
-        assert catalog_hooks.wire(worktree, "skill", "my-skill")
+        assert catalog_hooks.wire(worktree, "skill", "my-skill", assume_yes=True)
     assert (item_dir, version) == (worktree / ".claude" / "skills" / "my-skill", "1.1.0")
     assert (worktree / ".claude" / "settings.json").exists()
     assert not (primary / ".claude" / "settings.json").exists()

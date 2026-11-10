@@ -65,6 +65,17 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
                 run_update()
                 manifest = load_manifest(mp)
 
+    try:
+        _run_upgrade_scopes(manifest, yes=yes, dry_run=dry_run)
+    finally:
+        # Setup failures and interrupted prompts must not discard earlier
+        # successful item/dependency upgrades from the main manifest.
+        if not dry_run:
+            save_manifest(manifest, mp)
+
+
+def _run_upgrade_scopes(manifest: dict, *, yes: bool, dry_run: bool) -> None:
+    """Apply a batch; run_upgrade owns persistence on both success and failure."""
     source_dirs = get_source_dirs()
     any_upgraded = False
 
@@ -87,7 +98,7 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
         from ..lib import catalog_hooks
 
         try:
-            changes = catalog_hooks.refresh(catalog, allow_custom_check=yes, dry_run=dry_run)
+            changes = catalog_hooks.refresh(catalog, allow_custom_check=yes, dry_run=dry_run, assume_yes=yes)
         except Exception as e:  # noqa: BLE001 — never break upgrade on hook failure
             Console.warning(f"catalog hooks not refreshed: {e}")
             changes = []
@@ -104,9 +115,6 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
             any_upgraded = True
         else:
             Console.print("  (up to date)")
-
-    if not dry_run:
-        save_manifest(manifest, mp)
 
     # Offer to upgrade other repos
     all_repos = get_all_tracked_repos()
@@ -137,7 +145,6 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
                         yes=True,
                         dry_run=False,
                     )
-                save_manifest(manifest, mp)
             # Either way the tree was not "all up to date".
             any_upgraded = True
 
@@ -279,6 +286,7 @@ def _check_and_upgrade_dep_conflicts(
 
         dep_hash = hash_skill_directory(dep_dst) if dep_dst.is_dir() else ""
         dep_ver = dep_avail.get("version", "0.0.0")
+        _refresh_upgrade_hooks(scope, "skills", vc.name, dep_ver, dep_dst, yes)
         record_install(manifest, scope, "skills", vc.name, dep_ver, dep_hash, installed_as="dependency")
         record_item_install_pertype("skill", vc.name, dep_ver, dep_hash)
         Console.success(f"  Upgraded dep: {vc.name}  {vc.installed_ver} -> {dep_ver}")
@@ -314,6 +322,7 @@ def _check_and_upgrade_dep_conflicts(
 
             dep_hash = hash_skill_directory(dep_dst) if dep_dst.is_dir() else ""
             dep_ver = dep_avail.get("version", "0.0.0")
+            _refresh_upgrade_hooks(scope, "skills", d.name, dep_ver, dep_dst, yes)
             record_install(manifest, scope, "skills", d.name, dep_ver, dep_hash, installed_as="dependency")
             record_item_install_pertype("skill", d.name, dep_ver, dep_hash)
             Console.success(f"  Installed new dep: {d.name} {dep_ver}")
@@ -593,6 +602,7 @@ def _upgrade_scope(
                     existing_path, src_path, info, assume_yes=yes
                 )
                 if plan == "sync_manifest":
+                    _refresh_upgrade_hooks(scope, item_type, name, avail_v, existing_path, yes)
                     sh = hash_skill_directory(src_path)
                     record_install(
                         manifest, scope, item_type, name, avail_v, sh,
@@ -641,6 +651,8 @@ def _upgrade_scope(
             else:
                 shutil.copy2(src_path, dst_path)
 
+            _refresh_upgrade_hooks(scope, item_type, name, avail_v, dst_path, yes)
+
             content_hash = hash_skill_directory(dst_path) if dst_path.is_dir() else ""
             record_install(
                 manifest, scope, item_type, name, avail_v, content_hash,
@@ -652,35 +664,26 @@ def _upgrade_scope(
 
             Console.success(f"  {item_type[:-1]}  {name}  {inst_v} -> {avail_v}")
 
-            # Refresh hooks (per-repo only). Remove old, install new from new tree.
-            if scope != "global":
-                try:
-                    from ..lib.hooks.lifecycle import (
-                        install_hooks_for_item,
-                        remove_hooks_for_item,
-                    )
-                    repo_root = Path(scope)
-                    remove_hooks_for_item(
-                        item_type=item_type[:-1],
-                        item_key=name,
-                        repo_root=repo_root,
-                    )
-                    install_hooks_for_item(
-                        item_type=item_type[:-1],
-                        item_key=name,
-                        item_version=avail_v,
-                        item_dir=dst_path,
-                        repo_root=repo_root,
-                        allow_custom_check=yes,
-                    )
-                except PermissionError as e:
-                    Console.warning(f"  hooks not refreshed: {e}")
-                except Exception as e:  # noqa: BLE001
-                    Console.warning(f"  hooks refresh failed for {name}: {e}")
-
             upgraded = True
 
     return upgraded
+
+
+def _refresh_upgrade_hooks(scope, item_type, name, version, item_dir, yes):
+    """Finish setup before recording the new version, including retry/adoption."""
+    if scope == "global":
+        return
+    from ..lib.hooks.lifecycle import install_hooks_for_item, remove_hooks_for_item
+
+    repo_root = Path(scope)
+    if not (item_dir / "hooks.json").exists():
+        remove_hooks_for_item(item_type=item_type[:-1], item_key=name, repo_root=repo_root)
+        return
+    install_hooks_for_item(
+        item_type=item_type[:-1], item_key=name, item_version=version,
+        item_dir=item_dir, repo_root=repo_root,
+        allow_custom_check=yes, assume_yes=yes,
+    )
 
 
 def _find_outdated_repos(

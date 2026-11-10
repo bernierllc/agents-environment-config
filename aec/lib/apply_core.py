@@ -130,9 +130,9 @@ def execute_apply(
                     scope_key=item.scope,
                     manifest_file=manifest_path,
                     item_info=item_info,
+                    yes=True,
+                    install_hooks=install_hooks,
                 )
-                if install_hooks and not scope_obj.is_global and scope_obj.repo_path is not None:
-                    _install_item_hooks(item, scope_obj, item_info, dst)
             result.applied.append(entry)
         except Exception as exc:  # noqa: BLE001 — one bad item must not abort the rest
             result.errors.append((entry, str(exc)))
@@ -143,22 +143,6 @@ def _scope_from_key(scope_key: str) -> Scope:
     if scope_key == "global":
         return Scope(is_global=True, repo_path=None)
     return Scope(is_global=False, repo_path=Path(scope_key))
-
-
-def _install_item_hooks(item: DesiredItem, scope_obj: Scope, item_info: dict, dst: Path) -> None:
-    try:
-        from .hooks.lifecycle import install_hooks_for_item
-
-        install_hooks_for_item(
-            item_type=item.item_type,
-            item_key=item.name,
-            item_version=item_info.get("version", "0.0.0"),
-            item_dir=dst,
-            repo_root=scope_obj.repo_path,
-            allow_custom_check=True,
-        )
-    except Exception as exc:  # noqa: BLE001 — never fail an install on hook wiring
-        Console.warning(f"hooks install failed for {item.name}: {exc}")
 
 
 def _apply_mcp(

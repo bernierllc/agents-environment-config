@@ -297,6 +297,7 @@ def prompt(
     validator: Optional[Callable[[str], Any]] = None,
     sensitive: bool = False,
     choices: Optional[list] = None,
+    use_default: bool = False,
 ) -> str:
     """Ask ``prompt_text``, or return a pre-supplied answer for ``prompt_id``.
 
@@ -311,6 +312,7 @@ def prompt(
         sensitive: When True the answer must be supplied explicitly — never
             satisfied by ``--defaults``/``--yes``. Used for destructive actions
             and security acknowledgements.
+        use_default: Accept the declared default without reading stdin, after explicit answers.
         choices: Valid values for enum-typed prompts.
 
     Raises:
@@ -330,6 +332,10 @@ def prompt(
 
         Console.info(f"Pre-answered by {source}: {prompt_id}")
         return value
+
+    if use_default and not sensitive:
+        value = _coerce_typed("", type, default, choices)
+        return _run_validator(prompt_id, value, validator)
 
     if not is_non_interactive():
         from .console import Console

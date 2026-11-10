@@ -5,6 +5,7 @@ pure: no filesystem access beyond what the caller provides (script existence
 is deferred to install time per plan P1).
 """
 
+import re
 from dataclasses import dataclass
 from typing import List, Tuple
 
@@ -72,6 +73,11 @@ def validate_hooks_file(
 ) -> Tuple[List[ValidationError], List[ValidationWarning]]:
     errors: List[ValidationError] = []
     warnings: List[ValidationWarning] = []
+
+    for hook in hf.hooks:
+        for name in re.findall(r"\{directory:([^}]+)\}", hook.command):
+            if name not in hf.directories:
+                errors.append(ValidationError(f"undeclared directory: {name}", hook.id))
 
     # Rule 1: version match
     if hf.version != expected_version:

@@ -18,6 +18,7 @@ def install_hooks_for_item(
     repo_root: Path,
     agents: Sequence[str] = ("claude", "gemini", "cursor", "git"),
     allow_custom_check: bool = False,
+    assume_yes: bool = False,
 ) -> bool:
     """Install hooks declared by an item if it ships a hooks.json.
 
@@ -36,7 +37,14 @@ def install_hooks_for_item(
         repo_root=repo_root,
         agents=list(agents),
         allow_custom_check=allow_custom_check,
+        configure=True,
+        assume_yes=assume_yes,
     )
+    if item_type == "skill" and item_key == "playwright-test-generator":
+        from .state import load_state
+        from .legacy_pipeline import unwire_git_hooks
+        if load_state(repo_root, item_type, item_key).hooks_enabled is False:
+            unwire_git_hooks(repo_root)
     return True
 
 

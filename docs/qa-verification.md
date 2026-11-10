@@ -101,3 +101,33 @@ Use a scratch git repo you can push to, holding `org/my-org.yaml` (unsigned).
 
 ### Remove
 1. `aec org remove my-org --yes` deletes `~/.aec/orgs/my-org.d/`.
+
+## Hook resource setup
+
+1. In a fresh Git repository, run `aec install skill verification-writer`. Accept
+   `docs/verification` and hooks; verify the directory, `.aec/directories.json`,
+   and `PostToolUse` entries exist. Execute the installed scan command: it exits 0.
+2. Repeat in another repository, choosing `quality docs/checks`. Verify the scan
+   cache and gitignore entry use that path, with no `docs/verification` created.
+3. Decline hooks in a third repository. Verify the selected directory exists but
+   no item hooks are installed; reinstall and verify the decline is preserved.
+4. Install `playwright-test-generator` and `api-verification-writer` into the custom
+   directory repository. Verify they reuse its location. Edit a verification doc
+   and verify the Playwright manifest updates. Run `aec hooks verify`: no drift.
+5. In unattended mode without answers or defaults, verify setup fails with the
+   missing prompt ID. With `-y`, verify defaults are applied; explicit answers
+   still override `-y`. Paths outside the repository and file collisions fail.
+
+6. Supply a different explicit directory answer when installing a second item that
+   shares the same key (and when reinstalling the first). Verify installation
+   fails with the saved path to reuse, the mapping and existing hook settings are
+   unchanged, and the new directory is not created. Retry without the conflicting
+   answer; verify both items use the saved location and their commands execute.
+7. In the AEC catalog, upgrade a wired item to a version introducing a directory
+   declaration. Run `aec upgrade --yes` unattended and verify its default
+   directory is created and the new hook version is recorded without prompting.
+
+8. Install the Playwright pipeline with hooks enabled, then reinstall with hook
+   consent disabled and decline script copying. Verify managed pipeline blocks
+   are removed from pre-commit/pre-push, unrelated user commands still execute,
+   and pipeline resource files remain. Repeat with Husky and a custom hooksPath.

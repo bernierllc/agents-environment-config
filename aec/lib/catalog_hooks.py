@@ -39,7 +39,7 @@ def _catalog_item(repo: Path, item_type: str, name: str) -> Optional[tuple[Path,
     return path, info.get("version", "0.0.0")
 
 
-def wire(repo: Path, item_type: str, name: str, allow_custom_check: bool = False) -> bool:
+def wire(repo: Path, item_type: str, name: str, allow_custom_check: bool = False, assume_yes: bool = False) -> bool:
     """Wire an item's hooks from the catalog in place.
 
     Returns False when the item ships no hooks.json, unwiring any hooks an
@@ -61,6 +61,7 @@ def wire(repo: Path, item_type: str, name: str, allow_custom_check: bool = False
         item_dir=item_dir,
         repo_root=repo,
         allow_custom_check=allow_custom_check,
+        assume_yes=assume_yes,
     )
 
 
@@ -69,7 +70,7 @@ def unwire(repo: Path, item_type: str, name: str) -> bool:
     return remove_hooks_for_item(item_type=item_type, item_key=name, repo_root=repo)
 
 
-def refresh(repo: Path, allow_custom_check: bool = False, dry_run: bool = False) -> list[str]:
+def refresh(repo: Path, allow_custom_check: bool = False, dry_run: bool = False, assume_yes: bool = False) -> list[str]:
     """Re-wire every wired item whose catalog version moved.
 
     Items that left the catalog, or dropped their hooks.json, are unwired. Consent to custom checks given at
@@ -83,7 +84,7 @@ def refresh(repo: Path, allow_custom_check: bool = False, dry_run: bool = False)
     for state_file in sorted((repo / STATE_DIR).glob("*.json")):
         item_type, _, name = state_file.stem.partition(".")
         try:
-            line = _refresh_one(repo, item_type, name, allow_custom_check, dry_run)
+            line = _refresh_one(repo, item_type, name, allow_custom_check, dry_run, assume_yes)
         except Exception as e:  # noqa: BLE001 — one item never blocks the rest
             line = f"{name}: not refreshed, previous hooks kept: {e}"
         if line:
@@ -92,7 +93,7 @@ def refresh(repo: Path, allow_custom_check: bool = False, dry_run: bool = False)
 
 
 def _refresh_one(
-    repo: Path, item_type: str, name: str, allow_custom_check: bool, dry_run: bool,
+    repo: Path, item_type: str, name: str, allow_custom_check: bool, dry_run: bool, assume_yes: bool,
 ) -> Optional[str]:
     """Refresh one wired item; return its change line, or None if current."""
     state = load_state(repo, item_type, name)
@@ -110,5 +111,5 @@ def _refresh_one(
     if state.item_version == found[1]:
         return None
     if not dry_run:
-        wire(repo, item_type, name, allow_custom_check or state.allow_custom_check)
+        wire(repo, item_type, name, allow_custom_check or state.allow_custom_check, assume_yes=assume_yes)
     return line

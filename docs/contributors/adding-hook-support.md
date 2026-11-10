@@ -86,3 +86,44 @@ def test_new_agent_config(self):
 
 - [Adding a Git Provider](adding-git-provider-support.md) — add GitLab, Bitbucket, or other providers to the git essentials checklist
 - [Adding a Test Framework](adding-test-framework-support.md) — add new test framework detection
+
+## Declaring directories for item hooks
+
+In an item's `hooks.json`, declare resources that installation should create:
+
+```json
+{
+  "version": "1.0.0",
+  "directories": {"reports": "docs/reports"},
+  "hooks": [{
+    "id": "check-reports",
+    "event": "on_file_edit",
+    "command": "test -d {directory:reports}",
+    "description": "Check the reports directory",
+    "when": {"repo_has": ["docs/reports"]}
+  }]
+}
+```
+
+AEC asks for each resource location and whether to install the item's hooks. It
+creates declared directories even when hooks are declined. Defaults must be
+repository-relative paths; answers cannot escape the repository or replace a
+file. Directory keys are shared across items: related skills should use the same
+key, such as `verification`, rather than creating separate competing locations.
+
+Locations are saved in `.aec/directories.json`; include this file in the project
+so teammates and scripts use the same paths. Hook consent is saved in the item's
+installation state. Reinstall, upgrade, and repair retain both choices. Explicit
+answers can change hook consent. Saved directory locations are stable: a
+conflicting answer fails before any resource/config write. Reuse the saved path
+or omit the directory answer; individual installs cannot migrate all existing
+hooks and runtime readers to a new location.
+
+`{directory:reports}` in a generic hook command renders as a shell-quoted path.
+Place it outside shell quotes; concatenate quoted fragments if needed. Matching
+`when` paths are remapped to the selected location. Scripts that open the resource
+must also read `.aec/directories.json` (defaulting only when the setting is absent).
+Raw per-agent overrides do not support placeholders.
+
+`when` remains detection, not a list of paths to manufacture. Do not declare source
+folders such as `src/app` as resources. Unmet conditions are reported visibly.
