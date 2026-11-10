@@ -17,7 +17,7 @@ from aec.lib.agent_blurb.render import (
     render_block, shipped_template_hash, sha256_short, extract_inner_body,
 )
 from aec.lib.agent_blurb.targets import (
-    discover_targets, AgentTarget, resolve_path_for_agent_key,
+    discover_targets, canonicalize, AgentTarget, resolve_path_for_agent_key,
 )
 from aec.lib.atomic_write import atomic_write_text
 from aec.lib.console import Console
@@ -74,7 +74,11 @@ def _resolve_targets(
         return detected
     if agent_files:
         wanted = {x.strip() for x in agent_files.split(",")}
-        return [t for t in detected if t.path.name in wanted or t.agent_key in wanted]
+        existing = discover_targets(scope=scope, root=root, canonical=False)
+        return canonicalize(
+            [t for t in existing if t.path.name in wanted or t.agent_key in wanted],
+            existing,
+        )
     if not interactive:
         return detected
     return _prompt_agent_files(detected)
@@ -114,11 +118,23 @@ def _resolve_target_path(record: dict, scope: str,
     return base / record["path"]
 
 
+def _spliced(original: str, block: str) -> Optional[str]:
+    """``replace_block`` result, or None when the body on disk already matches.
+
+    Skipping keeps the marker's ``aec=`` version from churning on every upgrade.
+    """
+    loc = find_block(original)
+    if loc and extract_inner_body(original[loc.start:loc.end]) == extract_inner_body(block):
+        return None
+    return replace_block(original, block)
+
+
 def _write_target(target: AgentTarget, block: str, content_hash: str,
                   tmpl_hash: str, scope: str) -> dict:
     original = target.path.read_text(encoding="utf-8")
-    new_content = replace_block(original, block)
-    atomic_write_text(target.path, new_content)
+    new_content = _spliced(original, block)
+    if new_content is not None:
+        atomic_write_text(target.path, new_content)
     return {
         "agent_key": target.agent_key,
         "path": _relpath_for(target, scope),
@@ -263,7 +279,9 @@ def _do_refresh(scopes, yes: bool = False) -> int:
                     Console.info(f"Skipped {target_path}")
                     new_targets.append(t)
                     continue
-            atomic_write_text(target_path, replace_block(original, block))
+            new_content = _spliced(original, block)
+            if new_content is not None:
+                atomic_write_text(target_path, new_content)
             new_targets.append({**t, "template_hash": tmpl_hash,
                                 "content_hash": content_hash,
                                 "written_at": _now_iso()})

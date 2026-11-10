@@ -548,7 +548,9 @@ class TestRepoLocalScriptRendering:
         cmd = settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
         target = '"$CLAUDE_PROJECT_DIR"/.claude/skills/demo/scripts/check.sh'
         # Guarded so a clone that never committed the skill stays quiet.
-        assert cmd == f"if [ -f {target} ]; then /bin/sh {target} --flag; fi"
+        assert cmd.startswith(f"if [ -f {target} ]; then /bin/sh {target} --flag; else ")
+        # ...and, from a linked worktree without the skill, falls back to the main checkout.
+        assert '"$r"/.claude/skills/demo/scripts/check.sh' in cmd
         assert str(repo_root) not in cmd
         assert script.exists()
 
@@ -586,6 +588,43 @@ class TestRepoLocalScriptRendering:
         msg = json.loads(missing.stdout)["systemMessage"]
         assert "aec install skill demo" in msg and "OFF" in msg
 
+    def test_blocking_hook_runs_from_worktree_with_gitignored_skill(self, tmp_path):
+        """Installed skills are gitignored, so a linked worktree has no copy: the
+        hook must still run the main checkout's script, not report itself OFF."""
+        import subprocess
+        from aec.lib.hooks.installer import install_item_hooks
+        repo_root = tmp_path / "repo"
+        git = lambda *a, cwd=repo_root: subprocess.run(  # noqa: E731
+            ["git", *a], cwd=cwd, check=True, capture_output=True)
+        repo_root.mkdir()
+        git("init", "-q", "-b", "main")
+        git("config", "user.email", "t@t")
+        git("config", "user.name", "t")
+        (repo_root / ".gitignore").write_text(".claude/skills/*\n")
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        (item_dir / "scripts").mkdir(parents=True)
+        (item_dir / "scripts" / "guard.sh").write_text("#!/bin/sh\necho blocked >&2\nexit 2\n")
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "g", "event": "pre_tool_use", "blocking": True,
+                "command": "aec run-script skill:demo guard.sh", "description": "d",
+            }],
+        }))
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["claude"],
+        )
+        git("add", "-A")
+        git("commit", "-q", "-m", "init")
+        worktree = tmp_path / "wt"
+        git("worktree", "add", "-q", str(worktree), "-b", "topic")
+        assert not (worktree / ".claude/skills/demo").exists()
+        cmd = json.loads((worktree / ".claude/settings.json").read_text())[
+            "hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        env = {"CLAUDE_PROJECT_DIR": str(worktree), "PATH": "/usr/bin:/bin"}
+        result = subprocess.run(["sh", "-c", cmd], env=env, capture_output=True, text=True)
+        assert result.returncode == 2 and "blocked" in result.stderr, result
+
     def test_gemini_keeps_absolute_path(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -619,3 +658,64 @@ class TestRepoLocalScriptRendering:
         settings = json.loads((repo_root / ".claude/settings.json").read_text())
         cmd = settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
         assert cmd == f"/bin/sh {script}"
+
+
+class TestReinstallKeepsSettingsOrder:
+    """A reinstall must not move event keys or entries, so it shows no diff."""
+
+    @staticmethod
+    def _item(item_dir: Path, version: str, command: str) -> None:
+        _write_item(item_dir, hooks=[{
+            "id": "h", "event": "pre_tool_use", "command": command, "description": "d",
+        }])
+        data = json.loads((item_dir / "hooks.json").read_text())
+        data["version"] = version
+        (item_dir / "hooks.json").write_text(json.dumps(data))
+
+    def _install(self, repo_root, item_dir, version):
+        from aec.lib.hooks.installer import install_item_hooks
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version=version, repo_root=repo_root, agents=["claude"],
+        )
+
+    def test_reinstall_unchanged_is_byte_identical(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        self._item(item_dir, "1.0.0", "echo one")
+        self._install(repo_root, item_dir, "1.0.0")
+        path = repo_root / ".claude/settings.json"
+        # Other keys after `hooks`, as in a real shared settings file.
+        data = json.loads(path.read_text())
+        data["permissions"] = {"allow": []}
+        path.write_text(json.dumps(data, indent=2) + "\n")
+        self._install(repo_root, item_dir, "1.0.0")
+        again = json.loads(path.read_text())
+        assert list(again) == ["hooks", "permissions"]
+
+    def test_changed_sole_hook_keeps_event_key_position(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        self._item(item_dir, "1.0.0", "echo one")
+        self._install(repo_root, item_dir, "1.0.0")
+        path = repo_root / ".claude/settings.json"
+        data = json.loads(path.read_text())
+        data["hooks"]["PostToolUse"] = [{"matcher": "x", "hooks": [{"type": "command", "command": "y"}]}]
+        path.write_text(json.dumps(data))
+        self._item(item_dir, "1.0.1", "echo two")
+        self._install(repo_root, item_dir, "1.0.1")
+        hooks = json.loads(path.read_text())["hooks"]
+        assert list(hooks) == ["PreToolUse", "PostToolUse"]
+        assert "echo two" in json.dumps(hooks["PreToolUse"])
+        assert "echo one" not in json.dumps(hooks)
+
+    def test_event_dropped_by_new_version_is_pruned(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        self._item(item_dir, "1.0.0", "echo one")
+        self._install(repo_root, item_dir, "1.0.0")
+        _write_item(item_dir, hooks=[{
+            "id": "h", "event": "on_file_edit", "command": "echo two", "description": "d"}])
+        self._install(repo_root, item_dir, "1.0.0")
+        hooks = json.loads((repo_root / ".claude/settings.json").read_text())["hooks"]
+        assert list(hooks) == ["PostToolUse"]

@@ -38,10 +38,10 @@ Both scripts include timeouts on Docker commands to prevent hangs when the Docke
 
 The macOS/Linux script detects which runtime backs the `docker` CLI:
 
-- **Colima running:** runs `docker system prune` (stopped containers, unused networks, dangling images, build cache) and removes images unused for 24h+, then recycles the VM (`colima stop`, `colima start`). Containers come back according to their restart policy: `unless-stopped`/`always` ones restart with the daemon, `no` ones stay stopped (for example the byo-* and redis containers). If Colima fails to come back up, the script exits non-zero and says so.
-- **Docker Desktop (or another daemon):** prunes only; nothing is stopped.
+- **Colima running and the CLI targets its socket:** runs `docker system prune` (stopped containers, unused networks, dangling images, build cache) and removes images unused for 24h+. The VM is recycled (`colima stop`, `colima start`) only when `CLEANUP_RECYCLE_COLIMA=1` is set, because the stop interrupts every running container. When it runs, containers come back according to their restart policy: `unless-stopped`/`always` ones restart with the daemon, `no` ones stay stopped (for example the byo-* and redis containers). If Colima fails to come back up, the script exits non-zero and says so.
+- **Docker Desktop (or another daemon):** prunes only; nothing is stopped. This includes a Colima VM that runs while the CLI targets another daemon.
 - **No runtime:** Docker cleanup is skipped.
 
-Volumes are never pruned: an unused volume is often a stopped dev database's data. Compose stacks whose project directory no longer exists (a removed worktree) are reported with the command to stop them, but never stopped automatically.
+Anonymous volumes are pruned, including those of containers the cleanup just removed: a stopped database whose data sits in an anonymous volume loses that data. Keep dev data in named volumes, which are kept: they often hold a stopped dev database's data. Set `CLEANUP_PRUNE_NAMED_VOLUMES=1` to prune them too. Compose stacks whose project directory no longer exists (a removed worktree) are reported with the command to stop them, but never stopped automatically.
 
 From the terminal, the `cleanup` shell function runs the script as a subprocess, so the shell stays open when it finishes.
