@@ -369,3 +369,21 @@ run_upgrade()
     assert load_state(repo, "skill", "alpha").item_version == "1.0.0"
     assert (repo / "docs/alpha").is_dir()
     assert not (repo / "docs/beta").exists()
+
+    # Retry supplies only the unfinished item's answers. The completed item
+    # must retain its recorded installation while beta finishes setup.
+    alpha_record = recorded["alpha"].copy()
+    retry_script = script.replace(
+        '"install.directory.alpha":"docs/alpha", "install.hooks.enable.skill.alpha":True',
+        '"install.directory.beta":"docs/beta", "install.hooks.enable.skill.beta":True',
+    )
+    retry = subprocess.run([sys.executable, "-c", retry_script], cwd=repo,
+                           env={**os.environ, "HOME": str(home), "USERPROFILE": str(home),
+                                "PYTHONPATH": str(catalog), "AEC_NONINTERACTIVE": "1"},
+                           capture_output=True, text=True)
+    assert retry.returncode == 0, retry.stdout + retry.stderr
+    recorded = get_installed(load_manifest(manifest_path), str(repo), "skills")
+    assert recorded["alpha"] == alpha_record
+    assert recorded["beta"]["version"] == "1.0.0"
+    assert load_state(repo, "skill", "beta").item_version == "1.0.0"
+    assert (repo / "docs/beta").is_dir()
