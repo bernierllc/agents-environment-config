@@ -17,6 +17,10 @@ unit of impact lives — not a contract.
 
 ## Review follow-ups awaiting prioritization
 
+- [Deterministic directory prefix rendering](2026-11-10-directory-prefix-rendering.md):
+  P2 from PR #131; S1 replaces cascading rewrites with original-path matching
+  and validates overlapping defaults. Scheduling pending.
+
 - [Hook consent transitions](2026-11-10-hook-consent-transitions.md): two P2
   findings from PR #131; S1 owns durable declarative opt-out and optional
   pipeline re-enablement through the existing lifecycle. Scheduling pending.
