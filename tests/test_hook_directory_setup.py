@@ -391,8 +391,11 @@ run_upgrade()
 
 @pytest.mark.parametrize("second_name", ["first", "second"])
 def test_shared_directory_change_rejected_without_mutating_existing_hooks(tmp_path, second_name):
-    first = item_at(tmp_path / "first-source")
-    second = item_at(tmp_path / "second-source")
+    from aec.lib.hooks.drift import verify_repo, Drift
+    sources = tmp_path / ".claude/skills"
+    sources.mkdir(parents=True)
+    first = item_at(sources / "first")
+    second = first if second_name == "first" else item_at(sources / second_name)
     install(tmp_path, first, name="first", assume_yes=True)
     config = tmp_path / ".aec/directories.json"
     settings = tmp_path / ".claude/settings.json"
@@ -402,6 +405,7 @@ def test_shared_directory_change_rejected_without_mutating_existing_hooks(tmp_pa
         install(tmp_path, second, name=second_name, assume_yes=True)
     assert (config.read_bytes(), settings.read_bytes(), load_state(tmp_path, "skill", "first")) == before
     assert not (tmp_path / "new/reports").exists()
+    assert all(result.status is Drift.OK for result in verify_repo(tmp_path))
     # Retrying with the saved choice installs both consumers consistently.
     clear_answers()
     install(tmp_path, second, name=second_name, assume_yes=True)
@@ -410,3 +414,6 @@ def test_shared_directory_change_rejected_without_mutating_existing_hooks(tmp_pa
         for hook in entry["hooks"]:
             subprocess.run(["sh", "-c", hook["command"]], cwd=tmp_path, check=True)
     assert json.loads(config.read_text())["reports"] == "docs/reports"
+    results = verify_repo(tmp_path)
+    assert len(results) == (1 if second_name == "first" else 2)
+    assert all(result.status is Drift.OK for result in results)
