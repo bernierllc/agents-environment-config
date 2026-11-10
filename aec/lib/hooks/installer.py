@@ -172,6 +172,9 @@ def _resolve_script_commands(
             if len(parts) >= 4 and parts[:2] == ["aec", "run-script"]:
                 script_name = parts[3]
                 extra = parts[4:]
+                # The run-script CLI consumes its own option separator.
+                if extra[:1] == ["--"]:
+                    extra = extra[1:]
                 script_path = item_dir / "scripts" / script_name
                 if not script_path.exists():
                     raise FileNotFoundError(
@@ -263,6 +266,8 @@ def install_item_hooks(
     repo_root: Path,
     agents: Sequence[str],
     allow_custom_check: bool = False,
+    configure: bool = False,
+    assume_yes: bool = False,
 ) -> None:
     """End-to-end install: load → validate → translate → merge → record state.
 
@@ -279,13 +284,16 @@ def install_item_hooks(
         )
         raise ValueError(f"hooks.json validation failed: {messages}")
 
+    st = hook_state.load_state(repo_root, item_type=item_type, item_key=item_key)
+    allow_custom_check = allow_custom_check or st.allow_custom_check
+    if configure or hf.directories:
+        from .setup import configure_install
+        hf = configure_install(hf, repo_root, st, assume_yes=assume_yes)
     if any(h.when and h.when.custom_check for h in hf.hooks) and not allow_custom_check:
         raise PermissionError(
             "hooks.json contains when.custom_check; re-run with "
             "allow_custom_check=True to consent to running custom shell"
         )
-
-    st = hook_state.load_state(repo_root, item_type=item_type, item_key=item_key)
 
     skipped: List[dict] = []
     kept: List = []
@@ -295,6 +303,7 @@ def install_item_hooks(
             kept.append(h)
         else:
             skipped.append({"hook_id": h.id, "reason": result.reason})
+            Console.warning(f"{item_key}: hook {h.id} not installed: {result.reason}")
 
     filtered = HooksFile(
         version=hf.version,

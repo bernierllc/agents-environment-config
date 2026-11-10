@@ -99,7 +99,9 @@ def _rendered(repo_root: Path, item_type: str, item_key: str,
     if src is None or not (src / "hooks.json").exists():
         return None
     try:
-        hf = load_hooks_file(src / "hooks.json")
+        from .setup import configured_hooks
+        hf = configured_hooks(load_hooks_file(src / "hooks.json"), repo_root,
+                              load_state(repo_root, item_type, item_key))
         # Drop what install would skip, so a hook whose `when` turned false is
         # retracted. A custom_check is never run here — verify and doctor must
         # not execute item shell — so it alone counts as passing.

@@ -18,6 +18,9 @@ from .spec import DynamicPromptFamily, PromptSpec
 
 # --- Dynamic prefixes (concrete ID appends the item/dep name) ---------------
 
+INSTALL_HOOKS_ENABLE_PREFIX = "install.hooks.enable"
+INSTALL_DIRECTORY_PREFIX = "install.directory"
+
 INSTALL_OVERWRITE_PREFIX = "install.overwrite"
 INSTALL_REINSTALL_PREFIX = "install.reinstall"
 INSTALL_HOOKS_DORMANT_PREFIX = "install.hooks.dormant"
@@ -72,6 +75,8 @@ SPECS: tuple[PromptSpec, ...] = (
 )
 
 FAMILIES: tuple[DynamicPromptFamily, ...] = (
+    DynamicPromptFamily(INSTALL_HOOKS_ENABLE_PREFIX, command="install", summary="Enable the item's hooks?", type="yes_no"),
+    DynamicPromptFamily(INSTALL_DIRECTORY_PREFIX, command="install", summary="Repository-relative directory for a declared resource.", type="path"),
     DynamicPromptFamily(
         INSTALL_OVERWRITE_PREFIX,
         command="install",

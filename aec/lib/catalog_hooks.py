@@ -39,7 +39,7 @@ def _catalog_item(repo: Path, item_type: str, name: str) -> Optional[tuple[Path,
     return path, info.get("version", "0.0.0")
 
 
-def wire(repo: Path, item_type: str, name: str, allow_custom_check: bool = False) -> bool:
+def wire(repo: Path, item_type: str, name: str, allow_custom_check: bool = False, assume_yes: bool = False) -> bool:
     """Wire an item's hooks from the catalog in place.
 
     Returns False when the item ships no hooks.json, unwiring any hooks an
@@ -61,6 +61,7 @@ def wire(repo: Path, item_type: str, name: str, allow_custom_check: bool = False
         item_dir=item_dir,
         repo_root=repo,
         allow_custom_check=allow_custom_check,
+        assume_yes=assume_yes,
     )
 
 

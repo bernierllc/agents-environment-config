@@ -660,11 +660,8 @@ def _upgrade_scope(
                         remove_hooks_for_item,
                     )
                     repo_root = Path(scope)
-                    remove_hooks_for_item(
-                        item_type=item_type[:-1],
-                        item_key=name,
-                        repo_root=repo_root,
-                    )
+                    if not (dst_path / "hooks.json").exists():
+                        remove_hooks_for_item(item_type=item_type[:-1], item_key=name, repo_root=repo_root)
                     install_hooks_for_item(
                         item_type=item_type[:-1],
                         item_key=name,
@@ -672,6 +669,7 @@ def _upgrade_scope(
                         item_dir=dst_path,
                         repo_root=repo_root,
                         allow_custom_check=yes,
+                        assume_yes=yes,
                     )
                 except PermissionError as e:
                     Console.warning(f"  hooks not refreshed: {e}")

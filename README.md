@@ -215,6 +215,16 @@ agents-environment-config/
 
 ## Hooks
 
+On first installation, hook-bearing items ask whether to enable their hooks.
+Items can also declare resource directories: AEC suggests the default, accepts a
+custom repository-relative location, and creates it even if hooks are declined.
+Locations are shared in `.aec/directories.json`; reinstalls, upgrades, and repairs
+reuse saved choices. `-y` accepts defaults, while explicit `--answers` values take
+precedence (for example `install.directory.verification` and
+`install.hooks.enable.skill.verification-writer`). Changing a location does not
+move existing documents. Unmet detection conditions are reported, never silently
+skipped. See [declaring hook resources](docs/contributors/adding-hook-support.md).
+
 Hooks are **repo-scoped** — a skill's hooks are wired into `<repo>/.claude/settings.json` at install time, so a global install wires no hooks.
 
 - **`aec hooks verify`** — reports recorded hooks that have drifted out of the settings files (e.g. an out-of-band edit clobbered them). Add **`--repair`** to re-wire the missing hooks from source. `aec doctor` also surfaces a drift count across all tracked repos.

@@ -6,6 +6,7 @@ lives in validator.py.
 """
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, List, Optional
@@ -93,6 +94,7 @@ class HooksFile:
     cursor: List[AgentOverride] = field(default_factory=list)
     gemini: List[AgentOverride] = field(default_factory=list)
     git: List[AgentOverride] = field(default_factory=list)
+    directories: dict = field(default_factory=dict)
     schema_url: Optional[str] = None
     source_path: Optional[Path] = None
 
@@ -108,6 +110,15 @@ def load_hooks_file(path: Path) -> HooksFile:
         raise HooksSchemaError(f"{path}: top-level must be an object")
     if "version" not in data:
         raise HooksSchemaError(f"{path}: missing required field 'version'")
+
+    directories = data.get("directories", {})
+    if not isinstance(directories, dict):
+        raise HooksSchemaError("directories must map identifiers to default relative paths")
+    for key, value in directories.items():
+        if not isinstance(key, str) or not re.fullmatch(r"[a-z][a-z0-9_]*", key) or not isinstance(value, str):
+            raise HooksSchemaError("directory identifiers must be lowercase; paths must be strings")
+        if not value or Path(value).is_absolute() or ".." in Path(value).parts or "\\" in value or value == ".":
+            raise HooksSchemaError(f"directory {key!r} must have a relative path inside the repo")
 
     def _overrides(key: str) -> List[AgentOverride]:
         raw_list = data.get(key, []) or []
@@ -126,6 +137,7 @@ def load_hooks_file(path: Path) -> HooksFile:
     try:
         return HooksFile(
             version=str(data["version"]),
+            directories=directories,
             hooks=[GenericHook.from_dict(h) for h in data.get("hooks", []) or []],
             claude=_overrides("claude"),
             cursor=_overrides("cursor"),

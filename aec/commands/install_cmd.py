@@ -48,7 +48,7 @@ def _wire_catalog_hooks(repo: Path, item_type: str, name: str, yes: bool) -> Non
     from ..lib import catalog_hooks
 
     try:
-        wired = catalog_hooks.wire(repo, item_type, name, allow_custom_check=yes)
+        wired = catalog_hooks.wire(repo, item_type, name, allow_custom_check=yes, assume_yes=yes)
     except LookupError as e:
         Console.error(str(e))
         raise SystemExit(1)
@@ -59,7 +59,7 @@ def _wire_catalog_hooks(repo: Path, item_type: str, name: str, yes: bool) -> Non
         Console.error(f"hooks not installed for {name}: {e}")
         raise SystemExit(1)
     if wired:
-        Console.success(f"{name}: used in place from the aec catalog; hooks wired in {repo}")
+        Console.success(f"{name}: used in place from the aec catalog; hook setup complete in {repo}")
     else:
         Console.info(f"{name} is already in place in the aec catalog and ships no hooks; nothing to install.")
 
@@ -185,25 +185,10 @@ def run_install(
         scope_key=scope_key,
         manifest_file=manifest_file,
         item_info=item_info,
+        yes=yes,
     )
-    Console.success(f"Installed {name} v{item_info.get('version', '0.0.0')}")
 
-    # Install hooks declared by the item (per-repo only — hooks are repo-scoped)
-    if not scope.is_global and scope.repo_path is not None:
-        try:
-            from ..lib.hooks.lifecycle import install_hooks_for_item
-            install_hooks_for_item(
-                item_type=item_type,
-                item_key=name,
-                item_version=item_info.get("version", "0.0.0"),
-                item_dir=dst,
-                repo_root=scope.repo_path,
-                allow_custom_check=yes,
-            )
-        except PermissionError as e:
-            Console.warning(f"hooks not installed: {e}")
-        except Exception as e:  # noqa: BLE001 — never break install on hook failure
-            Console.warning(f"hooks install failed for {name}: {e}")
+    Console.success(f"Installed {name} v{item_info.get('version', '0.0.0')}")
 
     # Quick-scan notification for global installs
     if scope.is_global:
@@ -339,6 +324,7 @@ def _install_single_item(
     manifest_file: Path,
     item_info: dict,
     installed_as: str = "explicit",
+    yes: bool = False,
 ) -> None:
     """Copy ``src`` to ``dst`` and record the install in the manifest.
 
@@ -364,6 +350,19 @@ def _install_single_item(
 
     # Dual-write to per-type installed file (best-effort during transition)
     record_item_install(item_type, name, item_info.get("version", "0.0.0"), content_hash)
+
+    if scope_key != "global":
+        from ..lib.hooks.lifecycle import install_hooks_for_item
+        try:
+            install_hooks_for_item(
+                item_type=item_type, item_key=name,
+                item_version=item_info.get("version", "0.0.0"),
+                item_dir=dst, repo_root=Path(scope_key),
+                allow_custom_check=yes, assume_yes=yes,
+            )
+        except Exception as exc:
+            Console.error(f"{name} files installed, but hook setup failed: {exc}")
+            raise SystemExit(1) from exc
 
 
 def _resolve_and_prompt_deps(
@@ -448,6 +447,7 @@ def _resolve_and_prompt_deps(
             manifest_file=manifest_file,
             item_info=dep_info,
             installed_as="dependency",
+            yes=yes,
         )
         Console.success(f"Installed dependency: {d.name} v{dep_info.get('version', '0.0.0')}")
 
@@ -658,15 +658,15 @@ def _post_install_playwright_pipeline(name: str, scope: Scope, yes: bool = False
     if repo_path is None:
         return
 
-    verification_dir = repo_path / "docs" / "verification"
-    if not verification_dir.exists():
-        Console.info("No docs/verification/ directory found — skipping pipeline setup.")
-        return
+    from ..lib.hooks.setup import configure_directories
+    from ..lib.hooks.state import load_state
+    directories = configure_directories({"verification": "docs/verification"}, repo_path, assume_yes=yes)
+    verification_dir = repo_path / directories["verification"]
 
     if not yes:
         resp = ask_prompt(
             item_prompt_id(INSTALL_PIPELINE_COPY_PREFIX, name),
-            "This project has verification docs. "
+            "Set up the verification pipeline. "
             "Copy pipeline scripts to scripts/verification-playwright/? [y/N]: ",
             type="yes_no",
             default=False,
@@ -748,7 +748,7 @@ def _post_install_playwright_pipeline(name: str, scope: Scope, yes: bool = False
     # Copy hook templates and wire into git hooks
     skill_templates = scope.skills_dir / name / "templates" / "hooks"
     hooks_dst = pipeline_dst / "hooks"
-    if skill_templates.is_dir():
+    if skill_templates.is_dir() and load_state(repo_path, "skill", name).hooks_enabled is not False:
         hooks_dst.mkdir(parents=True, exist_ok=True)
         for hook_file in skill_templates.iterdir():
             dst_hook = hooks_dst / hook_file.name
@@ -763,7 +763,7 @@ def _post_install_playwright_pipeline(name: str, scope: Scope, yes: bool = False
     Console.print(f"  Scripts: {pipeline_dst}")
     Console.print(f"  Hook:    declared by the skill's hooks.json (see `aec hooks verify`)")
     Console.print(f"  Git:     pre-commit (gate tier), pre-push (thorough/full tiers)")
-    Console.print(f"  Trigger: edits to docs/verification/ will auto-sync Playwright tests")
+    Console.print(f"  Trigger: edits to {verification_dir.relative_to(repo_path)}/ will auto-sync Playwright tests")
 
 
 _HOOK_SOURCE_LINE = "source scripts/verification-playwright/hooks/{hook}.sh 2>/dev/null || true"

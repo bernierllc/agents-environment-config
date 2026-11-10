@@ -156,9 +156,11 @@ def _install_item_hooks(item: DesiredItem, scope_obj: Scope, item_info: dict, ds
             item_dir=dst,
             repo_root=scope_obj.repo_path,
             allow_custom_check=True,
+            assume_yes=True,
         )
-    except Exception as exc:  # noqa: BLE001 — never fail an install on hook wiring
-        Console.warning(f"hooks install failed for {item.name}: {exc}")
+    except Exception as exc:
+        Console.error(f"hooks install failed for {item.name}: {exc}")
+        raise
 
 
 def _apply_mcp(

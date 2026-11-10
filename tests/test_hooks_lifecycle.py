@@ -48,7 +48,7 @@ class TestLifecycleHelpers:
 
         installed = install_hooks_for_item(
             item_type="skill", item_key="demo", item_version="1.0.0",
-            item_dir=item_dir, repo_root=repo, agents=["claude"],
+            item_dir=item_dir, repo_root=repo, agents=["claude"], assume_yes=True,
         )
         assert installed is True
         state_path = repo / ".aec/installed-hooks/skill.demo.json"
