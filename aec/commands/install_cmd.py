@@ -751,6 +751,8 @@ def _post_install_playwright_pipeline(name: str, scope: Scope, yes: bool = False
     if skill_templates.is_dir():
         hooks_dst.mkdir(parents=True, exist_ok=True)
         for hook_file in skill_templates.iterdir():
+            if not hook_file.is_file():  # skip __tests__/ and other dev subdirs
+                continue
             dst_hook = hooks_dst / hook_file.name
             shutil.copy2(hook_file, dst_hook)
             dst_hook.chmod(0o755)
