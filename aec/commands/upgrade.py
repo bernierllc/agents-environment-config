@@ -279,6 +279,7 @@ def _check_and_upgrade_dep_conflicts(
 
         dep_hash = hash_skill_directory(dep_dst) if dep_dst.is_dir() else ""
         dep_ver = dep_avail.get("version", "0.0.0")
+        _refresh_upgrade_hooks(scope, "skills", vc.name, dep_ver, dep_dst, yes)
         record_install(manifest, scope, "skills", vc.name, dep_ver, dep_hash, installed_as="dependency")
         record_item_install_pertype("skill", vc.name, dep_ver, dep_hash)
         Console.success(f"  Upgraded dep: {vc.name}  {vc.installed_ver} -> {dep_ver}")
@@ -314,6 +315,7 @@ def _check_and_upgrade_dep_conflicts(
 
             dep_hash = hash_skill_directory(dep_dst) if dep_dst.is_dir() else ""
             dep_ver = dep_avail.get("version", "0.0.0")
+            _refresh_upgrade_hooks(scope, "skills", d.name, dep_ver, dep_dst, yes)
             record_install(manifest, scope, "skills", d.name, dep_ver, dep_hash, installed_as="dependency")
             record_item_install_pertype("skill", d.name, dep_ver, dep_hash)
             Console.success(f"  Installed new dep: {d.name} {dep_ver}")

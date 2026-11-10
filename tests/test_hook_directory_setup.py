@@ -248,3 +248,55 @@ def test_custom_directory_browser_and_api_readers(tmp_path):
     (custom / "principals.json").write_text(json.dumps({"principals": {"anonymous": {}}}))
     result = subprocess.run([sys.executable, str(skills / "api-verification/scripts/matrix.py"), "plan"], cwd=tmp_path, check=True, capture_output=True, text=True)
     assert json.loads(result.stdout)[0]["id"] == "GET /health"
+
+
+@pytest.mark.parametrize("existing_dependency", [False, True])
+@pytest.mark.parametrize("broken_hooks", [False, True])
+def test_parent_upgrade_configures_dependency_before_recording(tmp_path, existing_dependency, broken_hooks):
+    import shutil
+    from aec.commands.upgrade import _upgrade_scope
+    from aec.lib.manifest_v2 import load_manifest, record_install, get_installed
+    from aec.lib.skills_manifest import hash_skill_directory
+
+    source = tmp_path / "catalog"
+    source.mkdir()
+    dependency = item_at(source / "example")
+    (dependency / "SKILL.md").write_text("---\nname: example\nversion: 1.0.0\ndescription: example\n---\n")
+    valid_hooks = (dependency / "hooks.json").read_text()
+    parent = source / "parent"
+    parent.mkdir()
+    (parent / "SKILL.md").write_text(
+        '---\nname: parent\nversion: 2.0.0\ndescription: parent\n'
+        'dependencies:\n  skills:\n    - name: example\n      min_version: "1.0.0"\n      reason: "Reports"\n---\n')
+    repo = tmp_path / "project"
+    installed = repo / ".claude/skills"
+    old_parent = installed / "parent"
+    old_parent.mkdir(parents=True)
+    (old_parent / "SKILL.md").write_text("---\nname: parent\nversion: 1.0.0\ndescription: parent\n---\n")
+    manifest = load_manifest(tmp_path / "manifest.json")
+    record_install(manifest, str(repo), "skills", "parent", "1.0.0", hash_skill_directory(old_parent))
+    if existing_dependency:
+        old_dep = installed / "example"
+        shutil.copytree(dependency, old_dep)
+        (old_dep / "SKILL.md").write_text("---\nname: example\nversion: 0.9.0\ndescription: example\n---\n")
+        (old_dep / "hooks.json").write_text(json.dumps({"version": "0.9.0", "hooks": [
+            {"id": "report", "event": "on_file_edit", "command": "echo old-hook", "description": "old"}]}))
+        install(repo, old_dep, assume_yes=True)
+        record_install(manifest, str(repo), "skills", "example", "0.9.0", hash_skill_directory(old_dep))
+    if broken_hooks:
+        (dependency / "hooks.json").write_text('{"version":"1.0.0","hooks":[{}]}')
+        with pytest.raises(ValueError):
+            _upgrade_scope(manifest, str(repo), {"skills": source}, yes=True, dry_run=False)
+        recorded = get_installed(manifest, str(repo), "skills")
+        assert recorded["parent"]["version"] == "1.0.0"
+        assert recorded.get("example", {}).get("version") == ("0.9.0" if existing_dependency else None)
+        (dependency / "hooks.json").write_text(valid_hooks)
+    assert _upgrade_scope(manifest, str(repo), {"skills": source}, yes=True, dry_run=False)
+    assert get_installed(manifest, str(repo), "skills")["example"]["version"] == "1.0.0"
+    state = load_state(repo, "skill", "example")
+    assert state.item_version == "1.0.0" and state.hooks_installed
+    assert (repo / "docs/reports").is_dir()
+    settings = (repo / ".claude/settings.json").read_text()
+    assert "old-hook" not in settings
+    command = json.loads(settings)["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
+    subprocess.run(["sh", "-c", command], cwd=repo, check=True)
