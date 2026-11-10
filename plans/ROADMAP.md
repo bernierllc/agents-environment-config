@@ -17,6 +17,10 @@ unit of impact lives — not a contract.
 
 ## Review follow-ups awaiting prioritization
 
+- [Hook consent transitions](2026-11-10-hook-consent-transitions.md): two P2
+  findings from PR #131; S1 owns durable declarative opt-out and optional
+  pipeline re-enablement through the existing lifecycle. Scheduling pending.
+
 - [Shared directory transactions](2026-11-10-shared-directory-transactions.md):
   P2 concurrency finding from PR #131; S1 owns serialization and multiprocess
   validation. Scheduling pending.
