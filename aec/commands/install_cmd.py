@@ -9,7 +9,7 @@ import subprocess
 from ..lib import Console
 from ..lib.config import get_repo_root
 from ..lib.filesystem import installed_dst_path, remove_installed_item
-from ..lib.hooks.git_hooks_path import resolve_hooks_dir
+from ..lib.hooks.legacy_pipeline import wire_git_hooks as _wire_git_hooks
 from ..lib.manifest_v2 import (
     load_manifest, save_manifest, record_install, record_mcp_install, record_plugin_install,
 )
@@ -664,6 +664,7 @@ def _post_install_playwright_pipeline(name: str, scope: Scope, yes: bool = False
     from ..lib.hooks.state import load_state
     directories = configure_directories({"verification": "docs/verification"}, repo_path, assume_yes=yes)
     verification_dir = repo_path / directories["verification"]
+    hooks_enabled = load_state(repo_path, "skill", name).hooks_enabled is not False
 
     if not yes:
         resp = ask_prompt(
@@ -750,7 +751,7 @@ def _post_install_playwright_pipeline(name: str, scope: Scope, yes: bool = False
     # Copy hook templates and wire into git hooks
     skill_templates = scope.skills_dir / name / "templates" / "hooks"
     hooks_dst = pipeline_dst / "hooks"
-    if skill_templates.is_dir() and load_state(repo_path, "skill", name).hooks_enabled is not False:
+    if skill_templates.is_dir() and hooks_enabled:
         hooks_dst.mkdir(parents=True, exist_ok=True)
         for hook_file in skill_templates.iterdir():
             if not hook_file.is_file() or hook_file.suffix != ".sh":
@@ -768,42 +769,3 @@ def _post_install_playwright_pipeline(name: str, scope: Scope, yes: bool = False
     Console.print(f"  Hook:    declared by the skill's hooks.json (see `aec hooks verify`)")
     Console.print(f"  Git:     pre-commit (gate tier), pre-push (thorough/full tiers)")
     Console.print(f"  Trigger: edits to {verification_dir.relative_to(repo_path)}/ will auto-sync Playwright tests")
-
-
-_HOOK_SOURCE_LINE = "source scripts/verification-playwright/hooks/{hook}.sh 2>/dev/null || true"
-_HOOK_BEGIN = "# BEGIN verification-playwright"
-_HOOK_END = "# END verification-playwright"
-
-
-def _wire_git_hooks(repo_path: Path) -> None:
-    """Wire verification-playwright into the project's git hook framework."""
-    for hook_name in ("pre-commit", "pre-push"):
-        source_line = _HOOK_SOURCE_LINE.format(hook=hook_name)
-        block = f"{_HOOK_BEGIN}\n{source_line}\n{_HOOK_END}\n"
-
-        # Husky
-        husky_hook = repo_path / ".husky" / hook_name
-        if husky_hook.exists():
-            content = husky_hook.read_text()
-            if _HOOK_BEGIN not in content:
-                husky_hook.write_text(content.rstrip() + "\n\n" + block)
-            continue
-
-        # Lefthook
-        for lefthook_file in (".lefthookrc.yml", ".lefthookrc.yaml", "lefthook.yml"):
-            lefthook_path = repo_path / lefthook_file
-            if lefthook_path.exists():
-                # Don't auto-edit YAML — just inform
-                Console.info(f"  Add verification-playwright to {lefthook_file} manually")
-                break
-        else:
-            # Raw git hooks dir (honors core.hooksPath and linked worktrees)
-            git_hook = resolve_hooks_dir(repo_path).hooks_dir / hook_name
-            if git_hook.exists():
-                content = git_hook.read_text()
-                if _HOOK_BEGIN not in content:
-                    git_hook.write_text(content.rstrip() + "\n\n" + block)
-            else:
-                git_hook.parent.mkdir(parents=True, exist_ok=True)
-                git_hook.write_text(f"#!/usr/bin/env bash\n\n{block}")
-                git_hook.chmod(0o755)

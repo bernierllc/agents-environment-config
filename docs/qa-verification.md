@@ -126,3 +126,8 @@ Use a scratch git repo you can push to, holding `org/my-org.yaml` (unsigned).
 7. In the AEC catalog, upgrade a wired item to a version introducing a directory
    declaration. Run `aec upgrade --yes` unattended and verify its default
    directory is created and the new hook version is recorded without prompting.
+
+8. Install the Playwright pipeline with hooks enabled, then reinstall with hook
+   consent disabled and decline script copying. Verify managed pipeline blocks
+   are removed from pre-commit/pre-push, unrelated user commands still execute,
+   and pipeline resource files remain. Repeat with Husky and a custom hooksPath.

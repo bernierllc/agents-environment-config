@@ -433,3 +433,33 @@ def test_catalog_refresh_accepts_new_directory_defaults_with_yes(tmp_path):
     assert catalog_hooks.refresh(tmp_path, assume_yes=True) == ["example: 0.9.0 -> 1.0.0"]
     assert (tmp_path / "docs/reports").is_dir()
     assert load_state(tmp_path, "skill", "example").hooks_installed
+
+
+@pytest.mark.parametrize("framework", ["raw", "custom", "husky"])
+def test_pipeline_opt_out_removes_legacy_blocks_before_copy_prompt(tmp_path, framework):
+    from aec.commands.install_cmd import _wire_git_hooks, _post_install_playwright_pipeline
+    from aec.lib.hooks.git_hooks_path import resolve_hooks_dir
+    from aec.lib.scope import Scope
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    if framework == "custom":
+        subprocess.run(["git", "-C", str(tmp_path), "config", "core.hooksPath", ".custom-hooks"], check=True)
+    directory = tmp_path / ".husky" if framework == "husky" else resolve_hooks_dir(tmp_path).hooks_dir
+    directory.mkdir(parents=True, exist_ok=True)
+    for name in ("pre-commit", "pre-push"):
+        (directory / name).write_text("#!/usr/bin/env bash\necho user-hook\n")
+    _wire_git_hooks(tmp_path)
+    source = item_at(tmp_path / "item")
+    set_answers({"install.hooks.enable.skill.playwright-test-generator": False})
+    install(tmp_path, source, name="playwright-test-generator", assume_yes=True)
+    for name in ("pre-commit", "pre-push"):
+        assert "verification-playwright" not in (directory / name).read_text()
+    # Opt-out must be applied even if pipeline copying is declined afterwards.
+    set_answers({"install.directory.verification": "docs/verification",
+                 "install.verification_pipeline.copy_scripts.playwright-test-generator": False})
+    _post_install_playwright_pipeline("playwright-test-generator", Scope(False, tmp_path))
+    for name in ("pre-commit", "pre-push"):
+        text = (directory / name).read_text()
+        assert "verification-playwright" not in text
+        assert "echo user-hook" in text
+        result = subprocess.run(["bash", str(directory / name)], cwd=tmp_path, capture_output=True, text=True)
+        assert result.returncode == 0 and result.stdout.strip() == "user-hook"
