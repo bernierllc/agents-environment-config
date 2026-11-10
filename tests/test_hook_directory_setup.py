@@ -300,3 +300,17 @@ def test_parent_upgrade_configures_dependency_before_recording(tmp_path, existin
     assert "old-hook" not in settings
     command = json.loads(settings)["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
     subprocess.run(["sh", "-c", command], cwd=repo, check=True)
+
+
+@pytest.mark.parametrize("reader", ["browser-verification", "playwright-test-runner"])
+def test_preflight_reports_missing_python(tmp_path, reader):
+    import os
+    import shutil
+    script = Path(__file__).resolve().parents[1] / ".claude/skills" / reader / "scripts/preflight.sh"
+    empty_path = tmp_path / "bin"
+    empty_path.mkdir()
+    result = subprocess.run([shutil.which("bash"), str(script), "--root", str(tmp_path)],
+                            env={**os.environ, "PATH": str(empty_path)}, capture_output=True, text=True)
+    assert result.returncode == 1
+    assert "requires Python 3" in result.stderr and "python3 on PATH" in result.stderr
+    assert "command not found" not in result.stderr
