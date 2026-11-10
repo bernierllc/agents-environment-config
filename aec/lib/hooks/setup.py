@@ -50,6 +50,14 @@ def configure_directories(directories: dict, repo_root: Path, *, assume_yes=Fals
             validator=lambda value: validate_directory(value, repo_root),
         )
         chosen[name] = validate_directory(value, repo_root)
+        # This mapping is shared by installed hooks and runtime readers. An
+        # individual install cannot migrate all of those consumers atomically.
+        if name in configured and chosen[name] != validate_directory(configured[name], repo_root):
+            raise ValueError(
+                f"Shared directory {name!r} is already configured as {configured[name]!r}; "
+                f"installation cannot change it to {chosen[name]!r}. "
+                f"Reuse {configured[name]!r} or omit the directory answer."
+            )
     # Validate every answer before creating any directories.
     for value in chosen.values():
         (repo_root / value).mkdir(parents=True, exist_ok=True)

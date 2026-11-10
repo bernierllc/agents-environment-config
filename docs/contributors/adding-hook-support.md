@@ -114,7 +114,10 @@ key, such as `verification`, rather than creating separate competing locations.
 Locations are saved in `.aec/directories.json`; include this file in the project
 so teammates and scripts use the same paths. Hook consent is saved in the item's
 installation state. Reinstall, upgrade, and repair retain both choices. Explicit
-answers can change them; changing a location does not move existing documents.
+answers can change hook consent. Saved directory locations are stable: a
+conflicting answer fails before any resource/config write. Reuse the saved path
+or omit the directory answer; individual installs cannot migrate all existing
+hooks and runtime readers to a new location.
 
 `{directory:reports}` in a generic hook command renders as a shell-quoted path.
 Place it outside shell quotes; concatenate quoted fragments if needed. Matching

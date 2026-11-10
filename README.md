@@ -221,8 +221,10 @@ custom repository-relative location, and creates it even if hooks are declined.
 Locations are shared in `.aec/directories.json`; reinstalls, upgrades, and repairs
 reuse saved choices. `-y` accepts defaults, while explicit `--answers` values take
 precedence (for example `install.directory.verification` and
-`install.hooks.enable.skill.verification-writer`). Changing a location does not
-move existing documents. Unmet detection conditions are reported, never silently
+`install.hooks.enable.skill.verification-writer`). Once a shared location is saved,
+installation rejects a different location: reuse the saved path or omit that
+answer. Moving shared resources and their installed consumers is not an install
+operation. Unmet detection conditions are reported, never silently
 skipped. See [declaring hook resources](docs/contributors/adding-hook-support.md).
 
 Hooks are **repo-scoped** — a skill's hooks are wired into `<repo>/.claude/settings.json` at install time, so a global install wires no hooks.

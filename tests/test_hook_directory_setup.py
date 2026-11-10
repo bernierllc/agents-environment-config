@@ -387,3 +387,26 @@ run_upgrade()
     assert recorded["beta"]["version"] == "1.0.0"
     assert load_state(repo, "skill", "beta").item_version == "1.0.0"
     assert (repo / "docs/beta").is_dir()
+
+
+@pytest.mark.parametrize("second_name", ["first", "second"])
+def test_shared_directory_change_rejected_without_mutating_existing_hooks(tmp_path, second_name):
+    first = item_at(tmp_path / "first-source")
+    second = item_at(tmp_path / "second-source")
+    install(tmp_path, first, name="first", assume_yes=True)
+    config = tmp_path / ".aec/directories.json"
+    settings = tmp_path / ".claude/settings.json"
+    before = (config.read_bytes(), settings.read_bytes(), load_state(tmp_path, "skill", "first"))
+    set_answers({"install.directory.reports": "new/reports"})
+    with pytest.raises(ValueError, match="Reuse 'docs/reports' or omit"):
+        install(tmp_path, second, name=second_name, assume_yes=True)
+    assert (config.read_bytes(), settings.read_bytes(), load_state(tmp_path, "skill", "first")) == before
+    assert not (tmp_path / "new/reports").exists()
+    # Retrying with the saved choice installs both consumers consistently.
+    clear_answers()
+    install(tmp_path, second, name=second_name, assume_yes=True)
+    hooks = json.loads(settings.read_text())["hooks"]["PostToolUse"]
+    for entry in hooks:
+        for hook in entry["hooks"]:
+            subprocess.run(["sh", "-c", hook["command"]], cwd=tmp_path, check=True)
+    assert json.loads(config.read_text())["reports"] == "docs/reports"

@@ -117,3 +117,9 @@ Use a scratch git repo you can push to, holding `org/my-org.yaml` (unsigned).
 5. In unattended mode without answers or defaults, verify setup fails with the
    missing prompt ID. With `-y`, verify defaults are applied; explicit answers
    still override `-y`. Paths outside the repository and file collisions fail.
+
+6. Supply a different explicit directory answer when installing a second item that
+   shares the same key (and when reinstalling the first). Verify installation
+   fails with the saved path to reuse, the mapping and existing hook settings are
+   unchanged, and the new directory is not created. Retry without the conflicting
+   answer; verify both items use the saved location and their commands execute.
