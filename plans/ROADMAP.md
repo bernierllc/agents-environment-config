@@ -15,6 +15,12 @@ unit of impact lives — not a contract.
 
 ---
 
+## Review follow-ups awaiting prioritization
+
+- [Shared directory transactions](2026-11-10-shared-directory-transactions.md):
+  P2 concurrency finding from PR #131; S1 owns serialization and multiprocess
+  validation. Scheduling pending.
+
 ## Tier 1 — Now (active this cycle)
 
 Work that is in flight or unblocked and at the front of the queue.
@@ -124,5 +130,6 @@ Legacy `plans/` files marked shipped or superseded in-place:
 - **Shipped → archived within a week.** Prepend `> Status: shipped via PR #N
   on YYYY-MM-DD`, run `git mv` into `docs/superpowers/plans/archive/`,
   remove from the active table here.
-- **`plans/` is gitignored.** This file is force-tracked
-  (`git add -f plans/ROADMAP.md`). Don't add other tracked files to `plans/`.
+- **`plans/` is gitignored.** Durable implementation and deferral plans are
+  explicitly tracked with `git add -f` and linked here so worktree cleanup does
+  not discard outstanding work.

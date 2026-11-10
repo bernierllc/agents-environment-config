@@ -417,3 +417,19 @@ def test_shared_directory_change_rejected_without_mutating_existing_hooks(tmp_pa
     results = verify_repo(tmp_path)
     assert len(results) == (1 if second_name == "first" else 2)
     assert all(result.status is Drift.OK for result in results)
+
+
+def test_catalog_refresh_accepts_new_directory_defaults_with_yes(tmp_path):
+    from aec.lib import catalog_hooks
+    from aec.lib.hooks.state import save_state
+    source = tmp_path / ".claude/skills/example"
+    source.parent.mkdir(parents=True)
+    item_at(source)
+    (source / "SKILL.md").write_text("---\nname: example\nversion: 1.0.0\n---\n")
+    state = load_state(tmp_path, "skill", "example")
+    state.item_version = "0.9.0"
+    state.hooks_enabled = True
+    save_state(tmp_path, state)
+    assert catalog_hooks.refresh(tmp_path, assume_yes=True) == ["example: 0.9.0 -> 1.0.0"]
+    assert (tmp_path / "docs/reports").is_dir()
+    assert load_state(tmp_path, "skill", "example").hooks_installed

@@ -98,7 +98,7 @@ def _run_upgrade_scopes(manifest: dict, *, yes: bool, dry_run: bool) -> None:
         from ..lib import catalog_hooks
 
         try:
-            changes = catalog_hooks.refresh(catalog, allow_custom_check=yes, dry_run=dry_run)
+            changes = catalog_hooks.refresh(catalog, allow_custom_check=yes, dry_run=dry_run, assume_yes=yes)
         except Exception as e:  # noqa: BLE001 — never break upgrade on hook failure
             Console.warning(f"catalog hooks not refreshed: {e}")
             changes = []

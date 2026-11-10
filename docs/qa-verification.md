@@ -123,3 +123,6 @@ Use a scratch git repo you can push to, holding `org/my-org.yaml` (unsigned).
    fails with the saved path to reuse, the mapping and existing hook settings are
    unchanged, and the new directory is not created. Retry without the conflicting
    answer; verify both items use the saved location and their commands execute.
+7. In the AEC catalog, upgrade a wired item to a version introducing a directory
+   declaration. Run `aec upgrade --yes` unattended and verify its default
+   directory is created and the new hook version is recorded without prompting.
