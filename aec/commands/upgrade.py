@@ -65,6 +65,17 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
                 run_update()
                 manifest = load_manifest(mp)
 
+    try:
+        _run_upgrade_scopes(manifest, yes=yes, dry_run=dry_run)
+    finally:
+        # Setup failures and interrupted prompts must not discard earlier
+        # successful item/dependency upgrades from the main manifest.
+        if not dry_run:
+            save_manifest(manifest, mp)
+
+
+def _run_upgrade_scopes(manifest: dict, *, yes: bool, dry_run: bool) -> None:
+    """Apply a batch; run_upgrade owns persistence on both success and failure."""
     source_dirs = get_source_dirs()
     any_upgraded = False
 
@@ -105,9 +116,6 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
         else:
             Console.print("  (up to date)")
 
-    if not dry_run:
-        save_manifest(manifest, mp)
-
     # Offer to upgrade other repos
     all_repos = get_all_tracked_repos()
     other_repos = [r for r in all_repos if r != local_repo and not is_catalog_repo(r)]
@@ -137,7 +145,6 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
                         yes=True,
                         dry_run=False,
                     )
-                save_manifest(manifest, mp)
             # Either way the tree was not "all up to date".
             any_upgraded = True
 

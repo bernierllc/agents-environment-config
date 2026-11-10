@@ -314,3 +314,58 @@ def test_preflight_reports_missing_python(tmp_path, reader):
     assert result.returncode == 1
     assert "requires Python 3" in result.stderr and "python3 on PATH" in result.stderr
     assert "command not found" not in result.stderr
+
+
+def test_upgrade_persists_earlier_success_when_later_setup_is_unanswered(tmp_path):
+    """Run real command code in an isolated catalog/home, without patching owners."""
+    import os
+    import shutil
+    import sys
+    from datetime import datetime, timezone
+    from aec.lib.manifest_v2 import load_manifest, record_install, save_manifest, get_installed
+    from aec.lib.skills_manifest import hash_skill_directory
+
+    catalog = tmp_path / "catalog"
+    catalog.mkdir()
+    source_root = Path(__file__).resolve().parents[1]
+    shutil.copytree(source_root / "aec", catalog / "aec", ignore=shutil.ignore_patterns("__pycache__"))
+    (catalog / ".agent-rules").mkdir()
+    sources = catalog / ".claude/skills"
+    sources.mkdir(parents=True)
+    repo = tmp_path / "project"
+    home = tmp_path / "home"
+    config = home / ".agents-environment-config"
+    config.mkdir(parents=True)
+    manifest_path = config / "installed-manifest.json"
+    manifest = load_manifest(manifest_path)
+    for name in ("alpha", "beta"):
+        source = item_at(sources / name)
+        data = json.loads((source / "hooks.json").read_text())
+        data["directories"] = {name: f"docs/{name}"}
+        data["hooks"][0]["command"] = "test -d {directory:" + name + "}"
+        data["hooks"][0]["when"] = {"repo_has": [f"docs/{name}"]}
+        (source / "hooks.json").write_text(json.dumps(data))
+        (source / "SKILL.md").write_text(f"---\nname: {name}\nversion: 1.0.0\ndescription: test\n---\n")
+        installed = repo / ".claude/skills" / name
+        installed.mkdir(parents=True)
+        (installed / "SKILL.md").write_text(f"---\nname: {name}\nversion: 0.9.0\ndescription: test\n---\n")
+        record_install(manifest, str(repo), "skills", name, "0.9.0", hash_skill_directory(installed))
+    manifest["lastUpdateCheck"] = datetime.now(timezone.utc).isoformat()
+    save_manifest(manifest, manifest_path)
+    (config / "setup-repo-locations.txt").write_text("2026-01-01|1.0.0|" + str(repo) + "\n")
+    script = '''from aec.lib.prompts import set_answers
+from aec.commands.upgrade import run_upgrade
+set_answers({"install.directory.alpha":"docs/alpha", "install.hooks.enable.skill.alpha":True})
+run_upgrade()
+'''
+    result = subprocess.run([sys.executable, "-c", script], cwd=repo,
+                            env={**os.environ, "HOME": str(home), "USERPROFILE": str(home),
+                                 "PYTHONPATH": str(catalog), "AEC_NONINTERACTIVE": "1"},
+                            capture_output=True, text=True)
+    assert result.returncode != 0 and "install.directory.beta" in result.stderr
+    recorded = get_installed(load_manifest(manifest_path), str(repo), "skills")
+    assert recorded["alpha"]["version"] == "1.0.0"
+    assert recorded["beta"]["version"] == "0.9.0"
+    assert load_state(repo, "skill", "alpha").item_version == "1.0.0"
+    assert (repo / "docs/alpha").is_dir()
+    assert not (repo / "docs/beta").exists()
