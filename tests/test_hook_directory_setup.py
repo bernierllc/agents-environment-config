@@ -437,7 +437,7 @@ def test_catalog_refresh_accepts_new_directory_defaults_with_yes(tmp_path):
 
 @pytest.mark.parametrize("framework", ["raw", "custom", "husky"])
 def test_pipeline_opt_out_removes_legacy_blocks_before_copy_prompt(tmp_path, framework):
-    from aec.commands.install_cmd import _wire_git_hooks, _post_install_playwright_pipeline
+    from aec.commands.install_cmd import _post_install_playwright_pipeline
     from aec.lib.hooks.git_hooks_path import resolve_hooks_dir
     from aec.lib.scope import Scope
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
@@ -447,8 +447,20 @@ def test_pipeline_opt_out_removes_legacy_blocks_before_copy_prompt(tmp_path, fra
     directory.mkdir(parents=True, exist_ok=True)
     for name in ("pre-commit", "pre-push"):
         (directory / name).write_text("#!/usr/bin/env bash\necho user-hook\n")
-    _wire_git_hooks(tmp_path)
-    source = item_at(tmp_path / "item")
+    scope = Scope(False, tmp_path)
+    scope.skills_dir.mkdir(parents=True)
+    source = item_at(scope.skills_dir / "playwright-test-generator")
+    (source / "scripts").mkdir()
+    templates = source / "templates/hooks"
+    templates.mkdir(parents=True)
+    for name in ("pre-commit", "pre-push"):
+        (templates / (name + ".sh")).write_text("echo pipeline-hook\n")
+    install(tmp_path, source, name="playwright-test-generator", assume_yes=True)
+    _post_install_playwright_pipeline("playwright-test-generator", scope, yes=True)
+    for name in ("pre-commit", "pre-push"):
+        result = subprocess.run(["bash", str(directory / name)], cwd=tmp_path, capture_output=True, text=True)
+        assert result.returncode == 0
+        assert result.stdout.splitlines() == ["user-hook", "pipeline-hook"]
     set_answers({"install.hooks.enable.skill.playwright-test-generator": False})
     install(tmp_path, source, name="playwright-test-generator", assume_yes=True)
     for name in ("pre-commit", "pre-push"):
