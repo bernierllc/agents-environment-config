@@ -503,7 +503,10 @@ def _default_confirm(policy: EffectivePolicy) -> bool:
 
 
 def _stamp_applied(paths, now: Optional[str], synced: list[SyncedSource] = ()) -> None:
-    """Record ``last_applied_at`` and applied source commits on every enrolled org."""
+    """Record ``last_applied_at`` and applied source commits on every enrolled org.
+
+    All or nothing: if one org's write fails, the orgs already written are restored.
+    """
     import dataclasses
     from datetime import datetime, timezone
 
@@ -511,13 +514,20 @@ def _stamp_applied(paths, now: Optional[str], synced: list[SyncedSource] = ()) -
     from .state import read_state, write_state
 
     stamp = now or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    for enrolled in discover_enrolled_orgs(paths):
-        org_id = enrolled.config.org_id
-        st = read_state(paths, org_id)
-        if st is not None:
-            commits = {s.source_id: s.commit for s in synced if s.org_id == org_id} or None
-            failed = bool(st.pending and st.pending.get("kind") == "apply_failed")
-            write_state(paths, dataclasses.replace(
-                st, last_applied_at=stamp, source_commits=commits,
-                pending=None if failed else st.pending,
-            ))
+    written = []  # states as they were before this stamp
+    try:
+        for enrolled in discover_enrolled_orgs(paths):
+            org_id = enrolled.config.org_id
+            st = read_state(paths, org_id)
+            if st is not None:
+                commits = {s.source_id: s.commit for s in synced if s.org_id == org_id} or None
+                failed = bool(st.pending and st.pending.get("kind") == "apply_failed")
+                write_state(paths, dataclasses.replace(
+                    st, last_applied_at=stamp, source_commits=commits,
+                    pending=None if failed else st.pending,
+                ))
+                written.append(st)
+    except Exception:
+        for st in written:
+            write_state(paths, st)
+        raise

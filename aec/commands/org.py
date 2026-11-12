@@ -498,7 +498,8 @@ def _refresh_one(paths: OrgPaths, st: OrgState) -> tuple[str, bool]:
             )
             return "pending review", False
         # Back to the applied content: a stale review or verify failure no longer applies.
-        if st.pending:
+        # apply_failed stays: the enrolled config is right but still unapplied.
+        if st.pending and st.pending.get("kind") != "apply_failed":
             write_state(paths, dataclasses.replace(st, pending=None))
         return "unchanged", False
 

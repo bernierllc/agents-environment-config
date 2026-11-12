@@ -481,4 +481,5 @@ def test_signed_managed_change_whose_source_fails_is_apply_failed(remote, paths)
     assert st.config_version == "2.0.0" and st.pending["kind"] == "apply_failed"
     assert "aec org apply" in org_cmd.pending_fix(st)
     # Still reported on the next refresh, which finds the YAML unchanged.
+    assert org_cmd.refresh_remote_orgs(paths) == [("my-org", "unchanged")]
     assert read_state(paths, "my-org").pending["kind"] == "apply_failed"

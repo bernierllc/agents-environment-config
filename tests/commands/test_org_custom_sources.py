@@ -504,3 +504,52 @@ def test_failed_pip_install_records_nothing(tmp_path, monkeypatch):
         core._apply_mcp(item, Scope(is_global=True, repo_path=None), {"path": "srv"},
                         tmp_path, tmp_path / "m.json")
     assert not (tmp_path / "m.json").exists()
+
+
+ANOTHER_ORG = """---
+schema_version: "1.0"
+org_id: "another-org"
+org_name: "Another Org"
+config_version: "1.0.0"
+trust:
+  mode: "unsigned"
+---
+
+sources:
+  default: { skills: keep, rules: keep, agents: keep, mcps: keep }
+  custom: []
+
+items:
+  skills: {}
+  rules: {}
+  agents: {}
+  mcps: {}
+"""
+
+
+def test_failed_second_org_state_write_restores_the_first(repos, home, paths, tmp_path, monkeypatch):
+    import aec.lib.org_config.state as state_mod
+
+    a = _enroll_ref_only_and_apply(repos, paths)
+    another = tmp_path / "another-org.yaml"
+    another.write_text(ANOTHER_ORG, encoding="utf-8")
+    assert runner.invoke(app, ["org", "enroll", str(another), "--allow-unsigned", "--yes"]).exit_code == 0
+    _push_rule(repos, "1.1.0")
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+    before = {o: read_state(paths, o) for o in ("example-org", "another-org")}
+
+    real_write = state_mod.write_state
+    calls = []
+
+    def write_second_fails(p, st):
+        calls.append(st.org_id)
+        if len(calls) == 2:  # another-org (no review to roll back) is stamped first; this one fails
+            raise OSError("disk full")
+        real_write(p, st)
+
+    monkeypatch.setattr(state_mod, "write_state", write_second_fails)
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
+    # apply_cmd restores the reviewed org itself; another-org's stamp needs _stamp_applied to undo it.
+    assert {o: read_state(paths, o) for o in before} == before
+    assert _live_head(paths) == a
