@@ -462,3 +462,23 @@ def test_unknown_state_key_is_ignored(remote, paths):
     data = json.loads(p.read_text(encoding="utf-8"))
     p.write_text(json.dumps({**data, "from_a_newer_aec": 1}), encoding="utf-8")
     assert read_state(paths, "my-org").org_id == "my-org"
+
+
+@needs_nacl
+def test_signed_managed_change_whose_source_fails_is_apply_failed(remote, paths):
+    key = nacl_signing.SigningKey.generate()
+    _enroll_signed(remote, key, MANAGED)
+    unserved = (
+        f'custom:\n    - id: "team-rules"\n      url: "{REMOTE_URL}"\n'
+        f'      commit: "{"0" * 40}"\n      contributes: ["rules"]'
+    )
+    text = _pinned_text(key, "2.0.0", MANAGED).replace("custom: []", unserved)
+    (remote / "org/my-org.yaml.sig").write_bytes(key.sign(text.encode()).signature)
+    commit_file(remote, "org/my-org.yaml", text)
+
+    assert org_cmd.refresh_remote_orgs(paths) == [("my-org", "apply_failed: source failed")]
+    st = read_state(paths, "my-org")
+    assert st.config_version == "2.0.0" and st.pending["kind"] == "apply_failed"
+    assert "aec org apply" in org_cmd.pending_fix(st)
+    # Still reported on the next refresh, which finds the YAML unchanged.
+    assert read_state(paths, "my-org").pending["kind"] == "apply_failed"

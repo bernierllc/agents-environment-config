@@ -53,7 +53,7 @@ class OrgState:
     # Domain recorded at the last interactive enroll (dns_anchor). Part of the
     # trust anchor: a refresh compares fetched content against it, never the YAML.
     trust_dns_domain: Optional[str] = None
-    # Something needs a human: {"kind": "review"|"verify_failed"|"trust_change", ...}.
+    # Something needs a human: {"kind": "review"|"verify_failed"|"trust_change"|"apply_failed", ...}.
     pending: Optional[dict] = None
     # {custom_source_id: commit} last approved and applied, so a source pinned
     # only by ref stays put until a refresh's review approves where it moved.

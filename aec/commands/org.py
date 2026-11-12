@@ -613,7 +613,15 @@ def refresh_remote_orgs(paths: OrgPaths) -> list[tuple[str, str]]:
         results.append((org_id, status))
         promoted = promoted or did_promote
     if promoted:
-        apply_org_policy(paths, mode_override="managed")
+        outcome = apply_org_policy(paths, mode_override="managed")
+        if outcome.skipped_reason in ("source_failed", "install_failed"):
+            # The new config is enrolled but not applied; keep saying so until an apply succeeds.
+            reason = outcome.skipped_reason.replace("_", " ")
+            for i, (org_id, status) in enumerate(results):
+                st = read_state(paths, org_id) if status == "updated" else None
+                if st is not None:
+                    _set_pending(paths, st, {"kind": "apply_failed", "reason": reason})
+                    results[i] = (org_id, f"apply_failed: {reason}")
     return results
 
 
@@ -638,6 +646,11 @@ def pending_fix(st: OrgState) -> str:
     if kind == "trust_change":
         return (
             f"org '{st.org_id}' trust anchor changed: run `aec org enroll --replace {st.org_id} <source>`"
+        )
+    if kind == "apply_failed":
+        return (
+            f"org '{st.org_id}' was updated but not applied ({st.pending.get('reason')}): "
+            "run `aec org apply` to see why and retry"
         )
     return f"org '{st.org_id}' refresh failed ({st.pending.get('reason')}): fix the source, then `aec update`"
 

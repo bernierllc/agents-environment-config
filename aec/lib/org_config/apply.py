@@ -516,6 +516,8 @@ def _stamp_applied(paths, now: Optional[str], synced: list[SyncedSource] = ()) -
         st = read_state(paths, org_id)
         if st is not None:
             commits = {s.source_id: s.commit for s in synced if s.org_id == org_id} or None
-            write_state(
-                paths, dataclasses.replace(st, last_applied_at=stamp, source_commits=commits)
-            )
+            failed = bool(st.pending and st.pending.get("kind") == "apply_failed")
+            write_state(paths, dataclasses.replace(
+                st, last_applied_at=stamp, source_commits=commits,
+                pending=None if failed else st.pending,
+            ))
