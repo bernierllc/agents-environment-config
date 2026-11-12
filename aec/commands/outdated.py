@@ -6,8 +6,8 @@ from typing import Optional
 from ..lib.claude_plugins import is_claude_managed
 from ..lib.console import Console
 from ..lib.config import get_repo_root
-from ..lib.manifest_v2 import load_manifest, get_installed
-from ..lib.sources import discover_available, get_source_dirs
+from ..lib.manifest_v2 import load_manifest
+from ..lib.sources import discover_available, get_source_dirs, installed_by_source
 from ..lib.scope import find_tracked_repo, get_all_tracked_repos
 from ..lib.skills_manifest import version_is_newer
 
@@ -75,12 +75,10 @@ def _print_outdated(
 ) -> bool:
     """Print outdated items for a single scope. Returns True if any found."""
     found = False
-    for item_type in types:
-        source_dir = source_dirs.get(item_type)
-        if not source_dir or not source_dir.exists():
-            continue
+    for item_type, source_dir, _source, installed in installed_by_source(
+        manifest, scope, source_dirs, types
+    ):
         available = discover_available(source_dir, item_type)
-        installed = get_installed(manifest, scope, item_type)
         singular = TYPE_SINGULAR[item_type]
         for name, info in sorted(installed.items()):
             if item_type == "plugins" and is_claude_managed(info):

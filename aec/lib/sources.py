@@ -1,6 +1,7 @@
 """Source management: discover items, check staleness, fetch updates."""
 
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -146,6 +147,40 @@ def _discover_available_plugins(source_dir: Path) -> dict:
             "install_type": data.get("install_type", ""),
         }
     return plugins
+
+
+_SOURCE_PART_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
+
+
+def installed_by_source(manifest: dict, scope: str, source_dirs: dict, types=None) -> list:
+    """Group a scope's installed items by the source they came from.
+
+    Returns ``(item_type, source_dir, source, installed)`` tuples. Items without a
+    ``source`` came from the AEC catalog and resolve against ``source_dirs``; an
+    item recorded with ``source="<org_id>/<id>"`` resolves against that org custom
+    source's checkout, so upgrade and outdated compare it to its own source.
+    The AEC group is always present, even when empty.
+    """
+    from .manifest_v2 import get_installed
+    from .org_config.paths import OrgPaths
+
+    out = []
+    for item_type in types if types is not None else tuple(source_dirs):
+        groups: dict = {None: {}}
+        for name, info in get_installed(manifest, scope, item_type).items():
+            src = info.get("source") if isinstance(info, dict) else None
+            groups.setdefault(src, {})[name] = info
+        for src, installed in groups.items():
+            if src is None:
+                d = source_dirs.get(item_type)
+            else:
+                org_id, _, sid = src.partition("/")
+                if not (_SOURCE_PART_RE.match(org_id) and _SOURCE_PART_RE.match(sid)):
+                    continue  # malformed record: never build a path from it
+                d = get_source_dirs(OrgPaths.default().source_dir_for(org_id, sid)).get(item_type)
+            if d and Path(d).exists():
+                out.append((item_type, Path(d), src, installed))
+    return out
 
 
 def get_source_dirs(root: Optional[Path] = None) -> dict:

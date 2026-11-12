@@ -68,6 +68,55 @@ def validate_git_source(url: str, ref: str, path: str) -> GitSource:
     return GitSource(url=url, ref=ref, path=norm)
 
 
+def validate_source_remote(url: str, ref: Optional[str]) -> None:
+    """Validate a custom source's url and (optional) ref; same rules as a config source."""
+    validate_git_source(url, ref or "HEAD", "x")
+
+
+def remote_commit(url: str, ref: str) -> str:
+    """The commit ``ref`` points at on the remote (tags peeled)."""
+    validate_source_remote(url, ref)
+    out = _git(["ls-remote", "--", url, ref, f"{ref}^{{}}"], f"ls-remote {url}")
+    shas: dict[str, str] = {}
+    for line in out.splitlines():
+        sha, _, name = line.partition("\t")
+        shas[name] = sha
+    for name in (f"refs/tags/{ref}^{{}}", f"refs/heads/{ref}", f"refs/tags/{ref}", ref):
+        if name in shas:
+            return shas[name]
+    raise OrgConfigFetchError(f"ref {ref!r} not found at {url}")
+
+
+def sync_source(url: str, ref: Optional[str], commit: Optional[str], dest: Path) -> str:
+    """Check out ``commit`` (or the tip of ``ref``) of ``url`` at ``dest``. Returns the commit.
+
+    A pinned commit the server will not serve is an error; it never falls back to the ref.
+    """
+    validate_source_remote(url, ref)
+    want = commit or ref
+    if not want:
+        raise OrgConfigValidationError("a custom source needs a ref or commit", field_path="source")
+    if (dest / ".git").is_dir():
+        _git(["-C", str(dest), "remote", "set-url", "origin", "--", url], f"set-url in {dest}")
+    else:
+        dest.mkdir(parents=True, exist_ok=True)
+        _git(["init", "--quiet", str(dest)], f"init {dest}")
+        _git(["-C", str(dest), "remote", "add", "origin", "--", url], f"remote add in {dest}")
+    try:
+        _git(["-C", str(dest), "fetch", "--depth", "1", "origin", "--", want], f"fetch {url}")
+    except OrgConfigFetchError as exc:
+        if commit:
+            raise OrgConfigFetchError(
+                f"server would not serve pinned commit {commit} of {url}: {exc}"
+            ) from exc
+        raise
+    _git(["-C", str(dest), "checkout", "--quiet", "--detach", "FETCH_HEAD"], f"checkout in {dest}")
+    got = head_commit(dest)
+    if commit and got != commit:
+        raise OrgConfigFetchError(f"checked out {got} but pinned commit is {commit} ({url})")
+    return got
+
+
 def parse_git_source(source: str) -> GitSource:
     """Parse ``git+<url>#<ref>:<path>``."""
     if not is_git_source(source):

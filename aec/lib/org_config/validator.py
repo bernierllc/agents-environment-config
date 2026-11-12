@@ -33,6 +33,61 @@ def _require(d: dict, key: str, field_path: str) -> Any:
     return d[key]
 
 
+_SOURCE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
+_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _validate_custom_sources(raw: Any, trust_mode: str) -> list[CustomSource]:
+    from .git_source import validate_source_remote
+
+    if not isinstance(raw, list):
+        raise OrgConfigValidationError("must be a list", field_path="sources.custom")
+    out: list[CustomSource] = []
+    for i, s in enumerate(raw):
+        path = f"sources.custom[{i}]"
+        if not isinstance(s, dict):
+            raise OrgConfigValidationError("must be a mapping", field_path=path)
+        sid = s.get("id")
+        if not isinstance(sid, str) or not _SOURCE_ID_RE.match(sid):
+            raise OrgConfigValidationError(
+                f"id must match {_SOURCE_ID_RE.pattern}, got {sid!r}", field_path=f"{path}.id"
+            )
+        if sid in RESERVED_SOURCE_IDS:
+            raise OrgConfigValidationError(f"id {sid!r} is reserved", field_path=f"{path}.id")
+        if any(cs.id == sid for cs in out):
+            raise OrgConfigValidationError(f"duplicate id {sid!r}", field_path=f"{path}.id")
+        url, ref, commit = s.get("url"), s.get("ref"), s.get("commit")
+        if ref is None and commit is None:
+            raise OrgConfigValidationError("needs a ref or commit", field_path=path)
+        if commit is not None and not (isinstance(commit, str) and _COMMIT_RE.match(commit)):
+            raise OrgConfigValidationError(
+                "commit must be a full 40-character hex sha", field_path=f"{path}.commit"
+            )
+        if commit is None and trust_mode != "unsigned":
+            raise OrgConfigValidationError(
+                "signed orgs must pin every custom source to a commit",
+                field_path=f"{path}.commit",
+            )
+        if not isinstance(url, str) or (ref is not None and not isinstance(ref, str)):
+            raise OrgConfigValidationError("url and ref must be strings", field_path=path)
+        try:
+            validate_source_remote(url, ref)
+        except OrgConfigValidationError as exc:
+            raise OrgConfigValidationError(str(exc).split(": ", 1)[-1], field_path=path) from exc
+        contributes = s.get("contributes")
+        if (
+            not isinstance(contributes, list)
+            or not contributes
+            or any(t not in ITEM_TYPES or t == "plugins" for t in contributes)
+        ):
+            raise OrgConfigValidationError(
+                "contributes must be a non-empty list of skills, rules, agents, mcps",
+                field_path=f"{path}.contributes",
+            )
+        out.append(CustomSource(id=sid, url=url, ref=ref, contributes=tuple(contributes), commit=commit))
+    return out
+
+
 def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
     schema_version = frontmatter.get("schema_version")
     if schema_version not in SCHEMA_VERSION_SUPPORTED:
@@ -101,17 +156,8 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
     sources_block = body.get("sources") or {}
     default_sources = dict(sources_block.get("default") or {})
 
-    custom_sources_raw = sources_block.get("custom") or []
-    custom_sources: list[CustomSource] = []
-    for s in custom_sources_raw:
-        custom_sources.append(
-            CustomSource(
-                id=s["id"],
-                url=s["url"],
-                ref=s["ref"],
-                contributes=tuple(s["contributes"]),
-            )
-        )
+    custom_sources = _validate_custom_sources(sources_block.get("custom") or [], trust_mode)
+    contributes_by_source = {cs.id: cs.contributes for cs in custom_sources}
 
     valid_source_ids = set(RESERVED_SOURCE_IDS) | {cs.id for cs in custom_sources}
 
@@ -137,6 +183,17 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
                     f"unknown source '{source}' (not declared in sources.custom and not reserved)",
                     field_path=f"{base_path}.source",
                 )
+            if source in contributes_by_source:
+                if type_name == "plugins":
+                    raise OrgConfigValidationError(
+                        "plugins install only from aec.default.plugins",
+                        field_path=f"{base_path}.source",
+                    )
+                if type_name not in contributes_by_source[source]:
+                    raise OrgConfigValidationError(
+                        f"source '{source}' does not contribute {type_name}",
+                        field_path=f"{base_path}.source",
+                    )
             stance_raw = policy_dict.get("stance")
             if stance_raw not in _STANCE_VALUES:
                 raise OrgConfigValidationError(

@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 import subprocess
+from typing import Optional
 
 from ..lib import Console
 from ..lib.config import get_repo_root
@@ -326,6 +327,7 @@ def _install_single_item(
     installed_as: str = "explicit",
     yes: bool = False,
     install_hooks: bool = True,
+    source: Optional[str] = None,
 ) -> None:
     """Copy ``src`` to ``dst`` and record the install in the manifest.
 
@@ -358,7 +360,7 @@ def _install_single_item(
     record_install(
         manifest, scope_key, plural, name,
         item_info.get("version", "0.0.0"), content_hash,
-        installed_as=installed_as,
+        installed_as=installed_as, source=source,
     )
     save_manifest(manifest, manifest_file)
 

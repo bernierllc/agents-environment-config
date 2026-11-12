@@ -55,6 +55,9 @@ class OrgState:
     trust_dns_domain: Optional[str] = None
     # Something needs a human: {"kind": "review"|"verify_failed"|"trust_change", ...}.
     pending: Optional[dict] = None
+    # {custom_source_id: commit} last approved and applied, so a source pinned
+    # only by ref stays put until a refresh's review approves where it moved.
+    source_commits: Optional[dict] = None
 
 
 class OrgStateCorruptError(OrgConfigError):

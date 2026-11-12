@@ -8,7 +8,7 @@ from ..lib.config import get_repo_root, INSTALLED_MANIFEST_V2
 from ..lib.manifest_v2 import (
     get_all_repo_scopes, get_installed, load_manifest, record_update_check, save_manifest,
 )
-from ..lib.sources import fetch_latest, discover_available, get_source_dirs
+from ..lib.sources import fetch_latest, discover_available, get_source_dirs, installed_by_source
 from ..lib.scope import find_tracked_repo, get_all_tracked_repos
 from ..lib.skills_manifest import version_is_newer
 
@@ -192,11 +192,8 @@ def _refresh_claude_plugins(manifest: dict, scopes: list) -> int:
 def _report_scope_outdated(manifest: dict, scope: str, source_dirs: dict) -> int:
     """Report outdated items for a scope. Returns count of outdated items."""
     count = 0
-    for item_type, source_dir in source_dirs.items():
-        if not source_dir or not source_dir.exists():
-            continue
+    for item_type, source_dir, _source, installed in installed_by_source(manifest, scope, source_dirs):
         available = discover_available(source_dir, item_type)
-        installed = get_installed(manifest, scope, item_type)
         for name, info in installed.items():
             if item_type == "plugins" and is_claude_managed(info):
                 # Claude Code has no check-only command, so this plugin is

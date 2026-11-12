@@ -1,6 +1,7 @@
 """aec upgrade -- apply available upgrades to installed items."""
 
 import shutil
+from typing import Optional
 from pathlib import Path
 
 from ..lib.claude_plugins import is_claude_managed
@@ -23,7 +24,7 @@ from ..lib.manifest_v2 import (
     record_install,
     is_stale,
 )
-from ..lib.sources import discover_available, get_source_dirs
+from ..lib.sources import discover_available, get_source_dirs, installed_by_source
 from ..lib.scope import find_tracked_repo, get_all_tracked_repos, is_catalog_repo
 from ..lib.skills_manifest import (
     version_is_newer,
@@ -221,6 +222,7 @@ def _check_and_upgrade_dep_conflicts(
     target_dir: Path,
     yes: bool,
     dry_run: bool,
+    source: Optional[str] = None,
 ) -> bool:
     """Check dep constraints of the new skill version and resolve any conflicts.
 
@@ -287,7 +289,7 @@ def _check_and_upgrade_dep_conflicts(
         dep_hash = hash_skill_directory(dep_dst) if dep_dst.is_dir() else ""
         dep_ver = dep_avail.get("version", "0.0.0")
         _refresh_upgrade_hooks(scope, "skills", vc.name, dep_ver, dep_dst, yes)
-        record_install(manifest, scope, "skills", vc.name, dep_ver, dep_hash, installed_as="dependency")
+        record_install(manifest, scope, "skills", vc.name, dep_ver, dep_hash, installed_as="dependency", source=source)
         record_item_install_pertype("skill", vc.name, dep_ver, dep_hash)
         Console.success(f"  Upgraded dep: {vc.name}  {vc.installed_ver} -> {dep_ver}")
 
@@ -323,7 +325,7 @@ def _check_and_upgrade_dep_conflicts(
             dep_hash = hash_skill_directory(dep_dst) if dep_dst.is_dir() else ""
             dep_ver = dep_avail.get("version", "0.0.0")
             _refresh_upgrade_hooks(scope, "skills", d.name, dep_ver, dep_dst, yes)
-            record_install(manifest, scope, "skills", d.name, dep_ver, dep_hash, installed_as="dependency")
+            record_install(manifest, scope, "skills", d.name, dep_ver, dep_hash, installed_as="dependency", source=source)
             record_item_install_pertype("skill", d.name, dep_ver, dep_hash)
             Console.success(f"  Installed new dep: {d.name} {dep_ver}")
 
@@ -546,11 +548,8 @@ def _upgrade_scope(
     dependency upgrade), so the caller must not report "up to date".
     """
     upgraded = False
-    for item_type, source_dir in source_dirs.items():
-        if not source_dir or not source_dir.exists():
-            continue
+    for item_type, source_dir, source, installed in installed_by_source(manifest, scope, source_dirs):
         available = discover_available(source_dir, item_type)
-        installed = get_installed(manifest, scope, item_type)
         if item_type == "plugins":
             # Plugins are installed by their own tooling, not copied files.
             if _upgrade_plugins(manifest, scope, source_dir, installed, available, yes, dry_run):
@@ -558,7 +557,7 @@ def _upgrade_scope(
             continue
         target = _target_base(scope, item_type)
 
-        if item_type == "agents" and target.exists():
+        if item_type == "agents" and source is None and target.exists():
             repaired = _repair_extensionless_agents(manifest, scope, target, dry_run)
             if repaired and not dry_run:
                 upgraded = True
@@ -582,7 +581,7 @@ def _upgrade_scope(
                 if item_type == "skills":
                     _check_and_upgrade_dep_conflicts(
                         name, avail_v, manifest, scope, available,
-                        source_dir, target, yes, dry_run=True,
+                        source_dir, target, yes, dry_run=True, source=source,
                     )
                 upgraded = True
                 continue
@@ -591,7 +590,7 @@ def _upgrade_scope(
             if item_type == "skills":
                 if not _check_and_upgrade_dep_conflicts(
                     name, avail_v, manifest, scope, available,
-                    source_dir, target, yes, dry_run=False,
+                    source_dir, target, yes, dry_run=False, source=source,
                 ):
                     upgraded = True  # still outdated; never report "up to date"
                     continue
@@ -606,7 +605,7 @@ def _upgrade_scope(
                     sh = hash_skill_directory(src_path)
                     record_install(
                         manifest, scope, item_type, name, avail_v, sh,
-                        installed_as=info.get("installedAs", "explicit"),
+                        installed_as=info.get("installedAs", "explicit"), source=source,
                     )
                     record_item_install_pertype(
                         item_type[:-1], name, avail_v, sh
@@ -656,7 +655,7 @@ def _upgrade_scope(
             content_hash = hash_skill_directory(dst_path) if dst_path.is_dir() else ""
             record_install(
                 manifest, scope, item_type, name, avail_v, content_hash,
-                installed_as=info.get("installedAs", "explicit"),
+                installed_as=info.get("installedAs", "explicit"), source=source,
             )
 
             # Dual-write to per-type installed file (best-effort during transition)
@@ -694,11 +693,10 @@ def _find_outdated_repos(
     for repo_path in repos:
         repo_key = str(repo_path.resolve())
         count = 0
-        for item_type, source_dir in source_dirs.items():
-            if not source_dir or not source_dir.exists():
-                continue
+        for item_type, source_dir, _source, installed in installed_by_source(
+            manifest, repo_key, source_dirs
+        ):
             available = discover_available(source_dir, item_type)
-            installed = get_installed(manifest, repo_key, item_type)
             for name, info in installed.items():
                 if item_type == "plugins" and is_claude_managed(info):
                     # Only `claude plugin update` can tell whether it is

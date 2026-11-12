@@ -102,8 +102,13 @@ def record_install(
     version: str,
     content_hash: Optional[str] = None,
     installed_as: str = "explicit",
+    source: Optional[str] = None,
 ) -> None:
-    """Record an install of a skill, rule, or agent."""
+    """Record an install of a skill, rule, or agent.
+
+    ``source`` is ``"<org_id>/<custom_source_id>"`` for an item installed from an
+    org's custom source; None (the key is omitted) means the AEC catalog.
+    """
     scope_dict = _get_scope_dict(manifest, scope)
     prev = scope_dict[item_type].get(name)
     if item_type == "skills":
@@ -113,13 +118,17 @@ def record_install(
             installed_at=_now_iso(),
             previous=prev if isinstance(prev, dict) else None,
             installed_as=installed_as,
+            source=source,
         )
         return
-    scope_dict[item_type][name] = {
+    rec = {
         "version": version,
         "contentHash": content_hash or "",
         "installedAt": _now_iso(),
     }
+    if source is not None:
+        rec["source"] = source
+    scope_dict[item_type][name] = rec
 
 
 def record_mcp_install(
@@ -128,14 +137,18 @@ def record_mcp_install(
     name: str,
     version: str,
     package: str = "",
+    source: Optional[str] = None,
 ) -> None:
     """Record an MCP server install, including the pip/npm package name."""
     scope_dict = _get_scope_dict(manifest, scope)
-    scope_dict["mcps"][name] = {
+    rec = {
         "version": version,
         "installedAt": _now_iso(),
         "package": package,
     }
+    if source is not None:
+        rec["source"] = source
+    scope_dict["mcps"][name] = rec
 
 
 def record_plugin_install(

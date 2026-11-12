@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .effective import EffectivePolicy, effective_policy
+from .schema import RESERVED_SOURCE_IDS
 
 
 _CI_PREFIX = "configurable_instructions."
@@ -86,7 +87,7 @@ def compile_desired_items(policy: EffectivePolicy, scope: str) -> list:
     from ..apply_core import DesiredItem
 
     desired: list = []
-    for subject, (_org_id, p) in sorted(policy.items.items()):
+    for subject, (org_id, p) in sorted(policy.items.items()):
         plural, name = subject.split("/", 1)
         if plural == "plugins" or p.stance.value not in _INSTALL_STANCES:
             continue
@@ -96,6 +97,7 @@ def compile_desired_items(policy: EffectivePolicy, scope: str) -> list:
                 name=name,
                 scope=scope,
                 version_spec=p.version or "latest",
+                source_id="" if p.source in RESERVED_SOURCE_IDS else f"{org_id}/{p.source}",
             )
         )
     return desired
@@ -224,24 +226,72 @@ class ApplyOutcome:
     removed_items: int
     held: tuple[str, ...]
     preferences_applied: list
-    skipped_reason: Optional[str] = None  # "locked" | "declined" | "dry-run" | None
+    # "locked" | "declined" | "dry-run" | "source_failed" | None
+    skipped_reason: Optional[str] = None
 
 
-def _catalog(scope: str):
-    from ..config import get_repo_root  # noqa: F401 - imported for side-effect parity
+@dataclass(frozen=True)
+class SyncedSource:
+    org_id: str
+    source_id: str
+    commit: str
+    contributes: tuple[str, ...]
+
+
+def sync_custom_sources(paths) -> Optional[list[SyncedSource]]:
+    """Check out every enrolled org's custom sources before anything is written.
+
+    Each source gets its own checkout at ``<org_id>.d/sources/<id>/``, at its
+    ``commit`` pin, else the commit last approved for it, else (first apply) the
+    tip of its ref. Returns None, after printing why, if any source fails, so the
+    caller applies nothing.
+    """
+    from ..console import Console
+    from .discovery import discover_enrolled_orgs
+    from .errors import OrgConfigError
+    from .git_source import sync_source
+    from .state import read_state
+
+    synced: list[SyncedSource] = []
+    for enrolled in discover_enrolled_orgs(paths):
+        cfg = enrolled.config
+        if not cfg.custom_sources:
+            continue
+        st = read_state(paths, cfg.org_id)
+        approved = (st.source_commits if st else None) or {}
+        for cs in cfg.custom_sources:
+            want = cs.commit or approved.get(cs.id)
+            try:
+                commit = sync_source(cs.url, cs.ref, want, paths.source_dir_for(cfg.org_id, cs.id))
+            except OrgConfigError as exc:
+                Console.error(
+                    f"org-config apply stopped: source {cfg.org_id}/{cs.id} failed: {exc}. "
+                    "Nothing was applied."
+                )
+                return None
+            synced.append(SyncedSource(cfg.org_id, cs.id, commit, cs.contributes))
+    return synced
+
+
+def _catalog(paths, synced: list[SyncedSource]):
+    """Source dirs and available items: AEC catalog keyed by plural, custom
+    sources keyed by ``("<org_id>/<id>", plural)``."""
     from ..sources import discover_available, get_source_dirs
 
     manifest_path = Path.home() / ".agents-environment-config" / "installed-manifest.json"
-    source_dirs: dict = {}
+    source_dirs: dict = dict(get_source_dirs())
     available: dict = {}
-    try:
-        source_dirs = get_source_dirs()
-        for plural in ("skills", "rules", "agents", "mcps"):
-            d = source_dirs.get(plural)
-            if d and Path(d).exists():
-                available[plural] = discover_available(d, plural)
-    except Exception:  # noqa: BLE001 - missing catalog just means nothing installs
-        source_dirs, available = {}, {}
+    for plural in ("skills", "rules", "agents", "mcps"):
+        d = source_dirs.get(plural)
+        if d and Path(d).exists():
+            available[plural] = discover_available(d, plural)
+    for s in synced:
+        clone_dirs = get_source_dirs(paths.source_dir_for(s.org_id, s.source_id))
+        for plural in s.contributes:
+            d = clone_dirs[plural]
+            key = (f"{s.org_id}/{s.source_id}", plural)
+            source_dirs[key] = d
+            available[key] = discover_available(d, plural) if d.exists() else {}
     return source_dirs, available, manifest_path
 
 
@@ -284,10 +334,14 @@ def apply_org_policy(
             Console.info("org-config apply declined.")
             return ApplyOutcome(0, 0, policy.held, [], skipped_reason="declined")
 
+    synced = sync_custom_sources(paths)
+    if synced is None:
+        return ApplyOutcome(0, 0, policy.held, [], skipped_reason="source_failed")
+
     prefs_applied = apply_preferences(policy)
     apply_prompts(policy)
 
-    source_dirs, available_by_type, manifest_path = _catalog(scope)
+    source_dirs, available_by_type, manifest_path = _catalog(paths, synced)
     result, removed = apply_items(
         policy,
         scope,
@@ -309,7 +363,7 @@ def apply_org_policy(
         Console.warning(
             f"{len(policy.held)} item(s) held pending decision — run `aec org resolve`."
         )
-    _stamp_applied(paths, now)
+    _stamp_applied(paths, now, synced)
     return ApplyOutcome(
         applied_items=applied,
         removed_items=len(removed),
@@ -343,8 +397,8 @@ def _default_confirm(policy: EffectivePolicy) -> bool:
     ).strip().lower() == "y"
 
 
-def _stamp_applied(paths, now: Optional[str]) -> None:
-    """Record ``last_applied_at`` on every enrolled org after a successful apply."""
+def _stamp_applied(paths, now: Optional[str], synced: list[SyncedSource] = ()) -> None:
+    """Record ``last_applied_at`` and applied source commits on every enrolled org."""
     import dataclasses
     from datetime import datetime, timezone
 
@@ -353,6 +407,10 @@ def _stamp_applied(paths, now: Optional[str]) -> None:
 
     stamp = now or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     for enrolled in discover_enrolled_orgs(paths):
-        st = read_state(paths, enrolled.config.org_id)
+        org_id = enrolled.config.org_id
+        st = read_state(paths, org_id)
         if st is not None:
-            write_state(paths, dataclasses.replace(st, last_applied_at=stamp))
+            commits = {s.source_id: s.commit for s in synced if s.org_id == org_id} or None
+            write_state(
+                paths, dataclasses.replace(st, last_applied_at=stamp, source_commits=commits)
+            )
