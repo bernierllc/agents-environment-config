@@ -81,7 +81,9 @@ def remote_commit(url: str, ref: str) -> str:
     for line in out.splitlines():
         sha, _, name = line.partition("\t")
         shas[name] = sha
-    for name in (f"refs/tags/{ref}^{{}}", f"refs/heads/{ref}", f"refs/tags/{ref}", ref):
+    for name in (
+        f"refs/tags/{ref}^{{}}", f"refs/heads/{ref}", f"refs/tags/{ref}", f"{ref}^{{}}", ref,
+    ):
         if name in shas:
             return shas[name]
     raise OrgConfigFetchError(f"ref {ref!r} not found at {url}")

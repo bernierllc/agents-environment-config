@@ -35,6 +35,8 @@ class DesiredItem:
     # "<org_id>/<custom_source_id>" for an org custom source; "" is the AEC catalog.
     # source_dirs / available_by_type key such items by (source_id, plural).
     source_id: str = ""
+    # The approved commit of that custom source; a different one means reinstall.
+    source_commit: str = ""
 
 
 def _source_key(item: DesiredItem, plural: str):
@@ -75,6 +77,13 @@ def plan_apply(items, *, manifest: dict, available_by_type: dict) -> list:
             plan.append(ApplyPlanEntry(item, "install", None, avail_version, "not installed"))
             continue
         installed_version = installed.get("version", "0.0.0") if isinstance(installed, dict) else "0.0.0"
+        rec = installed if isinstance(installed, dict) else {}
+        if (rec.get("source") or "") != item.source_id or (
+            item.source_commit and rec.get("source_commit") != item.source_commit
+        ):
+            # Same version from another source (or another approved commit) is different content.
+            plan.append(ApplyPlanEntry(item, "upgrade", installed_version, avail_version, "source changed"))
+            continue
         if installed_version == avail_version:
             plan.append(ApplyPlanEntry(item, "noop", installed_version, avail_version, "up to date"))
             continue
@@ -143,10 +152,20 @@ def execute_apply(
                     install_hooks=install_hooks,
                     source=source,
                 )
+            if item.source_commit:
+                _record_source_commit(manifest_path, item, plural)
             result.applied.append(entry)
         except Exception as exc:  # noqa: BLE001 — one bad item must not abort the rest
             result.errors.append((entry, str(exc)))
     return result
+
+
+def _record_source_commit(manifest_path: Path, item: DesiredItem, plural: str) -> None:
+    manifest = load_manifest(manifest_path)
+    rec = get_installed(manifest, item.scope, plural).get(item.name)
+    if isinstance(rec, dict):
+        rec["source_commit"] = item.source_commit
+        save_manifest(manifest, manifest_path)
 
 
 def _scope_from_key(scope_key: str) -> Scope:
@@ -176,4 +195,6 @@ def _apply_mcp(
         source=item.source_id or None,
     )
     save_manifest(manifest, manifest_path)
+    if item.source_commit:
+        _record_source_commit(manifest_path, item, "mcps")
     record_item_install("mcp", item.name, item_info.get("version", "0.0.0"))

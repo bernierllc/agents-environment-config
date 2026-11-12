@@ -336,3 +336,108 @@ def test_signed_org_source_without_commit_is_verify_failed_at_refresh(repos, hom
     ((_org_id, status),) = org_cmd.refresh_remote_orgs(paths)
     assert status.startswith("verify_failed") and "commit" in status
     assert read_state(paths, "example-org").pending["kind"] == "verify_failed"
+
+
+# --------------------------------------------------------------------------- #
+#  review round 1: failures never approve or publish anything                  #
+# --------------------------------------------------------------------------- #
+
+
+def _enroll_ref_only_and_apply(repos, paths):
+    a = _push_rule(repos, "1.0.0")
+    _commit(repos["config"], "org/example-org.yaml", _config(pin='      ref: "main"\n'))
+    assert runner.invoke(
+        app,
+        ["org", "enroll", f"git+{CONFIG_URL}#main:org/example-org.yaml", "--allow-unsigned", "--yes"],
+    ).exit_code == 0
+    assert runner.invoke(app, ["org", "apply", "--yes"]).exit_code == 0
+    return a
+
+
+def _live_head(paths):
+    return _git("rev-parse", "HEAD", cwd=paths.source_dir_for("example-org", "team-rules"))
+
+
+def test_symlinked_item_is_refused_and_review_kept(repos, home, paths, tmp_path):
+    a = _enroll_ref_only_and_apply(repos, paths)
+    secret = tmp_path / "private.txt"
+    secret.write_text(RULE.format(version="1.1.0") + "not for installing\n", encoding="utf-8")
+    rule = repos["source"] / ".agent-rules/team/example-rule.md"
+    rule.unlink()
+    rule.symlink_to(secret)
+    _git("add", "-A", cwd=repos["source"])
+    _git("commit", "-q", "-m", "link", cwd=repos["source"])
+    _git("push", "-q", "origin", "HEAD:main", cwd=repos["source"])
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
+    assert "symlink" in result.output
+    st = read_state(paths, "example-org")
+    assert st.source_commits == {"team-rules": a} and st.pending["kind"] == "review"
+    assert _live_head(paths) == a
+    installed = list((home / ".agent-tools" / "rules").rglob("example-rule*"))
+    assert "not for installing" not in installed[0].read_text()
+
+
+def test_install_error_does_not_approve_or_publish(repos, home, paths):
+    a = _enroll_ref_only_and_apply(repos, paths)
+    _push_rule(repos, "1.1.0")
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+
+    installed = next((home / ".agent-tools" / "rules").rglob("example-rule*"))
+    locked = [installed.parent, installed]
+    for p in locked:
+        p.chmod(0o500 if p.is_dir() else 0o400)
+    try:
+        result = runner.invoke(app, ["org", "apply", "--yes"])
+    finally:
+        for p in locked:
+            p.chmod(0o700 if p.is_dir() else 0o600)
+    assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
+    st = read_state(paths, "example-org")
+    assert st.source_commits == {"team-rules": a} and st.pending["kind"] == "review"
+    assert _live_head(paths) == a
+    assert not (paths.org_dir_for("example-org") / "sources.next" / "team-rules").exists()
+
+
+def test_plan_reinstalls_when_source_or_commit_changes():
+    from aec.lib.apply_core import DesiredItem, plan_apply
+
+    avail = {("example-org/team-rules", "rules"): {"example-rule": {"version": "1.0.0"}}}
+    item = DesiredItem("rule", "example-rule", "global", source_id="example-org/team-rules",
+                       source_commit="b" * 40)
+
+    def plan(record):
+        manifest = {"global": {"rules": {"example-rule": record}}}
+        return plan_apply([item], manifest=manifest, available_by_type=avail)[0].action
+
+    assert plan({"version": "1.0.0"}) == "upgrade"  # was from the AEC catalog
+    assert plan({"version": "1.0.0", "source": "example-org/team-rules",
+                 "source_commit": "a" * 40}) == "upgrade"
+    assert plan({"version": "1.0.0", "source": "example-org/team-rules",
+                 "source_commit": "b" * 40}) == "noop"
+
+
+def test_installed_by_source_needs_no_pyyaml_for_catalog_items(tmp_path):
+    code = (
+        "import sys; sys.modules['yaml'] = None\n"
+        "from pathlib import Path\n"
+        "from aec.lib.sources import installed_by_source\n"
+        "m = {'global': {'rules': {'r': {'version': '1.0.0'}}}}\n"
+        f"print(len(installed_by_source(m, 'global', {{'rules': Path({str(tmp_path)!r})}})))\n"
+    )
+    out = subprocess.run(
+        [__import__("sys").executable, "-c", code], capture_output=True, text=True, check=False,
+        cwd=Path(__file__).resolve().parents[2],
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "1"
+
+
+def test_remote_commit_peels_a_fully_qualified_annotated_tag(repos):
+    a = _push_rule(repos, "1.0.0")
+    _git("tag", "-a", "v1", "-m", "v1", cwd=repos["source"])
+    _git("push", "-q", "origin", "v1", cwd=repos["source"])
+    assert git_source.remote_commit(SOURCE_URL, "v1") == a
+    assert git_source.remote_commit(SOURCE_URL, "refs/tags/v1") == a

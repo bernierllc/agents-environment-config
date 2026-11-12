@@ -162,7 +162,6 @@ def installed_by_source(manifest: dict, scope: str, source_dirs: dict, types=Non
     The AEC group is always present, even when empty.
     """
     from .manifest_v2 import get_installed
-    from .org_config.paths import OrgPaths
 
     out = []
     for item_type in types if types is not None else tuple(source_dirs):
@@ -177,6 +176,9 @@ def installed_by_source(manifest: dict, scope: str, source_dirs: dict, types=Non
                 org_id, _, sid = src.partition("/")
                 if not (_SOURCE_PART_RE.match(org_id) and _SOURCE_PART_RE.match(sid)):
                     continue  # malformed record: never build a path from it
+                # Imported here: org_config needs PyYAML, which catalog-only installs may lack.
+                from .org_config.paths import OrgPaths
+
                 d = get_source_dirs(OrgPaths.default().source_dir_for(org_id, sid)).get(item_type)
             if d and Path(d).exists():
                 out.append((item_type, Path(d), src, installed))

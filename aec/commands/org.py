@@ -1038,7 +1038,7 @@ def apply_cmd(
                 write_state(paths, old_state)
     if outcome.skipped_reason == "locked":
         raise typer.Exit(code=EXIT_TRUST)
-    if outcome.skipped_reason == "source_failed":
+    if outcome.skipped_reason in ("source_failed", "install_failed"):
         raise typer.Exit(code=EXIT_VALIDATION)
 
 
