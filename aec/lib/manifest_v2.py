@@ -103,11 +103,13 @@ def record_install(
     content_hash: Optional[str] = None,
     installed_as: str = "explicit",
     source: Optional[str] = None,
+    source_commit: Optional[str] = None,
 ) -> None:
     """Record an install of a skill, rule, or agent.
 
     ``source`` is ``"<org_id>/<custom_source_id>"`` for an item installed from an
     org's custom source; None (the key is omitted) means the AEC catalog.
+    ``source_commit`` is the checkout commit the item was copied from.
     """
     scope_dict = _get_scope_dict(manifest, scope)
     prev = scope_dict[item_type].get(name)
@@ -120,6 +122,8 @@ def record_install(
             installed_as=installed_as,
             source=source,
         )
+        if source_commit:
+            scope_dict[item_type][name]["source_commit"] = source_commit
         return
     rec = {
         "version": version,
@@ -128,6 +132,8 @@ def record_install(
     }
     if source is not None:
         rec["source"] = source
+    if source_commit:
+        rec["source_commit"] = source_commit
     scope_dict[item_type][name] = rec
 
 
@@ -138,6 +144,7 @@ def record_mcp_install(
     version: str,
     package: str = "",
     source: Optional[str] = None,
+    source_commit: Optional[str] = None,
 ) -> None:
     """Record an MCP server install, including the pip/npm package name."""
     scope_dict = _get_scope_dict(manifest, scope)
@@ -148,6 +155,8 @@ def record_mcp_install(
     }
     if source is not None:
         rec["source"] = source
+    if source_commit:
+        rec["source_commit"] = source_commit
     scope_dict["mcps"][name] = rec
 
 

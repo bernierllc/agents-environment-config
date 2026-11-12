@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .effective import EffectivePolicy, effective_policy
+from .errors import OrgConfigError
 from .schema import RESERVED_SOURCE_IDS
 
 _CI_PREFIX = "configurable_instructions."
@@ -267,7 +268,6 @@ def sync_custom_sources(paths) -> Optional[list[SyncedSource]]:
     """
     from ..console import Console
     from .discovery import discover_enrolled_orgs
-    from .errors import OrgConfigError
     from .git_source import sync_source
     from .state import read_state
 
@@ -327,14 +327,39 @@ def discard_staged(dirs) -> None:
         shutil.rmtree(d, ignore_errors=True)  # best-effort: the next apply re-stages it
 
 
-def publish_sources(paths, synced: list[SyncedSource]) -> None:
-    """Make each staged checkout the live one, once the whole apply succeeded."""
-    for s in synced:
-        live = paths.source_dir_for(s.org_id, s.source_id)
-        live.parent.mkdir(parents=True, exist_ok=True)
-        if live.exists():
-            shutil.rmtree(live)
-        s.staged.rename(live)
+def publish_sources(paths, synced: list[SyncedSource], commit_state: Callable[[], None]) -> None:
+    """Make each staged checkout live, then ``commit_state()``; all or nothing.
+
+    Live checkouts move aside to ``sources.prev`` first, so any failure (a rename
+    or the approval-state write) puts every one back and leaves nothing approved.
+    """
+    done = []  # (live, prev or None), in publish order
+    try:
+        for s in synced:
+            live = paths.source_dir_for(s.org_id, s.source_id)
+            prev = live.parent.parent / "sources.prev" / s.source_id
+            live.parent.mkdir(parents=True, exist_ok=True)
+            prev.parent.mkdir(parents=True, exist_ok=True)
+            if prev.exists():
+                shutil.rmtree(prev)  # left by an interrupted earlier publish
+            if live.exists():
+                live.rename(prev)
+                done.append((live, prev))
+            else:
+                done.append((live, None))
+            s.staged.rename(live)
+        commit_state()
+    except Exception:
+        for live, prev in reversed(done):
+            if live.exists():
+                shutil.rmtree(live)
+            if prev is not None:
+                prev.rename(live)
+        discard_staged(s.staged for s in synced)
+        raise
+    for _, prev in done:
+        if prev is not None:
+            shutil.rmtree(prev, ignore_errors=True)  # best-effort: the next publish clears it
 
 
 def _catalog(paths, synced: list[SyncedSource]):
@@ -438,8 +463,12 @@ def apply_org_policy(
         Console.warning(
             f"{len(policy.held)} item(s) held pending decision — run `aec org resolve`."
         )
-    publish_sources(paths, synced)
-    _stamp_applied(paths, now, synced)
+    try:
+        publish_sources(paths, synced, lambda: _stamp_applied(paths, now, synced))
+    except (OSError, OrgConfigError) as exc:
+        Console.error(f"org-config apply: could not publish custom sources: {exc}")
+        Console.error("org-config apply failed; source commits and pending reviews were not approved.")
+        return ApplyOutcome(applied, len(removed), policy.held, prefs_applied, skipped_reason="install_failed")
     return ApplyOutcome(
         applied_items=applied,
         removed_items=len(removed),

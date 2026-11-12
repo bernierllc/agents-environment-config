@@ -24,7 +24,7 @@ from ..lib.manifest_v2 import (
     record_install,
     is_stale,
 )
-from ..lib.sources import discover_available, get_source_dirs, installed_by_source
+from ..lib.sources import checkout_commit, discover_available, get_source_dirs, installed_by_source
 from ..lib.scope import find_tracked_repo, get_all_tracked_repos, is_catalog_repo
 from ..lib.skills_manifest import (
     version_is_newer,
@@ -289,7 +289,8 @@ def _check_and_upgrade_dep_conflicts(
         dep_hash = hash_skill_directory(dep_dst) if dep_dst.is_dir() else ""
         dep_ver = dep_avail.get("version", "0.0.0")
         _refresh_upgrade_hooks(scope, "skills", vc.name, dep_ver, dep_dst, yes)
-        record_install(manifest, scope, "skills", vc.name, dep_ver, dep_hash, installed_as="dependency", source=source)
+        record_install(manifest, scope, "skills", vc.name, dep_ver, dep_hash, installed_as="dependency", source=source,
+                       source_commit=checkout_commit(source, dep_src))
         record_item_install_pertype("skill", vc.name, dep_ver, dep_hash)
         Console.success(f"  Upgraded dep: {vc.name}  {vc.installed_ver} -> {dep_ver}")
 
@@ -325,7 +326,8 @@ def _check_and_upgrade_dep_conflicts(
             dep_hash = hash_skill_directory(dep_dst) if dep_dst.is_dir() else ""
             dep_ver = dep_avail.get("version", "0.0.0")
             _refresh_upgrade_hooks(scope, "skills", d.name, dep_ver, dep_dst, yes)
-            record_install(manifest, scope, "skills", d.name, dep_ver, dep_hash, installed_as="dependency", source=source)
+            record_install(manifest, scope, "skills", d.name, dep_ver, dep_hash, installed_as="dependency", source=source,
+                           source_commit=checkout_commit(source, dep_src))
             record_item_install_pertype("skill", d.name, dep_ver, dep_hash)
             Console.success(f"  Installed new dep: {d.name} {dep_ver}")
 
@@ -606,6 +608,7 @@ def _upgrade_scope(
                     record_install(
                         manifest, scope, item_type, name, avail_v, sh,
                         installed_as=info.get("installedAs", "explicit"), source=source,
+                        source_commit=checkout_commit(source, src_path),
                     )
                     record_item_install_pertype(
                         item_type[:-1], name, avail_v, sh
@@ -656,6 +659,7 @@ def _upgrade_scope(
             record_install(
                 manifest, scope, item_type, name, avail_v, content_hash,
                 installed_as=info.get("installedAs", "explicit"), source=source,
+                source_commit=checkout_commit(source, src_path),
             )
 
             # Dual-write to per-type installed file (best-effort during transition)

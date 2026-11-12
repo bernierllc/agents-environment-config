@@ -247,6 +247,7 @@ def test_apply_installs_from_custom_source_with_provenance(repos, home, paths, t
     record = _manifest(home)["global"]["rules"]["example-rule"]
     assert record["version"] == "1.0.0"
     assert record["source"] == "example-org/team-rules"
+    assert record["source_commit"] == a
     clone = paths.org_dir_for("example-org") / "sources" / "team-rules"
     assert _git("rev-parse", "HEAD", cwd=clone) == a
     installed = list((home / ".agent-tools" / "rules").rglob("example-rule*"))
@@ -286,6 +287,7 @@ def test_outdated_and_upgrade_resolve_against_the_items_source(repos, home, path
     record = _manifest(home)["global"]["rules"]["example-rule"]
     assert record["version"] == "1.1.0"
     assert record["source"] == "example-org/team-rules"
+    assert record["source_commit"] == b  # upgrade keeps provenance, so apply sees no change
 
 
 # --------------------------------------------------------------------------- #
@@ -441,3 +443,64 @@ def test_remote_commit_peels_a_fully_qualified_annotated_tag(repos):
     _git("push", "-q", "origin", "v1", cwd=repos["source"])
     assert git_source.remote_commit(SOURCE_URL, "v1") == a
     assert git_source.remote_commit(SOURCE_URL, "refs/tags/v1") == a
+
+
+# --------------------------------------------------------------------------- #
+#  review round 2                                                              #
+# --------------------------------------------------------------------------- #
+
+
+def test_failed_state_write_rolls_back_publication(repos, home, paths, monkeypatch):
+    import aec.lib.org_config.apply as org_apply
+
+    a = _enroll_ref_only_and_apply(repos, paths)
+    _push_rule(repos, "1.1.0")
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+
+    def boom(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(org_apply, "_stamp_applied", boom)
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
+    assert "disk full" in result.output
+    st = read_state(paths, "example-org")
+    assert st.source_commits == {"team-rules": a} and st.pending["kind"] == "review"
+    assert _live_head(paths) == a
+    org_dir = paths.org_dir_for("example-org")
+    assert not (org_dir / "sources.next" / "team-rules").exists()
+    assert not (org_dir / "sources.prev" / "team-rules").exists()
+
+
+def test_custom_source_never_replaces_a_pinned_version(tmp_path):
+    from aec.lib.apply_core import DesiredItem, execute_apply, plan_apply
+
+    key = ("example-org/team-rules", "rules")
+    avail = {key: {"example-rule": {"version": "1.0.0"}}}
+    item = DesiredItem("rule", "example-rule", "global", version_spec="2.0.0",
+                       source_id="example-org/team-rules", source_commit="b" * 40)
+    manifest = {"global": {"rules": {"example-rule": {"version": "2.0.0"}}}}
+    plan = plan_apply([item], manifest=manifest, available_by_type=avail)
+    assert plan[0].action == "unsatisfiable"
+    result = execute_apply(plan, source_dirs={key: str(tmp_path)}, available_by_type=avail,
+                           manifest_path=tmp_path / "m.json")
+    assert not result.applied and "pinned to 2.0.0" in result.errors[0][1]
+    assert not (tmp_path / "m.json").exists()
+
+
+def test_failed_pip_install_records_nothing(tmp_path, monkeypatch):
+    import aec.lib.apply_core as core
+    from aec.lib.scope import Scope
+
+    mcp_dir = tmp_path / "srv"
+    mcp_dir.mkdir()
+    (mcp_dir / "mcp.json").write_text(
+        json.dumps({"install": {"pip": "example-mcp"}, "mcpServers": {"x": {"command": "x"}}})
+    )
+    monkeypatch.setattr(core.subprocess, "run",
+                        lambda argv, **kw: subprocess.CompletedProcess(argv, 1))
+    item = core.DesiredItem("mcp", "srv", "global", source_id="example-org/team-mcps")
+    with pytest.raises(RuntimeError, match="pip install example-mcp failed"):
+        core._apply_mcp(item, Scope(is_global=True, repo_path=None), {"path": "srv"},
+                        tmp_path, tmp_path / "m.json")
+    assert not (tmp_path / "m.json").exists()

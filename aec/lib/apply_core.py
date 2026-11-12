@@ -19,6 +19,7 @@ from .manifest_v2 import get_installed, load_manifest, record_mcp_install, save_
 from .mcp_settings import get_settings_path, write_mcp_server
 from .scope import Scope
 from .skills_manifest import version_is_newer
+from .sources import checkout_commit
 
 TYPE_TO_PLURAL = {"skill": "skills", "rule": "rules", "agent": "agents", "mcp": "mcps"}
 
@@ -46,7 +47,7 @@ def _source_key(item: DesiredItem, plural: str):
 @dataclass
 class ApplyPlanEntry:
     item: DesiredItem
-    action: str  # "install" | "upgrade" | "noop" | "skip-missing"
+    action: str  # "install" | "upgrade" | "noop" | "skip-missing" | "unsatisfiable"
     from_version: Optional[str] = None
     to_version: Optional[str] = None
     reason: str = ""
@@ -72,6 +73,13 @@ def plan_apply(items, *, manifest: dict, available_by_type: dict) -> list:
             plan.append(ApplyPlanEntry(item, "skip-missing", reason="not in catalog"))
             continue
         avail_version = avail[item.name].get("version", "0.0.0")
+        if item.source_id and item.version_spec not in ("", "latest") and avail_version != item.version_spec:
+            # A custom source is the only place this item can come from; never swap in another version.
+            plan.append(ApplyPlanEntry(
+                item, "unsatisfiable", None, avail_version,
+                f"pinned to {item.version_spec} but the source has {avail_version}",
+            ))
+            continue
         installed = get_installed(manifest, item.scope, plural).get(item.name)
         if not installed:
             plan.append(ApplyPlanEntry(item, "install", None, avail_version, "not installed"))
@@ -115,6 +123,9 @@ def execute_apply(
 
     result = ApplyResult()
     for entry in plan:
+        if entry.action == "unsatisfiable":
+            result.errors.append((entry, entry.reason))
+            continue
         if entry.action not in ("install", "upgrade"):
             result.skipped.append(entry)
             continue
@@ -152,20 +163,10 @@ def execute_apply(
                     install_hooks=install_hooks,
                     source=source,
                 )
-            if item.source_commit:
-                _record_source_commit(manifest_path, item, plural)
             result.applied.append(entry)
         except Exception as exc:  # noqa: BLE001 — one bad item must not abort the rest
             result.errors.append((entry, str(exc)))
     return result
-
-
-def _record_source_commit(manifest_path: Path, item: DesiredItem, plural: str) -> None:
-    manifest = load_manifest(manifest_path)
-    rec = get_installed(manifest, item.scope, plural).get(item.name)
-    if isinstance(rec, dict):
-        rec["source_commit"] = item.source_commit
-        save_manifest(manifest, manifest_path)
 
 
 def _scope_from_key(scope_key: str) -> Scope:
@@ -185,16 +186,16 @@ def _apply_mcp(
     mcp_def = json.loads(mcp_file.read_text(encoding="utf-8"))
     pip_package = mcp_def.get("install", {}).get("pip", "")
     if pip_package:
-        subprocess.run(["pip", "install", pip_package])
+        done = subprocess.run(["pip", "install", pip_package], check=False)
+        if done.returncode != 0:
+            raise RuntimeError(f"pip install {pip_package} failed (exit {done.returncode})")
     settings_path = get_settings_path(scope_obj)
     for server_name, server_entry in mcp_def.get("mcpServers", {}).items():
         write_mcp_server(settings_path, server_name, server_entry)
     manifest = load_manifest(manifest_path)
     record_mcp_install(
         manifest, item.scope, item.name, item_info.get("version", "0.0.0"), pip_package,
-        source=item.source_id or None,
+        source=item.source_id or None, source_commit=checkout_commit(item.source_id, mcp_file),
     )
     save_manifest(manifest, manifest_path)
-    if item.source_commit:
-        _record_source_commit(manifest_path, item, "mcps")
     record_item_install("mcp", item.name, item_info.get("version", "0.0.0"))

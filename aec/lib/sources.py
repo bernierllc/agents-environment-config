@@ -152,6 +152,15 @@ def _discover_available_plugins(source_dir: Path) -> dict:
 _SOURCE_PART_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
 
 
+def checkout_commit(source: Optional[str], path: Path) -> Optional[str]:
+    """The commit a custom-source item at ``path`` is copied from; None for the AEC catalog."""
+    if not source:
+        return None
+    from .org_config.git_source import head_commit
+
+    return head_commit(path if path.is_dir() else path.parent)
+
+
 def installed_by_source(manifest: dict, scope: str, source_dirs: dict, types=None) -> list:
     """Group a scope's installed items by the source they came from.
 
