@@ -127,6 +127,12 @@ def maybe_notify() -> None:
     """At most once a day, print one line when ``aec:aec`` is due for review."""
     if os.environ.get("AEC_NO_UPDATE_CHECK", "").strip().lower() in ("1", "true", "yes"):
         return
+    try:
+        if not _logging_enabled():
+            return  # disabled or opted out: no capture, no nagging
+    except (OSError, ValueError) as exc:
+        logger.warning("feedback notice skipped: %r", exc)
+        return
     script = locate_script()
     if script is None:
         return
@@ -137,8 +143,8 @@ def maybe_notify() -> None:
         last = datetime.fromisoformat(json.loads(stamp.read_text())["last"])
         if now - last < NOTICE_INTERVAL:
             return
-    except (FileNotFoundError, KeyError, ValueError):
-        pass  # never noticed, or an unreadable stamp: check now
+    except (OSError, KeyError, TypeError, ValueError):
+        pass  # never noticed, or an unreadable/naive stamp: check now
     try:
         result = subprocess.run(
             [sys.executable, str(script), "status", SUBJECT, "--json"],

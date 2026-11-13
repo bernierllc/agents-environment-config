@@ -159,3 +159,30 @@ def test_feedback_works_in_the_dependency_free_cli(store, tmp_path):
                             capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
     assert json.loads(record.read_text()) == ["config", "--opt-out", "skill:my-skill"]
+
+
+@pytest.mark.parametrize("config", [{"enabled": False, "opt_out": []}, {"enabled": True, "opt_out": ["aec:aec"]}])
+def test_notice_is_silent_when_feedback_is_off(store, tmp_path, monkeypatch, capsys, config):
+    store.mkdir(parents=True)
+    (store / "config.json").write_text(json.dumps(config))
+    fake = tmp_path / "feedback.py"
+    fake.write_text("raise SystemExit('must not run')\n")
+    monkeypatch.setenv("AGENT_FEEDBACK_BIN", str(fake))
+    monkeypatch.delenv("AEC_NO_UPDATE_CHECK", raising=False)
+    monkeypatch.setattr("aec.lib.config.AEC_HOME", tmp_path / "aec-home")
+    feedback.maybe_notify()
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("stamp", ['{"last": "2020-01-01T00:00:00"}', '"not an object"'])
+def test_bad_notice_stamp_is_treated_as_never_noticed(store, tmp_path, monkeypatch, capsys, stamp):
+    fake = tmp_path / "feedback.py"
+    fake.write_text('import json\nprint(json.dumps({"subjects": [{"subject": "aec:aec", "due": "1 high"}]}))\n')
+    monkeypatch.setenv("AGENT_FEEDBACK_BIN", str(fake))
+    monkeypatch.delenv("AEC_NO_UPDATE_CHECK", raising=False)
+    home = tmp_path / "aec-home"
+    home.mkdir()
+    (home / "feedback-notice.json").write_text(stamp)
+    monkeypatch.setattr("aec.lib.config.AEC_HOME", home)
+    feedback.maybe_notify()
+    assert "aec feedback review aec:aec" in capsys.readouterr().err
