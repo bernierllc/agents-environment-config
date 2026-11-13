@@ -997,6 +997,13 @@ else:
         at_rollback = at_sub.add_parser("rollback", help="[DEPRECATED] Use `aec doctor`")
         at_rollback.add_argument("backup_dir")
 
+        # feedback (hands off to the feedback-loop skill's feedback.py)
+        feedback_parser = subparsers.add_parser(
+            "feedback", add_help=False,
+            help="Log, review and toggle feedback (passes through to the feedback-loop skill)",
+        )
+        feedback_parser.add_argument("feedback_args", nargs=argparse.REMAINDER)
+
         # prompts (headless discovery)
         prompts_parser = subparsers.add_parser(
             "prompts", help="Discover, template, and validate AEC's prompts"
@@ -1070,13 +1077,21 @@ else:
         from .lib.preferences import check_pending_preferences
         check_pending_preferences()
 
+        from .lib import feedback as _feedback
+        _feedback.current_command = args.command
+
         import atexit
         from .lib.version_check import maybe_check_for_update
         atexit.register(maybe_check_for_update)
+        atexit.register(_feedback.maybe_notify)
 
         # --- New flat commands ---
         if args.command == "version":
             Console.print(f"aec version {__version__}")
+
+        elif args.command == "feedback":
+            from .commands.feedback_cmd import run_feedback
+            sys.exit(run_feedback(args.feedback_args))
 
         elif args.command == "update":
             from .commands.org import EXIT_PENDING
@@ -1377,8 +1392,8 @@ def main():
         Console.print("\nAborted.")
         sys.exit(130)
     except _PromptUnanswered as exc:
-        from .lib.feedback import capture as _capture
-        _capture("medium", f"run stopped on unanswered prompt {exc.prompt_id}")
+        from .lib.feedback import capture as _capture, prompt_label as _prompt_label
+        _capture("medium", f"run stopped on unanswered prompt {_prompt_label(exc.prompt_id)}")
         # Not a bug — the run needed an answer nobody supplied. Tell the caller
         # exactly which key to add rather than burying it in a debug report.
         Console.error(f"Unanswered prompt: {exc.prompt_id}")

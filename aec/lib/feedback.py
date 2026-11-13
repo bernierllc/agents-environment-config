@@ -45,7 +45,9 @@ def _logging_enabled() -> bool:
         cfg = json.loads((store_home() / "config.json").read_text(encoding="utf-8"))
     except FileNotFoundError:
         return True  # the store's default: enabled, nothing opted out
-    return cfg.get("enabled", True) and SUBJECT not in cfg.get("opt_out", [])
+    if not isinstance(cfg, dict) or not isinstance(cfg.get("opt_out", []), list):
+        raise ValueError("config.json is not {enabled, opt_out: [...]}")  # capture logs and skips
+    return bool(cfg.get("enabled", True)) and SUBJECT not in cfg.get("opt_out", [])
 
 
 def capture(severity: str, summary: str) -> None:
@@ -71,9 +73,29 @@ def capture(severity: str, summary: str) -> None:
             os.write(fd, (json.dumps(entry, sort_keys=True) + "\n").encode("utf-8"))
         finally:
             os.close(fd)
-    except (OSError, ValueError) as exc:
-        # Best-effort by design: the run is already failing; a feedback write must not mask it.
+    except Exception as exc:
+        # Best-effort by design: capture runs inside main()'s error handlers, so any failure
+        # here would replace the original error. Log it and let the original path continue.
         logger.warning("feedback capture skipped: %r", exc)
+
+
+def prompt_label(prompt_id: str) -> str:
+    """A value-free name for a prompt: its static catalog ID, or its dynamic family's prefix.
+
+    Dynamic prompt IDs embed item names and resolved paths (``untrack.confirm.<path>``),
+    so they are never written to the store verbatim.
+    """
+    try:
+        from .prompt_catalog import all_families, catalog_ids
+        if prompt_id in catalog_ids():
+            return prompt_id
+        for family in all_families():
+            if prompt_id.startswith(family.prefix + "."):
+                return family.prefix + ".*"
+    except Exception as exc:
+        # Called from main()'s error handler: a catalog failure must not replace the original error.
+        logger.warning("prompt label lookup failed: %r", exc)
+    return "an uncatalogued prompt"
 
 
 def crash_summary(exc: BaseException) -> str:

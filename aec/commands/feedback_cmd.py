@@ -7,7 +7,10 @@ and offers short aliases for the switches, so there is one implementation of the
 import subprocess
 import sys
 
-import typer
+try:
+    import typer
+except ImportError:  # the argparse CLI only uses run_feedback
+    typer = None
 
 from ..lib.console import Console
 from ..lib.feedback import locate_script
@@ -27,17 +30,22 @@ def translate(args: list) -> list:
     return args
 
 
-def feedback(ctx: typer.Context) -> None:
+def run_feedback(args: list) -> int:
+    """Run feedback.py with ``args`` (aliases translated); its exit code, or 1 if not installed."""
+    script = locate_script()
+    if script is None:
+        Console.error("the feedback-loop skill is not installed")
+        Console.print("  Install it with: aec install skill feedback-loop")
+        return 1
+    args = translate(list(args)) or ["--help"]
+    return subprocess.run([sys.executable, str(script), *args]).returncode
+
+
+def feedback(ctx: "typer.Context") -> None:
     """Log, review and toggle feedback on skills, agents, hooks, plugins, AEC and your process.
 
     Passes everything to the feedback-loop skill's feedback.py
     (status, review, log, resolve, mark-reviewed, report, config).
     Shortcuts: enable, disable, opt-out <kind:name>, opt-in <kind:name>.
     """
-    script = locate_script()
-    if script is None:
-        Console.error("the feedback-loop skill is not installed")
-        Console.print("  Install it with: aec install skill feedback-loop")
-        raise typer.Exit(1)
-    args = translate(list(ctx.args)) or ["--help"]
-    raise typer.Exit(subprocess.run([sys.executable, str(script), *args]).returncode)
+    raise typer.Exit(run_feedback(ctx.args))
