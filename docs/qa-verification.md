@@ -131,3 +131,16 @@ Use a scratch git repo you can push to, holding `org/my-org.yaml` (unsigned).
    consent disabled and decline script copying. Verify managed pipeline blocks
    are removed from pre-commit/pre-push, unrelated user commands still execute,
    and pipeline resource files remain. Repeat with Husky and a custom hooksPath.
+
+## Feedback (`aec feedback`, AEC self-capture)
+
+1. Without the `feedback-loop` skill installed, run `aec feedback status`. Verify it exits 1
+   and names `aec install skill feedback-loop`.
+2. Install the skill. Run `aec feedback disable`, then `aec feedback`: verify `config` shows
+   `enabled: False`. Run `aec feedback enable`.
+3. Make an AEC command crash (for example, make `~/.aec` unreadable, then run `aec list`). Verify
+   `aec feedback review aec:aec` shows one high entry naming the command and the error type,
+   with no paths or argument values.
+4. Run `aec feedback opt-out aec:aec` and repeat step 3. Verify no new entry is added.
+5. With the entry due and `AEC_NO_UPDATE_CHECK` unset, run any command twice. Verify the
+   "aec has feedback due" line prints after the first run only.
