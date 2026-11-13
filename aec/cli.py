@@ -112,6 +112,8 @@ if HAS_TYPER:
         _apply_prompt_globals(answers, non_interactive, defaults)
         if ctx.invoked_subcommand is None:
             return
+        from .lib import feedback as _feedback
+        _feedback.current_command = ctx.invoked_subcommand
         from .lib.preferences import check_pending_preferences
         check_pending_preferences()
 
@@ -120,6 +122,7 @@ if HAS_TYPER:
         import atexit
         from .lib.version_check import maybe_check_for_update
         atexit.register(maybe_check_for_update)
+        atexit.register(_feedback.maybe_notify)
 
     # ------------------------------------------------------------------ #
     #  New flat top-level commands                                        #
@@ -511,6 +514,14 @@ if HAS_TYPER:
     # --- run-script (top-level; invoked from hook bodies) ---
     from .commands.run_script_cmd import run_script
     app.command("run-script")(run_script)
+
+    # --- feedback (hands off to the feedback-loop skill's feedback.py) ---
+    from .commands.feedback_cmd import feedback as feedback_cmd
+    app.command(
+        "feedback",
+        context_settings={"allow_extra_args": True, "ignore_unknown_options": True,
+                          "help_option_names": []},
+    )(feedback_cmd)
 
     # ------------------------------------------------------------------ #
     #  Deprecated command groups (kept as shims)                          #
@@ -1366,6 +1377,8 @@ def main():
         Console.print("\nAborted.")
         sys.exit(130)
     except _PromptUnanswered as exc:
+        from .lib.feedback import capture as _capture
+        _capture("medium", f"run stopped on unanswered prompt {exc.prompt_id}")
         # Not a bug — the run needed an answer nobody supplied. Tell the caller
         # exactly which key to add rather than burying it in a debug report.
         Console.error(f"Unanswered prompt: {exc.prompt_id}")
@@ -1380,6 +1393,8 @@ def main():
         Console.print(f"  {exc.value!r} is not a valid {exc.expected}")
         sys.exit(2)
     except BaseException as exc:
+        from .lib.feedback import capture as _capture, crash_summary as _crash_summary
+        _capture("high", _crash_summary(exc))
         try:
             log_path = _debug.log_exception(exc)
         except Exception:

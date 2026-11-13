@@ -74,7 +74,7 @@ Cursor, Gemini use it too) and not under AEC's home (must work without AEC).
   `log` on a disabled/opted-out subject is a no-op that exits 0 (logging must never break the
   calling item).
 - The switch lives with the store, not in AEC's preferences, so items read one file they
-  already use and it works without AEC. AEC's preference writes this file (see Phase 6).
+  already use and it works without AEC. `aec feedback enable|disable` writes this file (see Phase 6).
 
 ### Where the capture point lives: inside each item
 
@@ -148,20 +148,23 @@ change: hook feedback is attributed to the owning item, whose source AEC already
 
 ### P6 — AEC (agents-environment-config)
 
-- **Preference** `feedback_loop` in `OPTIONAL_FEATURES` (default on: local-only logging). On
-  enable, AEC installs the `feedback-loop` skill globally and writes `config.json`
-  `enabled: true`; on disable it writes `enabled: false`.
-- **`aec feedback`** subcommands: `status`, `review <kind:name>`, `log`, `enable`/`disable`,
-  `opt-out <kind:name>`. Delegates to the installed `feedback.py` (one implementation of the
-  store); resolves `source_repo` from AEC's installed-item records.
-- **Self-capture (AEC runs without an agent):** the top-level `main()` handler logs kind `aec`
-  on an unhandled crash (severity high, summary = exception type + command, no paths or args
-  values) and on `PromptUnanswered` (medium). Best-effort, never masks the original error.
-  Written directly by AEC (stdlib, same file format) so a crash is captured even if the skill is
-  missing; covered by a contract test against the skill's format.
-- **Surfacing:** at exit (alongside the update check, at most once a day) AEC prints one line
-  when the `aec` subject hits its threshold: `aec has N feedback entries — run aec feedback
-  review aec`. Review offers a GitHub issue on the AEC repo, created only on explicit consent.
+- **No AEC preference.** The store's `config.json` is the only switch. A second switch in AEC's
+  preferences would drift from it, and a new `OPTIONAL_FEATURES` entry prompts every existing
+  user on their next run. `aec feedback enable|disable|opt-out|opt-in` writes that one file.
+- **`aec feedback ...`** hands everything to the installed `feedback.py` (one implementation of
+  the store), found via `AGENT_FEEDBACK_BIN`, then `~/.claude/skills/feedback-loop/`, then
+  `~/.agent-tools/skills/feedback-loop/`. Missing skill: exit 1 with
+  `aec install skill feedback-loop`.
+- **Self-capture (AEC runs without an agent):** `main()` logs `aec:aec` on an unhandled crash
+  (high; summary = command name, exception type, innermost AEC function; no argument values or
+  paths) and on an unanswered prompt (medium). AEC writes the entry itself (stdlib, the store's
+  format) so a crash is captured even without the skill; `tests/test_feedback.py` checks the
+  real `feedback.py` reads it. Best-effort: never masks the original error. Respects
+  `enabled` and `opt_out`.
+- **Surfacing:** at exit, at most once a day and off under `AEC_NO_UPDATE_CHECK`, AEC asks
+  `feedback.py status aec:aec` (which owns the threshold) and prints one line when it is due:
+  `aec has feedback due (...): run aec feedback review aec:aec`. Review offers a GitHub issue on
+  the AEC repo, created only on explicit consent.
 
 ## Done when
 
@@ -170,4 +173,4 @@ change: hook feedback is attributed to the owning item, whose source AEC already
 - All skills and agents carry the feedback section; third-party items are synced with upstream
   and record their `source`.
 - Our hooks log their own malfunctions.
-- `aec feedback status` works; an AEC crash produces an `aec` entry; the preference toggles it.
+- `aec feedback status` works; an AEC crash produces an `aec` entry; `aec feedback disable` stops it.

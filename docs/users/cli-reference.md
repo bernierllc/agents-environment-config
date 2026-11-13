@@ -57,6 +57,20 @@ On Windows, the CLI uses NTFS junctions (no admin required) instead of symlinks 
 | `aec config set <key> <value>` | Set a preference |
 | `aec config reset <key>` | Reset a preference (re-prompts on next run) |
 
+### Feedback
+
+Needs the `feedback-loop` skill (`aec install skill feedback-loop`). Everything after `aec feedback` goes to that skill's `feedback.py`; the store stays on this machine.
+
+| Command | Description |
+|---------|-------------|
+| `aec feedback status [--due]` | Feedback counts per subject (`skill:my-skill`, `hook:my-skill/post-edit`, `process:my-project`, `aec:aec`, ...) |
+| `aec feedback review <kind:name>` | List a subject's entries for review |
+| `aec feedback report <kind:name>` | Trends by area and month |
+| `aec feedback enable` / `disable` | Turn all feedback logging on or off |
+| `aec feedback opt-out <kind:name>` / `opt-in` | Silence or restore one subject |
+
+AEC logs its own failures as `aec:aec` (a crash: high; a run stopped on an unanswered prompt: medium), with the command name and error type only, never arguments or paths. At most once a day, after a command, it prints one line when those entries are due for review. `aec feedback disable` or `aec feedback opt-out aec:aec` stops it.
+
 ### Generation & validation
 
 | Command | Description |
