@@ -24,6 +24,7 @@ from typing import Dict, Iterable, List, Optional
 
 from aec.lib.atomic_write import atomic_write_json
 from aec.lib.config import AEC_HOME
+from aec.lib.confine import escapes
 from aec.lib.file_lock import acquire, is_held, locked, release
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,7 @@ class Changeset:
     files: List[FileChange] = field(default_factory=list)
     reverses: Optional[str] = None
     reversed_by: Optional[str] = None
+    root: Optional[Path] = None  # the repo every file must stay inside (see aec.lib.confine)
 
     @property
     def dir(self) -> Path:
@@ -138,6 +140,7 @@ def _to_json(cs: Changeset) -> dict:
         "long": cs.long,
         "reverses": cs.reverses,
         "reversed_by": cs.reversed_by,
+        "root": None if cs.root is None else str(cs.root),
         "files": [
             {"path": str(fc.path), "before": fc.before, "after": fc.after}
             for fc in cs.files
@@ -154,6 +157,7 @@ def _from_json(d: dict) -> Changeset:
         long=d["long"],
         reverses=d.get("reverses"),
         reversed_by=d.get("reversed_by"),
+        root=Path(d["root"]) if d.get("root") else None,
         files=[
             FileChange(Path(f["path"]), f.get("before"), f.get("after"))
             for f in d["files"]
@@ -184,6 +188,7 @@ def _from_journal(journal: dict) -> Changeset:
         long=journal["long"],
         files=changes,
         reverses=journal.get("reverses"),
+        root=Path(journal["root"]) if journal.get("root") else None,
     )
 
 
@@ -228,21 +233,18 @@ class PendingChangeset:
         long: str,
         kind: str,
         reverses: Optional[str] = None,
-        within: Optional[Path] = None,
+        root: Optional[Path] = None,
     ) -> None:
         paths = [Path(p).absolute() for p in paths]
-        links = [str(p) for p in paths if p.is_symlink()]
-        if within is not None:  # a linked directory under `within` leads outside it
-            root = Path(within).absolute()
-            for p in paths:
-                links += [str(d) for d in p.parents if d != root and root in d.parents and d.is_symlink()]
-        if links:
-            # A restore writes a regular file, so it could not put a link back.
-            raise ChangesetError("AEC does not change symlinked files: " + ", ".join(links))
+        # Without a repo root, each file is only checked against its own directory.
+        problems = escapes(root, paths) if root is not None else [e for p in paths for e in escapes(p.parent, [p])]
+        if problems:
+            # A restore writes a regular file, so it could not put a link back either.
+            raise ChangesetError("AEC only changes regular files inside the repo: " + "; ".join(problems))
         now = datetime.now(timezone.utc)
-        root = rollbacks_dir()
-        self.id = _new_id(root, now)
-        self._dir = root / self.id
+        store = rollbacks_dir()
+        self.id = _new_id(store, now)
+        self._dir = store / self.id
         (self._dir / "blobs").mkdir(parents=True)
         self._active = acquire(self._dir / _ACTIVE)
         before: Dict[str, Optional[str]] = {}
@@ -259,6 +261,7 @@ class PendingChangeset:
             "short": short,
             "long": long,
             "reverses": reverses,
+            "root": None if root is None else str(Path(root).absolute()),
             "before": before,
         }
         atomic_write_json(self._dir / _PENDING, self._journal)
@@ -280,11 +283,12 @@ def begin(
     long: str,
     kind: str,
     reverses: Optional[str] = None,
-    within: Optional[Path] = None,
+    root: Optional[Path] = None,
 ) -> PendingChangeset:
-    """Snapshot `paths` before a change. With `within`, also refuse any path
-    reached through a symlinked directory below that root."""
-    return PendingChangeset(paths, short, long, kind, reverses, within)
+    """Snapshot `paths` before a change. With `root`, refuse any path that is
+    not confined to it (aec.lib.confine); the root is recorded so a rollback
+    re-checks the same confinement before it writes."""
+    return PendingChangeset(paths, short, long, kind, reverses, root)
 
 
 def load(cs_id: str) -> Changeset:
@@ -378,6 +382,7 @@ def revert(
             long=f"Reverts changeset {orig.id} ({orig.short}).",
             kind="revert",
             reverses=orig.id,
+            root=orig.root,
         )
         try:
             for path, data in restore:

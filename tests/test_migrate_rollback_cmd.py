@@ -198,26 +198,8 @@ def test_port_block_goes_to_agents_md_without_agentinfo(tmp_path, monkeypatch):
     assert not (tmp_path / "AGENTINFO.md").exists()
 
 
-def test_symlinked_stub_is_refused_without_touching_files(store, legacy_repo):
-    (legacy_repo / "CLAUDE.md").unlink()
-    (legacy_repo / "CLAUDE.md").symlink_to("AGENTS.md")
-    before = _snapshot(legacy_repo)
-    assert migrate_cmd.run_migrate_agents_md([str(legacy_repo)], yes=True) == 1
-    assert _snapshot(legacy_repo) == before
-    assert (legacy_repo / "CLAUDE.md").is_symlink()
-    assert changesets.list_changesets() == []
 
 
-def test_symlinked_rules_directory_is_refused(store, legacy_repo, tmp_path):
-    shared = tmp_path / "shared-rules"
-    shutil.move(str(legacy_repo / ".cursor" / "rules"), str(shared))
-    (legacy_repo / ".cursor" / "rules").symlink_to(shared, target_is_directory=True)
-    outside = (shared / "CURSOR.mdc").read_bytes()
-    before = _snapshot(legacy_repo)
-    assert migrate_cmd.run_migrate_agents_md([str(legacy_repo)], yes=True) == 1
-    assert (shared / "CURSOR.mdc").read_bytes() == outside
-    assert _snapshot(legacy_repo) == before
-    assert changesets.list_changesets() == []
 
 
 def test_setup_adds_rules_reference_to_existing_agents_md(tmp_path, monkeypatch):
@@ -237,17 +219,6 @@ def test_setup_adds_rules_reference_to_existing_agents_md(tmp_path, monkeypatch)
     assert (project / "AGENTS.md").read_bytes() == agents
 
 
-def test_setup_leaves_a_symlinked_agents_md_alone(tmp_path, monkeypatch):
-    from aec.commands import repo as repo_cmd
-
-    monkeypatch.setattr("aec.lib.preferences.get_setting", lambda key: None)
-    shared = tmp_path / "shared.md"
-    shared.write_text("shared notes\n")
-    project = tmp_path / "my-app"
-    project.mkdir()
-    (project / "AGENTS.md").symlink_to(shared)
-    repo_cmd._copy_agent_files(project, TEMPLATES.parent)
-    assert shared.read_text() == "shared notes\n"
 
 
 def test_tidy_timeout_still_reports_unrecorded_edits(store, legacy_repo, monkeypatch, tmp_path, capsys):
@@ -303,3 +274,74 @@ def test_rollback_apply_refuses_a_running_change(store, tmp_path, capsys):
     assert "still being made" in capsys.readouterr().out
     assert f.read_bytes() == b"new"
     pending.commit()
+
+
+def _link_out(repo: Path, rel: str, outside: Path) -> None:
+    """Move repo/rel to `outside` and leave a symlink to it in its place."""
+    shutil.move(str(repo / rel), str(outside))
+    (repo / rel).symlink_to(outside, target_is_directory=outside.is_dir())
+
+
+def _setup(repo: Path) -> int:
+    from aec.commands import repo as repo_cmd
+
+    repo_cmd._copy_agent_files(repo, TEMPLATES.parent)
+    return 0
+
+
+def _tidy(repo: Path) -> int:
+    config = {"commands": ["true"], "headless_args": []}
+    return 0 if migrate_cmd._tidy(repo, "fake", config, yes=True) else 1
+
+
+def _rollback(repo: Path) -> int:
+    (cs,) = changesets.list_changesets()
+    return rollback_cmd.run_rollback_apply(cs.id, yes=True)
+
+
+# Every AEC command that writes repo files, each with a symlinked file and a
+# symlinked directory where it can reach one. All go through aec.lib.confine.
+CALLERS = ["migrate", "tidy", "setup", "rollback"]
+
+
+@pytest.mark.parametrize("caller", CALLERS)
+@pytest.mark.parametrize("kind", ["file", "dir"])
+def test_every_writer_refuses_paths_that_leave_the_repo(store, legacy_repo, tmp_path, monkeypatch, caller, kind):
+    monkeypatch.setattr("aec.lib.preferences.get_setting", lambda key: None)
+    if caller == "tidy" and kind == "dir":
+        pytest.skip("tidy only records files at the repo root")
+    outside = tmp_path / "shared"
+    rel = "CLAUDE.md" if kind == "file" else ".cursor/rules"
+    link = lambda: _link_out(legacy_repo, rel, outside)  # noqa: E731
+    if caller == "setup":
+        for name in list(LEGACY) + [".cursor"]:  # an empty repo, so setup has files to create
+            p = legacy_repo / name
+            shutil.rmtree(p) if p.is_dir() else p.unlink()
+        if kind == "file":
+            outside.write_text("shared notes\n")
+            (legacy_repo / "AGENTS.md").symlink_to(outside)
+        else:
+            outside.mkdir()
+            (legacy_repo / ".cursor").symlink_to(outside, target_is_directory=True)
+        run = _setup
+    else:
+        if caller == "rollback":  # record a migration, then link one of its files out
+            assert migrate_cmd.run_migrate_agents_md([str(legacy_repo)], yes=True) == 0
+        link()
+        run = {
+            "migrate": lambda r: migrate_cmd.run_migrate_agents_md([str(r)], yes=True),
+            "tidy": _tidy,
+            "rollback": _rollback,
+        }[caller]
+
+    def state():
+        files = outside.rglob("*") if outside.is_dir() else [outside]
+        return {str(p): p.read_bytes() for p in files if p.is_file()}
+
+    before, outside_before, recorded = _snapshot(legacy_repo), state(), changesets.list_changesets()
+    status = run(legacy_repo)
+    assert state() == outside_before  # nothing written through the link
+    if caller != "setup":
+        assert status == 1
+        assert _snapshot(legacy_repo) == before
+        assert changesets.list_changesets() == recorded

@@ -173,6 +173,7 @@ def _copy_agent_files(project_dir: Path, repo_root: Path, dry_run: bool = False)
     Existing files are never overwritten.
     """
     from ..lib.agents_md_layout import CURSOR_RULE, render_new_layout, split_stub
+    from ..lib.confine import escapes
 
     Console.subheader("Copying agent files...")
 
@@ -196,7 +197,10 @@ def _copy_agent_files(project_dir: Path, repo_root: Path, dry_run: bool = False)
 
     for name, text in contents.items():
         target = project_dir / name
-        if name == "AGENTS.md" and layout != "agentinfo" and target.is_file() and not target.is_symlink():
+        unsafe = escapes(project_dir, [target])
+        if unsafe:  # a symlinked file or directory would send the write outside the repo
+            Console.warning(f"Skipping {name}: {unsafe[0]}")
+        elif name == "AGENTS.md" and layout != "agentinfo" and target.is_file():
             _add_rules_reference(target, split_stub(text)[0], dry_run)
         elif target.exists():
             Console.skip(f"{name} already exists (skipping)")

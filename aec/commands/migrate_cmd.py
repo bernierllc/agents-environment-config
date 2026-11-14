@@ -75,7 +75,7 @@ def _apply_plan(repo: Path, plan: dict) -> Optional[changesets.Changeset]:
             "Files: " + ", ".join(str(p.relative_to(repo)) for p in plan)
         ),
         kind="migrate-agents-md",
-        within=repo,
+        root=repo,
     )
     try:
         for path, text in plan.items():
@@ -154,7 +154,7 @@ def _tidy(repo: Path, agent: str, config: dict, yes: bool) -> bool:
             short=f"Tidy {repo.name} instructions with {agent}",
             long=f"{agent} ran headless in {repo} with this prompt:\n\n{TIDY_PROMPT}",
             kind="tidy",
-            within=repo,
+            root=repo,
         )
     except changesets.ChangesetError as e:
         Console.error(f"{repo.name}: tidy not run: {e}")
