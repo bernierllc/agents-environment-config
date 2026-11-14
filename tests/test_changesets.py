@@ -183,8 +183,24 @@ def test_interrupted_change_is_listed_and_revertible(tmp_path):
     crash(pending)
     (cs,) = c.list_changesets()
     assert cs.short.endswith("(interrupted)")
-    c.revert(cs.id)
+    with pytest.raises(c.ConflictError):  # no recorded after-state: a person confirms first
+        c.revert(cs.id)
+    c.revert(cs.id, confirmed=c.current_hashes(c.conflicts(cs)))
     assert f.read_bytes() == b"old"
+
+
+def test_edit_after_a_crash_is_never_taken_for_aec_output(tmp_path):
+    """Codex round 9: an interrupted change must not adopt a later edit as its after-state."""
+    f = tmp_path / "f"
+    f.write_bytes(b"old")
+    crash(c.begin([f], "s", "l", "test"))  # died before writing anything
+    f.write_bytes(b"user edit")
+    (cs,) = c.list_changesets()
+    assert [x.path for x in c.conflicts(cs)] == [f]
+    assert "user edit" in c.diff_text(cs, cs.files[0])
+    with pytest.raises(c.ConflictError):
+        c.revert(cs.id)
+    assert f.read_bytes() == b"user edit"
 
 
 def test_listing_never_finalizes_a_running_change(tmp_path):
@@ -238,7 +254,7 @@ def test_late_commit_after_rollback_keeps_history(tmp_path):
     f.write_bytes(b"new")
     crash(pending)  # looks dead to rollback, then commits anyway
     (cs,) = c.list_changesets()
-    undo = c.revert(cs.id)
+    undo = c.revert(cs.id, confirmed=c.current_hashes(c.conflicts(cs)))
     pending._active = open(pending._dir / "active.lock", "a+")  # commit() releases a handle
     with pytest.raises(c.ChangesetError, match="rolled back while running"):
         pending.commit()

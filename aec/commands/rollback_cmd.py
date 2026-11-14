@@ -89,6 +89,11 @@ def run_rollback_apply(cs_id: str, force: bool = False, yes: bool = False) -> in
     _print_detail(cs)
     Console.print()
 
+    try:  # before asking about overwrites: a running change can't be rolled back at all
+        changesets.check_not_running(cs)
+    except changesets.StillRunning as e:
+        Console.error(f"Nothing rolled back: {e}")
+        return 1
     edited = changesets.conflicts(cs)
     confirmed = changesets.current_hashes(edited)  # before the diff, so a later save is caught
     if edited and not force:

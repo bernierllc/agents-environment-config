@@ -84,6 +84,9 @@ class Changeset:
     reverses: Optional[str] = None
     reversed_by: Optional[str] = None
     root: Optional[Path] = None  # the repo every file must stay inside (see aec.lib.confine)
+    # Never committed (crash, or still running): `after` is only what is on disk
+    # now, so it cannot tell AEC's edits from later ones. Not persisted.
+    unconfirmed_after: bool = False
 
     @property
     def dir(self) -> Path:
@@ -305,6 +308,7 @@ def load(cs_id: str) -> Changeset:
     except FileNotFoundError:
         raise ChangesetNotFound(cs_id) from None
     cs.short += " (running)" if is_held(d / _ACTIVE) else " (interrupted)"
+    cs.unconfirmed_after = True
     return cs
 
 
@@ -334,6 +338,9 @@ def _blob(cs: Changeset, sha: str) -> bytes:
 
 
 def conflicts(cs: Changeset) -> List[FileChange]:
+    """Files a person must confirm before a revert overwrites them."""
+    if cs.unconfirmed_after:  # no recorded after-state, so every changed file may hold an edit
+        return list(cs.files)
     return [fc for fc in cs.files if _current_hash(fc.path) != fc.after]
 
 
@@ -343,8 +350,10 @@ def current_hashes(files: Iterable[FileChange]) -> Dict[Path, Optional[str]]:
 
 
 def diff_text(cs: Changeset, fc: FileChange) -> str:
-    """Unified diff from the recorded after-state to the current file (display only)."""
-    recorded = b"" if fc.after is None else _blob(cs, fc.after)
+    """Unified diff from the recorded after-state (or, with none, the before-state)
+    to the current file (display only)."""
+    base = fc.before if cs.unconfirmed_after else fc.after
+    recorded = b"" if base is None else _blob(cs, base)
     current = _read(fc.path) or b""
     return "".join(
         difflib.unified_diff(
@@ -356,6 +365,12 @@ def diff_text(cs: Changeset, fc: FileChange) -> str:
     )
 
 
+def check_not_running(cs: Changeset) -> None:
+    """Raise StillRunning while another aec process is still making `cs`."""
+    if not (cs.dir / _MANIFEST).exists() and is_held(cs.dir / _ACTIVE):
+        raise StillRunning(f"{cs.id} is still being made by another aec command; roll it back when that finishes")
+
+
 def revert(
     cs_id: str, force: bool = False, confirmed: Optional[Dict[Path, Optional[str]]] = None
 ) -> Changeset:
@@ -363,8 +378,7 @@ def revert(
     each one is still exactly as `confirmed` (from current_hashes) when the lock is held."""
     with _store_lock():  # load to settle in one critical section
         orig = load(cs_id)
-        if not (orig.dir / _MANIFEST).exists() and is_held(orig.dir / _ACTIVE):
-            raise StillRunning(f"{orig.id} is still being made by another aec command; roll it back when that finishes")
+        check_not_running(orig)
         if orig.reversed_by:
             raise AlreadyReverted(f"{orig.id} was already reverted by {orig.reversed_by}")
         found = conflicts(orig)

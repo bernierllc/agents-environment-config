@@ -345,3 +345,16 @@ def test_every_writer_refuses_paths_that_leave_the_repo(store, legacy_repo, tmp_
         assert status == 1
         assert _snapshot(legacy_repo) == before
         assert changesets.list_changesets() == recorded
+
+
+def test_all_keeps_separate_git_dir_checkouts_and_skips_linked_worktrees(tmp_path, monkeypatch):
+    main, sep, plain = tmp_path / "main", tmp_path / "sep", tmp_path / "plain"
+    plain.mkdir()
+    run = lambda *a: subprocess.run(["git", *a], check=True, capture_output=True)  # noqa: E731
+    run("init", "-q", str(main))
+    run("init", "-q", "--separate-git-dir", str(tmp_path / "sep.git"), str(sep))
+    run("-c", "user.name=t", "-c", "user.email=t@example.invalid", "-C", str(main), "commit", "-q", "--allow-empty", "-m", "init")
+    run("-C", str(main), "worktree", "add", "-q", str(tmp_path / "wt"))
+    tracked = [main, sep, tmp_path / "wt", plain]
+    monkeypatch.setattr("aec.lib.scope.get_all_tracked_repos", lambda: tracked)
+    assert migrate_cmd._target_repos([], all_repos=True) == [main, sep]
