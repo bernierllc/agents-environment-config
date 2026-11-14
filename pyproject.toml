@@ -26,6 +26,7 @@ keywords = ["ai", "agents", "cli", "configuration", "claude", "cursor"]
 
 dependencies = [
     "typer>=0.9.0",
+    "PyYAML>=6.0",  # aec.cli imports the org commands, which parse YAML
 ]
 
 [project.optional-dependencies]

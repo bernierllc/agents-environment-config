@@ -345,6 +345,20 @@ def _diagnose_sync_failure(repo_path: Path, cmd: list, stderr: str):
     ) or None
     rerun = "Run `aec update` again."
 
+    if any(s in text for s in (
+        "could not resolve host", "could not read from remote", "permission denied",
+        "authentication failed", "connection timed out", "unable to access",
+    )):
+        return RepoSyncError(
+            "Could not reach the AEC remote (network or git credentials).",
+            detail=detail,
+            fix=[
+                "Check your network connection.",
+                f"Test access: git -C {repo_path} fetch",
+                "If that asks for or rejects credentials, fix your SSH key or git credential helper.",
+                rerun,
+            ],
+        )
     if cmd[1] == "submodule":
         return RepoSyncError(
             "Updating the AEC skill/agent submodules failed.",
@@ -394,20 +408,6 @@ def _diagnose_sync_failure(repo_path: Path, cmd: list, stderr: str):
             "Your AEC checkout is not on a branch that tracks the remote.",
             detail=detail,
             fix=[cd, "git switch main", rerun],
-        )
-    if any(s in text for s in (
-        "could not resolve host", "could not read from remote", "permission denied",
-        "authentication failed", "connection timed out", "unable to access",
-    )):
-        return RepoSyncError(
-            "Could not reach the AEC remote (network or git credentials).",
-            detail=detail,
-            fix=[
-                "Check your network connection.",
-                f"Test access: git -C {repo_path} fetch",
-                "If that asks for or rejects credentials, fix your SSH key or git credential helper.",
-                rerun,
-            ],
         )
     return RepoSyncError(
         f"`{' '.join(cmd)}` failed in your AEC checkout.",

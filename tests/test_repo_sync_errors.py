@@ -346,3 +346,19 @@ def test_submodule_pointer_bump_still_offers_the_remedy(remote_and_clone, tmp_pa
     git(seed / "sub", "pull", "-q")
     git(seed, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "bump")
     assert offered(seed, clone)
+
+
+def test_submodule_network_failure_is_diagnosed_as_network(tmp_path):
+    from aec.lib.sources import _diagnose_sync_failure
+    err = _diagnose_sync_failure(tmp_path, ["git", "submodule", "update"],
+                                 "fatal: unable to access 'https://example.invalid/': Could not resolve host")
+    assert "Could not reach the AEC remote" in err.message
+
+
+def test_version_flag(monkeypatch, capsys):
+    from aec import __version__
+    monkeypatch.setattr("sys.argv", ["aec", "--version"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 0
+    assert __version__ in capsys.readouterr().out

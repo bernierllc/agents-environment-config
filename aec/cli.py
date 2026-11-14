@@ -96,8 +96,14 @@ def _cli_callback(
         "--defaults",
         help="Accept each prompt's declared default when no answer is supplied.",
     ),
+    version: bool = typer.Option(
+        False, "--version", "-V", is_eager=True, help="Show the aec version and exit.",
+    ),
 ):
     """Pre-command hook: check for unanswered preferences and register update check."""
+    if version:
+        Console.print(f"aec version {__version__}")
+        raise typer.Exit()
     if debug:
         from .lib.debug import enable_debug
         enable_debug()

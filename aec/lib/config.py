@@ -31,7 +31,12 @@ def _read_version() -> str:
             if line.strip().startswith("version"):
                 return line.split("=", 1)[1].strip().strip('"')
 
-    return "2.0.0"
+    # Installed from a wheel (pipx, pip install): no pyproject beside the package.
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        return version("aec")
+    except PackageNotFoundError:
+        return "0.0.0"
 
 
 VERSION = _read_version()

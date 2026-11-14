@@ -21,7 +21,7 @@ AEC is a product for anyone who installs it, not the maintainer's personal setup
 - **Package manager:** pip with `pyproject.toml`
 - **CLI framework:** Typer (runtime dependency; the only CLI front-end)
 - **Test runner:** pytest (dev dependency)
-- **Key dependencies:** None at runtime (zero-dependency); `typer>=0.9.0` and `pytest>=7.0.0` as dev deps
+- **Key dependencies:** `typer>=0.9.0` and `PyYAML>=6.0` at runtime; `pytest>=7.0.0` as a dev dep
 - **Database:** None
 <!-- STACK-END -->
 
