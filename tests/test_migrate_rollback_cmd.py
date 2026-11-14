@@ -184,3 +184,13 @@ def test_port_block_goes_to_agents_md_without_agentinfo(tmp_path, monkeypatch):
     _inject_port_registry(tmp_path)
     assert _PORT_START in (tmp_path / "AGENTS.md").read_text()
     assert not (tmp_path / "AGENTINFO.md").exists()
+
+
+def test_symlinked_stub_is_refused_without_touching_files(store, legacy_repo):
+    (legacy_repo / "CLAUDE.md").unlink()
+    (legacy_repo / "CLAUDE.md").symlink_to("AGENTS.md")
+    before = _snapshot(legacy_repo)
+    assert migrate_cmd.run_migrate_agents_md([str(legacy_repo)], yes=True) == 1
+    assert _snapshot(legacy_repo) == before
+    assert (legacy_repo / "CLAUDE.md").is_symlink()
+    assert changesets.list_changesets() == []

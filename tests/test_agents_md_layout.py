@@ -7,6 +7,7 @@ from pathlib import Path
 
 from aec.lib.agents_md_layout import (
     INSTRUCTION_STUBS,
+    migrate_texts,
     detect_layout,
     plan_migration,
     render_new_layout,
@@ -172,3 +173,38 @@ def test_render_new_layout_from_templates():
     assert out["AGENTS.md"].count("## Rules Reference") == 1
     for name in INSTRUCTION_STUBS:
         assert out[name] == "@AGENTS.md\n"
+
+
+def test_user_lines_inside_generated_sections_survive():
+    claude = (
+        "# Claude Code Agent Instructions\n\n## Quick Start\n\n"
+        "1. Read `AGENTINFO.md` for project-specific info\n"
+        "4. Always run make lint first\n\n"
+        "## Regenerating This File\n\n```bash\naec files generate\n```\n\nEOF note from me\n"
+    )
+    out = migrate_texts({"AGENTINFO.md": "# info\n", "CLAUDE.md": claude})
+    assert "Always run make lint first" in out["CLAUDE.md"]
+    assert "EOF note from me" in out["CLAUDE.md"]
+    assert out["CLAUDE.md"].startswith("@AGENTS.md\n")
+
+
+def test_pure_boilerplate_sections_are_dropped():
+    claude = (
+        "## Quick Start\n\n1. Read `AGENTINFO.md` for project-specific info\n\n"
+        "## Regenerating This File\n\n```bash\naec files generate\n```\n"
+    )
+    out = migrate_texts({"AGENTINFO.md": "# info\n", "CLAUDE.md": claude})
+    assert out["CLAUDE.md"] == "@AGENTS.md\n"
+
+
+def test_differing_rules_section_stays_in_its_stub():
+    rules_a = "## Rules Reference\n\n- rule a\n"
+    rules_b = "## Rules Reference\n\n- rule b only for gemini\n"
+    out = migrate_texts({"AGENTINFO.md": "# info\n", "AGENTS.md": rules_a, "GEMINI.md": rules_b})
+    assert "rule a" in out["AGENTS.md"]
+    assert "rule b only for gemini" in out["GEMINI.md"]
+
+
+def test_existing_import_stub_gets_references_fixed():
+    out = migrate_texts({"AGENTINFO.md": "# info\n", "CLAUDE.md": "@AGENTS.md\n\nSee AGENTINFO.md.\n"})
+    assert out["CLAUDE.md"] == "@AGENTS.md\n\nSee AGENTS.md.\n"

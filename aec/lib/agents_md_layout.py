@@ -17,7 +17,6 @@ _LEGACY = "AGENTINFO.md"
 _NEW = "AGENTS.md"
 _IMPORT_LINE = "@AGENTS.md"
 _H1 = re.compile(r"^# .+ Agent Instructions\s*$")
-_GENERATED_H2 = ("Quick Start", "Rules Reference", "Regenerating This File")
 _GENERATED_QUOTES = ("> **Canonical Source**", "> Read that file first", "> 🚨 **Canonical Source**")
 _SELF_POINTER = "5. For project-specific info, see `AGENTINFO.md`"
 
@@ -38,32 +37,67 @@ def _trim_blank_edges(lines: list) -> str:
     return "\n".join(lines)
 
 
+# Lines AEC itself generates in the Quick Start / Regenerating sections.
+_BOILERPLATE = {
+    "",
+    "```",
+    "```bash",
+    "1. Read `AGENTINFO.md` for project-specific info",
+    "2. Read relevant `~/.agent-tools/rules/agents-environment-config/*.md` files on demand",
+    "3. Do NOT memorize all rules - reference them when needed",
+    "aec files generate",
+    "python3 scripts/generate-agent-files.py",
+}
+
+
 def split_stub(text: str) -> Tuple[str, str]:
-    """Return (rules reference section, everything the user added)."""
+    """Return (first Rules Reference section, everything else the user wrote).
+
+    Quick Start and Regenerating This File are dropped only when every line in
+    them is AEC boilerplate; otherwise the whole section is kept as user content.
+    """
     kept: list = []
     rules: list = []
-    section: Optional[str] = None
+    section: list = []
+    mode = "user"  # user | rules | generated
     in_fence = False
     h1_seen = False
+
+    def close() -> None:
+        if mode == "generated" and any(l.strip() not in _BOILERPLATE for l in section[1:]):
+            kept.extend(section)
+        elif mode == "rules":
+            rules.extend(l for l in section if l.rstrip() != _SELF_POINTER)
+
     for line in text.split("\n"):
-        if line.startswith("```"):
-            in_fence = not in_fence
-        elif not in_fence and line.startswith("## "):
+        heading = not in_fence and line.startswith("#")
+        if heading and line.startswith("## "):
+            close()
             title = line[3:].strip()
-            section = title if title in _GENERATED_H2 else None
-        elif not in_fence and line.startswith("# "):
-            section = None
+            if title == "Rules Reference" and not rules:
+                mode = "rules"
+            elif title in ("Quick Start", "Regenerating This File"):
+                mode = "generated"
+            else:
+                mode = "user"
+            section = [line]
+            if mode == "user":
+                kept.append(line)
+            continue
+        if heading and line.startswith("# "):
+            close()
+            mode, section = "user", []
             if not h1_seen:
                 h1_seen = True
                 if _H1.match(line):
                     continue
-        if section is not None:
-            if section == "Rules Reference" and line.rstrip() != _SELF_POINTER:
-                rules.append(line)
-            continue
-        if line.startswith(_GENERATED_QUOTES):
-            continue
-        kept.append(line)
+        if line.startswith("```"):
+            in_fence = not in_fence
+        if mode != "user":
+            section.append(line)
+        elif not line.startswith(_GENERATED_QUOTES):
+            kept.append(line)
+    close()
     return _trim_blank_edges(rules), _trim_blank_edges(kept)
 
 
@@ -87,9 +121,16 @@ def migrate_texts(files: Dict[str, str]) -> Dict[str, Optional[str]]:
         _LEGACY: None,
     }
     for name in INSTRUCTION_STUBS:
-        if name in texts and not texts[name].startswith(_IMPORT_LINE):
-            user = _rename(stubs[name][1])
-            out[name] = _IMPORT_LINE + "\n" + (f"\n{user}\n" if user else "")
+        if name not in texts:
+            continue
+        if texts[name].startswith(_IMPORT_LINE):
+            out[name] = _rename(texts[name])  # already an import; only fix references
+            continue
+        own_rules, user = stubs[name]
+        # A rules section that differs from the one moved to AGENTS.md stays here.
+        user = "\n\n".join(p for p in (own_rules if own_rules != rules else "", user) if p)
+        user = _rename(user)
+        out[name] = _IMPORT_LINE + "\n" + (f"\n{user}\n" if user else "")
     if _LEGACY in texts.get(CURSOR_RULE, ""):
         out[CURSOR_RULE] = _rename(texts[CURSOR_RULE])
 

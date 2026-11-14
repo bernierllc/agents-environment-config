@@ -157,3 +157,57 @@ def test_corrupt_skipped_with_warning(tmp_path, rb, caplog):
 def test_load_missing():
     with pytest.raises(c.ChangesetNotFound):
         c.load("nope")
+
+
+def test_store_failure_happens_before_any_change(tmp_path, monkeypatch):
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x")
+    monkeypatch.setattr(c, "rollbacks_dir", lambda: blocker / "rollbacks")
+    f = tmp_path / "f"
+    f.write_bytes(b"keep")
+    with pytest.raises(OSError):
+        c.begin([f], "s", "l", "test")
+    assert f.read_bytes() == b"keep"
+
+
+def test_interrupted_change_is_recorded_on_list(tmp_path):
+    f = tmp_path / "f"
+    f.write_bytes(b"old")
+    c.begin([f], "s", "l", "test")  # process dies before commit
+    f.write_bytes(b"new")
+    (cs,) = c.list_changesets()
+    c.revert(cs.id)
+    assert f.read_bytes() == b"old"
+
+
+def test_symlinks_are_refused(tmp_path):
+    target = tmp_path / "AGENTS.md"
+    target.write_text("x")
+    link = tmp_path / "CLAUDE.md"
+    link.symlink_to(target)
+    with pytest.raises(c.ChangesetError, match="symlink"):
+        c.begin([link], "s", "l", "test")
+    assert c.list_changesets() == []
+
+
+def test_partial_revert_is_recorded(tmp_path, monkeypatch):
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.write_bytes(b"a0")
+    b.write_bytes(b"b0")
+    cs = change([a, b], lambda: (a.write_bytes(b"A"), b.write_bytes(b"B")))
+    a.write_bytes(b"edited")
+    real = c._write_bytes_atomic
+
+    def flaky(path, data):
+        if path == b:
+            raise OSError("disk full")
+        real(path, data)
+
+    monkeypatch.setattr(c, "_write_bytes_atomic", flaky)
+    with pytest.raises(OSError):
+        c.revert(cs.id, force=True)
+    monkeypatch.setattr(c, "_write_bytes_atomic", real)
+    partial = c.list_changesets()[0]
+    assert partial.reverses == cs.id
+    c.revert(partial.id)
+    assert a.read_bytes() == b"edited"  # the overwritten edit is recoverable

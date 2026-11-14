@@ -116,12 +116,16 @@ def _tidy(repo: Path, agent: str, config: dict, yes: bool) -> bool:
             return True
 
     files = [repo / "AGENTS.md"] + [repo / n for n in INSTRUCTION_STUBS]
-    pending = changesets.begin(
-        files,
-        short=f"Tidy {repo.name} instructions with {agent}",
-        long=f"{agent} ran headless in {repo} with this prompt:\n\n{TIDY_PROMPT}",
-        kind="tidy",
-    )
+    try:
+        pending = changesets.begin(
+            files,
+            short=f"Tidy {repo.name} instructions with {agent}",
+            long=f"{agent} ran headless in {repo} with this prompt:\n\n{TIDY_PROMPT}",
+            kind="tidy",
+        )
+    except changesets.ChangesetError as e:
+        Console.error(f"{repo.name}: tidy not run: {e}")
+        return False
     try:
         result = subprocess.run(args, cwd=str(repo), timeout=TIDY_TIMEOUT_SECONDS)
     finally:
@@ -184,13 +188,22 @@ def run_migrate_agents_md(
                 Console.skip("Nothing changed")
                 return 0
 
+        failed = False
         for repo, plan in plans.items():
-            cs = _apply_plan(repo, plan)
+            try:
+                cs = _apply_plan(repo, plan)
+            except changesets.ChangesetError as e:
+                # Raised before any file is touched (e.g. a symlinked instruction file).
+                Console.error(f"{repo.name}: not migrated: {e}")
+                failed = True
+                continue
             if cs is not None:
                 Console.success(f"{repo.name}: migrated (undo: {Console.cmd('aec rollback apply ' + cs.id)})")
 
     if dry_run:
         return 0
+    if plans and failed:
+        return 1
     if tidy_config is not None:
         ok = True
         for repo in repos:

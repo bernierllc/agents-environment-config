@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import secrets
+import shutil
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 SCHEMA = 1
 _MANIFEST = "rollback.json"
+_PENDING = "pending.json"  # journal of a change in progress
 
 
 class ChangesetError(Exception):
@@ -147,60 +149,90 @@ def _from_json(d: dict) -> Changeset:
     )
 
 
+def _new_id(root: Path, now: datetime) -> str:
+    while True:
+        cs_id = now.strftime("%Y%m%dT%H%M%SZ-") + secrets.token_hex(2)
+        if not (root / cs_id).exists():
+            return cs_id
+
+
+def _finalize(d: Path, journal: dict) -> Optional[Changeset]:
+    """Turn a pending journal into a changeset by recording each file's current state."""
+    changes: List[FileChange] = []
+    for path_str, b in journal["before"].items():
+        path = Path(path_str)
+        after = _read(path)
+        a = None if after is None else _sha(after)
+        if a == b:
+            continue
+        if after is not None:
+            _write_bytes_atomic(d / "blobs" / a, after)
+        changes.append(FileChange(path, b, a))
+    if not changes:
+        shutil.rmtree(d)
+        return None
+    cs = Changeset(
+        id=journal["id"],
+        created_at=journal["created_at"],
+        kind=journal["kind"],
+        short=journal["short"],
+        long=journal["long"],
+        files=changes,
+        reverses=journal.get("reverses"),
+    )
+    atomic_write_json(d / _MANIFEST, _to_json(cs))
+    (d / _PENDING).unlink()
+    return cs
+
+
 class PendingChangeset:
-    def __init__(self, paths: Iterable[Path], short: str, long: str, kind: str) -> None:
-        self.short, self.long, self.kind = short, long, kind
-        self.reverses: Optional[str] = None
-        self._before: Dict[Path, Optional[bytes]] = {}
-        for p in paths:
-            p = Path(p).absolute()
-            self._before[p] = _read(p)
+    """Snapshots files to disk before the caller changes them.
 
-    def discard(self) -> None:
-        self._before = {}
+    The before-bytes and a journal are written when this is created, so if the
+    store cannot be written nothing has been touched yet, and an interrupted
+    change can still be finalized later (see list_changesets).
+    """
 
-    def commit(self) -> Optional[Changeset]:
-        changes: List[FileChange] = []
-        blobs: Dict[str, bytes] = {}
-        for path, before in self._before.items():
-            after = _read(path)
-            b = None if before is None else _sha(before)
-            a = None if after is None else _sha(after)
-            if a == b:
-                continue
-            if before is not None:
-                blobs[b] = before
-            if after is not None:
-                blobs[a] = after
-            changes.append(FileChange(path, b, a))
-        if not changes:
-            return None
-
+    def __init__(
+        self, paths: Iterable[Path], short: str, long: str, kind: str, reverses: Optional[str] = None
+    ) -> None:
+        paths = [Path(p).absolute() for p in paths]
+        links = [str(p) for p in paths if p.is_symlink()]
+        if links:
+            # A restore writes a regular file, so it could not put a link back.
+            raise ChangesetError("AEC does not change symlinked files: " + ", ".join(links))
         now = datetime.now(timezone.utc)
         root = rollbacks_dir()
-        while True:
-            cs_id = now.strftime("%Y%m%dT%H%M%SZ-") + secrets.token_hex(2)
-            if not (root / cs_id).exists():
-                break
-        cs = Changeset(
-            id=cs_id,
-            created_at=now.isoformat(timespec="microseconds"),  # fixed width, so it sorts as a string
-            kind=self.kind,
-            short=self.short,
-            long=self.long,
-            files=changes,
-            reverses=self.reverses,
-        )
-        (cs.dir / "blobs").mkdir(parents=True)
-        for sha, data in blobs.items():
-            _write_bytes_atomic(cs.dir / "blobs" / sha, data)
-        atomic_write_json(cs.dir / _MANIFEST, _to_json(cs))
-        self._before = {}
-        return cs
+        self.id = _new_id(root, now)
+        self._dir = root / self.id
+        (self._dir / "blobs").mkdir(parents=True)
+        before: Dict[str, Optional[str]] = {}
+        for p in paths:
+            data = _read(p)
+            before[str(p)] = None if data is None else _sha(data)
+            if data is not None:
+                _write_bytes_atomic(self._dir / "blobs" / before[str(p)], data)
+        self._journal = {
+            "schema": SCHEMA,
+            "id": self.id,
+            "created_at": now.isoformat(timespec="microseconds"),  # fixed width, so it sorts as a string
+            "kind": kind,
+            "short": short,
+            "long": long,
+            "reverses": reverses,
+            "before": before,
+        }
+        atomic_write_json(self._dir / _PENDING, self._journal)
+
+    def commit(self) -> Optional[Changeset]:
+        """Record every snapshotted file's current state; None if nothing changed."""
+        return _finalize(self._dir, self._journal)
 
 
-def begin(paths: Iterable[Path], short: str, long: str, kind: str) -> PendingChangeset:
-    return PendingChangeset(paths, short, long, kind)
+def begin(
+    paths: Iterable[Path], short: str, long: str, kind: str, reverses: Optional[str] = None
+) -> PendingChangeset:
+    return PendingChangeset(paths, short, long, kind, reverses)
 
 
 def load(cs_id: str) -> Changeset:
@@ -219,6 +251,15 @@ def list_changesets() -> List[Changeset]:
     for d in sorted(root.iterdir(), reverse=True):
         if not d.is_dir():
             continue
+        if (d / _PENDING).exists() and not (d / _MANIFEST).exists():
+            # shortcut: assumes no other aec process is mid-change; add a lock if that becomes real.
+            try:
+                if _finalize(d, json.loads((d / _PENDING).read_text(encoding="utf-8"))) is None:
+                    continue
+                logger.warning("recorded interrupted change %s", d.name)
+            except (OSError, ValueError, KeyError) as e:
+                logger.warning("cannot record interrupted change %s: %s", d.name, e)
+                continue
         try:
             out.append(load(d.name))
         except (ChangesetNotFound, OSError, ValueError, KeyError, TypeError) as e:
@@ -260,21 +301,24 @@ def revert(cs_id: str, force: bool = False) -> Changeset:
     if found and not force:
         raise ConflictError(found)
 
+    # Load every blob before touching any file, so a missing blob can't leave a half-restore.
+    restore = [(fc.path, None if fc.before is None else _blob(orig, fc.before)) for fc in orig.files]
     pending = begin(
         [fc.path for fc in orig.files],
         short=f"Revert: {orig.short}",
         long=f"Reverts changeset {orig.id} ({orig.short}).",
         kind="revert",
+        reverses=orig.id,
     )
-    pending.reverses = orig.id
-    # Load every blob before touching any file, so a missing blob can't leave a half-restore.
-    restore = [(fc.path, None if fc.before is None else _blob(orig, fc.before)) for fc in orig.files]
-    for path, data in restore:
-        if data is None:
-            path.unlink(missing_ok=True)
-        else:
-            _write_bytes_atomic(path, data)
-    new = pending.commit()
+    try:
+        for path, data in restore:
+            if data is None:
+                path.unlink(missing_ok=True)
+            else:
+                _write_bytes_atomic(path, data)
+    finally:
+        # Record even a partial restore, so edits it overwrote can be brought back.
+        new = pending.commit()
     if new is None:
         raise NothingToRevert(f"reverting {orig.id} would change no file")
     orig.reversed_by = new.id
