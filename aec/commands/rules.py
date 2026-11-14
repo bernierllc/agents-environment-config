@@ -4,18 +4,7 @@ import re
 from pathlib import Path
 from typing import List, Tuple
 
-try:
-    import typer
-    HAS_TYPER = True
-except ImportError:
-    HAS_TYPER = False
-
-from ..lib import Console, get_repo_root, ensure_directory
-
-if HAS_TYPER:
-    app = typer.Typer(help="Manage agent rules")
-else:
-    app = None
+from ..lib import Console, ensure_directory, require_repo_root
 
 
 def _strip_frontmatter(content: str) -> str:
@@ -116,10 +105,7 @@ def generate(dry_run: bool = False) -> None:
     if dry_run:
         Console.warning("DRY RUN MODE - No changes will be made\n")
 
-    repo_root = get_repo_root()
-    if not repo_root:
-        Console.error("Could not find agents-environment-config repository")
-        raise SystemExit(1)
+    repo_root = require_repo_root()
 
     Console.print(f"Repository: {Console.path(repo_root)}")
 
@@ -180,10 +166,7 @@ def validate() -> Tuple[bool, List[str]]:
     """
     Console.header("Validate Rule Parity")
 
-    repo_root = get_repo_root()
-    if not repo_root:
-        Console.error("Could not find agents-environment-config repository")
-        return False, ["Repository not found"]
+    repo_root = require_repo_root()
 
     cursor_rules = _get_cursor_rules(repo_root)
     if not cursor_rules:
@@ -223,18 +206,3 @@ def validate() -> Tuple[bool, List[str]]:
         Console.success(f"Rule parity check passed - .agent-rules/ matches .cursor/rules/")
         Console.print(f"  Validated {len(cursor_rules)} rule files")
         return True, []
-
-
-# Typer command decorators (if available)
-if HAS_TYPER:
-    @app.command("generate")
-    def generate_cmd():
-        """Generate .agent-rules/ from .cursor/rules/ (strips frontmatter)."""
-        generate()
-
-    @app.command("validate")
-    def validate_cmd():
-        """Validate .agent-rules/ parity with .cursor/rules/."""
-        success, _ = validate()
-        if not success:
-            raise typer.Exit(1)

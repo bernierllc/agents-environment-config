@@ -1,19 +1,7 @@
 """Files commands: aec files {generate}"""
 
-from pathlib import Path
 
-try:
-    import typer
-    HAS_TYPER = True
-except ImportError:
-    HAS_TYPER = False
-
-from ..lib import Console, get_repo_root
-
-if HAS_TYPER:
-    app = typer.Typer(help="Manage agent instruction files")
-else:
-    app = None
+from ..lib import Console, require_repo_root
 
 
 def generate() -> None:
@@ -24,10 +12,7 @@ def generate() -> None:
     """
     Console.header("Generate Agent Instruction Files")
 
-    repo_root = get_repo_root()
-    if not repo_root:
-        Console.error("Could not find agents-environment-config repository")
-        raise SystemExit(1)
+    repo_root = require_repo_root()
 
     templates_dir = repo_root / "templates"
     if not templates_dir.exists():
@@ -51,11 +36,3 @@ def generate() -> None:
 
     Console.print()
     Console.success(f"Generated {len(results)} agent instruction files in templates/")
-
-
-# Typer command decorators (if available)
-if HAS_TYPER:
-    @app.command("generate")
-    def generate_cmd():
-        """Generate agent instruction files in templates/ from .cursor/rules/."""
-        generate()

@@ -1,4 +1,4 @@
-"""Catalogued prompts for ``aec upgrade`` and ``aec agent-tools``.
+"""Catalogued prompts for ``aec update``, ``aec upgrade`` and ``aec agent-tools``.
 
 All of these are per-invocation confirmations over local state, so none are
 org-overlay-eligible. The rollback confirmation in particular is destructive:
@@ -18,6 +18,7 @@ UPGRADE_OVERWRITE_LOCAL_PREFIX = "upgrade.overwrite_local"
 
 # --- Static IDs -------------------------------------------------------------
 
+UPDATE_RESET_TO_REMOTE = "update.sync.reset_to_remote"
 UPGRADE_RUN_UPDATE_FIRST = "upgrade.run_update_first"
 UPGRADE_OTHER_REPOS = "upgrade.other_repos"
 UPGRADE_PLUGINS_CONFIRM = "upgrade.plugins.confirm"
@@ -26,6 +27,17 @@ AGENT_TOOLS_ROLLBACK_CONFIRM = "agent_tools.rollback.confirm"
 
 
 SPECS: tuple[PromptSpec, ...] = (
+    PromptSpec(
+        UPDATE_RESET_TO_REMOTE,
+        command="update",
+        summary=(
+            "The AEC checkout diverged from its remote: save the local-only "
+            "commits on an aec-backup/* branch, reset to the remote, and retry."
+        ),
+        type="yes_no",
+        default=False,
+        sensitive=True,
+    ),
     PromptSpec(
         UPGRADE_PLUGINS_CONFIRM,
         command="upgrade",

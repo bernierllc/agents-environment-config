@@ -33,7 +33,7 @@ def search_env(temp_dir, monkeypatch):
 
 
 class TestSearch:
-    @patch("aec.commands.search.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     def test_finds_matching_skills(self, mock_root, search_env, capsys):
         from aec.commands.search import run_search
         mock_root.return_value = search_env
@@ -43,7 +43,7 @@ class TestSearch:
         assert "browser-verification" in output
         assert "commit" not in output
 
-    @patch("aec.commands.search.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     def test_shows_install_status(self, mock_root, search_env, capsys):
         from aec.commands.search import run_search
         mock_root.return_value = search_env
@@ -51,7 +51,7 @@ class TestSearch:
         output = capsys.readouterr().out
         assert "[global]" in output
 
-    @patch("aec.commands.search.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     def test_no_results_message(self, mock_root, search_env, capsys):
         from aec.commands.search import run_search
         mock_root.return_value = search_env
@@ -59,7 +59,7 @@ class TestSearch:
         output = capsys.readouterr().out
         assert "No results" in output
 
-    @patch("aec.commands.search.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     def test_type_filter(self, mock_root, search_env, capsys):
         from aec.commands.search import run_search
         mock_root.return_value = search_env

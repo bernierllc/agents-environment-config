@@ -1,21 +1,15 @@
 """Discover command: aec discover - Find repos from existing Raycast scripts."""
 
 from pathlib import Path
-from typing import Optional
 
-try:
-    import typer
-    HAS_TYPER = True
-except ImportError:
-    HAS_TYPER = False
+import typer
 
 from ..lib import (
     Console,
-    get_repo_root,
+    require_repo_root,
     discover_from_scripts,
     is_logged,
     log_setup,
-    list_repos as tracking_list_repos,
 )
 from ..lib.prompt_catalog.discovery_area import DISCOVER_ADD_PATHS
 from ..lib.prompts import prompt
@@ -38,10 +32,7 @@ def discover(
     """
     Console.header("Repo Discovery")
 
-    repo_root = get_repo_root()
-    if not repo_root:
-        Console.error("Could not find agents-environment-config repository")
-        raise SystemExit(1)
+    repo_root = require_repo_root()
 
     raycast_dir = repo_root / "raycast_scripts"
     if not raycast_dir.is_dir():
@@ -141,17 +132,15 @@ def _add_paths(paths: list[Path]) -> None:
     Console.success(f"Added {len(paths)} path(s) to tracking log")
 
 
-# Typer command (if available)
-if HAS_TYPER:
-    def discover_cmd(
-        dry_run: bool = typer.Option(
-            False, "--dry-run",
-            help="Show what would be added without adding it",
-        ),
-        auto: bool = typer.Option(
-            False, "--auto",
-            help="Add missing paths without prompting",
-        ),
-    ):
-        """Discover repos from existing Raycast launcher scripts."""
-        discover(dry_run=dry_run, auto=auto)
+def discover_cmd(
+    dry_run: bool = typer.Option(
+        False, "--dry-run",
+        help="Show what would be added without adding it",
+    ),
+    auto: bool = typer.Option(
+        False, "--auto",
+        help="Add missing paths without prompting",
+    ),
+):
+    """Discover repos from existing Raycast launcher scripts."""
+    discover(dry_run=dry_run, auto=auto)

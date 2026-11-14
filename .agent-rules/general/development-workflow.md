@@ -75,7 +75,7 @@ refactor(models): extract user validation logic
 - **Maintainability**: When code becomes hard to understand or modify
 
 ### Refactoring Process
-1. **Create Plan**: Document refactor plan in `./plans/` directory
+1. **Create Plan**: Document refactor plan in `./.plans/` directory
 2. **Consider Reusability**: Plan for reusability with other functionality
 3. **Safe Migration**: Move functionality to more manageable state
 4. **Test Thoroughly**: Ensure all functionality works after refactoring
@@ -105,7 +105,7 @@ refactor(models): extract user validation logic
 ### Documentation Structure
 - **Architecture**: Note in `.cursor/rules/*.mdc` files
 - **Detailed Docs**: Store in `/docs/**/*.md`
-- **Planning**: Store in `./plans/**/*.md`
+- **Planning**: Store in `./.plans/**/*.md`
 - **Be Pithy**: Link to files rather than including all content
 
 ## Quality Assurance

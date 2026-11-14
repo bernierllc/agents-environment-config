@@ -7,10 +7,7 @@ and offers short aliases for the switches, so there is one implementation of the
 import subprocess
 import sys
 
-try:
-    import typer
-except ImportError:  # the argparse CLI only uses run_feedback
-    typer = None
+import typer
 
 from ..lib.console import Console
 from ..lib.feedback import locate_script
@@ -41,7 +38,7 @@ def run_feedback(args: list) -> int:
     return subprocess.run([sys.executable, str(script), *args]).returncode
 
 
-def feedback(ctx: "typer.Context") -> None:
+def feedback(ctx: typer.Context) -> None:
     """Log, review and toggle feedback on skills, agents, hooks, plugins, AEC and your process.
 
     Passes everything to the feedback-loop skill's feedback.py

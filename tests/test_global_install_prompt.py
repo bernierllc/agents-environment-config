@@ -397,7 +397,7 @@ class TestInstallCmdMultiRepoGlobal:
         monkeypatch.chdir(projects[3])
 
         patches = [
-            patch("aec.commands.install_cmd.get_repo_root", return_value=repo),
+            patch("aec.lib.config.get_repo_root", return_value=repo),
             patch(
                 "aec.commands.install_cmd.get_source_dirs",
                 return_value={

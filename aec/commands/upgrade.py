@@ -13,7 +13,7 @@ from ..lib.prompt_catalog.maintenance_area import (
     UPGRADE_RUN_UPDATE_FIRST,
 )
 from ..lib.prompts import prompt
-from ..lib.config import get_repo_root
+from ..lib.config import require_repo_root
 from ..lib.filesystem import installed_dst_path, remove_installed_item, resolve_installed_path
 from ..lib.installed_store import record_item_install as record_item_install_pertype
 from ..lib.manifest_v2 import (
@@ -41,10 +41,7 @@ def _manifest_path() -> Path:
 
 def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
     """Upgrade installed items to latest available versions."""
-    repo = get_repo_root()
-    if repo is None:
-        Console.error("AEC repo not found. Run `aec setup` first.")
-        return
+    repo = require_repo_root()
 
     mp = _manifest_path()
     manifest = load_manifest(mp)
@@ -66,7 +63,7 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
                 manifest = load_manifest(mp)
 
     try:
-        _run_upgrade_scopes(manifest, yes=yes, dry_run=dry_run)
+        _run_upgrade_scopes(manifest, repo, yes=yes, dry_run=dry_run)
     finally:
         # Setup failures and interrupted prompts must not discard earlier
         # successful item/dependency upgrades from the main manifest.
@@ -74,7 +71,7 @@ def run_upgrade(yes: bool = False, dry_run: bool = False) -> None:
             save_manifest(manifest, mp)
 
 
-def _run_upgrade_scopes(manifest: dict, *, yes: bool, dry_run: bool) -> None:
+def _run_upgrade_scopes(manifest: dict, repo: Path, *, yes: bool, dry_run: bool) -> None:
     """Apply a batch; run_upgrade owns persistence on both success and failure."""
     source_dirs = get_source_dirs()
     any_upgraded = False
@@ -86,7 +83,7 @@ def _run_upgrade_scopes(manifest: dict, *, yes: bool, dry_run: bool) -> None:
         Console.print("  (up to date)")
 
     local_repo = find_tracked_repo()
-    catalog = get_repo_root()
+    catalog = repo
     if local_repo and is_catalog_repo(local_repo):
         # Its items are the catalog source (see is_catalog_repo); refresh the
         # checkout we are in, which may be a worktree of the installed one.

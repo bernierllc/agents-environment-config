@@ -133,7 +133,7 @@ class TestFetchLatest:
             return _Result()
 
         with patch("aec.lib.sources.subprocess.run", fake_run):
-            assert fetch_latest(tmp_path) is True
+            assert fetch_latest(tmp_path) is None
 
         assert len(calls) == 2
         assert calls[0] == ["git", "pull", "--ff-only"]
@@ -146,16 +146,19 @@ class TestFetchLatest:
             "--remote",
         ]
 
-    def test_fetch_latest_returns_false_on_git_failure(self, tmp_path):
+    def test_fetch_latest_raises_repo_sync_error_on_git_failure(self, tmp_path):
         import subprocess as sp
 
+        from aec.lib.errors import RepoSyncError
         from aec.lib.sources import fetch_latest
 
         def fake_run(cmd, **kwargs):
-            raise sp.CalledProcessError(1, cmd)
+            raise sp.CalledProcessError(1, cmd, stderr="boom")
 
         with patch("aec.lib.sources.subprocess.run", fake_run):
-            assert fetch_latest(tmp_path) is False
+            with pytest.raises(RepoSyncError) as exc:
+                fetch_latest(tmp_path)
+        assert exc.value.detail == "boom"
 
 
 def test_discover_plugins_finds_registry_entry(tmp_path):

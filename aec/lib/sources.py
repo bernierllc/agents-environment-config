@@ -1,7 +1,9 @@
 """Source management: discover items, check staleness, fetch updates."""
 
 import json
+import os
 import subprocess
+import unicodedata
 from pathlib import Path
 from typing import Optional
 
@@ -174,41 +176,246 @@ def check_staleness(manifest: dict, max_age_hours: int = 24) -> bool:
     return is_stale(manifest, max_age_hours)
 
 
-def fetch_latest(repo_path: Optional[Path] = None) -> bool:
+def fetch_latest(repo_path: Optional[Path] = None) -> None:
     """Pull latest AEC repo and update submodules to remote branch tips.
 
     Uses ``git submodule update --remote`` so skills/agents track the latest
     commits on their default branches (same as the post-merge hook), not only
     the superproject's recorded gitlinks.
+
+    Raises ``RepoSyncError`` naming the cause and the fix when git fails.
     """
+    from .errors import RepoSyncError
+
     if repo_path is None:
         repo_path = get_repo_root()
     if repo_path is None:
-        return False
+        raise RepoSyncError(
+            "AEC repo not found.", fix=["Run `aec setup` to clone and register it."],
+        )
     from . import debug as _debug
-    try:
-        subprocess.run(
-            ["git", "pull", "--ff-only"],
-            cwd=repo_path, capture_output=True, check=True, text=True,
-        )
-        subprocess.run(
-            [
-                "git",
-                "submodule",
-                "update",
-                "--init",
-                "--recursive",
-                "--remote",
+    pull = ["git", "pull", "--ff-only"]
+    submodules = ["git", "submodule", "update", "--init", "--recursive", "--remote"]
+    for cmd in (pull, submodules):
+        try:
+            subprocess.run(cmd, cwd=repo_path, capture_output=True, check=True, text=True)
+        except FileNotFoundError as exc:
+            raise RepoSyncError(
+                "git is not installed or not on PATH.",
+                fix=["Install git (https://git-scm.com/downloads), then run `aec update` again."],
+            ) from exc
+        except subprocess.CalledProcessError as exc:
+            stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+            _debug.log_subprocess_failure(
+                cmd=cmd, returncode=exc.returncode,
+                stdout=exc.stdout if isinstance(exc.stdout, str) else None,
+                stderr=stderr or None, note=f"fetch_latest in {repo_path}",
+            )
+            raise _diagnose_sync_failure(repo_path, cmd, stderr) from exc
+
+
+def _ahead_behind(repo_path: Path) -> Optional[tuple]:
+    """Return (local-only commits, upstream-only commits), or None if unknown."""
+    done = subprocess.run(
+        ["git", "rev-list", "--left-right", "--count", "HEAD...@{u}"],
+        cwd=repo_path, capture_output=True, text=True,
+    )
+    parts = done.stdout.split()
+    if done.returncode != 0 or len(parts) != 2:
+        return None  # no upstream or detached HEAD: the caller's message covers it
+    return int(parts[0]), int(parts[1])
+
+
+def _tracked_tree_clean(repo_path: Path) -> bool:
+    done = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=no", "--ignore-submodules=all"],
+        cwd=repo_path, capture_output=True, text=True,
+    )
+    return done.returncode == 0 and not done.stdout.strip()
+
+
+def _git_out(repo_path: Path, *args: str) -> Optional[str]:
+    done = subprocess.run(["git", *args], cwd=repo_path, capture_output=True, text=True)
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def _git_paths(repo_path: Path, *args: str) -> Optional[list]:
+    """NUL-separated paths from git (no quoting), or None if git failed."""
+    done = subprocess.run(["git", *args, "-z"], cwd=repo_path, capture_output=True)
+    if done.returncode != 0:
+        return None
+    return [os.fsdecode(p) for p in done.stdout.split(b"\0") if p]
+
+
+def _paths_reset_would_overwrite(repo_path: Path, head: str, target: str) -> list:
+    """Untracked or ignored paths that a reset from head to target could clobber.
+
+    ``git reset --keep`` treats ignored files as expendable. Rather than model
+    each way it can overwrite one, this fails closed: any untracked or ignored
+    path that is, contains or sits under a changed path blocks the reset, as
+    does a changed submodule directory with anything in it. The comparison
+    ignores case, for case-insensitive filesystems.
+    """
+    changed = _git_paths(repo_path, "diff", "--name-only", "--no-renames", head, target)
+    others = _git_paths(repo_path, "ls-files", "--others", "--directory")
+    before = _git_paths(repo_path, "ls-tree", "-r", head)
+    after = _git_paths(repo_path, "ls-tree", "-r", target)
+    if None in (changed, others, before, after):
+        return ["(git could not list the files a reset would touch)"]
+    # a submodule that stays a submodule keeps its directory; one that goes away doesn't
+    gitlinks = ({e.split("\t", 1)[1] for e in before if e.startswith("160000 ")}
+                - {e.split("\t", 1)[1] for e in after if e.startswith("160000 ")})
+    def fold(path: str) -> str:  # APFS and NTFS match names case- and normalization-insensitively
+        return unicodedata.normalize("NFC", path).casefold()
+
+    loose = {o.rstrip("/"): fold(o.rstrip("/")) for o in others}
+    blocking = []
+    for path in changed:
+        d = fold(path)
+        hits = [o for o, u in loose.items()
+                if u == d or d.startswith(u + "/") or u.startswith(d + "/")]
+        sub = repo_path / path
+        if path in gitlinks and sub.is_dir() and any(sub.iterdir()):
+            hits.append(path)
+        blocking.extend(hits)
+    return sorted(set(blocking))
+
+
+def _reset_to_upstream_remedy(repo_path: Path, local_commits: int):
+    """Back up HEAD on a new branch, then move the branch to its upstream.
+
+    Bound to the branch, HEAD and upstream commit seen now: if any of them
+    changes before the user answers, it refuses instead of resetting
+    something else. Returns None when no safe reset exists.
+    """
+    from datetime import datetime
+
+    from .errors import AecError, Remedy
+    from .prompt_catalog.maintenance_area import UPDATE_RESET_TO_REMOTE
+    from .prompts import prompt, yes_no_hint
+
+    branch = _git_out(repo_path, "symbolic-ref", "-q", "HEAD")
+    head = _git_out(repo_path, "rev-parse", "HEAD")
+    upstream = _git_out(repo_path, "rev-parse", "--symbolic-full-name", "@{u}")
+    target = _git_out(repo_path, "rev-parse", "@{u}")
+    if not (branch and head and upstream and target) or _paths_reset_would_overwrite(repo_path, head, target):
+        return None
+
+    def apply() -> str:
+        now = tuple(_git_out(repo_path, *a) for a in (
+            ("symbolic-ref", "-q", "HEAD"), ("rev-parse", "HEAD"),
+            ("rev-parse", "--symbolic-full-name", "@{u}"), ("rev-parse", "@{u}"),
+        ))
+        blocking = _paths_reset_would_overwrite(repo_path, head, target)
+        if now != (branch, head, upstream, target) or not _tracked_tree_clean(repo_path) or blocking:
+            raise AecError(
+                "The AEC checkout changed before the reset, so nothing was reset.",
+                detail="\n".join(f"would overwrite: {p}" for p in blocking) or None,
+                fix=["Run `aec update` again."],
+            )
+        backup = f"aec-backup/{datetime.now():%Y%m%d-%H%M%S}"
+        # --keep (not --hard) refuses rather than discard any uncommitted change;
+        # no recursion, so submodule working trees (and their ignored files) are untouched
+        for cmd in (["git", "branch", backup, head], ["git", "-c", "submodule.recurse=false", "reset", "--keep", target]):
+            done = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True)
+            if done.returncode != 0:
+                raise AecError(
+                    f"Could not reset the AEC checkout: `{' '.join(cmd)}` failed.",
+                    detail=done.stderr.strip() or None,
+                    fix=[f"cd {repo_path}", "Resolve it by hand with the steps above."],
+                )
+        return (f"Saved your local commit(s) on branch {backup} and reset to the remote. "
+                f"Restore them any time with: git -C {repo_path} cherry-pick ..{backup}")
+
+    def confirm() -> bool:
+        return prompt(
+            UPDATE_RESET_TO_REMOTE,
+            f"Save the {local_commits} local commit(s) on a backup branch, reset the "
+            f"AEC checkout to the remote and retry? {yes_no_hint(False)}",
+            type="yes_no", default=False, sensitive=True,
+        ) == "y"
+
+    return Remedy(confirm=confirm, apply=apply)
+
+
+def _diagnose_sync_failure(repo_path: Path, cmd: list, stderr: str):
+    """Turn a failed git command into a RepoSyncError with the steps that fix it."""
+    from .errors import RepoSyncError
+
+    text = stderr.lower()
+    cd = f"cd {repo_path}"
+    # git's "hint:" lines restate generic options; our fix steps replace them
+    detail = "\n".join(
+        line for line in stderr.strip().splitlines() if not line.startswith("hint:")
+    ) or None
+    rerun = "Run `aec update` again."
+
+    if any(s in text for s in (
+        "could not resolve host", "could not read from remote", "permission denied",
+        "authentication failed", "connection timed out", "unable to access",
+    )):
+        return RepoSyncError(
+            "Could not reach the AEC remote (network or git credentials).",
+            detail=detail,
+            fix=[
+                "Check your network connection.",
+                f"Test access: git -C {repo_path} fetch",
+                "If that asks for or rejects credentials, fix your SSH key or git credential helper.",
+                rerun,
             ],
-            cwd=repo_path, capture_output=True, check=True, text=True,
         )
-        return True
-    except subprocess.CalledProcessError as exc:
-        _debug.log_subprocess_failure(
-            cmd=list(exc.cmd) if isinstance(exc.cmd, (list, tuple)) else str(exc.cmd),
-            returncode=exc.returncode,
-            stdout=exc.stdout if isinstance(exc.stdout, str) else None,
-            stderr=exc.stderr if isinstance(exc.stderr, str) else None,
-            note=f"fetch_latest in {repo_path}",
+    if cmd[1] == "submodule":
+        return RepoSyncError(
+            "Updating the AEC skill/agent submodules failed.",
+            detail=detail,
+            fix=[
+                cd,
+                "git submodule status   # a '+' or 'U' marks the submodule in trouble",
+                "Commit or discard local changes inside that submodule directory.",
+                rerun,
+            ],
         )
-        return False
+    if "not possible to fast-forward" in text or "diverg" in text:
+        counts = _ahead_behind(repo_path)
+        which = (
+            f"{counts[0]} local commit(s) not on the remote, and the remote has {counts[1]} new one(s)"
+            if counts else "local commits not on the remote, and the remote has new ones"
+        )
+        return RepoSyncError(
+            f"Your AEC checkout has diverged from the remote: {which}. "
+            "`aec update` only fast-forwards, so it will not merge them for you.",
+            detail=detail,
+            fix=[
+                cd,
+                "git log --oneline @{u}..HEAD   # see your local-only commits",
+                "To keep them on top of the remote: git pull --rebase",
+                "To drop them (back them up first): git branch backup/aec-local HEAD && git reset --keep @{u}",
+                rerun,
+            ],
+            # Only offered when nothing uncommitted could be at stake.
+            remedy=(_reset_to_upstream_remedy(repo_path, counts[0])
+                    if counts and _tracked_tree_clean(repo_path) else None),
+        )
+    if "would be overwritten" in text or "local changes" in text:
+        return RepoSyncError(
+            "Uncommitted changes in your AEC checkout block the update.",
+            detail=detail,
+            fix=[
+                cd,
+                "git status   # see which files changed",
+                "Commit them, or set them aside: git stash push -m before-aec-update",
+                rerun,
+                "If you stashed: git stash pop",
+            ],
+        )
+    if "no tracking information" in text or "not currently on a branch" in text:
+        return RepoSyncError(
+            "Your AEC checkout is not on a branch that tracks the remote.",
+            detail=detail,
+            fix=[cd, "git switch main", rerun],
+        )
+    return RepoSyncError(
+        f"`{' '.join(cmd)}` failed in your AEC checkout.",
+        detail=detail,
+        fix=[cd, f"Run `{' '.join(cmd)}` yourself to see the full error and resolve it.", rerun],
+    )

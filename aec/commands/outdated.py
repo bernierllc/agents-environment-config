@@ -5,7 +5,7 @@ from typing import Optional
 
 from ..lib.claude_plugins import is_claude_managed
 from ..lib.console import Console
-from ..lib.config import get_repo_root
+from ..lib.config import require_repo_root
 from ..lib.manifest_v2 import load_manifest, get_installed
 from ..lib.sources import discover_available, get_source_dirs
 from ..lib.scope import find_tracked_repo, get_all_tracked_repos
@@ -21,10 +21,7 @@ def _manifest_path() -> Path:
 
 def run_outdated(type_filter: Optional[str] = None, show_all: bool = False) -> None:
     """Check for items with available upgrades across scopes."""
-    repo = get_repo_root()
-    if repo is None:
-        Console.error("AEC repo not found. Run `aec setup` first.")
-        return
+    repo = require_repo_root()
 
     source_dirs = get_source_dirs()
     manifest = load_manifest(_manifest_path())

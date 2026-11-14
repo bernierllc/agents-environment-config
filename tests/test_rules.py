@@ -107,7 +107,7 @@ class TestRulesPlansSubstitution:
             "Use `./plans/**/*.md` for organization\n"
         )
 
-        monkeypatch.setattr("aec.commands.rules.get_repo_root", lambda: mock_repo_root)
+        monkeypatch.setattr("aec.lib.config.get_repo_root", lambda: mock_repo_root)
         from aec.commands.rules import generate
         generate()
 
@@ -133,7 +133,7 @@ class TestRulesPlansSubstitution:
             "Store plans in `./plans/` directory\n"
         )
 
-        monkeypatch.setattr("aec.commands.rules.get_repo_root", lambda: mock_repo_root)
+        monkeypatch.setattr("aec.lib.config.get_repo_root", lambda: mock_repo_root)
         from aec.commands.rules import generate
         generate()
 
@@ -163,7 +163,7 @@ class TestRulesCompletionBehavior:
             "   - **Move file** to `./plans/completed/` directory (if applicable)\n"
         )
 
-        monkeypatch.setattr("aec.commands.rules.get_repo_root", lambda: mock_repo_root)
+        monkeypatch.setattr("aec.lib.config.get_repo_root", lambda: mock_repo_root)
         from aec.commands.rules import generate
         generate()
 
@@ -191,7 +191,7 @@ class TestRulesCompletionBehavior:
             "   - **Move file** to `./plans/completed/` directory (if applicable)\n"
         )
 
-        monkeypatch.setattr("aec.commands.rules.get_repo_root", lambda: mock_repo_root)
+        monkeypatch.setattr("aec.lib.config.get_repo_root", lambda: mock_repo_root)
         from aec.commands.rules import generate
         generate()
 
@@ -216,7 +216,7 @@ class TestRulesCompletionBehavior:
             "   - **Move file** to `./plans/completed/` directory (if applicable)\n"
         )
 
-        monkeypatch.setattr("aec.commands.rules.get_repo_root", lambda: mock_repo_root)
+        monkeypatch.setattr("aec.lib.config.get_repo_root", lambda: mock_repo_root)
         from aec.commands.rules import generate
         generate()
 
@@ -239,7 +239,7 @@ class TestRulesPrOpenMode:
         target = mock_repo_root / ".cursor" / "rules" / "topics" / "git"
         target.mkdir(parents=True, exist_ok=True)
         (target / "workflow.mdc").write_text(self.SOURCE.read_text())
-        monkeypatch.setattr("aec.commands.rules.get_repo_root", lambda: mock_repo_root)
+        monkeypatch.setattr("aec.lib.config.get_repo_root", lambda: mock_repo_root)
         from aec.commands.rules import generate
         generate()
         return (mock_repo_root / ".agent-rules" / "topics" / "git" / "workflow.md").read_text()
@@ -289,7 +289,7 @@ class TestValidateWithSettings:
             "Store plans in `./plans/` directory\n"
         )
 
-        monkeypatch.setattr("aec.commands.rules.get_repo_root", lambda: mock_repo_root)
+        monkeypatch.setattr("aec.lib.config.get_repo_root", lambda: mock_repo_root)
 
         # First generate (applies settings: ./plans/ -> ./.plans/)
         from aec.commands.rules import generate, validate

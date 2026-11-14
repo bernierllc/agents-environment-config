@@ -95,7 +95,7 @@ def test_export_then_apply_reproduces_setup(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: home2)
     monkeypatch.setenv("PROJECTS_DIR", str(home2 / "projects"))
 
-    with patch("aec.commands.apply_cmd.get_repo_root", return_value=repo), patch(
+    with patch("aec.lib.config.get_repo_root", return_value=repo), patch(
         "aec.commands.apply_cmd.get_source_dirs", return_value=_source_dirs(repo)
     ):
         run_apply(file=str(manifest_file))
@@ -131,7 +131,7 @@ def test_apply_dry_run_makes_no_changes(tmp_path, monkeypatch):
         )
     )
 
-    with patch("aec.commands.apply_cmd.get_repo_root", return_value=repo), patch(
+    with patch("aec.lib.config.get_repo_root", return_value=repo), patch(
         "aec.commands.apply_cmd.get_source_dirs", return_value=_source_dirs(repo)
     ):
         run_apply(file=str(manifest_file), dry_run=True)
@@ -214,7 +214,7 @@ def test_export_then_apply_reproduces_external_plugin(tmp_path, monkeypatch):
     source_dirs["plugins"] = plugins_dir
 
     ran = []
-    with patch("aec.commands.apply_cmd.get_repo_root", return_value=repo), patch(
+    with patch("aec.lib.config.get_repo_root", return_value=repo), patch(
         "aec.commands.apply_cmd.get_source_dirs", return_value=source_dirs
     ), patch("subprocess.run", side_effect=lambda *a, **k: ran.append(a)):
         run_apply(file=str(manifest_file), yes=True)
@@ -252,7 +252,7 @@ def test_apply_declined_batch_prompt_installs_nothing(tmp_path, monkeypatch, cap
 
     ran = []
     monkeypatch.setattr("builtins.input", lambda *a, **k: "n")
-    with patch("aec.commands.apply_cmd.get_repo_root", return_value=repo), patch(
+    with patch("aec.lib.config.get_repo_root", return_value=repo), patch(
         "aec.commands.apply_cmd.get_source_dirs", return_value=source_dirs
     ), patch("subprocess.run", side_effect=lambda *a, **k: ran.append(a)):
         run_apply(file=str(manifest_file), yes=False)
@@ -299,7 +299,7 @@ def test_plugins_apply_even_when_item_pass_fails(tmp_path, monkeypatch):
     # execute_apply records a real error -> items_failed.
     (home / ".claude").write_text("not a directory")
 
-    with patch("aec.commands.apply_cmd.get_repo_root", return_value=repo), patch(
+    with patch("aec.lib.config.get_repo_root", return_value=repo), patch(
         "aec.commands.apply_cmd.get_source_dirs", return_value=source_dirs
     ):
         with pytest.raises(SystemExit) as exc:
@@ -332,7 +332,7 @@ def test_apply_skips_projects_token_resolving_to_catalog(tmp_path, monkeypatch):
         )
     )
 
-    with patch("aec.commands.apply_cmd.get_repo_root", return_value=repo), patch(
+    with patch("aec.lib.config.get_repo_root", return_value=repo), patch(
         "aec.lib.config.get_repo_root", return_value=repo
     ), patch("aec.commands.apply_cmd.get_source_dirs", return_value=_source_dirs(repo)):
         run_apply(file=str(manifest_file))

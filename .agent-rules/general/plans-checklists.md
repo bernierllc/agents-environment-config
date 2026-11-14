@@ -4,8 +4,8 @@
 
 ### When to Create Plans
 - Every new feature, tool, or improvement should begin with a plans/ document
-- If a `./plans/` doc for the topic does not exist, create one named after the task or feature
-- Use `./plans/` or `./plans/<category>/` folders for organization
+- If a `./.plans/` doc for the topic does not exist, create one named after the task or feature
+- Use `./.plans/` or `./.plans/<category>/` folders for organization
 
 ### Plan File Structure
 ```
@@ -46,7 +46,7 @@ plans/
 
 ### File Completion Process
 1. When ALL tasks in a plan file are completed `- [x]`:
-   - **Move file** to `./plans/completed/` directory (if applicable)
+   - **Move file** to `./.plans/completed/` directory (if applicable)
    - **Update** coordination documents to reflect completion
    - **Commit** changes with conventional commit message
 

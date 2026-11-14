@@ -149,7 +149,7 @@ def test_aec_update_summary_counts_managed_plugins_in_other_repos(tmp_path, caps
     other.mkdir()
     manifest = {"global": {}, "repos": {str(other): {
         "plugins": {"p": {"install_type": "marketplace", "pluginId": "p@m", "version": "1.0.0"}}}}}
-    with patch.object(update, "get_repo_root", return_value=tmp_path), \
+    with patch("aec.lib.config.get_repo_root", return_value=tmp_path), \
          patch.object(update, "fetch_latest", return_value=True), \
          patch.object(update, "load_manifest", return_value=manifest), \
          patch.object(update, "save_manifest"), \

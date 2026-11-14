@@ -4,7 +4,7 @@
 
 ### File Organization
 - **Documentation**: Store in `/docs/**/*.md`
-- **Planning Docs**: Store in `./plans/**/*.md`
+- **Planning Docs**: Store in `./.plans/**/*.md`
 - **Cursor Rules**: Store in `.cursor/rules/*.mdc`
 - **Architecture Notes**: Note in `.cursor/rules/*.mdc` files
 
@@ -31,7 +31,7 @@
 ### Planning Documentation
 - **Task Lists**: Use - [ ] for pending, - [x] for completed
 - **Cross-Links**: Link to related planning and implementation docs
-- **Refactoring Plans**: Document in `./plans/` when code gets too large
+- **Refactoring Plans**: Document in `./.plans/` when code gets too large
 - **Feature Planning**: Track feature development and dependencies
 
 ## Documentation Maintenance

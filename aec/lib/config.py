@@ -31,7 +31,12 @@ def _read_version() -> str:
             if line.strip().startswith("version"):
                 return line.split("=", 1)[1].strip().strip('"')
 
-    return "2.0.0"
+    # Installed from a wheel (pipx, pip install): no pyproject beside the package.
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        return version("aec")
+    except PackageNotFoundError:
+        return "0.0.0"
 
 
 VERSION = _read_version()
@@ -212,6 +217,23 @@ def get_repo_root() -> Optional[Path]:
         current = parent
 
     return None
+
+
+def require_repo_root() -> Path:
+    """The AEC repo checkout, or an AecError telling the user how to get one."""
+    from .errors import AecError
+
+    repo = get_repo_root()
+    if repo is None:
+        raise AecError(
+            "AEC could not find its repository checkout: this `aec` is not "
+            "installed from a clone of the AEC repo.",
+            fix=[
+                "git clone https://github.com/bernierllc/agents-environment-config.git",
+                "cd agents-environment-config && pip install -e .",
+            ],
+        )
+    return repo
 
 
 def get_projects_dir() -> Path:
