@@ -218,3 +218,10 @@ def test_edited_canonical_quote_survives():
     out = migrate_texts({"AGENTINFO.md": "# info\n", "CLAUDE.md": claude})
     assert "Keep policy in SECURITY.md" in out["CLAUDE.md"]
     assert "Project-specific standards live" not in out["CLAUDE.md"]
+
+
+def test_user_heading_that_looks_generated_survives():
+    out = migrate_texts({"AGENTINFO.md": "# info\n", "CLAUDE.md": "# Deployment Agent Instructions\n\nShip on Fridays.\n"})
+    assert "# Deployment Agent Instructions" in out["CLAUDE.md"]
+    out = migrate_texts({"AGENTINFO.md": "# info\n", "CLAUDE.md": "# Claude Code Agent Instructions\n\nShip on Fridays.\n"})
+    assert "Agent Instructions" not in out["CLAUDE.md"]

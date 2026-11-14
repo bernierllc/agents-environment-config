@@ -222,10 +222,20 @@ class PendingChangeset:
     """
 
     def __init__(
-        self, paths: Iterable[Path], short: str, long: str, kind: str, reverses: Optional[str] = None
+        self,
+        paths: Iterable[Path],
+        short: str,
+        long: str,
+        kind: str,
+        reverses: Optional[str] = None,
+        within: Optional[Path] = None,
     ) -> None:
         paths = [Path(p).absolute() for p in paths]
         links = [str(p) for p in paths if p.is_symlink()]
+        if within is not None:  # a linked directory under `within` leads outside it
+            root = Path(within).absolute()
+            for p in paths:
+                links += [str(d) for d in p.parents if d != root and root in d.parents and d.is_symlink()]
         if links:
             # A restore writes a regular file, so it could not put a link back.
             raise ChangesetError("AEC does not change symlinked files: " + ", ".join(links))
@@ -265,9 +275,16 @@ class PendingChangeset:
 
 
 def begin(
-    paths: Iterable[Path], short: str, long: str, kind: str, reverses: Optional[str] = None
+    paths: Iterable[Path],
+    short: str,
+    long: str,
+    kind: str,
+    reverses: Optional[str] = None,
+    within: Optional[Path] = None,
 ) -> PendingChangeset:
-    return PendingChangeset(paths, short, long, kind, reverses)
+    """Snapshot `paths` before a change. With `within`, also refuse any path
+    reached through a symlinked directory below that root."""
+    return PendingChangeset(paths, short, long, kind, reverses, within)
 
 
 def load(cs_id: str) -> Changeset:
@@ -316,6 +333,11 @@ def conflicts(cs: Changeset) -> List[FileChange]:
     return [fc for fc in cs.files if _current_hash(fc.path) != fc.after]
 
 
+def current_hashes(files: Iterable[FileChange]) -> Dict[Path, Optional[str]]:
+    """Each file's hash now, to pass back to revert() as what a person confirmed."""
+    return {fc.path: _current_hash(fc.path) for fc in files}
+
+
 def diff_text(cs: Changeset, fc: FileChange) -> str:
     """Unified diff from the recorded after-state to the current file (display only)."""
     recorded = b"" if fc.after is None else _blob(cs, fc.after)
@@ -330,7 +352,11 @@ def diff_text(cs: Changeset, fc: FileChange) -> str:
     )
 
 
-def revert(cs_id: str, force: bool = False) -> Changeset:
+def revert(
+    cs_id: str, force: bool = False, confirmed: Optional[Dict[Path, Optional[str]]] = None
+) -> Changeset:
+    """Undo a changeset. Edited files raise ConflictError unless `force`, or unless
+    each one is still exactly as `confirmed` (from current_hashes) when the lock is held."""
     with _store_lock():  # load to settle in one critical section
         orig = load(cs_id)
         if not (orig.dir / _MANIFEST).exists() and is_held(orig.dir / _ACTIVE):
@@ -338,8 +364,11 @@ def revert(cs_id: str, force: bool = False) -> Changeset:
         if orig.reversed_by:
             raise AlreadyReverted(f"{orig.id} was already reverted by {orig.reversed_by}")
         found = conflicts(orig)
-        if found and not force:
-            raise ConflictError(found)
+        if not force:
+            seen = confirmed or {}
+            unconfirmed = [fc for fc in found if fc.path not in seen or _current_hash(fc.path) != seen[fc.path]]
+            if unconfirmed:
+                raise ConflictError(unconfirmed)
 
         # Load every blob before touching any file, so a missing blob can't leave a half-restore.
         restore = [(fc.path, None if fc.before is None else _blob(orig, fc.before)) for fc in orig.files]

@@ -6,7 +6,6 @@ become (None means delete); the caller records and applies it.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -16,7 +15,8 @@ CURSOR_RULE = ".cursor/rules/CURSOR.mdc"
 _LEGACY = "AGENTINFO.md"
 _NEW = "AGENTS.md"
 _IMPORT_LINE = "@AGENTS.md"
-_H1 = re.compile(r"^# .+ Agent Instructions\s*$")
+# The H1s AEC has generated, matched whole so a user heading such as "# Deployment Agent Instructions" survives.
+_H1 = frozenset(f"# {a} Agent Instructions" for a in ("Codex", "Claude Code", "Gemini CLI", "Qwen Code"))
 # Every pointer blockquote AEC has generated, matched whole so an edited one survives.
 _GENERATED_QUOTES = frozenset({
     "> **Canonical Source**: Project-specific standards live in `AGENTINFO.md`.",
@@ -97,7 +97,7 @@ def split_stub(text: str) -> Tuple[str, str]:
             mode, section = "user", []
             if not h1_seen:
                 h1_seen = True
-                if _H1.match(line):
+                if line.rstrip() in _H1:
                     continue
         if line.startswith("```"):
             in_fence = not in_fence

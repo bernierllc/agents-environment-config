@@ -90,6 +90,7 @@ def run_rollback_apply(cs_id: str, force: bool = False, yes: bool = False) -> in
     Console.print()
 
     edited = changesets.conflicts(cs)
+    confirmed = changesets.current_hashes(edited)  # before the diff, so a later save is caught
     if edited and not force:
         Console.warning("These files changed after AEC recorded this change:")
         for fc in edited:
@@ -111,8 +112,9 @@ def run_rollback_apply(cs_id: str, force: bool = False, yes: bool = False) -> in
             return 0
 
     try:
-        new = changesets.revert(cs.id, force=True)  # conflicts were confirmed above
-    except changesets.ChangesetError as e:  # e.g. still running, or a missing blob
+        # Overwrites only the edits shown above; a file saved since then is refused.
+        new = changesets.revert(cs.id, force=force, confirmed=confirmed)
+    except changesets.ChangesetError as e:  # e.g. still running, edited since the prompt, or a missing blob
         Console.error(f"Nothing rolled back: {e}")
         return 1
     Console.success(f"Rolled back {cs.id}; recorded as {new.id}")

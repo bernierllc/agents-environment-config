@@ -208,6 +208,18 @@ def test_symlinked_stub_is_refused_without_touching_files(store, legacy_repo):
     assert changesets.list_changesets() == []
 
 
+def test_symlinked_rules_directory_is_refused(store, legacy_repo, tmp_path):
+    shared = tmp_path / "shared-rules"
+    shutil.move(str(legacy_repo / ".cursor" / "rules"), str(shared))
+    (legacy_repo / ".cursor" / "rules").symlink_to(shared, target_is_directory=True)
+    outside = (shared / "CURSOR.mdc").read_bytes()
+    before = _snapshot(legacy_repo)
+    assert migrate_cmd.run_migrate_agents_md([str(legacy_repo)], yes=True) == 1
+    assert (shared / "CURSOR.mdc").read_bytes() == outside
+    assert _snapshot(legacy_repo) == before
+    assert changesets.list_changesets() == []
+
+
 def test_setup_adds_rules_reference_to_existing_agents_md(tmp_path, monkeypatch):
     from aec.commands import repo as repo_cmd
 
@@ -259,6 +271,26 @@ def test_tidy_timeout_still_reports_unrecorded_edits(store, legacy_repo, monkeyp
         migrate_cmd.run_migrate_agents_md([str(legacy_repo)], yes=True, tidy_with="fake")
     out = capsys.readouterr().out
     assert "does not undo them" in out and "src.py" in out
+
+
+@pytest.mark.parametrize("edited_before_prompt", [True, False])
+def test_rollback_refuses_a_file_saved_after_the_prompt(store, tmp_path, monkeypatch, capsys, edited_before_prompt):
+    f = tmp_path / "f"
+    f.write_bytes(b"old")
+    pending = changesets.begin([f], "s", "l", "test")
+    f.write_bytes(b"new")
+    cs = pending.commit()
+    if edited_before_prompt:
+        f.write_bytes(b"edit the user saw")
+
+    def answer_while_editor_saves(*a, **kw):
+        f.write_bytes(b"saved after the prompt")
+        return "y"
+
+    monkeypatch.setattr(rollback_cmd, "prompt", answer_while_editor_saves)
+    assert rollback_cmd.run_rollback_apply(cs.id) == 1
+    assert f.read_bytes() == b"saved after the prompt"
+    assert "Nothing rolled back" in capsys.readouterr().out
 
 
 def test_rollback_apply_refuses_a_running_change(store, tmp_path, capsys):

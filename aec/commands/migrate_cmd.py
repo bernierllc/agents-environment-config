@@ -75,6 +75,7 @@ def _apply_plan(repo: Path, plan: dict) -> Optional[changesets.Changeset]:
             "Files: " + ", ".join(str(p.relative_to(repo)) for p in plan)
         ),
         kind="migrate-agents-md",
+        within=repo,
     )
     try:
         for path, text in plan.items():
@@ -153,6 +154,7 @@ def _tidy(repo: Path, agent: str, config: dict, yes: bool) -> bool:
             short=f"Tidy {repo.name} instructions with {agent}",
             long=f"{agent} ran headless in {repo} with this prompt:\n\n{TIDY_PROMPT}",
             kind="tidy",
+            within=repo,
         )
     except changesets.ChangesetError as e:
         Console.error(f"{repo.name}: tidy not run: {e}")
@@ -226,7 +228,7 @@ def run_migrate_agents_md(
             try:
                 cs = _apply_plan(repo, plan)
             except changesets.ChangesetError as e:
-                # Raised before any file is touched (e.g. a symlinked instruction file).
+                # Raised before any file is touched (e.g. a symlinked file or directory).
                 Console.error(f"{repo.name}: not migrated: {e}")
                 failed = True
                 continue
