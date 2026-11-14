@@ -1,19 +1,7 @@
 """Files commands: aec files {generate}"""
 
-from pathlib import Path
-
-try:
-    import typer
-    HAS_TYPER = True
-except ImportError:
-    HAS_TYPER = False
 
 from ..lib import Console, get_repo_root
-
-if HAS_TYPER:
-    app = typer.Typer(help="Manage agent instruction files")
-else:
-    app = None
 
 
 def generate() -> None:
@@ -51,11 +39,3 @@ def generate() -> None:
 
     Console.print()
     Console.success(f"Generated {len(results)} agent instruction files in templates/")
-
-
-# Typer command decorators (if available)
-if HAS_TYPER:
-    @app.command("generate")
-    def generate_cmd():
-        """Generate agent instruction files in templates/ from .cursor/rules/."""
-        generate()

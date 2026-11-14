@@ -4,18 +4,7 @@ import re
 from pathlib import Path
 from typing import List, Tuple
 
-try:
-    import typer
-    HAS_TYPER = True
-except ImportError:
-    HAS_TYPER = False
-
 from ..lib import Console, get_repo_root, ensure_directory
-
-if HAS_TYPER:
-    app = typer.Typer(help="Manage agent rules")
-else:
-    app = None
 
 
 def _strip_frontmatter(content: str) -> str:
@@ -223,18 +212,3 @@ def validate() -> Tuple[bool, List[str]]:
         Console.success(f"Rule parity check passed - .agent-rules/ matches .cursor/rules/")
         Console.print(f"  Validated {len(cursor_rules)} rule files")
         return True, []
-
-
-# Typer command decorators (if available)
-if HAS_TYPER:
-    @app.command("generate")
-    def generate_cmd():
-        """Generate .agent-rules/ from .cursor/rules/ (strips frontmatter)."""
-        generate()
-
-    @app.command("validate")
-    def validate_cmd():
-        """Validate .agent-rules/ parity with .cursor/rules/."""
-        success, _ = validate()
-        if not success:
-            raise typer.Exit(1)

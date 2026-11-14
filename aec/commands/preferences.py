@@ -1,12 +1,5 @@
 """Preferences commands: aec preferences {list|set|reset}"""
 
-try:
-    import typer
-
-    HAS_TYPER = True
-except ImportError:
-    HAS_TYPER = False
-
 from ..lib.console import Console
 from ..lib import preferences as lib_preferences
 from ..lib.preferences import (
@@ -19,11 +12,6 @@ from ..lib.preferences import (
 # String-valued settings (stored under preferences "settings", not the boolean
 # optional_rules). Maps key -> allowed values.
 STRING_SETTINGS = {"plugins.execution": {"default", "instructions-only"}}
-
-if HAS_TYPER:
-    app = typer.Typer(help="Manage optional feature preferences")
-else:
-    app = None
 
 
 def list_preferences() -> None:
@@ -90,27 +78,3 @@ def reset_pref(feature: str) -> None:
 
     reset_preference(feature)
     Console.success(f"Reset: {feature} (will prompt on next CLI run)")
-
-
-# Typer command decorators
-if HAS_TYPER:
-
-    @app.command("list")
-    def list_cmd():
-        """List all optional features and their current settings."""
-        list_preferences()
-
-    @app.command("set")
-    def set_cmd(
-        feature: str = typer.Argument(..., help="Feature name (e.g., leave-it-better)"),
-        value: str = typer.Argument(..., help="'on' or 'off'"),
-    ):
-        """Enable or disable an optional feature."""
-        set_pref(feature, value)
-
-    @app.command("reset")
-    def reset_cmd(
-        feature: str = typer.Argument(..., help="Feature name to reset"),
-    ):
-        """Reset a preference (will re-prompt on next CLI run)."""
-        reset_pref(feature)

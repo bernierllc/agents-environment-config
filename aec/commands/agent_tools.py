@@ -2,13 +2,6 @@
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
-
-try:
-    import typer
-    HAS_TYPER = True
-except ImportError:
-    HAS_TYPER = False
 
 from ..lib import (
     Console,
@@ -29,11 +22,6 @@ from ..lib.prompt_catalog.maintenance_area import (
     AGENT_TOOLS_ROLLBACK_CONFIRM,
 )
 from ..lib.prompts import prompt
-
-if HAS_TYPER:
-    app = typer.Typer(help="Manage ~/.agent-tools/ directory")
-else:
-    app = None
 
 
 def _is_claude_installed() -> bool:
@@ -405,25 +393,3 @@ def rollback(backup_dir: str) -> None:
     Console.success("Restored old symlink structure")
     Console.print(f"\nThe backup has been preserved at: {backup_path}")
     Console.print(f"\nTo re-run migration: {Console.cmd('aec agent-tools migrate')}")
-
-
-# Typer command decorators (if available)
-if HAS_TYPER:
-    @app.command("setup")
-    def setup_cmd():
-        """Create ~/.agent-tools/ structure and symlinks."""
-        setup()
-
-    @app.command("migrate")
-    def migrate_cmd(
-        dry_run: bool = typer.Option(False, "--dry-run", help="Preview without making changes"),
-    ):
-        """Migrate from old symlink structure to new."""
-        migrate(dry_run)
-
-    @app.command("rollback")
-    def rollback_cmd(
-        backup_dir: str = typer.Argument(..., help="Backup directory to restore from"),
-    ):
-        """Rollback migration from a backup."""
-        rollback(backup_dir)

@@ -5,12 +5,6 @@ import shlex
 from pathlib import Path
 from typing import Optional
 
-try:
-    import typer
-    HAS_TYPER = True
-except ImportError:
-    HAS_TYPER = False
-
 from ..lib import Console, get_repo_root, init_aec_home
 from ..lib.git import is_git_repo, has_gitmodules, init_submodules, update_submodule
 from ..lib.prompt_ids import (

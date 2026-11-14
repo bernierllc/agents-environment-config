@@ -1,13 +1,6 @@
 """Doctor command: aec doctor - Check installation health."""
 
-from pathlib import Path
 from typing import List, Tuple
-
-try:
-    import typer
-    HAS_TYPER = True
-except ImportError:
-    HAS_TYPER = False
 
 from ..lib import (
     Console,
@@ -386,7 +379,7 @@ def run_doctor() -> Tuple[bool, List[str]]:
     repos_with_bad_hooks = []
     tracked = list_repos()
     if tracked:
-        from ..lib.hooks import repair_hook_keys, HOOK_KEY_FIXES
+        from ..lib.hooks import HOOK_KEY_FIXES
         import json
         from ..lib.hooks import AGENT_HOOK_CONFIGS
 
