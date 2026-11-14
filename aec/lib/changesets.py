@@ -177,15 +177,24 @@ def _from_journal(journal: dict) -> Changeset:
 
 def _finalize(d: Path, journal: dict) -> Optional[Changeset]:
     """Record a journal's change: after-blobs plus manifest. None if nothing changed."""
-    cs = _from_journal(journal)
-    if not cs.files:
+    if not (d / _PENDING).exists():
+        # Someone rolled this change back while it was running; never touch that history.
+        raise ChangesetError(f"change {journal['id']} was rolled back while running; not recorded")
+    changes: List[FileChange] = []
+    for path_str, b in journal["before"].items():
+        path = Path(path_str)
+        data = _read(path)  # one read, so the recorded hash always matches the stored blob
+        a = None if data is None else _sha(data)
+        if a == b:
+            continue
+        if data is not None:
+            _write_bytes_atomic(d / "blobs" / a, data)
+        changes.append(FileChange(path, b, a))
+    if not changes:
         shutil.rmtree(d)
         return None
-    for fc in cs.files:
-        if fc.after is not None:
-            data = _read(fc.path)
-            if data is not None and _sha(data) == fc.after:
-                _write_bytes_atomic(d / "blobs" / fc.after, data)
+    cs = _from_journal(journal)
+    cs.files = changes
     atomic_write_json(d / _MANIFEST, _to_json(cs))
     (d / _PENDING).unlink()
     return cs

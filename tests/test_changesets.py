@@ -223,3 +223,16 @@ def test_partial_revert_is_recorded(tmp_path, monkeypatch):
     assert partial.reverses == cs.id
     c.revert(partial.id)
     assert a.read_bytes() == b"edited"  # the overwritten edit is recoverable
+
+
+def test_late_commit_after_rollback_keeps_history(tmp_path):
+    f = tmp_path / "f"
+    f.write_bytes(b"old")
+    pending = c.begin([f], "s", "l", "test")
+    f.write_bytes(b"new")
+    (cs,) = c.list_changesets()
+    undo = c.revert(cs.id)
+    with pytest.raises(c.ChangesetError, match="rolled back while running"):
+        pending.commit()
+    assert c.load(cs.id).reversed_by == undo.id
+    assert f.read_bytes() == b"old"
