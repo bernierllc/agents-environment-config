@@ -139,42 +139,95 @@ def _create_directories(project_dir: Path, dry_run: bool = False) -> None:
         Console.success(f"Created .cursor/rules/, docs/, {plans_dir}/")
 
 
+AGENTS_MD_DOCS_URL = "https://code.claude.com/docs/en/memory#agents-md"
+
+
+def _repo_layout(project_dir: Path) -> str:
+    """The instructions layout this repo uses: its own if it has one, else the setting."""
+    from ..lib.agents_md_layout import detect_layout
+    from ..lib.preferences import get_setting
+
+    layout = detect_layout(project_dir)
+    if layout != "none":
+        return layout
+    return "agentinfo" if get_setting("instructions_layout") == "agentinfo" else "agents-md"
+
+
+def _canonical_instructions_file(project_dir: Path) -> Path:
+    """The file holding project-wide instructions: AGENTINFO.md in legacy repos, else AGENTS.md."""
+    legacy = project_dir / "AGENTINFO.md"
+    return legacy if legacy.exists() else project_dir / "AGENTS.md"
+
+
+def _add_rules_reference(agents_md: Path, rules: str, dry_run: bool) -> None:
+    """Append AEC's Rules Reference to an existing AGENTS.md that lacks one, since
+    the per-agent files only import AGENTS.md. Nothing else in it is touched."""
+    from ..lib.agents_md_layout import split_stub
+
+    raw = agents_md.read_bytes().decode("utf-8")
+    if split_stub(raw.replace("\r\n", "\n"))[0]:
+        Console.skip("AGENTS.md already exists (skipping)")
+        return
+    if dry_run:
+        Console.info("Would add the Rules Reference section to AGENTS.md")
+        return
+    nl = "\r\n" if "\r\n" in raw else "\n"
+    agents_md.write_bytes((raw.rstrip() + nl * 2 + rules.replace("\n", nl) + nl).encode("utf-8"))
+    Console.success("Added the Rules Reference section to AGENTS.md")
+
+
 def _copy_agent_files(project_dir: Path, repo_root: Path, dry_run: bool = False) -> None:
-    """Copy agent files from repo to project."""
+    """Write missing agent instruction files in the repo's layout.
+
+    Legacy (agentinfo) repos get the templates as-is. Everything else gets the
+    AGENTS.md layout, rendered from the same templates by the migration transform.
+    Existing files are never overwritten.
+    """
+    from ..lib.agents_md_layout import CURSOR_RULE, render_new_layout, split_stub
+
     Console.subheader("Copying agent files...")
 
-    for filename in AGENT_FILES:
-        source = repo_root / "templates" / filename
-        target = project_dir / filename
-
-        if not source.exists():
-            Console.warning(f"{filename} not found in templates/")
-            continue
-
-        if target.exists():
-            Console.skip(f"{filename} already exists (skipping)")
-        elif dry_run:
-            Console.info(f"Would copy: {filename}")
+    names = list(AGENT_FILES) + [CURSOR_RULE]
+    templates = {}
+    for name in names:
+        source = repo_root / "templates" / name
+        if source.exists():
+            # bytes + decode keeps the template's line endings exactly
+            templates[name] = source.read_bytes().decode("utf-8")
         else:
-            if copy_file(source, target):
-                Console.success(f"Copied {filename}")
-            else:
-                Console.error(f"Failed to copy {filename}")
+            Console.warning(f"{name} not found in templates/")
 
-    # Copy CURSOR.mdc
-    cursor_src = repo_root / "templates" / ".cursor" / "rules" / "CURSOR.mdc"
-    cursor_dst = project_dir / ".cursor" / "rules" / "CURSOR.mdc"
+    layout = _repo_layout(project_dir)
+    if layout == "agentinfo":
+        contents = templates
+    else:
+        contents = render_new_layout(templates)
+        # Files the transform leaves unchanged (none today) still come from the template.
+        contents = {n: contents.get(n, t) for n, t in templates.items() if n != "AGENTINFO.md"}
 
-    if cursor_src.exists():
-        if cursor_dst.exists():
-            Console.skip("CURSOR.mdc already exists (skipping)")
+    for name, text in contents.items():
+        target = project_dir / name
+        if name == "AGENTS.md" and layout != "agentinfo" and target.is_file():
+            _add_rules_reference(target, split_stub(text)[0], dry_run)
+        elif target.exists():
+            Console.skip(f"{name} already exists (skipping)")
         elif dry_run:
-            Console.info("Would copy: CURSOR.mdc to .cursor/rules/")
+            Console.info(f"Would create: {name}")
         else:
-            if copy_file(cursor_src, cursor_dst):
-                Console.success("Copied CURSOR.mdc to .cursor/rules/")
-            else:
-                Console.error("Failed to copy CURSOR.mdc")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(text.encode("utf-8"))
+            Console.success(f"Created {name}")
+
+    if layout == "agentinfo":
+        Console.info(
+            "This repo uses the AGENTINFO.md layout. AGENTS.md can hold it instead: "
+            "Codex and Cursor read AGENTS.md, and so does Claude Code"
+        )
+        Console.info(f"  ({AGENTS_MD_DOCS_URL}).")
+        Console.info(
+            f"  Switch with {Console.cmd('aec migrate agents-md')}; "
+            f"undo any time with {Console.cmd('aec rollback')}."
+        )
 
 
 # Mapping of optional feature keys to their rule source files (relative to repo root)
@@ -888,11 +941,13 @@ _PORT_START = "<!-- aec-port-registry:start -->"
 _PORT_END = "<!-- aec-port-registry:end -->"
 
 
-def _inject_port_registry_agentinfo(
+def _inject_port_registry(
     project_dir: Path,
     dry_run: bool = False,
 ) -> None:
-    """Keep AGENTINFO.md's Port Registry section in step with the preference.
+    """Keep the canonical instructions file's Port Registry section in step with the preference.
+
+    The canonical file is AGENTINFO.md in legacy repos and AGENTS.md otherwise.
 
     The always-applied port-management rule only applies where this section
     exists, so it is added when the registry is enabled and removed when the
@@ -907,7 +962,8 @@ def _inject_port_registry_agentinfo(
     from ..lib.preferences import get_preference
 
     port_enabled = get_preference("port_registry_enabled")
-    agentinfo_path = project_dir / "AGENTINFO.md"
+    agentinfo_path = _canonical_instructions_file(project_dir)
+    name = agentinfo_path.name
     if port_enabled is None or not agentinfo_path.exists():
         return
 
@@ -919,10 +975,10 @@ def _inject_port_registry_agentinfo(
         if stripped == content:
             return
         if dry_run:
-            Console.info("Would remove Port Registry section from AGENTINFO.md")
+            Console.info(f"Would remove Port Registry section from {name}")
             return
         agentinfo_path.write_text(stripped.rstrip("\n") + "\n")
-        Console.success("Removed Port Registry section from AGENTINFO.md (registry disabled)")
+        Console.success(f"Removed Port Registry section from {name} (registry disabled)")
         return
 
     # The rule gates on the marker, so a user-written section without it
@@ -932,14 +988,14 @@ def _inject_port_registry_agentinfo(
     block = f"{_PORT_START}\n{_PORT_SECTION_BODY}{_PORT_END}\n"
     legacy = "\n" + _PORT_SECTION_BODY
     if dry_run:
-        Console.info("Would add Port Registry section to AGENTINFO.md")
+        Console.info(f"Would add Port Registry section to {name}")
         return
     if legacy in content:
         agentinfo_path.write_text(content.replace(legacy, "\n" + block, 1))
     else:
         with open(agentinfo_path, "a") as f:
             f.write("\n" + block)
-    Console.success("Added Port Registry section to AGENTINFO.md")
+    Console.success(f"Added Port Registry section to {name}")
 
 
 def _run_git_phase(project_dir: Path) -> dict:
@@ -1370,8 +1426,8 @@ def setup(
     # Manage .aec.json gitignore
     _manage_aec_json_gitignore_step(project_dir, dry_run)
 
-    # Inject port registry info into AGENTINFO.md
-    _inject_port_registry_agentinfo(project_dir, dry_run)
+    # Inject port registry info into the canonical instructions file
+    _inject_port_registry(project_dir, dry_run)
 
     # Log setup
     log_setup(project_dir, dry_run)
@@ -1446,7 +1502,7 @@ def setup(
         Console.header("Setup Complete")
         Console.print(f"Project ready at: {Console.path(project_dir)}")
         Console.print("\nNext steps:")
-        Console.print(f"  1. {Console.bold('Edit AGENTINFO.md')} with your project-specific info")
+        Console.print(f"  1. {Console.bold('Edit ' + _canonical_instructions_file(project_dir).name)} with your project-specific info")
         Console.print("  2. Review .cursor/rules/CURSOR.mdc for Cursor settings")
         Console.print("  3. Start coding with your AI assistant!")
         Console.print()
@@ -1683,7 +1739,7 @@ def _update_single_repo(project_dir: Path, dry_run: bool = False) -> None:
     _clean_agentinfo_redundancy(project_dir, dry_run)
 
     # Port Registry block (the port rule gates on its marker)
-    _inject_port_registry_agentinfo(project_dir, dry_run)
+    _inject_port_registry(project_dir, dry_run)
 
     # Migrate legacy plans directories
     if not dry_run:

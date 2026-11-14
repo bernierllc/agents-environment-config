@@ -48,6 +48,8 @@ On Windows, the CLI uses NTFS junctions (no admin required) instead of symlinks 
 | `aec setup --all` | Track all projects in configured projects directory |
 | `aec untrack <path>` | Stop tracking a project |
 | `aec discover-repos` | Find repos from Raycast scripts |
+| `aec migrate agents-md [path…] [--all] [--dry-run] [--yes] [--tidy-with <agent>]` | Move projects from `AGENTINFO.md` to `AGENTS.md`; recorded for rollback |
+| `aec rollback [list\|show <id>\|apply <id> [--force] [--yes]]` | List, inspect and undo changes AEC recorded; an undo is itself recorded, so it can be redone |
 
 ### Configuration
 

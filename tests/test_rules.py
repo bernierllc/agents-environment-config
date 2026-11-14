@@ -314,31 +314,34 @@ class TestPortRuleHonorsOptOut:
         }))
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", prefs_file)
         (tmp_path / "AGENTINFO.md").write_text("# my-app\n")
-        from aec.commands.repo import _inject_port_registry_agentinfo
-        _inject_port_registry_agentinfo(tmp_path)
+        from aec.commands.repo import _inject_port_registry
+        _inject_port_registry(tmp_path)
         return (tmp_path / "AGENTINFO.md").read_text()
 
     def test_rule_gates_on_the_section_aec_writes(self, tmp_path, monkeypatch):
         from aec.commands.repo import _PORT_START
         assert _PORT_START in self._inject(tmp_path, monkeypatch, True)
-        assert f"`AGENTINFO.md` contains the `{_PORT_START}` marker" in self.RULE.read_text()
+        assert (
+            f"(`AGENTINFO.md` if the project has one, otherwise `AGENTS.md`) contains the `{_PORT_START}` marker"
+            in self.RULE.read_text()
+        )
 
     def test_enabling_migrates_the_legacy_block_to_marked_form(self, tmp_path, monkeypatch):
-        from aec.commands.repo import _PORT_END, _PORT_SECTION_BODY, _PORT_START, _inject_port_registry_agentinfo
+        from aec.commands.repo import _PORT_END, _PORT_SECTION_BODY, _PORT_START, _inject_port_registry
         agentinfo = tmp_path / "AGENTINFO.md"
         self._inject(tmp_path, monkeypatch, True)
         agentinfo.write_text("# my-app\n\n" + _PORT_SECTION_BODY + "\n## Testing\n")
-        _inject_port_registry_agentinfo(tmp_path)
+        _inject_port_registry(tmp_path)
         assert agentinfo.read_text() == (
             f"# my-app\n\n{_PORT_START}\n{_PORT_SECTION_BODY}{_PORT_END}\n\n## Testing\n"
         )
 
     def test_enabling_adds_the_block_beside_a_user_section(self, tmp_path, monkeypatch):
-        from aec.commands.repo import _PORT_START, _inject_port_registry_agentinfo
+        from aec.commands.repo import _PORT_START, _inject_port_registry
         agentinfo = tmp_path / "AGENTINFO.md"
         self._inject(tmp_path, monkeypatch, True)
         agentinfo.write_text("# my-app\n\n## Port Registry\n\nWe use 3000.\n")
-        _inject_port_registry_agentinfo(tmp_path)
+        _inject_port_registry(tmp_path)
         text = agentinfo.read_text()
         assert "We use 3000." in text and _PORT_START in text
 
@@ -354,8 +357,8 @@ class TestPortRuleHonorsOptOut:
             "schema_version": "1.1", "settings": {},
             "optional_rules": {"port_registry_enabled": {"enabled": False}},
         }))
-        from aec.commands.repo import _inject_port_registry_agentinfo
-        _inject_port_registry_agentinfo(tmp_path)
+        from aec.commands.repo import _inject_port_registry
+        _inject_port_registry(tmp_path)
         assert agentinfo.read_text() == "# my-app\n\n## Testing\n\nRun pytest.\n"
 
     def test_disabling_removes_a_trailing_section(self, tmp_path, monkeypatch):
@@ -364,8 +367,8 @@ class TestPortRuleHonorsOptOut:
             "schema_version": "1.1", "settings": {},
             "optional_rules": {"port_registry_enabled": {"enabled": False}},
         }))
-        from aec.commands.repo import _inject_port_registry_agentinfo
-        _inject_port_registry_agentinfo(tmp_path)
+        from aec.commands.repo import _inject_port_registry
+        _inject_port_registry(tmp_path)
         assert (tmp_path / "AGENTINFO.md").read_text() == "# my-app\n"
 
     def test_disabling_keeps_a_section_the_user_wrote(self, tmp_path, monkeypatch):
@@ -373,14 +376,14 @@ class TestPortRuleHonorsOptOut:
         agentinfo = tmp_path / "AGENTINFO.md"
         self._inject(tmp_path, monkeypatch, False)
         agentinfo.write_text(own)
-        from aec.commands.repo import _inject_port_registry_agentinfo
-        _inject_port_registry_agentinfo(tmp_path)
+        from aec.commands.repo import _inject_port_registry
+        _inject_port_registry(tmp_path)
         assert agentinfo.read_text() == own
 
     def test_disabling_removes_the_unmarked_legacy_section(self, tmp_path, monkeypatch):
-        from aec.commands.repo import _PORT_SECTION_BODY, _inject_port_registry_agentinfo
+        from aec.commands.repo import _PORT_SECTION_BODY, _inject_port_registry
         agentinfo = tmp_path / "AGENTINFO.md"
         self._inject(tmp_path, monkeypatch, False)
         agentinfo.write_text("# my-app\n\n" + _PORT_SECTION_BODY)
-        _inject_port_registry_agentinfo(tmp_path)
+        _inject_port_registry(tmp_path)
         assert agentinfo.read_text() == "# my-app\n"

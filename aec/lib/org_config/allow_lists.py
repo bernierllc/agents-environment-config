@@ -42,6 +42,7 @@ PREFERENCES_ALLOW_LIST: dict[str, str] = {
     "plans_gitignored": "bool",
     "plans_completion": "enum[archive,delete]",
     "pr_open_mode": "enum[ready,draft]",
+    "instructions_layout": "enum[default,agents-md,agentinfo]",
     "hook_mode": "enum[auto,per-repo,never]",
     "aec_json_gitignored": "bool",
     "report_viewer": "enum-from-detect-viewers",

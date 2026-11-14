@@ -151,10 +151,10 @@ def _run_upgrade_scopes(manifest: dict, *, yes: bool, dry_run: bool) -> None:
     # The port rule gates on AGENTINFO.md's marked block, so keep each tracked
     # repo's block in step with the preference (this also migrates the
     # unmarked block older versions wrote).
-    from .repo import _inject_port_registry_agentinfo
+    from .repo import _inject_port_registry
 
     for repo_path in all_repos:
-        _inject_port_registry_agentinfo(Path(repo_path), dry_run)
+        _inject_port_registry(Path(repo_path), dry_run)
 
     if not any_upgraded and not dry_run:
         Console.print("\nEverything is up to date.")

@@ -29,6 +29,10 @@ unit of impact lives — not a contract.
   P2 concurrency finding from PR #131; S1 owns serialization and multiprocess
   validation. Scheduling pending.
 
+- [AGENTS.md layout and `aec rollback`](2026-11-14-agents-md-layout-and-rollback.md):
+  opt-in AGENTINFO.md → AGENTS.md migration recorded as reversible changesets.
+  In progress on `feat/agents-md-migration`.
+
 ## Tier 1 — Now (active this cycle)
 
 Work that is in flight or unblocked and at the front of the queue.

@@ -18,7 +18,11 @@ from ..lib.preferences import (
 
 # String-valued settings (stored under preferences "settings", not the boolean
 # optional_rules). Maps key -> allowed values.
-STRING_SETTINGS = {"plugins.execution": {"default", "instructions-only"}}
+STRING_SETTINGS = {
+    "plugins.execution": {"default", "instructions-only"},
+    # Layout `aec setup` writes into repos that have neither AGENTINFO.md nor AGENTS.md.
+    "instructions_layout": {"default", "agents-md", "agentinfo"},
+}
 
 if HAS_TYPER:
     app = typer.Typer(help="Manage optional feature preferences")
