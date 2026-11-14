@@ -184,7 +184,7 @@ class TestGenerateCommand:
         templates_dir = tmp_path / "templates"
         templates_dir.mkdir()
 
-        monkeypatch.setattr("aec.commands.files.get_repo_root", lambda: tmp_path)
+        monkeypatch.setattr("aec.lib.config.get_repo_root", lambda: tmp_path)
 
         # Mock the registry to return a simple agent set
         agents = {"TEST.md": ("Test Agent", True)}

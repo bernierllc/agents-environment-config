@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aec"
-version = "2.49.8"
+version = "2.50.2"
 description = "Agents Environment Configuration - Cross-platform AI agent setup CLI"
 readme = "README.md"
 license = {text = "MIT"}
@@ -24,11 +24,13 @@ classifiers = [
 ]
 keywords = ["ai", "agents", "cli", "configuration", "claude", "cursor"]
 
-dependencies = []
+dependencies = [
+    "typer>=0.9.0",
+    "PyYAML>=6.0",  # aec.cli imports the org commands, which parse YAML
+]
 
 [project.optional-dependencies]
 dev = [
-    "typer>=0.9.0",
     "PyYAML>=6.0",
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",

@@ -2,6 +2,8 @@
 
 import json
 import pytest
+
+from aec.lib.errors import AecError
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
@@ -69,7 +71,7 @@ def _patch_repo(install_env):
     """Return a stack of patches that redirect repo root and source dirs to test fixtures."""
     repo = install_env["repo"]
     return [
-        patch("aec.commands.install_cmd.get_repo_root", return_value=repo),
+        patch("aec.lib.config.get_repo_root", return_value=repo),
         patch(
             "aec.commands.install_cmd.get_source_dirs",
             return_value={
@@ -92,9 +94,9 @@ class TestInstallValidation:
     def test_error_when_repo_root_not_found(self, install_env):
         from aec.commands.install_cmd import run_install
 
-        with patch("aec.commands.install_cmd.get_repo_root", return_value=None), \
+        with patch("aec.lib.config.get_repo_root", return_value=None), \
              _patch_repo(install_env)[1]:
-            with pytest.raises(SystemExit):
+            with pytest.raises(AecError, match="repository checkout"):
                 run_install(item_type="skill", name="my-skill", global_flag=True, yes=True)
 
 
@@ -564,7 +566,7 @@ class TestInstallPlugin:
     def _patch_repo_with_plugins(self, install_env, plugins_dir: Path):
         repo = install_env["repo"]
         return [
-            patch("aec.commands.install_cmd.get_repo_root", return_value=repo),
+            patch("aec.lib.config.get_repo_root", return_value=repo),
             patch(
                 "aec.commands.install_cmd.get_source_dirs",
                 return_value={

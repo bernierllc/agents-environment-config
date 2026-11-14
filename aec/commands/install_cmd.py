@@ -8,7 +8,7 @@ import subprocess
 from typing import Optional
 
 from ..lib import Console
-from ..lib.config import get_repo_root
+from ..lib.config import require_repo_root
 from ..lib.filesystem import installed_dst_path, remove_installed_item
 from ..lib.hooks.legacy_pipeline import wire_git_hooks as _wire_git_hooks
 from ..lib.manifest_v2 import (
@@ -98,10 +98,7 @@ def run_install(
         Console.error(str(e))
         raise SystemExit(1)
 
-    repo = get_repo_root()
-    if repo is None:
-        Console.error("AEC repo not found. Run `aec setup` first.")
-        raise SystemExit(1)
+    repo = require_repo_root()
 
     source_dirs = get_source_dirs()
     source_dir = source_dirs.get(plural)
@@ -219,7 +216,7 @@ def _dormant_hook_guard(
     Returns True to proceed, False to abort the install.
     """
     from ..lib.hooks.dormant import (
-        GUARD_ALLOWED, GUARD_CONFIRM, GUARD_OK, GUARD_REFUSE,
+        GUARD_ALLOWED, GUARD_OK, GUARD_REFUSE,
         count_item_hooks, dormant_guard_status,
     )
 
@@ -464,10 +461,7 @@ def _install_mcp(name: str, global_flag: bool, yes: bool) -> None:
         Console.error(str(e))
         raise SystemExit(1)
 
-    repo = get_repo_root()
-    if repo is None:
-        Console.error("AEC repo not found. Run `aec setup` first.")
-        raise SystemExit(1)
+    repo = require_repo_root()
 
     source_dirs = get_source_dirs()
     source_dir = source_dirs.get("mcps")
@@ -561,10 +555,7 @@ def _install_plugin(name_or_url: str, global_flag: bool, yes: bool) -> None:
         Console.error(str(e))
         raise SystemExit(1)
 
-    repo = get_repo_root()
-    if repo is None:
-        Console.error("AEC repo not found. Run `aec setup` first.")
-        raise SystemExit(1)
+    repo = require_repo_root()
 
     # Local directory path takes priority over a registry-name lookup.
     # ponytail: local path is the MVP; a git-clone-from-URL upgrade path would
