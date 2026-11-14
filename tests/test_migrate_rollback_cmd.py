@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -116,7 +117,7 @@ def test_unknown_tidy_agent_is_rejected_before_changing_anything(store, legacy_r
     assert _snapshot(legacy_repo) == before
 
 
-def test_tidy_runs_agent_in_repo_and_records_its_edits(store, legacy_repo, monkeypatch, tmp_path):
+def test_tidy_runs_agent_in_repo_and_records_its_edits(store, legacy_repo, monkeypatch, tmp_path, capsys):
     fake = tmp_path / "bin" / "fake-agent"
     fake.parent.mkdir()
     fake.write_text("")
@@ -127,19 +128,27 @@ def test_tidy_runs_agent_in_repo_and_records_its_edits(store, legacy_repo, monke
     )
     monkeypatch.setattr(migrate_cmd.shutil, "which", lambda cmd: str(fake))
     calls = []
+    real_run = subprocess.run
 
-    def fake_run(args, cwd, timeout):
+    def fake_run(args, cwd, **kw):
+        if args[0] == "git":
+            return real_run(args, cwd=cwd, **kw)
         calls.append((args, cwd))
         (Path(cwd) / "AGENTS.md").write_text("tidied\n")
+        (Path(cwd) / "notes.txt").write_text("stray edit\n")
         return type("R", (), {"returncode": 0})()
 
     monkeypatch.setattr(migrate_cmd.subprocess, "run", fake_run)
+    real_run(["git", "init", "-q"], cwd=legacy_repo, check=True)
     assert migrate_cmd.run_migrate_agents_md([str(legacy_repo)], yes=True, tidy_with="fake") == 0
     (args, cwd), = calls
     assert args == [str(fake), "-p", migrate_cmd.TIDY_PROMPT]
     assert Path(cwd) == legacy_repo
     tidy, migrate = changesets.list_changesets()
     assert (tidy.kind, migrate.kind) == ("tidy", "migrate-agents-md")
+    out = capsys.readouterr().out
+    assert "does not undo them" in out and "notes.txt" in out
+    assert "    AGENTS.md" not in out  # recorded files are not listed as unrecorded
 
 
 @pytest.mark.parametrize("setting, expect_agentinfo", [(None, False), ("agentinfo", True)])
@@ -211,6 +220,19 @@ def test_setup_adds_rules_reference_to_existing_agents_md(tmp_path, monkeypatch)
     assert (project / "CLAUDE.md").read_text() == "@AGENTS.md\n"
     repo_cmd._copy_agent_files(project, TEMPLATES.parent)  # second run adds nothing
     assert (project / "AGENTS.md").read_bytes() == agents
+
+
+def test_setup_leaves_a_symlinked_agents_md_alone(tmp_path, monkeypatch):
+    from aec.commands import repo as repo_cmd
+
+    monkeypatch.setattr("aec.lib.preferences.get_setting", lambda key: None)
+    shared = tmp_path / "shared.md"
+    shared.write_text("shared notes\n")
+    project = tmp_path / "my-app"
+    project.mkdir()
+    (project / "AGENTS.md").symlink_to(shared)
+    repo_cmd._copy_agent_files(project, TEMPLATES.parent)
+    assert shared.read_text() == "shared notes\n"
 
 
 def test_rollback_apply_refuses_a_running_change(store, tmp_path, capsys):

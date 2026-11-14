@@ -8,6 +8,7 @@ which is recorded as its own changeset.
 
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 from pathlib import Path
@@ -22,6 +23,8 @@ from ..lib.prompt_catalog.maintenance_area import (
 )
 from ..lib.prompts import prompt
 from .repo import AGENTS_MD_DOCS_URL
+
+logger = logging.getLogger(__name__)
 
 TIDY_TIMEOUT_SECONDS = 15 * 60
 
@@ -98,6 +101,21 @@ def _headless_agents() -> dict:
     }
 
 
+def _git_changes(repo: Path) -> Optional[set]:
+    """Status lines for every changed or untracked file, or None outside a git repo.
+
+    shortcut: a file already dirty before the run keeps the same line if edited again,
+    so it goes unreported; hash those files if that case matters.
+    """
+    r = subprocess.run(
+        ["git", "status", "--porcelain=v1", "-z", "-uall", "--no-renames"], cwd=str(repo), capture_output=True, text=True
+    )
+    if r.returncode != 0:
+        logger.warning("git status failed in %s: %s", repo, r.stderr.strip())
+        return None
+    return set(filter(None, r.stdout.split("\0")))
+
+
 def _tidy(repo: Path, agent: str, config: dict, yes: bool) -> bool:
     exe = shutil.which(config["commands"][0])  # resolves .cmd/.exe on Windows too
     if exe is None:
@@ -126,12 +144,24 @@ def _tidy(repo: Path, agent: str, config: dict, yes: bool) -> bool:
     except changesets.ChangesetError as e:
         Console.error(f"{repo.name}: tidy not run: {e}")
         return False
+    before = _git_changes(repo)
     try:
         result = subprocess.run(args, cwd=str(repo), timeout=TIDY_TIMEOUT_SECONDS)
     finally:
         cs = pending.commit()
     if cs is not None:
         Console.success(f"Recorded as {cs.id} (undo: {Console.cmd('aec rollback apply ' + cs.id)})")
+    # The agent can edit any file; only the instruction files were snapshotted.
+    after = _git_changes(repo)
+    recorded = {f.name for f in files}
+    if before is None or after is None:
+        Console.warning(f"Not a git repo: edits {agent} made outside {', '.join(sorted(recorded))} were not checked")
+    else:
+        other = sorted({line[3:] for line in after - before} - recorded)
+        if other:
+            Console.warning(f"{agent} also changed these files; {Console.cmd('aec rollback')} does not undo them:")
+            for path in other:
+                Console.print(f"    {path}")
     if result.returncode != 0:
         Console.error(f"{agent} exited with code {result.returncode}")
         return False

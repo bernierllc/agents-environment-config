@@ -17,7 +17,15 @@ _LEGACY = "AGENTINFO.md"
 _NEW = "AGENTS.md"
 _IMPORT_LINE = "@AGENTS.md"
 _H1 = re.compile(r"^# .+ Agent Instructions\s*$")
-_GENERATED_QUOTES = ("> **Canonical Source**", "> Read that file first", "> 🚨 **Canonical Source**")
+# Every pointer blockquote AEC has generated, matched whole so an edited one survives.
+_GENERATED_QUOTES = frozenset({
+    "> **Canonical Source**: Project-specific standards live in `AGENTINFO.md`.",
+    "> Read that file first. This file provides rule references.",
+    "> 🚨 **Canonical Source**: All project-specific standards live in `AGENTINFO.md`. Read/update that file first; this profile only highlights Claude-specific reminders.",
+    "> 🚨 **Canonical Source**: All project-specific guidance now lives in `AGENTINFO.md`. Read/update that file first. This document only carries Gemini-specific reminders.",
+    "> 🚨 **Canonical Source**: All project-specific context now lives in `AGENTINFO.md`. Read/update that file first; this profile only adds Qwen-specific reminders.",
+    "> 🚨 **Canonical Source**: All project-specific standards now live in `AGENTINFO.md`. Always update/read that file first; this document contains global rules and is a pointer to project-specific info.",
+})
 _SELF_POINTER = "5. For project-specific info, see `AGENTINFO.md`"
 
 
@@ -95,7 +103,7 @@ def split_stub(text: str) -> Tuple[str, str]:
             in_fence = not in_fence
         if mode != "user":
             section.append(line)
-        elif not line.startswith(_GENERATED_QUOTES):
+        elif line.rstrip() not in _GENERATED_QUOTES:
             kept.append(line)
     close()
     return _trim_blank_edges(rules), _trim_blank_edges(kept)

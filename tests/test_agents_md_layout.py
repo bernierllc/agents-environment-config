@@ -208,3 +208,13 @@ def test_differing_rules_section_stays_in_its_stub():
 def test_existing_import_stub_gets_references_fixed():
     out = migrate_texts({"AGENTINFO.md": "# info\n", "CLAUDE.md": "@AGENTS.md\n\nSee AGENTINFO.md.\n"})
     assert out["CLAUDE.md"] == "@AGENTS.md\n\nSee AGENTS.md.\n"
+
+
+def test_edited_canonical_quote_survives():
+    claude = (
+        "> **Canonical Source**: Project-specific standards live in `AGENTINFO.md`.\n"
+        "> **Canonical Source**: Keep policy in SECURITY.md\n"
+    )
+    out = migrate_texts({"AGENTINFO.md": "# info\n", "CLAUDE.md": claude})
+    assert "Keep policy in SECURITY.md" in out["CLAUDE.md"]
+    assert "Project-specific standards live" not in out["CLAUDE.md"]

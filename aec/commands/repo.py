@@ -196,7 +196,7 @@ def _copy_agent_files(project_dir: Path, repo_root: Path, dry_run: bool = False)
 
     for name, text in contents.items():
         target = project_dir / name
-        if name == "AGENTS.md" and layout != "agentinfo" and target.is_file():
+        if name == "AGENTS.md" and layout != "agentinfo" and target.is_file() and not target.is_symlink():
             _add_rules_reference(target, split_stub(text)[0], dry_run)
         elif target.exists():
             Console.skip(f"{name} already exists (skipping)")
