@@ -110,8 +110,18 @@ Loadout schema: `docs/loadout/` — plugin publishers ship a `plugin.json` at th
 ## Commits and PRs
 
 - Conventional commits: `feat:`, `fix:`, `docs:`, `chore:`
-- Feature branches from `main`
-- Add project-specific branching rules
+- Feature branches from `main`. There is no `staging` branch: `main` is the integration branch, and the `version-bump` workflow cuts a release after each merge.
+
+### Merging without maintainer approval
+
+An agent may merge a PR into `main` without asking the maintainer when every one of these holds:
+
+1. The `adversarial-review` skill's loop is complete: the latest round on the current head found no new P0/P1, and every P0/P1 is resolved: fixed at the root, agreed away by the reviewer on its thread, or accepted by the maintainer on its thread as a known limit. A P1 the author declined on their own still blocks.
+2. The `pr-merge-flow` skill's steps were followed: merge through GitHub, no base-branch merges into the PR unless there is a real conflict.
+3. CI is green on the current head, the PR is `CLEAN`, and no review thread is unresolved.
+4. The repo's other requirements are met: tests, docs and `docs/qa-verification.md` (if present) are updated with the change.
+
+Destructive actions (force push, history rewrites, deleting unmerged branches) still need the maintainer's confirmation.
 
 ## Security and Configuration
 
