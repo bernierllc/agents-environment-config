@@ -2,6 +2,8 @@
 
 import json
 import pytest
+
+from aec.lib.errors import AecError
 from pathlib import Path
 from unittest.mock import patch
 
@@ -52,7 +54,7 @@ def _make_source_dirs(repo):
 
 class TestOutdated:
     @patch("aec.commands.outdated.get_source_dirs")
-    @patch("aec.commands.outdated.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     def test_shows_outdated_global(self, mock_root, mock_dirs, outdated_env, capsys):
         from aec.commands.outdated import run_outdated
 
@@ -65,7 +67,7 @@ class TestOutdated:
         assert "2.0.0" in output
 
     @patch("aec.commands.outdated.get_source_dirs")
-    @patch("aec.commands.outdated.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     def test_shows_up_to_date_when_current(self, mock_root, mock_dirs, outdated_env, capsys, temp_dir):
         from aec.commands.outdated import run_outdated
 
@@ -81,7 +83,7 @@ class TestOutdated:
         assert "up to date" in output.lower()
 
     @patch("aec.commands.outdated.get_source_dirs")
-    @patch("aec.commands.outdated.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     def test_type_filter(self, mock_root, mock_dirs, outdated_env, capsys):
         from aec.commands.outdated import run_outdated
 
@@ -92,17 +94,16 @@ class TestOutdated:
         # Filtering to agents should not show the outdated skill
         assert "old-skill" not in output
 
-    @patch("aec.commands.outdated.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     def test_no_repo_shows_error(self, mock_root, capsys):
         from aec.commands.outdated import run_outdated
 
         mock_root.return_value = None
-        run_outdated()
-        output = capsys.readouterr().out
-        assert "not found" in output.lower() or "setup" in output.lower()
+        with pytest.raises(AecError, match="repository checkout"):
+            run_outdated()
 
     @patch("aec.commands.outdated.get_source_dirs")
-    @patch("aec.commands.outdated.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     def test_type_filter_plural_form(self, mock_root, mock_dirs, outdated_env, capsys):
         from aec.commands.outdated import run_outdated
 
@@ -130,7 +131,7 @@ def _make_source_dirs_with_plugins(repo):
 
 class TestOutdatedPlugins:
     @patch("aec.commands.outdated.get_source_dirs")
-    @patch("aec.commands.outdated.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     def test_registry_plugin_version_compare(self, mock_root, mock_dirs, outdated_env, capsys, temp_dir):
         from aec.commands.outdated import run_outdated
 
@@ -153,7 +154,7 @@ class TestOutdatedPlugins:
         assert "1.0.0" in output and "2.0.0" in output
 
     @patch("aec.commands.outdated.get_source_dirs")
-    @patch("aec.commands.outdated.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     def test_claude_managed_plugin_is_not_compared_to_catalog(self, mock_root, mock_dirs, outdated_env, capsys, temp_dir):
         """Claude Code owns marketplace plugin versions; the catalog pin would be stale."""
         from aec.commands.outdated import run_outdated
@@ -175,7 +176,7 @@ class TestOutdatedPlugins:
         assert "2.0.0" not in output
 
     @patch("aec.commands.outdated.get_source_dirs")
-    @patch("aec.commands.outdated.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     def test_url_only_plugin_version_unknown(self, mock_root, mock_dirs, outdated_env, capsys, temp_dir):
         from aec.commands.outdated import run_outdated
 
@@ -209,7 +210,7 @@ def test_all_counts_findings_in_other_repos(tmp_path, capsys):
     other.mkdir()
     manifest = {"global": {}, "repos": {str(other.resolve()): {
         "plugins": {"p": {"install_type": "marketplace", "version": "1.0.0"}}}}}
-    with patch("aec.commands.outdated.get_repo_root", return_value=tmp_path), \
+    with patch("aec.lib.config.get_repo_root", return_value=tmp_path), \
          patch("aec.commands.outdated.get_source_dirs", return_value={"plugins": tmp_path}), \
          patch("aec.commands.outdated.load_manifest", return_value=manifest), \
          patch("aec.commands.outdated.find_tracked_repo", return_value=None), \

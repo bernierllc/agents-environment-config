@@ -83,7 +83,7 @@ class TestRulesDryRun:
 
     def test_generate_dry_run_no_files_written(self, mock_repo_root, monkeypatch):
         """generate(dry_run=True) should not write .md files."""
-        monkeypatch.setattr("aec.commands.rules.get_repo_root", lambda: mock_repo_root)
+        monkeypatch.setattr("aec.lib.config.get_repo_root", lambda: mock_repo_root)
         monkeypatch.setattr("aec.lib.preferences.AEC_PREFERENCES", mock_repo_root / "prefs.json")
         monkeypatch.setattr("aec.lib.preferences.AEC_HOME", mock_repo_root)
 
@@ -119,7 +119,7 @@ class TestAgentToolsDryRun:
         (repo_root / ".cursor" / "commands").mkdir(parents=True)
 
         monkeypatch.setattr("aec.commands.agent_tools.AGENT_TOOLS_DIR", agent_tools_dir)
-        monkeypatch.setattr("aec.commands.agent_tools.get_repo_root", lambda: repo_root)
+        monkeypatch.setattr("aec.lib.config.get_repo_root", lambda: repo_root)
         monkeypatch.setattr("aec.commands.agent_tools._is_claude_installed", lambda: False)
         monkeypatch.setattr("aec.commands.agent_tools._is_cursor_installed", lambda: False)
 
