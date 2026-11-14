@@ -767,16 +767,48 @@ def main():
     and re-print the traceback so it can be copied into a GitHub issue.
     """
     from .lib import debug as _debug
-    from .lib.errors import AecError as _AecError
-    from .lib.prompts import PromptInvalidAnswer as _PromptInvalidAnswer
-    from .lib.prompts import PromptUnanswered as _PromptUnanswered
-    from .lib.prompts import env_var_name as _prompt_env_var
 
     if _debug.debug_from_env_or_argv():
         _debug.enable_debug()
         # Strip --debug so it can appear before OR after the subcommand
         # without confusing typer's subcommand parsing.
         sys.argv = [a for a in sys.argv if a != "--debug"]
+    _run()
+
+
+def _report(exc) -> None:
+    """Print an AecError: the cause, the tool's output, and numbered fix steps."""
+    Console.error(exc.message)
+    if exc.detail:
+        Console.print("")
+        Console.print("  Output:")
+        for line in exc.detail.splitlines()[-8:]:
+            Console.print(f"    {line}")
+    if exc.fix:
+        Console.print("")
+        Console.print("  To fix:")
+        for n, step in enumerate(exc.fix, 1):
+            Console.print(f"    {n}. {step}")
+
+
+def _remedy_accepted(remedy) -> bool:
+    """Ask before AEC fixes its own checkout; no answer available means no."""
+    from .lib.prompts import PromptUnanswered
+
+    Console.print("")
+    try:
+        return remedy.confirm()
+    except PromptUnanswered:
+        return False  # headless: the printed steps are the answer
+
+
+def _run(retried: bool = False) -> None:
+    """Run the CLI once; an accepted AecError remedy re-runs it one time."""
+    from .lib import debug as _debug
+    from .lib.errors import AecError as _AecError
+    from .lib.prompts import PromptInvalidAnswer as _PromptInvalidAnswer
+    from .lib.prompts import PromptUnanswered as _PromptUnanswered
+    from .lib.prompts import env_var_name as _prompt_env_var
 
     try:
         app()
@@ -801,17 +833,15 @@ def main():
         from .lib.feedback import capture as _capture
         _capture("medium", f"{type(exc).__name__}: {exc.message}")
         # A known cause with user-fixable steps: say what to do, not "file an issue".
-        Console.error(exc.message)
-        if exc.detail:
-            Console.print("")
-            Console.print("  Output:")
-            for line in exc.detail.splitlines()[-8:]:
-                Console.print(f"    {line}")
-        if exc.fix:
-            Console.print("")
-            Console.print("  To fix:")
-            for n, step in enumerate(exc.fix, 1):
-                Console.print(f"    {n}. {step}")
+        _report(exc)
+        if exc.remedy and not retried and _remedy_accepted(exc.remedy):
+            try:
+                Console.success(exc.remedy.apply())
+            except _AecError as failed:
+                _report(failed)
+                sys.exit(1)
+            Console.print("Retrying...")
+            return _run(retried=True)
         sys.exit(1)
     except _PromptInvalidAnswer as exc:
         Console.error(f"Invalid answer for prompt: {exc.prompt_id}")

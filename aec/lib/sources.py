@@ -224,6 +224,47 @@ def _ahead_behind(repo_path: Path) -> Optional[tuple]:
     return int(parts[0]), int(parts[1])
 
 
+def _tracked_tree_clean(repo_path: Path) -> bool:
+    done = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=no", "--ignore-submodules=all"],
+        cwd=repo_path, capture_output=True, text=True,
+    )
+    return done.returncode == 0 and not done.stdout.strip()
+
+
+def _reset_to_upstream_remedy(repo_path: Path, local_commits: int):
+    """Back up HEAD on a new branch, then move the branch to its upstream."""
+    from datetime import datetime
+
+    from .errors import AecError, Remedy
+    from .prompt_catalog.maintenance_area import UPDATE_RESET_TO_REMOTE
+    from .prompts import prompt, yes_no_hint
+
+    def apply() -> str:
+        backup = f"aec-backup/{datetime.now():%Y%m%d-%H%M%S}"
+        # --keep (not --hard) refuses rather than discard any uncommitted change
+        for cmd in (["git", "branch", backup, "HEAD"], ["git", "reset", "--keep", "@{u}"]):
+            done = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True)
+            if done.returncode != 0:
+                raise AecError(
+                    f"Could not reset the AEC checkout: `{' '.join(cmd)}` failed.",
+                    detail=done.stderr.strip() or None,
+                    fix=[f"cd {repo_path}", "Resolve it by hand with the steps above."],
+                )
+        return (f"Saved your local commit(s) on branch {backup} and reset to the remote. "
+                f"Restore them any time with: git -C {repo_path} cherry-pick ..{backup}")
+
+    def confirm() -> bool:
+        return prompt(
+            UPDATE_RESET_TO_REMOTE,
+            f"Save the {local_commits} local commit(s) on a backup branch, reset the "
+            f"AEC checkout to the remote and retry? {yes_no_hint(False)}",
+            type="yes_no", default=False, sensitive=True,
+        ) == "y"
+
+    return Remedy(confirm=confirm, apply=apply)
+
+
 def _diagnose_sync_failure(repo_path: Path, cmd: list, stderr: str):
     """Turn a failed git command into a RepoSyncError with the steps that fix it."""
     from .errors import RepoSyncError
@@ -261,9 +302,12 @@ def _diagnose_sync_failure(repo_path: Path, cmd: list, stderr: str):
                 cd,
                 "git log --oneline @{u}..HEAD   # see your local-only commits",
                 "To keep them on top of the remote: git pull --rebase",
-                "To drop them (back them up first): git branch backup/aec-local HEAD && git reset --hard @{u}",
+                "To drop them (back them up first): git branch backup/aec-local HEAD && git reset --keep @{u}",
                 rerun,
             ],
+            # Only offered when nothing uncommitted could be at stake.
+            remedy=(_reset_to_upstream_remedy(repo_path, counts[0])
+                    if counts and _tracked_tree_clean(repo_path) else None),
         )
     if "would be overwritten" in text or "local changes" in text:
         return RepoSyncError(
