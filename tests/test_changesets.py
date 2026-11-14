@@ -139,9 +139,7 @@ def test_list_newest_first(tmp_path):
     f = tmp_path / "f"
     a = change([f], lambda: f.write_bytes(b"1"))
     b = change([f], lambda: f.write_bytes(b"2"))
-    ids = [x.id for x in c.list_changesets()]
-    assert set(ids) == {a.id, b.id}
-    assert ids == sorted(ids, reverse=True)
+    assert [x.id for x in c.list_changesets()] == [b.id, a.id]
 
 
 def test_corrupt_skipped_with_warning(tmp_path, rb, caplog):

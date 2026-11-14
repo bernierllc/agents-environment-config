@@ -184,7 +184,7 @@ class PendingChangeset:
                 break
         cs = Changeset(
             id=cs_id,
-            created_at=now.isoformat(),
+            created_at=now.isoformat(timespec="microseconds"),  # fixed width, so it sorts as a string
             kind=self.kind,
             short=self.short,
             long=self.long,
@@ -223,7 +223,7 @@ def list_changesets() -> List[Changeset]:
             out.append(load(d.name))
         except (ChangesetNotFound, OSError, ValueError, KeyError, TypeError) as e:
             logger.warning("skipping unreadable changeset %s: %s", d.name, e)
-    out.sort(key=lambda c: c.id, reverse=True)
+    out.sort(key=lambda c: (c.created_at, c.id), reverse=True)  # id suffix is random within a second
     return out
 
 

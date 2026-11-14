@@ -289,6 +289,57 @@ if HAS_TYPER:
         from .commands.untrack import run_untrack
         run_untrack(path=path, yes=yes)
 
+    # --- migrate ---
+    migrate_app = typer.Typer(help="Move repos to a newer AEC layout (recorded; `aec rollback` undoes it)")
+    app.add_typer(migrate_app, name="migrate")
+
+    @migrate_app.command("agents-md")
+    def migrate_agents_md_cmd(
+        paths: Optional[List[str]] = typer.Argument(None, help="Repo paths (default: current directory)"),
+        all_repos: bool = typer.Option(False, "--all", help="Every tracked repo"),
+        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+        dry_run: bool = typer.Option(False, "--dry-run", help="Show what would change"),
+        tidy_with: Optional[str] = typer.Option(
+            None, "--tidy-with", help="Afterwards, run this agent headless to remove duplication"
+        ),
+    ):
+        """Move AGENTINFO.md into AGENTS.md; CLAUDE.md, GEMINI.md, QWEN.md import it."""
+        from .commands.migrate_cmd import run_migrate_agents_md
+        raise typer.Exit(run_migrate_agents_md(paths or [], all_repos, yes, dry_run, tidy_with))
+
+    # --- rollback ---
+    rollback_app = typer.Typer(help="List, inspect and undo changes AEC recorded")
+    app.add_typer(rollback_app, name="rollback")
+
+    @rollback_app.callback(invoke_without_command=True)
+    def rollback_root(ctx: typer.Context):
+        """List recorded changes and browse them."""
+        if ctx.invoked_subcommand is None:
+            from .commands.rollback_cmd import run_rollback
+            raise typer.Exit(run_rollback())
+
+    @rollback_app.command("list")
+    def rollback_list_cmd():
+        """List recorded changes, newest first."""
+        from .commands.rollback_cmd import run_rollback_list
+        raise typer.Exit(run_rollback_list())
+
+    @rollback_app.command("show")
+    def rollback_show_cmd(change_id: str = typer.Argument(..., help="Change id from `aec rollback list`")):
+        """Show a change's description and the files it touched."""
+        from .commands.rollback_cmd import run_rollback_show
+        raise typer.Exit(run_rollback_show(change_id))
+
+    @rollback_app.command("apply")
+    def rollback_apply_cmd(
+        change_id: str = typer.Argument(..., help="Change id from `aec rollback list`"),
+        force: bool = typer.Option(False, "--force", help="Overwrite files edited since the change"),
+        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+    ):
+        """Undo a change byte-exact. The undo is recorded too, so it can be redone."""
+        from .commands.rollback_cmd import run_rollback_apply
+        raise typer.Exit(run_rollback_apply(change_id, force=force, yes=yes))
+
     # --- config subcommands ---
     config_app = typer.Typer(help="Manage configuration preferences")
     app.add_typer(config_app, name="config")
@@ -1004,6 +1055,25 @@ else:
         )
         feedback_parser.add_argument("feedback_args", nargs=argparse.REMAINDER)
 
+        # migrate / rollback
+        migrate_parser = subparsers.add_parser("migrate", help="Move repos to a newer AEC layout")
+        migrate_sub = migrate_parser.add_subparsers(dest="migrate_command")
+        mig_agents = migrate_sub.add_parser("agents-md", help="Move AGENTINFO.md into AGENTS.md")
+        mig_agents.add_argument("paths", nargs="*")
+        mig_agents.add_argument("--all", dest="all_repos", action="store_true")
+        mig_agents.add_argument("--yes", "-y", action="store_true")
+        mig_agents.add_argument("--dry-run", action="store_true")
+        mig_agents.add_argument("--tidy-with", default=None)
+        rollback_parser = subparsers.add_parser("rollback", help="List, inspect and undo recorded changes")
+        rollback_sub = rollback_parser.add_subparsers(dest="rollback_command")
+        rollback_sub.add_parser("list", help="List recorded changes")
+        rb_show = rollback_sub.add_parser("show", help="Show a recorded change")
+        rb_show.add_argument("change_id")
+        rb_apply = rollback_sub.add_parser("apply", help="Undo a recorded change")
+        rb_apply.add_argument("change_id")
+        rb_apply.add_argument("--force", action="store_true")
+        rb_apply.add_argument("--yes", "-y", action="store_true")
+
         # prompts (headless discovery)
         prompts_parser = subparsers.add_parser(
             "prompts", help="Discover, template, and validate AEC's prompts"
@@ -1092,6 +1162,23 @@ else:
         elif args.command == "feedback":
             from .commands.feedback_cmd import run_feedback
             sys.exit(run_feedback(args.feedback_args))
+
+        elif args.command == "migrate":
+            if args.migrate_command != "agents-md":
+                migrate_parser.print_help()
+                sys.exit(2)
+            from .commands.migrate_cmd import run_migrate_agents_md
+            sys.exit(run_migrate_agents_md(args.paths, args.all_repos, args.yes, args.dry_run, args.tidy_with))
+
+        elif args.command == "rollback":
+            from .commands import rollback_cmd
+            if args.rollback_command == "list":
+                sys.exit(rollback_cmd.run_rollback_list())
+            elif args.rollback_command == "show":
+                sys.exit(rollback_cmd.run_rollback_show(args.change_id))
+            elif args.rollback_command == "apply":
+                sys.exit(rollback_cmd.run_rollback_apply(args.change_id, force=args.force, yes=args.yes))
+            sys.exit(rollback_cmd.run_rollback())
 
         elif args.command == "update":
             from .commands.org import EXIT_PENDING
