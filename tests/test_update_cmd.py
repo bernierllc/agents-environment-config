@@ -5,6 +5,8 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
+from aec.lib.errors import RepoSyncError
+
 
 @pytest.fixture
 def aec_env(temp_dir, monkeypatch):
@@ -98,15 +100,16 @@ class TestUpdateCommand:
         assert "2.0.0" in output
         assert "upgrade" in output.lower()
 
-    @patch("aec.commands.update.fetch_latest", return_value=False)
+    @patch("aec.commands.update.fetch_latest",
+           side_effect=RepoSyncError("x"))
     @patch("aec.commands.update.get_repo_root")
-    def test_handles_fetch_failure(self, mock_root, mock_fetch, aec_env, capsys):
+    def test_fetch_failure_propagates_to_cli(self, mock_root, mock_fetch, aec_env, capsys):
         from aec.commands.update import run_update
 
         mock_root.return_value = aec_env["repo"]
-        run_update()
-        output = capsys.readouterr().out
-        assert "fail" in output.lower()
+        with pytest.raises(RepoSyncError):
+            run_update()
+        assert "failed!" in capsys.readouterr().out
 
     @patch("aec.commands.update.find_tracked_repo", return_value=None)
     @patch("aec.commands.update.get_all_tracked_repos", return_value=[])

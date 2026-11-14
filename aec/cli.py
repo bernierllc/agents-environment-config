@@ -1371,6 +1371,7 @@ def main():
     and re-print the traceback so it can be copied into a GitHub issue.
     """
     from .lib import debug as _debug
+    from .lib.errors import AecError as _AecError
     from .lib.prompts import PromptInvalidAnswer as _PromptInvalidAnswer
     from .lib.prompts import PromptUnanswered as _PromptUnanswered
     from .lib.prompts import env_var_name as _prompt_env_var
@@ -1403,6 +1404,22 @@ def main():
         if not exc.sensitive:
             Console.print("  Run `aec prompts list` to see every prompt this command can ask.")
         sys.exit(2)
+    except _AecError as exc:
+        from .lib.feedback import capture as _capture
+        _capture("medium", f"{type(exc).__name__}: {exc.message}")
+        # A known cause with user-fixable steps: say what to do, not "file an issue".
+        Console.error(exc.message)
+        if exc.detail:
+            Console.print("")
+            Console.print("  Output:")
+            for line in exc.detail.splitlines()[-8:]:
+                Console.print(f"    {line}")
+        if exc.fix:
+            Console.print("")
+            Console.print("  To fix:")
+            for n, step in enumerate(exc.fix, 1):
+                Console.print(f"    {n}. {step}")
+        sys.exit(1)
     except _PromptInvalidAnswer as exc:
         Console.error(f"Invalid answer for prompt: {exc.prompt_id}")
         Console.print(f"  {exc.value!r} is not a valid {exc.expected}")

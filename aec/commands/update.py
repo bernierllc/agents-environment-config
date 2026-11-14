@@ -4,6 +4,7 @@ from pathlib import Path
 
 from ..lib.claude_plugins import is_claude_managed, marketplace_of, refresh_marketplace
 from ..lib.console import Console
+from ..lib.errors import AecError
 from ..lib.config import get_repo_root, INSTALLED_MANIFEST_V2
 from ..lib.manifest_v2 import (
     get_all_repo_scopes, get_installed, load_manifest, record_update_check, save_manifest,
@@ -30,10 +31,11 @@ def run_update() -> bool:
         return False
 
     Console.print("Pulling latest...", end=" ")
-    if not fetch_latest(repo):
+    try:
+        fetch_latest(repo)
+    except AecError:
         Console.print("failed!")
-        Console.error("Could not pull latest. Check your network and git status.")
-        return False
+        raise  # aec.cli.main prints the cause and the fix steps
     Console.print("done.")
 
     manifest_path = _get_manifest_path()
