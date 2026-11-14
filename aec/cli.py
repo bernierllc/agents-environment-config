@@ -3,13 +3,7 @@
 import sys
 from typing import List, Optional
 
-# Check for typer, fall back to argparse if not available
-try:
-    import typer
-    from typing import Annotated
-    HAS_TYPER = True
-except ImportError:
-    HAS_TYPER = False
+import typer
 
 from . import __version__
 from .lib import Console
@@ -19,7 +13,7 @@ from .commands.deprecation import deprecation_warning
 def _apply_prompt_globals(answers_path, non_interactive: bool, defaults: bool) -> None:
     """Wire the headless-prompt global options into the prompt seam.
 
-    Shared by both CLI front-ends so typer and argparse can never drift.
+    Called once from the root callback, before any command runs.
     """
     from .lib.prompts import load_answers_file, set_answers, set_mode
 
@@ -46,1321 +40,723 @@ def _apply_prompt_globals(answers_path, non_interactive: bool, defaults: bool) -
     )
 
 
-if HAS_TYPER:
-    # Typer-based CLI (preferred)
-    app = typer.Typer(
-        name="aec",
-        help="agents-environment-config CLI - Manage AI agent configurations",
-        add_completion=False,
-        no_args_is_help=True,
-    )
+app = typer.Typer(
+    name="aec",
+    help="agents-environment-config CLI - Manage AI agent configurations",
+    add_completion=False,
+    no_args_is_help=True,
+)
 
-    def _run_org_config_gate() -> None:
-        """Per-invocation org-config propagation gate. Best-effort: surfaces key
-        rotation warnings/lockouts but never breaks the command being run."""
-        try:
-            from .lib.org_config import OrgPaths
-            from .lib.org_config.propagation import run_propagation_gate
-        except ImportError:
-            return  # org-configs extra not installed
-        try:
-            paths = OrgPaths.default()
-            if not paths.orgs_dir.exists():
-                return
-            result = run_propagation_gate(paths)
-        except Exception:  # noqa: BLE001 - the gate must never break other commands
+def _run_org_config_gate() -> None:
+    """Per-invocation org-config propagation gate. Best-effort: surfaces key
+    rotation warnings/lockouts but never breaks the command being run."""
+    try:
+        from .lib.org_config import OrgPaths
+        from .lib.org_config.propagation import run_propagation_gate
+    except ImportError:
+        return  # org-configs extra not installed
+    try:
+        paths = OrgPaths.default()
+        if not paths.orgs_dir.exists():
             return
-        for message in result.warnings:
-            Console.warning(message)
-        try:
-            from .commands.org import pending_fix, pending_orgs
-            pending = pending_orgs(paths)
-        except Exception:  # noqa: BLE001 - same rule as the gate above
-            return
-        for st in pending:
-            Console.warning(pending_fix(st))
+        result = run_propagation_gate(paths)
+    except Exception:  # noqa: BLE001 - the gate must never break other commands
+        return
+    for message in result.warnings:
+        Console.warning(message)
+    try:
+        from .commands.org import pending_fix, pending_orgs
+        pending = pending_orgs(paths)
+    except Exception:  # noqa: BLE001 - same rule as the gate above
+        return
+    for st in pending:
+        Console.warning(pending_fix(st))
 
-    @app.callback(invoke_without_command=True)
-    def _cli_callback(
-        ctx: typer.Context,
-        debug: bool = typer.Option(
-            False,
-            "--debug",
-            help="Capture errors to ~/.agents-environment-config/logs/aec-debug.log and print the traceback.",
-        ),
-        answers: str = typer.Option(
-            None,
-            "--answers",
-            metavar="PATH",
-            help="JSON file of {prompt_id: value} answers (see `aec prompts template`).",
-        ),
-        non_interactive: bool = typer.Option(
-            False,
-            "--non-interactive",
-            help="Never prompt; fail with the prompt ID if an answer is missing.",
-        ),
-        defaults: bool = typer.Option(
-            False,
-            "--defaults",
-            help="Accept each prompt's declared default when no answer is supplied.",
-        ),
-    ):
-        """Pre-command hook: check for unanswered preferences and register update check."""
-        if debug:
-            from .lib.debug import enable_debug
-            enable_debug()
-        _apply_prompt_globals(answers, non_interactive, defaults)
-        if ctx.invoked_subcommand is None:
-            return
-        from .lib import feedback as _feedback
-        _feedback.current_command = ctx.invoked_subcommand
-        from .lib.preferences import check_pending_preferences
-        check_pending_preferences()
+@app.callback(invoke_without_command=True)
+def _cli_callback(
+    ctx: typer.Context,
+    debug: bool = typer.Option(
+        False,
+        "--debug",
+        help="Capture errors to ~/.agents-environment-config/logs/aec-debug.log and print the traceback.",
+    ),
+    answers: str = typer.Option(
+        None,
+        "--answers",
+        metavar="PATH",
+        help="JSON file of {prompt_id: value} answers (see `aec prompts template`).",
+    ),
+    non_interactive: bool = typer.Option(
+        False,
+        "--non-interactive",
+        help="Never prompt; fail with the prompt ID if an answer is missing.",
+    ),
+    defaults: bool = typer.Option(
+        False,
+        "--defaults",
+        help="Accept each prompt's declared default when no answer is supplied.",
+    ),
+):
+    """Pre-command hook: check for unanswered preferences and register update check."""
+    if debug:
+        from .lib.debug import enable_debug
+        enable_debug()
+    _apply_prompt_globals(answers, non_interactive, defaults)
+    if ctx.invoked_subcommand is None:
+        return
+    from .lib import feedback as _feedback
+    _feedback.current_command = ctx.invoked_subcommand
+    from .lib.preferences import check_pending_preferences
+    check_pending_preferences()
 
-        _run_org_config_gate()
+    _run_org_config_gate()
 
-        import atexit
-        from .lib.version_check import maybe_check_for_update
-        atexit.register(maybe_check_for_update)
-        atexit.register(_feedback.maybe_notify)
+    import atexit
+    from .lib.version_check import maybe_check_for_update
+    atexit.register(maybe_check_for_update)
+    atexit.register(_feedback.maybe_notify)
 
-    # ------------------------------------------------------------------ #
-    #  New flat top-level commands                                        #
-    # ------------------------------------------------------------------ #
+# ------------------------------------------------------------------ #
+#  New flat top-level commands                                        #
+# ------------------------------------------------------------------ #
 
-    @app.command("update")
-    def update_cmd():
-        """Fetch latest sources and report what's outdated."""
-        from .commands.org import EXIT_PENDING
-        from .commands.update import run_update
-        if run_update():
-            raise typer.Exit(EXIT_PENDING)
+@app.command("update")
+def update_cmd():
+    """Fetch latest sources and report what's outdated."""
+    from .commands.org import EXIT_PENDING
+    from .commands.update import run_update
+    if run_update():
+        raise typer.Exit(EXIT_PENDING)
 
-    @app.command("upgrade")
-    def upgrade_cmd(
-        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
-        dry_run: bool = typer.Option(False, "--dry-run", help="Preview without applying"),
-    ):
-        """Apply available upgrades to installed items."""
-        from .commands.upgrade import run_upgrade
-        run_upgrade(yes=yes, dry_run=dry_run)
+@app.command("upgrade")
+def upgrade_cmd(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without applying"),
+):
+    """Apply available upgrades to installed items."""
+    from .commands.upgrade import run_upgrade
+    run_upgrade(yes=yes, dry_run=dry_run)
 
-    @app.command("install")
-    def install_cmd(
-        item_type: Optional[str] = typer.Argument(None, help="Type: skill, rule, agent, mcp, or plugin"),
-        name: Optional[str] = typer.Argument(None, help="Name of the item to install"),
-        global_flag: bool = typer.Option(False, "-g", "--global", help="Install globally"),
-        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
-        org_config: Optional[str] = typer.Option(
-            None,
-            "--org-config",
-            help="Enroll an org config (local path or https url) and apply its policy",
-        ),
-        allow_unsigned: bool = typer.Option(
-            False, "--allow-unsigned", help="Allow an unsigned --org-config source"
-        ),
-        allow_dormant_hooks: bool = typer.Option(
-            False, "--allow-dormant-hooks",
-            help="Allow installing a hook-bearing skill globally (hooks stay dormant)",
-        ),
-        dry_run: bool = typer.Option(
-            False, "--dry-run", help="Preview full setup without making changes (bare `aec install`)",
-        ),
-    ):
-        """Run full setup (no arguments), install a skill, rule, agent, or MCP server,
-        or apply an org config with --org-config."""
-        if org_config:
-            from .commands.org import perform_enroll
-            from .lib.org_config import OrgPaths
-            from .lib.org_config.apply import apply_org_policy
+@app.command("install")
+def install_cmd(
+    item_type: Optional[str] = typer.Argument(None, help="Type: skill, rule, agent, mcp, or plugin"),
+    name: Optional[str] = typer.Argument(None, help="Name of the item to install"),
+    global_flag: bool = typer.Option(False, "-g", "--global", help="Install globally"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+    org_config: Optional[str] = typer.Option(
+        None,
+        "--org-config",
+        help="Enroll an org config (local path or https url) and apply its policy",
+    ),
+    allow_unsigned: bool = typer.Option(
+        False, "--allow-unsigned", help="Allow an unsigned --org-config source"
+    ),
+    allow_dormant_hooks: bool = typer.Option(
+        False, "--allow-dormant-hooks",
+        help="Allow installing a hook-bearing skill globally (hooks stay dormant)",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview full setup without making changes (bare `aec install`)",
+    ),
+):
+    """Run full setup (no arguments), install a skill, rule, agent, or MCP server,
+    or apply an org config with --org-config."""
+    if org_config:
+        from .commands.org import perform_enroll
+        from .lib.org_config import OrgPaths
+        from .lib.org_config.apply import apply_org_policy
 
-            perform_enroll(org_config, allow_unsigned=allow_unsigned, yes=yes)
-            confirm = (lambda _policy: True) if yes else None
-            apply_org_policy(OrgPaths.default(), confirm=confirm)
-            return
-        if not item_type and not name:
-            from .commands.install import install
-            install(dry_run=dry_run)
-            return
-        if not item_type or not name:
-            Console.error("install requires <type> <name> (or no arguments for full setup)")
-            raise typer.Exit(code=2)
-        from .commands.install_cmd import run_install
-        run_install(item_type=item_type, name=name, global_flag=global_flag, yes=yes,
-                    allow_dormant_hooks=allow_dormant_hooks)
+        perform_enroll(org_config, allow_unsigned=allow_unsigned, yes=yes)
+        confirm = (lambda _policy: True) if yes else None
+        apply_org_policy(OrgPaths.default(), confirm=confirm)
+        return
+    if not item_type and not name:
+        from .commands.install import install
+        install(dry_run=dry_run)
+        return
+    if not item_type or not name:
+        Console.error("install requires <type> <name> (or no arguments for full setup)")
+        raise typer.Exit(code=2)
+    from .commands.install_cmd import run_install
+    run_install(item_type=item_type, name=name, global_flag=global_flag, yes=yes,
+                allow_dormant_hooks=allow_dormant_hooks)
 
-    @app.command("uninstall")
-    def uninstall_cmd(
-        item_type: str = typer.Argument(..., help="Type: skill, rule, agent, mcp, or plugin"),
-        name: str = typer.Argument(..., help="Name of the item to uninstall"),
-        global_flag: bool = typer.Option(False, "-g", "--global", help="Uninstall globally"),
-        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
-        repos: Optional[str] = typer.Option(
-            None, "--repos",
-            help="For a global uninstall, also remove repo-scoped installs: "
-                 "all | none | comma-separated paths (default: none)",
-        ),
-    ):
-        """Remove an installed skill, rule, or agent."""
-        from .commands.uninstall import run_uninstall
-        run_uninstall(item_type=item_type, name=name, global_flag=global_flag,
-                      yes=yes, repos=repos)
+@app.command("uninstall")
+def uninstall_cmd(
+    item_type: str = typer.Argument(..., help="Type: skill, rule, agent, mcp, or plugin"),
+    name: str = typer.Argument(..., help="Name of the item to uninstall"),
+    global_flag: bool = typer.Option(False, "-g", "--global", help="Uninstall globally"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+    repos: Optional[str] = typer.Option(
+        None, "--repos",
+        help="For a global uninstall, also remove repo-scoped installs: "
+             "all | none | comma-separated paths (default: none)",
+    ),
+):
+    """Remove an installed skill, rule, or agent."""
+    from .commands.uninstall import run_uninstall
+    run_uninstall(item_type=item_type, name=name, global_flag=global_flag,
+                  yes=yes, repos=repos)
 
-    @app.command("list")
-    def list_cmd(
-        type_filter: Optional[str] = typer.Option(None, "--type", help="Filter by type"),
-        scope_filter: Optional[str] = typer.Option(None, "--scope", help="Filter by scope"),
-        show_all: bool = typer.Option(False, "--all", help="Show items across all tracked repos"),
-    ):
-        """Show installed items."""
-        from .commands.list_cmd import run_list
-        run_list(type_filter=type_filter, scope_filter=scope_filter, show_all=show_all)
+@app.command("list")
+def list_cmd(
+    type_filter: Optional[str] = typer.Option(None, "--type", help="Filter by type"),
+    scope_filter: Optional[str] = typer.Option(None, "--scope", help="Filter by scope"),
+    show_all: bool = typer.Option(False, "--all", help="Show items across all tracked repos"),
+):
+    """Show installed items."""
+    from .commands.list_cmd import run_list
+    run_list(type_filter=type_filter, scope_filter=scope_filter, show_all=show_all)
 
-    @app.command("search")
-    def search_cmd(
-        term: str = typer.Argument(..., help="Search term"),
-        type_filter: Optional[str] = typer.Option(None, "--type", help="Filter by type"),
-    ):
-        """Search available items."""
-        from .commands.search import run_search
-        run_search(term=term, type_filter=type_filter)
+@app.command("search")
+def search_cmd(
+    term: str = typer.Argument(..., help="Search term"),
+    type_filter: Optional[str] = typer.Option(None, "--type", help="Filter by type"),
+):
+    """Search available items."""
+    from .commands.search import run_search
+    run_search(term=term, type_filter=type_filter)
 
-    @app.command("outdated")
-    def outdated_cmd(
-        type_filter: Optional[str] = typer.Option(None, "--type", help="Filter by type"),
-        show_all: bool = typer.Option(False, "--all", help="Check all tracked repos"),
-    ):
-        """Show items with available upgrades."""
-        from .commands.outdated import run_outdated
-        run_outdated(type_filter=type_filter, show_all=show_all)
+@app.command("outdated")
+def outdated_cmd(
+    type_filter: Optional[str] = typer.Option(None, "--type", help="Filter by type"),
+    show_all: bool = typer.Option(False, "--all", help="Check all tracked repos"),
+):
+    """Show items with available upgrades."""
+    from .commands.outdated import run_outdated
+    run_outdated(type_filter=type_filter, show_all=show_all)
 
-    @app.command("info")
-    def info_cmd(
-        item_type: str = typer.Argument(..., help="Type: skill, rule, agent, mcp, or plugin"),
-        name: str = typer.Argument(..., help="Name of the item"),
-    ):
-        """Show detailed metadata for an installed item."""
-        from .commands.info import run_info
-        run_info(item_type=item_type, name=name)
+@app.command("info")
+def info_cmd(
+    item_type: str = typer.Argument(..., help="Type: skill, rule, agent, mcp, or plugin"),
+    name: str = typer.Argument(..., help="Name of the item"),
+):
+    """Show detailed metadata for an installed item."""
+    from .commands.info import run_info
+    run_info(item_type=item_type, name=name)
 
-    @app.command("export")
-    def export_cmd(
-        out: Optional[str] = typer.Option(None, "--out", "-o", help="Write manifest to FILE (default: stdout)"),
-        latest: bool = typer.Option(False, "--latest", help="Record versions as 'latest' instead of pinning"),
-        no_repos: bool = typer.Option(False, "--no-repos", help="Export global scope only"),
-    ):
-        """Export the current setup to a portable manifest file."""
-        from .commands.export_cmd import run_export
-        run_export(out=out, latest=latest, include_repos=not no_repos)
+@app.command("export")
+def export_cmd(
+    out: Optional[str] = typer.Option(None, "--out", "-o", help="Write manifest to FILE (default: stdout)"),
+    latest: bool = typer.Option(False, "--latest", help="Record versions as 'latest' instead of pinning"),
+    no_repos: bool = typer.Option(False, "--no-repos", help="Export global scope only"),
+):
+    """Export the current setup to a portable manifest file."""
+    from .commands.export_cmd import run_export
+    run_export(out=out, latest=latest, include_repos=not no_repos)
 
-    @app.command("apply")
-    def apply_cmd(
-        file: str = typer.Argument(..., help="Path to a portable manifest file"),
-        dry_run: bool = typer.Option(False, "--dry-run", help="Preview without making changes"),
-        latest: bool = typer.Option(False, "--latest", help="Install latest catalog versions"),
-        yes: bool = typer.Option(False, "--yes", "-y", help="Skip prompts (plugins apply non-interactively)"),
-    ):
-        """Apply a portable manifest - reproduce its setup on this machine."""
-        from .commands.apply_cmd import run_apply
-        run_apply(file=file, dry_run=dry_run, latest=latest, yes=yes)
+@app.command("apply")
+def apply_cmd(
+    file: str = typer.Argument(..., help="Path to a portable manifest file"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without making changes"),
+    latest: bool = typer.Option(False, "--latest", help="Install latest catalog versions"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip prompts (plugins apply non-interactively)"),
+):
+    """Apply a portable manifest - reproduce its setup on this machine."""
+    from .commands.apply_cmd import run_apply
+    run_apply(file=file, dry_run=dry_run, latest=latest, yes=yes)
 
-    @app.command("setup")
-    def setup_cmd(
-        path: Optional[str] = typer.Argument(None, help="Project path to set up"),
-        all_flag: bool = typer.Option(False, "--all", help="Set up all projects"),
-        skip_raycast: bool = typer.Option(False, "--skip-raycast", help="Skip Raycast script creation"),
-        dry_run: bool = typer.Option(False, "--dry-run", help="Preview without making changes"),
-    ):
-        """Set up a project or all projects."""
-        from .commands.setup import run_setup, run_setup_path, run_setup_all
-        if all_flag:
-            run_setup_all(skip_raycast=skip_raycast, dry_run=dry_run)
-        elif path:
-            run_setup_path(path=path, skip_raycast=skip_raycast, dry_run=dry_run)
-        else:
-            run_setup(skip_raycast=skip_raycast, dry_run=dry_run)
+@app.command("setup")
+def setup_cmd(
+    path: Optional[str] = typer.Argument(None, help="Project path to set up"),
+    all_flag: bool = typer.Option(False, "--all", help="Set up all projects"),
+    skip_raycast: bool = typer.Option(False, "--skip-raycast", help="Skip Raycast script creation"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without making changes"),
+):
+    """Set up a project or all projects."""
+    from .commands.setup import run_setup, run_setup_path, run_setup_all
+    if all_flag:
+        run_setup_all(skip_raycast=skip_raycast, dry_run=dry_run)
+    elif path:
+        run_setup_path(path=path, skip_raycast=skip_raycast, dry_run=dry_run)
+    else:
+        run_setup(skip_raycast=skip_raycast, dry_run=dry_run)
 
-    @app.command("untrack")
-    def untrack_cmd(
-        path: str = typer.Argument(..., help="Project path to stop tracking"),
-        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
-    ):
-        """Stop tracking a repository."""
-        from .commands.untrack import run_untrack
-        run_untrack(path=path, yes=yes)
+@app.command("untrack")
+def untrack_cmd(
+    path: str = typer.Argument(..., help="Project path to stop tracking"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+):
+    """Stop tracking a repository."""
+    from .commands.untrack import run_untrack
+    run_untrack(path=path, yes=yes)
 
-    # --- config subcommands ---
-    config_app = typer.Typer(help="Manage configuration preferences")
-    app.add_typer(config_app, name="config")
+# --- config subcommands ---
+config_app = typer.Typer(help="Manage configuration preferences")
+app.add_typer(config_app, name="config")
 
-    @config_app.command("list")
-    def config_list_cmd():
-        """List all configuration preferences."""
-        from .commands.config_cmd import run_config_list
-        run_config_list()
+@config_app.command("list")
+def config_list_cmd():
+    """List all configuration preferences."""
+    from .commands.config_cmd import run_config_list
+    run_config_list()
 
-    @config_app.command("set")
-    def config_set_cmd(
-        key: str = typer.Argument(..., help="Preference key"),
-        value: str = typer.Argument(..., help="Value: 'on' or 'off'"),
-    ):
-        """Set a configuration preference."""
-        from .commands.config_cmd import run_config_set
-        run_config_set(key=key, value=value)
+@config_app.command("set")
+def config_set_cmd(
+    key: str = typer.Argument(..., help="Preference key"),
+    value: str = typer.Argument(..., help="Value: 'on' or 'off'"),
+):
+    """Set a configuration preference."""
+    from .commands.config_cmd import run_config_set
+    run_config_set(key=key, value=value)
 
-    @config_app.command("reset")
-    def config_reset_cmd(
-        key: str = typer.Argument(..., help="Preference key to reset"),
-    ):
-        """Reset a configuration preference to default."""
-        from .commands.config_cmd import run_config_reset
-        run_config_reset(key=key)
+@config_app.command("reset")
+def config_reset_cmd(
+    key: str = typer.Argument(..., help="Preference key to reset"),
+):
+    """Reset a configuration preference to default."""
+    from .commands.config_cmd import run_config_reset
+    run_config_reset(key=key)
 
-    # --- generate subcommands ---
-    generate_app = typer.Typer(help="Generate agent files and rules")
-    app.add_typer(generate_app, name="generate")
+# --- generate subcommands ---
+generate_app = typer.Typer(help="Generate agent files and rules")
+app.add_typer(generate_app, name="generate")
 
-    @generate_app.command("rules")
-    def generate_rules_cmd():
-        """Generate .agent-rules/ from source rules."""
-        from .commands.generate import run_generate_rules
-        run_generate_rules()
+@generate_app.command("rules")
+def generate_rules_cmd():
+    """Generate .agent-rules/ from source rules."""
+    from .commands.generate import run_generate_rules
+    run_generate_rules()
 
-    @generate_app.command("files")
-    def generate_files_cmd():
-        """Generate agent instruction files in templates/."""
-        from .commands.generate import run_generate_files
-        run_generate_files()
+@generate_app.command("files")
+def generate_files_cmd():
+    """Generate agent instruction files in templates/."""
+    from .commands.generate import run_generate_files
+    run_generate_files()
 
-    @app.command("validate")
-    def validate_cmd():
-        """Validate rule parity across agents."""
-        from .commands.generate import run_validate
-        run_validate()
+@app.command("validate")
+def validate_cmd():
+    """Validate rule parity across agents."""
+    from .commands.generate import run_validate
+    run_validate()
 
-    @app.command("prune")
-    def prune_cmd(
-        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
-        dry_run: bool = typer.Option(False, "--dry-run", help="Preview without making changes"),
-    ):
-        """Remove stale tracking entries."""
-        from .commands.generate import run_prune
-        run_prune(yes=yes, dry_run=dry_run)
+@app.command("prune")
+def prune_cmd(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without making changes"),
+):
+    """Remove stale tracking entries."""
+    from .commands.generate import run_prune
+    run_prune(yes=yes, dry_run=dry_run)
 
-    # --- ports subcommands ---
-    ports_app = typer.Typer(help="Manage project port registry")
-    app.add_typer(ports_app, name="ports")
+# --- ports subcommands ---
+ports_app = typer.Typer(help="Manage project port registry")
+app.add_typer(ports_app, name="ports")
 
-    @ports_app.command("list")
-    def ports_list_cmd():
-        """Show all registered ports grouped by project."""
-        from .commands.ports import run_ports_list
-        run_ports_list()
+@ports_app.command("list")
+def ports_list_cmd():
+    """Show all registered ports grouped by project."""
+    from .commands.ports import run_ports_list
+    run_ports_list()
 
-    @ports_app.command("check")
-    def ports_check_cmd(
-        path: str = typer.Argument(".", help="Project path containing .aec.json"),
-    ):
-        """Check a project's ports against the registry."""
-        from .commands.ports import run_ports_check
-        run_ports_check(path)
+@ports_app.command("check")
+def ports_check_cmd(
+    path: str = typer.Argument(".", help="Project path containing .aec.json"),
+):
+    """Check a project's ports against the registry."""
+    from .commands.ports import run_ports_check
+    run_ports_check(path)
 
-    @ports_app.command("register")
-    def ports_register_cmd(
-        path: str = typer.Argument(".", help="Project path containing .aec.json"),
-    ):
-        """Register ports from a project's .aec.json."""
-        from .commands.ports import run_ports_register
-        run_ports_register(path)
+@ports_app.command("register")
+def ports_register_cmd(
+    path: str = typer.Argument(".", help="Project path containing .aec.json"),
+):
+    """Register ports from a project's .aec.json."""
+    from .commands.ports import run_ports_register
+    run_ports_register(path)
 
-    @ports_app.command("unregister")
-    def ports_unregister_cmd(
-        path: str = typer.Argument(".", help="Project path to unregister"),
-    ):
-        """Remove all port registrations for a project."""
-        from .commands.ports import run_ports_unregister
-        run_ports_unregister(path)
+@ports_app.command("unregister")
+def ports_unregister_cmd(
+    path: str = typer.Argument(".", help="Project path to unregister"),
+):
+    """Remove all port registrations for a project."""
+    from .commands.ports import run_ports_unregister
+    run_ports_unregister(path)
 
-    @ports_app.command("validate")
-    def ports_validate_cmd():
-        """Scan registry for stale entries (dead paths)."""
-        from .commands.ports import run_ports_validate
-        run_ports_validate()
+@ports_app.command("validate")
+def ports_validate_cmd():
+    """Scan registry for stale entries (dead paths)."""
+    from .commands.ports import run_ports_validate
+    run_ports_validate()
 
-    # --- test (parity with argparse `aec test …`) ---
-    test_app = typer.Typer(help="Manage test suites, scheduling, and reports")
-    app.add_typer(test_app, name="test")
+# --- test ---
+test_app = typer.Typer(help="Manage test suites, scheduling, and reports")
+app.add_typer(test_app, name="test")
 
-    @test_app.command("run")
-    def test_run_cmd(
-        global_flag: bool = typer.Option(
-            False, "-g", "--global",
-            help="Run scheduled suites across all tracked projects",
-        ),
-    ):
-        """Run test suites for the current project (or all with -g)."""
-        from .commands.test_cmd import run_test_run
-        run_test_run(global_flag=global_flag)
+@test_app.command("run")
+def test_run_cmd(
+    global_flag: bool = typer.Option(
+        False, "-g", "--global",
+        help="Run scheduled suites across all tracked projects",
+    ),
+):
+    """Run test suites for the current project (or all with -g)."""
+    from .commands.test_cmd import run_test_run
+    run_test_run(global_flag=global_flag)
 
-    @test_app.command("schedule")
-    def test_schedule_cmd(
-        global_flag: bool = typer.Option(
-            False, "-g", "--global",
-            help="Configure global daily time and OS scheduler",
-        ),
-        do: List[str] = typer.Option(
-            None, "--do",
-            help="One schedule command, repeatable; same verbs as the schedule> REPL (e.g. 'merge', '+ unit', 'r 2', 'n e2e :: npm run e2e', 'o unit,e2e', 'mv 1 2')",
-        ),
-        list_only: bool = typer.Option(
-            False, "--list", help="Print the current schedule and exit (no prompts)"
-        ),
-    ):
-        """Edit this repo's scheduled suites, or use -g for system-wide setup."""
-        from .commands.test_cmd import run_test_schedule
-        raise typer.Exit(
-            run_test_schedule(global_flag=global_flag, commands=do, list_only=list_only)
-        )
-
-    @test_app.command("status")
-    def test_status_cmd(
-        global_flag: bool = typer.Option(False, "-g", "--global", help="Global schedule status"),
-    ):
-        """Show test configuration or global schedule status."""
-        from .commands.test_cmd import run_test_status
-        run_test_status(global_flag=global_flag)
-
-    @test_app.command("enable")
-    def test_enable_cmd():
-        """Re-enable scheduled runs with the OS scheduler."""
-        from .commands.test_cmd import run_test_enable
-        run_test_enable()
-
-    @test_app.command("disable")
-    def test_disable_cmd():
-        """Disable scheduled runs (keeps config)."""
-        from .commands.test_cmd import run_test_disable
-        run_test_disable()
-
-    @test_app.command("report")
-    def test_report_cmd(
-        global_flag: bool = typer.Option(False, "-g", "--global", help="Full cross-project summary"),
-    ):
-        """View latest test results."""
-        from .commands.test_cmd import run_test_report
-        run_test_report(global_flag=global_flag)
-
-    @test_app.command("detect")
-    def test_detect_cmd():
-        """Re-detect test frameworks and update .aec.json."""
-        from .commands.test_cmd import run_test_detect
-        run_test_detect()
-
-    # --- existing top-level commands ---
-    from .commands import discover
-    app.command("discover-repos")(discover.discover_cmd)
-
-    @app.command("discover")
-    def discover_catalog_cmd(
-        global_flag: bool = typer.Option(False, "-g", "--global", help="Scan global scope"),
-        rediscover: bool = typer.Option(False, "--rediscover", help="Re-surface dismissed items"),
-        depth: Optional[int] = typer.Option(None, "--depth", help="Scan depth: 1=Quick, 2=Normal, 3=Deep"),
-        yes: bool = typer.Option(False, "--yes", "-y", help="Install exact matches, skip rest"),
-        dry_run: bool = typer.Option(False, "--dry-run", help="Preview without writing"),
-    ):
-        """Scan for local items similar to AEC catalog entries."""
-        from .commands.discover_catalog import run_discover
-        run_discover(
-            global_flag=global_flag,
-            rediscover=rediscover,
-            depth=depth,
-            yes=yes,
-            dry_run=dry_run,
-        )
-
-    @app.command("doctor")
-    def doctor_cmd():
-        """Check installation health."""
-        from .commands.doctor import run_doctor
-        run_doctor()
-
-    @app.command("configure-agent")
-    def configure_agent_cmd(
-        scope: Optional[str] = typer.Option(None, "--scope", help="project|global|both"),
-        profile: Optional[str] = typer.Option(None, "--profile", help="conservative|balanced|permissive|custom"),
-        agent_files: Optional[str] = typer.Option(None, "--agent-files", help="all|<csv>"),
-        check: bool = typer.Option(False, "--check", help="Exit non-zero on drift"),
-        refresh: bool = typer.Option(False, "--refresh", help="Re-render from stored config"),
-        remove: bool = typer.Option(False, "--remove", help="Remove the blurb and config"),
-        dry_run: bool = typer.Option(False, "--dry-run", help="Show plan; write nothing"),
-        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmations"),
-    ):
-        """Manage the AEC agent-instruction blurb."""
-        from .commands.configure_agent import run_configure_agent
-        raise typer.Exit(run_configure_agent(
-            scope=scope, profile=profile, agent_files=agent_files,
-            check=check, refresh=refresh, remove=remove, dry_run=dry_run, yes=yes,
-        ))
-
-    @app.command("version")
-    def version_cmd():
-        """Show version information."""
-        Console.print(f"aec version {__version__}")
-
-    # --- hooks ---
-    from .commands.hooks_cmd import hooks_app
-    app.add_typer(hooks_app, name="hooks")
-
-    # --- run-script (top-level; invoked from hook bodies) ---
-    from .commands.run_script_cmd import run_script
-    app.command("run-script")(run_script)
-
-    # --- feedback (hands off to the feedback-loop skill's feedback.py) ---
-    from .commands.feedback_cmd import feedback as feedback_cmd
-    app.command(
-        "feedback",
-        context_settings={"allow_extra_args": True, "ignore_unknown_options": True,
-                          "help_option_names": []},
-    )(feedback_cmd)
-
-    # ------------------------------------------------------------------ #
-    #  Deprecated command groups (kept as shims)                          #
-    # ------------------------------------------------------------------ #
-
-    # --- repo (deprecated) ---
-    repo_app = typer.Typer(
-        help="[DEPRECATED] Use top-level commands instead",
-        deprecated=True,
+@test_app.command("schedule")
+def test_schedule_cmd(
+    global_flag: bool = typer.Option(
+        False, "-g", "--global",
+        help="Configure global daily time and OS scheduler",
+    ),
+    do: List[str] = typer.Option(
+        None, "--do",
+        help="One schedule command, repeatable; same verbs as the schedule> REPL (e.g. 'merge', '+ unit', 'r 2', 'n e2e :: npm run e2e', 'o unit,e2e', 'mv 1 2')",
+    ),
+    list_only: bool = typer.Option(
+        False, "--list", help="Print the current schedule and exit (no prompts)"
+    ),
+):
+    """Edit this repo's scheduled suites, or use -g for system-wide setup."""
+    from .commands.test_cmd import run_test_schedule
+    raise typer.Exit(
+        run_test_schedule(global_flag=global_flag, commands=do, list_only=list_only)
     )
-    app.add_typer(repo_app, name="repo")
 
-    @repo_app.command("list")
-    def repo_list_deprecated():
-        """[DEPRECATED] Use `aec list` instead."""
-        deprecation_warning("aec repo list", "aec list --scope global")
-        from .commands.repo import list_repos
-        list_repos()
+@test_app.command("status")
+def test_status_cmd(
+    global_flag: bool = typer.Option(False, "-g", "--global", help="Global schedule status"),
+):
+    """Show test configuration or global schedule status."""
+    from .commands.test_cmd import run_test_status
+    run_test_status(global_flag=global_flag)
 
-    @repo_app.command("setup")
-    def repo_setup_deprecated(
-        path: Optional[str] = typer.Argument(None, help="Project name or path"),
-        skip_raycast: bool = typer.Option(False, "--skip-raycast"),
-    ):
-        """[DEPRECATED] Use `aec setup` instead."""
-        deprecation_warning("aec repo setup", "aec setup")
-        from .commands.repo import setup
-        setup(path, skip_raycast)
+@test_app.command("enable")
+def test_enable_cmd():
+    """Re-enable scheduled runs with the OS scheduler."""
+    from .commands.test_cmd import run_test_enable
+    run_test_enable()
 
-    @repo_app.command("setup-all")
-    def repo_setup_all_deprecated():
-        """[DEPRECATED] Use `aec setup --all` instead."""
-        deprecation_warning("aec repo setup-all", "aec setup --all")
-        from .commands.repo import setup_all
-        setup_all()
+@test_app.command("disable")
+def test_disable_cmd():
+    """Disable scheduled runs (keeps config)."""
+    from .commands.test_cmd import run_test_disable
+    run_test_disable()
 
-    @repo_app.command("update")
-    def repo_update_deprecated(
-        path: Optional[str] = typer.Argument(None),
-        dry_run: bool = typer.Option(False, "--dry-run"),
-        update_all: bool = typer.Option(False, "--all"),
-    ):
-        """[DEPRECATED] Use `aec update` instead."""
-        deprecation_warning("aec repo update", "aec update")
-        from .commands.repo import update
-        update(path, dry_run, update_all)
+@test_app.command("report")
+def test_report_cmd(
+    global_flag: bool = typer.Option(False, "-g", "--global", help="Full cross-project summary"),
+):
+    """View latest test results."""
+    from .commands.test_cmd import run_test_report
+    run_test_report(global_flag=global_flag)
 
-    @repo_app.command("prune")
-    def repo_prune_deprecated(
-        yes: bool = typer.Option(False, "--yes", "-y"),
-        dry_run: bool = typer.Option(False, "--dry-run"),
-    ):
-        """[DEPRECATED] Use `aec prune` instead."""
-        deprecation_warning("aec repo prune", "aec prune")
-        from .commands.repo import prune
-        prune(yes, dry_run)
+@test_app.command("detect")
+def test_detect_cmd():
+    """Re-detect test frameworks and update .aec.json."""
+    from .commands.test_cmd import run_test_detect
+    run_test_detect()
 
-    # --- skills (deprecated) ---
-    skills_app = typer.Typer(
-        help="[DEPRECATED] Use `aec install/uninstall/list` instead",
-        deprecated=True,
+# --- existing top-level commands ---
+from .commands import discover
+app.command("discover-repos")(discover.discover_cmd)
+
+@app.command("discover")
+def discover_catalog_cmd(
+    global_flag: bool = typer.Option(False, "-g", "--global", help="Scan global scope"),
+    rediscover: bool = typer.Option(False, "--rediscover", help="Re-surface dismissed items"),
+    depth: Optional[int] = typer.Option(None, "--depth", help="Scan depth: 1=Quick, 2=Normal, 3=Deep"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Install exact matches, skip rest"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without writing"),
+):
+    """Scan for local items similar to AEC catalog entries."""
+    from .commands.discover_catalog import run_discover
+    run_discover(
+        global_flag=global_flag,
+        rediscover=rediscover,
+        depth=depth,
+        yes=yes,
+        dry_run=dry_run,
     )
-    app.add_typer(skills_app, name="skills")
-
-    @skills_app.command("list")
-    def skills_list_deprecated():
-        """[DEPRECATED] Use `aec list --type skill` instead."""
-        deprecation_warning("aec skills list", "aec list --type skill")
-        from .commands.skills import list_skills
-        list_skills()
-
-    @skills_app.command("install")
-    def skills_install_deprecated(
-        names: list[str] = typer.Argument(..., help="Skill name(s)"),
-        yes: bool = typer.Option(False, "--yes", "-y"),
-    ):
-        """[DEPRECATED] Use `aec install skill <name>` instead."""
-        deprecation_warning("aec skills install", "aec install skill <name>")
-        from .commands.skills import install_skills
-        install_skills(names=names, yes=yes)
-
-    @skills_app.command("uninstall")
-    def skills_uninstall_deprecated(
-        names: list[str] = typer.Argument(..., help="Skill name(s)"),
-        yes: bool = typer.Option(False, "--yes", "-y"),
-    ):
-        """[DEPRECATED] Use `aec uninstall skill <name>` instead."""
-        deprecation_warning("aec skills uninstall", "aec uninstall skill <name>")
-        from .commands.skills import uninstall_skills
-        uninstall_skills(names=names, yes=yes)
-
-    @skills_app.command("update")
-    def skills_update_deprecated(
-        name: Optional[str] = typer.Argument(None),
-        yes: bool = typer.Option(False, "--yes", "-y"),
-    ):
-        """[DEPRECATED] Use `aec upgrade` instead."""
-        deprecation_warning("aec skills update", "aec upgrade")
-        from .commands.skills import update_skills
-        names = [name] if name else None
-        update_skills(names=names, yes=yes)
-
-    # --- agent-tools (deprecated) ---
-    agent_tools_app = typer.Typer(
-        help="[DEPRECATED] Use `aec setup` or `aec doctor` instead",
-        deprecated=True,
-    )
-    app.add_typer(agent_tools_app, name="agent-tools")
-
-    @agent_tools_app.command("setup")
-    def at_setup_deprecated(
-        dry_run: bool = typer.Option(False, "--dry-run"),
-    ):
-        """[DEPRECATED] Use `aec setup` instead."""
-        deprecation_warning("aec agent-tools setup", "aec setup")
-        from .commands.agent_tools import setup
-        setup(dry_run=dry_run)
-
-    @agent_tools_app.command("migrate")
-    def at_migrate_deprecated(
-        dry_run: bool = typer.Option(False, "--dry-run"),
-    ):
-        """[DEPRECATED] Use `aec upgrade` instead."""
-        deprecation_warning("aec agent-tools migrate", "aec upgrade")
-        from .commands.agent_tools import migrate
-        migrate(dry_run=dry_run)
-
-    @agent_tools_app.command("rollback")
-    def at_rollback_deprecated(
-        backup_dir: str = typer.Argument(..., help="Backup directory"),
-    ):
-        """[DEPRECATED] No direct replacement."""
-        deprecation_warning("aec agent-tools rollback", "aec doctor")
-        from .commands.agent_tools import rollback
-        rollback(backup_dir)
-
-    # --- rules (deprecated) ---
-    rules_app = typer.Typer(
-        help="[DEPRECATED] Use `aec generate rules` or `aec validate` instead",
-        deprecated=True,
-    )
-    app.add_typer(rules_app, name="rules")
-
-    @rules_app.command("generate")
-    def rules_generate_deprecated():
-        """[DEPRECATED] Use `aec generate rules` instead."""
-        deprecation_warning("aec rules generate", "aec generate rules")
-        from .commands.generate import run_generate_rules
-        run_generate_rules()
-
-    @rules_app.command("validate")
-    def rules_validate_deprecated():
-        """[DEPRECATED] Use `aec validate` instead."""
-        deprecation_warning("aec rules validate", "aec validate")
-        from .commands.generate import run_validate
-        run_validate()
-
-    # --- files (deprecated) ---
-    files_app = typer.Typer(
-        help="[DEPRECATED] Use `aec generate files` instead",
-        deprecated=True,
-    )
-    app.add_typer(files_app, name="files")
-
-    @files_app.command("generate")
-    def files_generate_deprecated():
-        """[DEPRECATED] Use `aec generate files` instead."""
-        deprecation_warning("aec files generate", "aec generate files")
-        from .commands.generate import run_generate_files
-        run_generate_files()
-
-    # --- prompts (headless discovery) ---
-    prompts_app = typer.Typer(
-        help="Discover, template, and validate the prompts AEC can ask",
-    )
-    app.add_typer(prompts_app, name="prompts")
-
-    @prompts_app.command("list")
-    def prompts_list_cmd(
-        command: str = typer.Option(
-            None, "--command", "-c", help="Only show prompts for commands matching this text"
-        ),
-        json_output: bool = typer.Option(False, "--json", help="Machine-readable output"),
-    ):
-        """Show every prompt AEC can ask, with its ID, type, and default."""
-        from .commands.prompts_cmd import run_prompts_list
-        run_prompts_list(command=command, json_out=json_output)
-
-    @prompts_app.command("template")
-    def prompts_template_cmd(
-        command: str = typer.Option(
-            None, "--command", "-c", help="Only include prompts for commands matching this text"
-        ),
-        output: str = typer.Option(None, "--output", "-o", help="Write to this file instead of stdout"),
-    ):
-        """Emit a skeleton answers file for use with --answers."""
-        from .commands.prompts_cmd import run_prompts_template
-        run_prompts_template(command=command, output=output)
-
-    @prompts_app.command("check")
-    def prompts_check_cmd(
-        answers_file: str = typer.Argument(..., help="Answers file to validate"),
-    ):
-        """Validate an answers file against the prompt catalog."""
-        from .commands.prompts_cmd import run_prompts_check
-        raise typer.Exit(run_prompts_check(answers_file))
-
-    # --- org (phase 1) ---
-    from .commands.org import org_app
-    app.add_typer(org_app, name="org", help="Manage organization configurations")
-
-    # --- preferences (deprecated) ---
-    prefs_app = typer.Typer(
-        help="[DEPRECATED] Use `aec config` instead",
-        deprecated=True,
-    )
-    app.add_typer(prefs_app, name="preferences")
-
-    @prefs_app.command("list")
-    def prefs_list_deprecated():
-        """[DEPRECATED] Use `aec config list` instead."""
-        deprecation_warning("aec preferences list", "aec config list")
-        from .commands.config_cmd import run_config_list
-        run_config_list()
-
-    @prefs_app.command("set")
-    def prefs_set_deprecated(
-        feature: str = typer.Argument(..., help="Feature name"),
-        value: str = typer.Argument(..., help="'on' or 'off'"),
-    ):
-        """[DEPRECATED] Use `aec config set` instead."""
-        deprecation_warning("aec preferences set", "aec config set")
-        from .commands.config_cmd import run_config_set
-        run_config_set(key=feature, value=value)
-
-    @prefs_app.command("reset")
-    def prefs_reset_deprecated(
-        feature: str = typer.Argument(..., help="Feature name"),
-    ):
-        """[DEPRECATED] Use `aec config reset` instead."""
-        deprecation_warning("aec preferences reset", "aec config reset")
-        from .commands.config_cmd import run_config_reset
-        run_config_reset(key=feature)
-
-else:
-    # Argparse fallback (no external dependencies)
-    import argparse
-
-    def app():
-        """Argparse-based CLI fallback."""
-        parser = argparse.ArgumentParser(
-            prog="aec",
-            description="agents-environment-config CLI - Manage AI agent configurations",
-        )
-        parser.add_argument(
-            "--version", "-V",
-            action="version",
-            version=f"aec {__version__}",
-        )
-        parser.add_argument(
-            "--debug",
-            action="store_true",
-            help="Capture errors to ~/.agents-environment-config/logs/aec-debug.log and print the traceback.",
-        )
-        parser.add_argument(
-            "--answers",
-            metavar="PATH",
-            help="JSON file of {prompt_id: value} answers (see `aec prompts template`).",
-        )
-        parser.add_argument(
-            "--non-interactive",
-            action="store_true",
-            help="Never prompt; fail with the prompt ID if an answer is missing.",
-        )
-        parser.add_argument(
-            "--defaults",
-            action="store_true",
-            help="Accept each prompt's declared default when no answer is supplied.",
-        )
-
-        subparsers = parser.add_subparsers(dest="command", help="Commands")
-
-        # ---------------------------------------------------------- #
-        #  New flat top-level commands                                #
-        # ---------------------------------------------------------- #
-
-        # update
-        subparsers.add_parser("update", help="Fetch latest sources and report outdated items")
-
-        # upgrade
-        upgrade_parser = subparsers.add_parser("upgrade", help="Apply available upgrades")
-        upgrade_parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
-        upgrade_parser.add_argument("--dry-run", action="store_true", help="Preview without applying")
-
-        # install
-        install_new = subparsers.add_parser("install", help="Full setup, or install a skill, rule, or agent")
-        install_new.add_argument("item_type", nargs="?", help="Type: skill, rule, agent, mcp, or plugin")
-        install_new.add_argument("name", nargs="?", help="Name of the item")
-        install_new.add_argument("--dry-run", action="store_true", help="Preview full setup without making changes")
-        install_new.add_argument("-g", "--global", dest="global_flag", action="store_true", help="Install globally")
-        install_new.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
-
-        # uninstall
-        uninstall_parser = subparsers.add_parser("uninstall", help="Remove a skill, rule, or agent")
-        uninstall_parser.add_argument("item_type", help="Type: skill, rule, agent, mcp, or plugin")
-        uninstall_parser.add_argument("name", help="Name of the item")
-        uninstall_parser.add_argument("-g", "--global", dest="global_flag", action="store_true", help="Uninstall globally")
-        uninstall_parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
-
-        # list
-        list_parser = subparsers.add_parser("list", help="Show installed items")
-        list_parser.add_argument("--type", dest="type_filter", help="Filter by type")
-        list_parser.add_argument("--scope", dest="scope_filter", help="Filter by scope")
-        list_parser.add_argument("--all", dest="show_all", action="store_true", help="Show across all repos")
-
-        # search
-        search_parser = subparsers.add_parser("search", help="Search available items")
-        search_parser.add_argument("term", help="Search term")
-        search_parser.add_argument("--type", dest="type_filter", help="Filter by type")
-
-        # outdated
-        outdated_parser = subparsers.add_parser("outdated", help="Show items with available upgrades")
-        outdated_parser.add_argument("--type", dest="type_filter", help="Filter by type")
-        outdated_parser.add_argument("--all", dest="show_all", action="store_true", help="Check all repos")
-
-        # info
-        info_parser = subparsers.add_parser("info", help="Show detailed item metadata")
-        info_parser.add_argument("item_type", help="Type: skill, rule, agent, mcp, or plugin")
-        info_parser.add_argument("name", help="Name of the item")
-
-        # export
-        export_parser = subparsers.add_parser("export", help="Export current setup to a portable manifest")
-        export_parser.add_argument("--out", "-o", dest="out", default=None, help="Write to FILE (default: stdout)")
-        export_parser.add_argument("--latest", action="store_true", help="Record versions as 'latest'")
-        export_parser.add_argument("--no-repos", dest="no_repos", action="store_true", help="Global scope only")
-
-        # apply
-        apply_parser = subparsers.add_parser("apply", help="Apply a portable manifest to this machine")
-        apply_parser.add_argument("file", help="Path to a portable manifest file")
-        apply_parser.add_argument("--dry-run", action="store_true", help="Preview without making changes")
-        apply_parser.add_argument("--latest", action="store_true", help="Install latest catalog versions")
-        apply_parser.add_argument("--yes", "-y", action="store_true", help="Skip prompts (plugins apply non-interactively)")
-
-        # setup
-        setup_parser = subparsers.add_parser("setup", help="Set up a project or all projects")
-        setup_parser.add_argument("path", nargs="?", default=None, help="Project path")
-        setup_parser.add_argument("--all", dest="setup_all", action="store_true", help="Set up all projects")
-        setup_parser.add_argument("--skip-raycast", action="store_true", help="Skip Raycast scripts")
-        setup_parser.add_argument("--dry-run", action="store_true", help="Preview without changes")
-
-        # untrack
-        untrack_parser = subparsers.add_parser("untrack", help="Stop tracking a repository")
-        untrack_parser.add_argument("path", help="Project path")
-        untrack_parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
-
-        # config
-        config_parser = subparsers.add_parser("config", help="Manage configuration preferences")
-        config_sub = config_parser.add_subparsers(dest="config_command")
-        config_sub.add_parser("list", help="List preferences")
-        config_set = config_sub.add_parser("set", help="Set a preference")
-        config_set.add_argument("key", help="Preference key")
-        config_set.add_argument("value", help="Value: 'on' or 'off'")
-        config_reset = config_sub.add_parser("reset", help="Reset a preference")
-        config_reset.add_argument("key", help="Preference key")
-
-        # generate
-        generate_parser = subparsers.add_parser("generate", help="Generate agent files and rules")
-        generate_sub = generate_parser.add_subparsers(dest="generate_command")
-        generate_sub.add_parser("rules", help="Generate .agent-rules/")
-        generate_sub.add_parser("files", help="Generate agent instruction files")
-
-        # validate
-        subparsers.add_parser("validate", help="Validate rule parity")
-
-        # prune
-        prune_parser = subparsers.add_parser("prune", help="Remove stale tracking entries")
-        prune_parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
-        prune_parser.add_argument("--dry-run", action="store_true", help="Preview without changes")
-
-        # ports
-        ports_parser = subparsers.add_parser("ports", help="Manage project port registry")
-        ports_sub = ports_parser.add_subparsers(dest="ports_command")
-        ports_sub.add_parser("list", help="List registered ports")
-        ports_check = ports_sub.add_parser("check", help="Check ports against registry")
-        ports_check.add_argument("path", nargs="?", default=".", help="Project path")
-        ports_reg = ports_sub.add_parser("register", help="Register ports from .aec.json")
-        ports_reg.add_argument("path", nargs="?", default=".", help="Project path")
-        ports_unreg = ports_sub.add_parser("unregister", help="Unregister project ports")
-        ports_unreg.add_argument("path", nargs="?", default=".", help="Project path")
-        ports_sub.add_parser("validate", help="Validate registry entries")
-
-        # test
-        test_parser = subparsers.add_parser("test", help="Manage test suites, scheduling, and reports")
-        test_sub = test_parser.add_subparsers(dest="test_command")
-        test_run = test_sub.add_parser("run", help="Run test suites")
-        test_run.add_argument("-g", "--global", dest="global_flag", action="store_true", help="Run all tracked projects")
-        test_schedule = test_sub.add_parser(
-            "schedule",
-            help="Edit this repo's scheduled suites, or use -g for system-wide daily time",
-        )
-        test_schedule.add_argument(
-            "-g",
-            "--global",
-            dest="global_flag",
-            action="store_true",
-            help="Configure global daily run time and OS scheduler (not .aec.json)",
-        )
-        test_schedule.add_argument(
-            "--do",
-            action="append",
-            dest="schedule_do",
-            help="One schedule command, repeatable; same verbs as the schedule> REPL (e.g. 'merge', '+ unit', 'r 2', 'n e2e :: npm run e2e', 'o unit,e2e', 'mv 1 2')",
-        )
-        test_schedule.add_argument(
-            "--list",
-            action="store_true",
-            dest="schedule_list",
-            help="Print the current schedule and exit (no prompts)",
-        )
-        test_status = test_sub.add_parser("status", help="Show test configuration or schedule status")
-        test_status.add_argument("-g", "--global", dest="global_flag", action="store_true", help="Show global schedule status")
-        test_sub.add_parser("enable", help="Enable scheduled test runs")
-        test_sub.add_parser("disable", help="Disable scheduled test runs")
-        test_report = test_sub.add_parser("report", help="View test reports")
-        test_report.add_argument("-g", "--global", dest="global_flag", action="store_true", help="Show global report")
-        test_sub.add_parser("detect", help="Re-detect test frameworks for current project")
-
-        # discover-repos (renamed from discover)
-        discover_repos_parser = subparsers.add_parser("discover-repos", help="Discover repos from Raycast scripts")
-        discover_repos_parser.add_argument("--dry-run", action="store_true", help="Preview")
-        discover_repos_parser.add_argument("--auto", action="store_true", help="Add without prompting")
-
-        # discover (catalog discovery)
-        discover_parser = subparsers.add_parser("discover", help="Scan for local items similar to AEC catalog")
-        discover_parser.add_argument("-g", "--global", dest="global_flag", action="store_true", help="Scan global scope")
-        discover_parser.add_argument("--rediscover", action="store_true", help="Re-surface dismissed items")
-        discover_parser.add_argument("--depth", type=int, default=None, help="Scan depth: 1=Quick, 2=Normal, 3=Deep")
-        discover_parser.add_argument("--yes", "-y", action="store_true", help="Install exact matches, skip rest")
-        discover_parser.add_argument("--dry-run", action="store_true", help="Preview without writing")
-
-        # doctor
-        subparsers.add_parser("doctor", help="Check installation health")
-
-        # version
-        subparsers.add_parser("version", help="Show version")
-
-        # ---------------------------------------------------------- #
-        #  Deprecated command groups (kept as shims)                  #
-        # ---------------------------------------------------------- #
-
-        # repo (deprecated)
-        repo_parser = subparsers.add_parser("repo", help="[DEPRECATED] Manage repositories")
-        repo_sub = repo_parser.add_subparsers(dest="repo_command")
-        repo_setup = repo_sub.add_parser("setup", help="[DEPRECATED] Use `aec setup`")
-        repo_setup.add_argument("path", nargs="?", default=None)
-        repo_setup.add_argument("--skip-raycast", action="store_true")
-        repo_sub.add_parser("list", help="[DEPRECATED] Use `aec list`")
-        repo_sub.add_parser("setup-all", help="[DEPRECATED] Use `aec setup --all`")
-        repo_prune = repo_sub.add_parser("prune", help="[DEPRECATED] Use `aec prune`")
-        repo_prune.add_argument("--yes", "-y", action="store_true")
-        repo_prune.add_argument("--dry-run", action="store_true")
-        repo_update = repo_sub.add_parser("update", help="[DEPRECATED] Use `aec update`")
-        repo_update.add_argument("path", nargs="?")
-        repo_update.add_argument("--all", action="store_true")
-        repo_update.add_argument("--dry-run", action="store_true")
-
-        # agent-tools (deprecated)
-        at_parser = subparsers.add_parser("agent-tools", help="[DEPRECATED] Manage ~/.agent-tools/")
-        at_sub = at_parser.add_subparsers(dest="at_command")
-        at_sub.add_parser("setup", help="[DEPRECATED] Use `aec setup`")
-        at_migrate = at_sub.add_parser("migrate", help="[DEPRECATED] Use `aec upgrade`")
-        at_migrate.add_argument("--dry-run", action="store_true")
-        at_rollback = at_sub.add_parser("rollback", help="[DEPRECATED] Use `aec doctor`")
-        at_rollback.add_argument("backup_dir")
-
-        # feedback (hands off to the feedback-loop skill's feedback.py)
-        feedback_parser = subparsers.add_parser(
-            "feedback", add_help=False,
-            help="Log, review and toggle feedback (passes through to the feedback-loop skill)",
-        )
-        feedback_parser.add_argument("feedback_args", nargs=argparse.REMAINDER)
-
-        # prompts (headless discovery)
-        prompts_parser = subparsers.add_parser(
-            "prompts", help="Discover, template, and validate AEC's prompts"
-        )
-        prompts_sub = prompts_parser.add_subparsers(dest="prompts_command")
-        prompts_list_p = prompts_sub.add_parser("list", help="Show every prompt AEC can ask")
-        prompts_list_p.add_argument("--command", "-c", dest="command_filter")
-        prompts_list_p.add_argument("--json", action="store_true", dest="json_output")
-        prompts_tpl_p = prompts_sub.add_parser("template", help="Emit a skeleton answers file")
-        prompts_tpl_p.add_argument("--command", "-c", dest="command_filter")
-        prompts_tpl_p.add_argument("--output", "-o")
-        prompts_check_p = prompts_sub.add_parser("check", help="Validate an answers file")
-        prompts_check_p.add_argument("answers_file")
-
-        # rules (deprecated)
-        rules_parser = subparsers.add_parser("rules", help="[DEPRECATED] Use `aec generate rules` or `aec validate`")
-        rules_sub = rules_parser.add_subparsers(dest="rules_command")
-        rules_sub.add_parser("generate", help="[DEPRECATED] Use `aec generate rules`")
-        rules_sub.add_parser("validate", help="[DEPRECATED] Use `aec validate`")
-
-        # files (deprecated)
-        files_parser = subparsers.add_parser("files", help="[DEPRECATED] Use `aec generate files`")
-        files_sub = files_parser.add_subparsers(dest="files_command")
-        files_sub.add_parser("generate", help="[DEPRECATED] Use `aec generate files`")
-
-        # skills (deprecated)
-        skills_parser = subparsers.add_parser("skills", help="[DEPRECATED] Use `aec install/uninstall/list`")
-        skills_sub = skills_parser.add_subparsers(dest="skills_command")
-        skills_sub.add_parser("list", help="[DEPRECATED] Use `aec list --type skill`")
-        skills_install = skills_sub.add_parser("install", help="[DEPRECATED] Use `aec install skill <name>`")
-        skills_install.add_argument("names", nargs="+")
-        skills_install.add_argument("--yes", "-y", action="store_true")
-        skills_uninstall = skills_sub.add_parser("uninstall", help="[DEPRECATED] Use `aec uninstall skill <name>`")
-        skills_uninstall.add_argument("names", nargs="+")
-        skills_uninstall.add_argument("--yes", "-y", action="store_true")
-        skills_update = skills_sub.add_parser("update", help="[DEPRECATED] Use `aec upgrade`")
-        skills_update.add_argument("name", nargs="?", default=None)
-        skills_update.add_argument("--yes", "-y", action="store_true")
-
-        # preferences (deprecated)
-        prefs_parser = subparsers.add_parser("preferences", help="[DEPRECATED] Use `aec config`")
-        prefs_sub = prefs_parser.add_subparsers(dest="prefs_command")
-        prefs_sub.add_parser("list", help="[DEPRECATED] Use `aec config list`")
-        prefs_set = prefs_sub.add_parser("set", help="[DEPRECATED] Use `aec config set`")
-        prefs_set.add_argument("feature")
-        prefs_set.add_argument("value")
-        prefs_reset = prefs_sub.add_parser("reset", help="[DEPRECATED] Use `aec config reset`")
-        prefs_reset.add_argument("feature")
-
-        # ---------------------------------------------------------- #
-        #  Parse and dispatch                                         #
-        # ---------------------------------------------------------- #
-
-        args = parser.parse_args()
-
-        if getattr(args, "debug", False):
-            from .lib.debug import enable_debug
-            enable_debug()
-
-        _apply_prompt_globals(
-            getattr(args, "answers", None),
-            getattr(args, "non_interactive", False),
-            getattr(args, "defaults", False),
-        )
-
-        if args.command is None:
-            parser.print_help()
-            return
-
-        # Check for unanswered optional features
-        from .lib.preferences import check_pending_preferences
-        check_pending_preferences()
-
-        from .lib import feedback as _feedback
-        _feedback.current_command = args.command
-
-        import atexit
-        from .lib.version_check import maybe_check_for_update
-        atexit.register(maybe_check_for_update)
-        atexit.register(_feedback.maybe_notify)
-
-        # --- New flat commands ---
-        if args.command == "version":
-            Console.print(f"aec version {__version__}")
-
-        elif args.command == "feedback":
-            from .commands.feedback_cmd import run_feedback
-            sys.exit(run_feedback(args.feedback_args))
-
-        elif args.command == "update":
-            from .commands.org import EXIT_PENDING
-            from .commands.update import run_update
-            if run_update():
-                sys.exit(EXIT_PENDING)
-
-        elif args.command == "upgrade":
-            from .commands.upgrade import run_upgrade
-            run_upgrade(yes=args.yes, dry_run=args.dry_run)
-
-        elif args.command == "install":
-            if not args.item_type and not args.name:
-                from .commands.install import install
-                install(dry_run=args.dry_run)
-                return
-            if not args.item_type or not args.name:
-                Console.error("install requires <type> <name> (or no arguments for full setup)")
-                sys.exit(2)
-            from .commands.install_cmd import run_install
-            run_install(
-                item_type=args.item_type, name=args.name,
-                global_flag=args.global_flag, yes=args.yes,
-            )
-
-        elif args.command == "uninstall":
-            from .commands.uninstall import run_uninstall
-            run_uninstall(
-                item_type=args.item_type, name=args.name,
-                global_flag=args.global_flag, yes=args.yes,
-            )
-
-        elif args.command == "list":
-            from .commands.list_cmd import run_list
-            run_list(
-                type_filter=args.type_filter,
-                scope_filter=args.scope_filter,
-                show_all=args.show_all,
-            )
-
-        elif args.command == "search":
-            from .commands.search import run_search
-            run_search(term=args.term, type_filter=args.type_filter)
-
-        elif args.command == "outdated":
-            from .commands.outdated import run_outdated
-            run_outdated(type_filter=args.type_filter, show_all=args.show_all)
-
-        elif args.command == "info":
-            from .commands.info import run_info
-            run_info(item_type=args.item_type, name=args.name)
-
-        elif args.command == "export":
-            from .commands.export_cmd import run_export
-            run_export(out=args.out, latest=args.latest, include_repos=not args.no_repos)
-
-        elif args.command == "apply":
-            from .commands.apply_cmd import run_apply
-            run_apply(file=args.file, dry_run=args.dry_run, latest=args.latest, yes=args.yes)
-
-        elif args.command == "setup":
-            from .commands.setup import run_setup, run_setup_path, run_setup_all
-            if args.setup_all:
-                run_setup_all(skip_raycast=args.skip_raycast, dry_run=args.dry_run)
-            elif args.path:
-                run_setup_path(path=args.path, skip_raycast=args.skip_raycast, dry_run=args.dry_run)
-            else:
-                run_setup(skip_raycast=args.skip_raycast, dry_run=args.dry_run)
-
-        elif args.command == "untrack":
-            from .commands.untrack import run_untrack
-            run_untrack(path=args.path, yes=args.yes)
-
-        elif args.command == "config":
-            from .commands.config_cmd import run_config_list, run_config_set, run_config_reset
-            if args.config_command == "list":
-                run_config_list()
-            elif args.config_command == "set":
-                run_config_set(key=args.key, value=args.value)
-            elif args.config_command == "reset":
-                run_config_reset(key=args.key)
-            else:
-                config_parser.print_help()
-
-        elif args.command == "generate":
-            from .commands.generate import run_generate_rules, run_generate_files
-            if args.generate_command == "rules":
-                run_generate_rules()
-            elif args.generate_command == "files":
-                run_generate_files()
-            else:
-                generate_parser.print_help()
-
-        elif args.command == "validate":
-            from .commands.generate import run_validate
-            run_validate()
-
-        elif args.command == "prune":
-            from .commands.generate import run_prune
-            run_prune(yes=args.yes, dry_run=args.dry_run)
-
-        elif args.command == "discover-repos":
-            from .commands import discover as discover_repos_cmd
-            discover_repos_cmd.discover(dry_run=args.dry_run, auto=args.auto)
-
-        elif args.command == "discover":
-            from .commands.discover_catalog import run_discover
-            run_discover(
-                global_flag=args.global_flag,
-                rediscover=args.rediscover,
-                depth=args.depth,
-                yes=args.yes,
-                dry_run=args.dry_run,
-            )
-
-        elif args.command == "doctor":
-            from .commands.doctor import run_doctor
-            run_doctor()
-
-        elif args.command == "ports":
-            from .commands.ports import (
-                run_ports_list, run_ports_check, run_ports_register,
-                run_ports_unregister, run_ports_validate,
-            )
-            if args.ports_command == "list":
-                run_ports_list()
-            elif args.ports_command == "check":
-                run_ports_check(args.path)
-            elif args.ports_command == "register":
-                run_ports_register(args.path)
-            elif args.ports_command == "unregister":
-                run_ports_unregister(args.path)
-            elif args.ports_command == "validate":
-                run_ports_validate()
-            else:
-                ports_parser.print_help()
-
-        elif args.command == "test":
-            from .commands.test_cmd import (
-                run_test_run, run_test_schedule, run_test_status,
-                run_test_enable, run_test_disable, run_test_report,
-                run_test_detect,
-            )
-            if args.test_command == "run":
-                run_test_run(global_flag=args.global_flag)
-            elif args.test_command == "schedule":
-                sys.exit(
-                    run_test_schedule(
-                        global_flag=getattr(args, "global_flag", False),
-                        commands=args.schedule_do,
-                        list_only=args.schedule_list,
-                    )
-                )
-            elif args.test_command == "status":
-                run_test_status(global_flag=args.global_flag)
-            elif args.test_command == "enable":
-                run_test_enable()
-            elif args.test_command == "disable":
-                run_test_disable()
-            elif args.test_command == "report":
-                run_test_report(global_flag=args.global_flag)
-            elif args.test_command == "detect":
-                run_test_detect()
-            else:
-                test_parser.print_help()
-
-        # --- Deprecated command groups ---
-        elif args.command == "repo":
-            from .commands import repo as repo_cmd
-            if args.repo_command == "setup":
-                deprecation_warning("aec repo setup", "aec setup")
-                repo_cmd.setup(args.path, args.skip_raycast)
-            elif args.repo_command == "setup-all":
-                deprecation_warning("aec repo setup-all", "aec setup --all")
-                repo_cmd.setup_all()
-            elif args.repo_command == "list":
-                deprecation_warning("aec repo list", "aec list --scope global")
-                repo_cmd.list_repos()
-            elif args.repo_command == "prune":
-                deprecation_warning("aec repo prune", "aec prune")
-                repo_cmd.prune(args.yes, args.dry_run)
-            elif args.repo_command == "update":
-                deprecation_warning("aec repo update", "aec update")
-                repo_cmd.update(args.path, args.dry_run, getattr(args, 'all', False))
-            else:
-                repo_parser.print_help()
-
-        elif args.command == "agent-tools":
-            from .commands import agent_tools as at_cmd
-            if args.at_command == "setup":
-                deprecation_warning("aec agent-tools setup", "aec setup")
-                at_cmd.setup()
-            elif args.at_command == "migrate":
-                deprecation_warning("aec agent-tools migrate", "aec upgrade")
-                at_cmd.migrate(args.dry_run)
-            elif args.at_command == "rollback":
-                deprecation_warning("aec agent-tools rollback", "aec doctor")
-                at_cmd.rollback(args.backup_dir)
-            else:
-                at_parser.print_help()
-
-        elif args.command == "prompts":
-            from .commands import prompts_cmd
-            if args.prompts_command == "list":
-                prompts_cmd.run_prompts_list(
-                    command=args.command_filter, json_out=args.json_output
-                )
-            elif args.prompts_command == "template":
-                prompts_cmd.run_prompts_template(
-                    command=args.command_filter, output=args.output
-                )
-            elif args.prompts_command == "check":
-                sys.exit(prompts_cmd.run_prompts_check(args.answers_file))
-            else:
-                prompts_parser.print_help()
-
-        elif args.command == "rules":
-            if args.rules_command == "generate":
-                deprecation_warning("aec rules generate", "aec generate rules")
-                from .commands.generate import run_generate_rules
-                run_generate_rules()
-            elif args.rules_command == "validate":
-                deprecation_warning("aec rules validate", "aec validate")
-                from .commands.generate import run_validate
-                run_validate()
-            else:
-                rules_parser.print_help()
-
-        elif args.command == "files":
-            if args.files_command == "generate":
-                deprecation_warning("aec files generate", "aec generate files")
-                from .commands.generate import run_generate_files
-                run_generate_files()
-            else:
-                files_parser.print_help()
-
-        elif args.command == "skills":
-            from .commands import skills as skills_cmd
-            if args.skills_command == "list":
-                deprecation_warning("aec skills list", "aec list --type skill")
-                skills_cmd.list_skills()
-            elif args.skills_command == "install":
-                deprecation_warning("aec skills install", "aec install skill <name>")
-                skills_cmd.install_skills(names=args.names, yes=args.yes)
-            elif args.skills_command == "uninstall":
-                deprecation_warning("aec skills uninstall", "aec uninstall skill <name>")
-                skills_cmd.uninstall_skills(names=args.names, yes=args.yes)
-            elif args.skills_command == "update":
-                deprecation_warning("aec skills update", "aec upgrade")
-                names = [args.name] if args.name else None
-                skills_cmd.update_skills(names=names, yes=args.yes)
-            else:
-                skills_parser.print_help()
-
-        elif args.command == "preferences":
-            if args.prefs_command == "list":
-                deprecation_warning("aec preferences list", "aec config list")
-                from .commands.config_cmd import run_config_list
-                run_config_list()
-            elif args.prefs_command == "set":
-                deprecation_warning("aec preferences set", "aec config set")
-                from .commands.config_cmd import run_config_set
-                run_config_set(key=args.feature, value=args.value)
-            elif args.prefs_command == "reset":
-                deprecation_warning("aec preferences reset", "aec config reset")
-                from .commands.config_cmd import run_config_reset
-                run_config_reset(key=args.feature)
-            else:
-                prefs_parser.print_help()
+
+@app.command("doctor")
+def doctor_cmd():
+    """Check installation health."""
+    from .commands.doctor import run_doctor
+    run_doctor()
+
+@app.command("configure-agent")
+def configure_agent_cmd(
+    scope: Optional[str] = typer.Option(None, "--scope", help="project|global|both"),
+    profile: Optional[str] = typer.Option(None, "--profile", help="conservative|balanced|permissive|custom"),
+    agent_files: Optional[str] = typer.Option(None, "--agent-files", help="all|<csv>"),
+    check: bool = typer.Option(False, "--check", help="Exit non-zero on drift"),
+    refresh: bool = typer.Option(False, "--refresh", help="Re-render from stored config"),
+    remove: bool = typer.Option(False, "--remove", help="Remove the blurb and config"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show plan; write nothing"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmations"),
+):
+    """Manage the AEC agent-instruction blurb."""
+    from .commands.configure_agent import run_configure_agent
+    raise typer.Exit(run_configure_agent(
+        scope=scope, profile=profile, agent_files=agent_files,
+        check=check, refresh=refresh, remove=remove, dry_run=dry_run, yes=yes,
+    ))
+
+@app.command("version")
+def version_cmd():
+    """Show version information."""
+    Console.print(f"aec version {__version__}")
+
+# --- hooks ---
+from .commands.hooks_cmd import hooks_app
+app.add_typer(hooks_app, name="hooks")
+
+# --- run-script (top-level; invoked from hook bodies) ---
+from .commands.run_script_cmd import run_script
+app.command("run-script")(run_script)
+
+# --- feedback (hands off to the feedback-loop skill's feedback.py) ---
+from .commands.feedback_cmd import feedback as feedback_cmd
+app.command(
+    "feedback",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True,
+                      "help_option_names": []},
+)(feedback_cmd)
+
+# ------------------------------------------------------------------ #
+#  Deprecated command groups (kept as shims)                          #
+# ------------------------------------------------------------------ #
+
+# --- repo (deprecated) ---
+repo_app = typer.Typer(
+    help="[DEPRECATED] Use top-level commands instead",
+    deprecated=True,
+)
+app.add_typer(repo_app, name="repo")
+
+@repo_app.command("list")
+def repo_list_deprecated():
+    """[DEPRECATED] Use `aec list` instead."""
+    deprecation_warning("aec repo list", "aec list --scope global")
+    from .commands.repo import list_repos
+    list_repos()
+
+@repo_app.command("setup")
+def repo_setup_deprecated(
+    path: Optional[str] = typer.Argument(None, help="Project name or path"),
+    skip_raycast: bool = typer.Option(False, "--skip-raycast"),
+):
+    """[DEPRECATED] Use `aec setup` instead."""
+    deprecation_warning("aec repo setup", "aec setup")
+    from .commands.repo import setup
+    setup(path, skip_raycast)
+
+@repo_app.command("setup-all")
+def repo_setup_all_deprecated():
+    """[DEPRECATED] Use `aec setup --all` instead."""
+    deprecation_warning("aec repo setup-all", "aec setup --all")
+    from .commands.repo import setup_all
+    setup_all()
+
+@repo_app.command("update")
+def repo_update_deprecated(
+    path: Optional[str] = typer.Argument(None),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    update_all: bool = typer.Option(False, "--all"),
+):
+    """[DEPRECATED] Use `aec update` instead."""
+    deprecation_warning("aec repo update", "aec update")
+    from .commands.repo import update
+    update(path, dry_run, update_all)
+
+@repo_app.command("prune")
+def repo_prune_deprecated(
+    yes: bool = typer.Option(False, "--yes", "-y"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+):
+    """[DEPRECATED] Use `aec prune` instead."""
+    deprecation_warning("aec repo prune", "aec prune")
+    from .commands.repo import prune
+    prune(yes, dry_run)
+
+# --- skills (deprecated) ---
+skills_app = typer.Typer(
+    help="[DEPRECATED] Use `aec install/uninstall/list` instead",
+    deprecated=True,
+)
+app.add_typer(skills_app, name="skills")
+
+@skills_app.command("list")
+def skills_list_deprecated():
+    """[DEPRECATED] Use `aec list --type skill` instead."""
+    deprecation_warning("aec skills list", "aec list --type skill")
+    from .commands.skills import list_skills
+    list_skills()
+
+@skills_app.command("install")
+def skills_install_deprecated(
+    names: list[str] = typer.Argument(..., help="Skill name(s)"),
+    yes: bool = typer.Option(False, "--yes", "-y"),
+):
+    """[DEPRECATED] Use `aec install skill <name>` instead."""
+    deprecation_warning("aec skills install", "aec install skill <name>")
+    from .commands.skills import install_skills
+    install_skills(names=names, yes=yes)
+
+@skills_app.command("uninstall")
+def skills_uninstall_deprecated(
+    names: list[str] = typer.Argument(..., help="Skill name(s)"),
+    yes: bool = typer.Option(False, "--yes", "-y"),
+):
+    """[DEPRECATED] Use `aec uninstall skill <name>` instead."""
+    deprecation_warning("aec skills uninstall", "aec uninstall skill <name>")
+    from .commands.skills import uninstall_skills
+    uninstall_skills(names=names, yes=yes)
+
+@skills_app.command("update")
+def skills_update_deprecated(
+    name: Optional[str] = typer.Argument(None),
+    yes: bool = typer.Option(False, "--yes", "-y"),
+):
+    """[DEPRECATED] Use `aec upgrade` instead."""
+    deprecation_warning("aec skills update", "aec upgrade")
+    from .commands.skills import update_skills
+    names = [name] if name else None
+    update_skills(names=names, yes=yes)
+
+# --- agent-tools (deprecated) ---
+agent_tools_app = typer.Typer(
+    help="[DEPRECATED] Use `aec setup` or `aec doctor` instead",
+    deprecated=True,
+)
+app.add_typer(agent_tools_app, name="agent-tools")
+
+@agent_tools_app.command("setup")
+def at_setup_deprecated(
+    dry_run: bool = typer.Option(False, "--dry-run"),
+):
+    """[DEPRECATED] Use `aec setup` instead."""
+    deprecation_warning("aec agent-tools setup", "aec setup")
+    from .commands.agent_tools import setup
+    setup(dry_run=dry_run)
+
+@agent_tools_app.command("migrate")
+def at_migrate_deprecated(
+    dry_run: bool = typer.Option(False, "--dry-run"),
+):
+    """[DEPRECATED] Use `aec upgrade` instead."""
+    deprecation_warning("aec agent-tools migrate", "aec upgrade")
+    from .commands.agent_tools import migrate
+    migrate(dry_run=dry_run)
+
+@agent_tools_app.command("rollback")
+def at_rollback_deprecated(
+    backup_dir: str = typer.Argument(..., help="Backup directory"),
+):
+    """[DEPRECATED] No direct replacement."""
+    deprecation_warning("aec agent-tools rollback", "aec doctor")
+    from .commands.agent_tools import rollback
+    rollback(backup_dir)
+
+# --- rules (deprecated) ---
+rules_app = typer.Typer(
+    help="[DEPRECATED] Use `aec generate rules` or `aec validate` instead",
+    deprecated=True,
+)
+app.add_typer(rules_app, name="rules")
+
+@rules_app.command("generate")
+def rules_generate_deprecated():
+    """[DEPRECATED] Use `aec generate rules` instead."""
+    deprecation_warning("aec rules generate", "aec generate rules")
+    from .commands.generate import run_generate_rules
+    run_generate_rules()
+
+@rules_app.command("validate")
+def rules_validate_deprecated():
+    """[DEPRECATED] Use `aec validate` instead."""
+    deprecation_warning("aec rules validate", "aec validate")
+    from .commands.generate import run_validate
+    run_validate()
+
+# --- files (deprecated) ---
+files_app = typer.Typer(
+    help="[DEPRECATED] Use `aec generate files` instead",
+    deprecated=True,
+)
+app.add_typer(files_app, name="files")
+
+@files_app.command("generate")
+def files_generate_deprecated():
+    """[DEPRECATED] Use `aec generate files` instead."""
+    deprecation_warning("aec files generate", "aec generate files")
+    from .commands.generate import run_generate_files
+    run_generate_files()
+
+# --- prompts (headless discovery) ---
+prompts_app = typer.Typer(
+    help="Discover, template, and validate the prompts AEC can ask",
+)
+app.add_typer(prompts_app, name="prompts")
+
+@prompts_app.command("list")
+def prompts_list_cmd(
+    command: str = typer.Option(
+        None, "--command", "-c", help="Only show prompts for commands matching this text"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Machine-readable output"),
+):
+    """Show every prompt AEC can ask, with its ID, type, and default."""
+    from .commands.prompts_cmd import run_prompts_list
+    run_prompts_list(command=command, json_out=json_output)
+
+@prompts_app.command("template")
+def prompts_template_cmd(
+    command: str = typer.Option(
+        None, "--command", "-c", help="Only include prompts for commands matching this text"
+    ),
+    output: str = typer.Option(None, "--output", "-o", help="Write to this file instead of stdout"),
+):
+    """Emit a skeleton answers file for use with --answers."""
+    from .commands.prompts_cmd import run_prompts_template
+    run_prompts_template(command=command, output=output)
+
+@prompts_app.command("check")
+def prompts_check_cmd(
+    answers_file: str = typer.Argument(..., help="Answers file to validate"),
+):
+    """Validate an answers file against the prompt catalog."""
+    from .commands.prompts_cmd import run_prompts_check
+    raise typer.Exit(run_prompts_check(answers_file))
+
+# --- org (phase 1) ---
+from .commands.org import org_app
+app.add_typer(org_app, name="org", help="Manage organization configurations")
+
+# --- preferences (deprecated) ---
+prefs_app = typer.Typer(
+    help="[DEPRECATED] Use `aec config` instead",
+    deprecated=True,
+)
+app.add_typer(prefs_app, name="preferences")
+
+@prefs_app.command("list")
+def prefs_list_deprecated():
+    """[DEPRECATED] Use `aec config list` instead."""
+    deprecation_warning("aec preferences list", "aec config list")
+    from .commands.config_cmd import run_config_list
+    run_config_list()
+
+@prefs_app.command("set")
+def prefs_set_deprecated(
+    feature: str = typer.Argument(..., help="Feature name"),
+    value: str = typer.Argument(..., help="'on' or 'off'"),
+):
+    """[DEPRECATED] Use `aec config set` instead."""
+    deprecation_warning("aec preferences set", "aec config set")
+    from .commands.config_cmd import run_config_set
+    run_config_set(key=feature, value=value)
+
+@prefs_app.command("reset")
+def prefs_reset_deprecated(
+    feature: str = typer.Argument(..., help="Feature name"),
+):
+    """[DEPRECATED] Use `aec config reset` instead."""
+    deprecation_warning("aec preferences reset", "aec config reset")
+    from .commands.config_cmd import run_config_reset
+    run_config_reset(key=feature)
 
 
 def main():
@@ -1379,14 +775,11 @@ def main():
     if _debug.debug_from_env_or_argv():
         _debug.enable_debug()
         # Strip --debug so it can appear before OR after the subcommand
-        # without confusing typer/argparse subparsers.
+        # without confusing typer's subcommand parsing.
         sys.argv = [a for a in sys.argv if a != "--debug"]
 
     try:
-        if HAS_TYPER:
-            app()
-        else:
-            app()
+        app()
     except SystemExit:
         raise
     except KeyboardInterrupt:

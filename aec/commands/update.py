@@ -97,7 +97,7 @@ def _refresh_org_configs() -> bool:
     try:
         from ..lib.org_config import OrgConfigError, OrgPaths
         from .org import pending_fix, pending_orgs, refresh_remote_orgs
-    except ImportError:  # org-configs extra (PyYAML) or typer not installed
+    except ImportError:  # org-configs extra (PyYAML) not installed
         return False
 
     paths = OrgPaths.default()
