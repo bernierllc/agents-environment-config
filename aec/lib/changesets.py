@@ -156,22 +156,15 @@ def _new_id(root: Path, now: datetime) -> str:
             return cs_id
 
 
-def _finalize(d: Path, journal: dict) -> Optional[Changeset]:
-    """Turn a pending journal into a changeset by recording each file's current state."""
+def _from_journal(journal: dict) -> Changeset:
+    """The changeset a journal describes, using each file's current state (no writes)."""
     changes: List[FileChange] = []
     for path_str, b in journal["before"].items():
         path = Path(path_str)
-        after = _read(path)
-        a = None if after is None else _sha(after)
-        if a == b:
-            continue
-        if after is not None:
-            _write_bytes_atomic(d / "blobs" / a, after)
-        changes.append(FileChange(path, b, a))
-    if not changes:
-        shutil.rmtree(d)
-        return None
-    cs = Changeset(
+        a = _current_hash(path)
+        if a != b:
+            changes.append(FileChange(path, b, a))
+    return Changeset(
         id=journal["id"],
         created_at=journal["created_at"],
         kind=journal["kind"],
@@ -180,6 +173,19 @@ def _finalize(d: Path, journal: dict) -> Optional[Changeset]:
         files=changes,
         reverses=journal.get("reverses"),
     )
+
+
+def _finalize(d: Path, journal: dict) -> Optional[Changeset]:
+    """Record a journal's change: after-blobs plus manifest. None if nothing changed."""
+    cs = _from_journal(journal)
+    if not cs.files:
+        shutil.rmtree(d)
+        return None
+    for fc in cs.files:
+        if fc.after is not None:
+            data = _read(fc.path)
+            if data is not None and _sha(data) == fc.after:
+                _write_bytes_atomic(d / "blobs" / fc.after, data)
     atomic_write_json(d / _MANIFEST, _to_json(cs))
     (d / _PENDING).unlink()
     return cs
@@ -236,11 +242,20 @@ def begin(
 
 
 def load(cs_id: str) -> Changeset:
-    manifest = rollbacks_dir() / cs_id / _MANIFEST
+    """Load a changeset. One whose process never committed (crash, or still
+    running) is read from its journal and the files' current state; loading
+    never writes, so a running change is never finalized from under it."""
+    d = rollbacks_dir() / cs_id
     try:
-        return _from_json(json.loads(manifest.read_text(encoding="utf-8")))
+        return _from_json(json.loads((d / _MANIFEST).read_text(encoding="utf-8")))
+    except FileNotFoundError:
+        pass
+    try:
+        cs = _from_journal(json.loads((d / _PENDING).read_text(encoding="utf-8")))
     except FileNotFoundError:
         raise ChangesetNotFound(cs_id) from None
+    cs.short += " (interrupted)"
+    return cs
 
 
 def list_changesets() -> List[Changeset]:
@@ -251,17 +266,10 @@ def list_changesets() -> List[Changeset]:
     for d in sorted(root.iterdir(), reverse=True):
         if not d.is_dir():
             continue
-        if (d / _PENDING).exists() and not (d / _MANIFEST).exists():
-            # shortcut: assumes no other aec process is mid-change; add a lock if that becomes real.
-            try:
-                if _finalize(d, json.loads((d / _PENDING).read_text(encoding="utf-8"))) is None:
-                    continue
-                logger.warning("recorded interrupted change %s", d.name)
-            except (OSError, ValueError, KeyError) as e:
-                logger.warning("cannot record interrupted change %s: %s", d.name, e)
-                continue
         try:
-            out.append(load(d.name))
+            cs = load(d.name)
+            if cs.files:  # an interrupted change that touched nothing is noise
+                out.append(cs)
         except (ChangesetNotFound, OSError, ValueError, KeyError, TypeError) as e:
             logger.warning("skipping unreadable changeset %s: %s", d.name, e)
     out.sort(key=lambda c: (c.created_at, c.id), reverse=True)  # id suffix is random within a second
@@ -323,4 +331,6 @@ def revert(cs_id: str, force: bool = False) -> Changeset:
         raise NothingToRevert(f"reverting {orig.id} would change no file")
     orig.reversed_by = new.id
     atomic_write_json(orig.dir / _MANIFEST, _to_json(orig))
+    # An interrupted original is now settled; a late commit from its process fails loudly.
+    (orig.dir / _PENDING).unlink(missing_ok=True)
     return new

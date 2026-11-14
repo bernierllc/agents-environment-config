@@ -170,12 +170,24 @@ def test_store_failure_happens_before_any_change(tmp_path, monkeypatch):
     assert f.read_bytes() == b"keep"
 
 
-def test_interrupted_change_is_recorded_on_list(tmp_path):
+def test_interrupted_change_is_listed_and_revertible(tmp_path):
     f = tmp_path / "f"
     f.write_bytes(b"old")
     c.begin([f], "s", "l", "test")  # process dies before commit
     f.write_bytes(b"new")
     (cs,) = c.list_changesets()
+    assert cs.short.endswith("(interrupted)")
+    c.revert(cs.id)
+    assert f.read_bytes() == b"old"
+
+
+def test_listing_never_finalizes_a_running_change(tmp_path):
+    f = tmp_path / "f"
+    f.write_bytes(b"old")
+    pending = c.begin([f], "s", "l", "test")
+    assert c.list_changesets() == []  # nothing changed yet; must not delete the snapshot
+    f.write_bytes(b"new")
+    cs = pending.commit()
     c.revert(cs.id)
     assert f.read_bytes() == b"old"
 
