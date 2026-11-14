@@ -11,6 +11,7 @@ from ..lib import (
     Console,
     IS_MACOS,
     get_repo_root,
+    require_repo_root,
     get_projects_dir,
     get_github_orgs,
     ensure_directory,
@@ -1204,10 +1205,7 @@ def setup(
     if dry_run:
         Console.warning("DRY RUN MODE - No changes will be made\n")
 
-    repo_root = get_repo_root()
-    if not repo_root:
-        Console.error("Could not find agents-environment-config repository")
-        raise SystemExit(1)
+    repo_root = require_repo_root()
 
     Console.print(f"Template source: {Console.path(repo_root)}")
 

@@ -2,6 +2,8 @@
 
 import json
 import pytest
+
+from aec.lib.errors import AecError
 from pathlib import Path
 from unittest.mock import patch
 
@@ -76,7 +78,7 @@ class TestUpdateCommand:
     @patch("aec.commands.update.find_tracked_repo", return_value=None)
     @patch("aec.commands.update.get_all_tracked_repos", return_value=[])
     @patch("aec.commands.update.fetch_latest", return_value=True)
-    @patch("aec.commands.update.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     @patch("aec.commands.update.get_source_dirs")
     @patch("aec.commands.update._get_manifest_path")
     def test_reports_outdated_global_skills(
@@ -102,7 +104,7 @@ class TestUpdateCommand:
 
     @patch("aec.commands.update.fetch_latest",
            side_effect=RepoSyncError("x"))
-    @patch("aec.commands.update.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     def test_fetch_failure_propagates_to_cli(self, mock_root, mock_fetch, aec_env, capsys):
         from aec.commands.update import run_update
 
@@ -114,7 +116,7 @@ class TestUpdateCommand:
     @patch("aec.commands.update.find_tracked_repo", return_value=None)
     @patch("aec.commands.update.get_all_tracked_repos", return_value=[])
     @patch("aec.commands.update.fetch_latest", return_value=True)
-    @patch("aec.commands.update.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     @patch("aec.commands.update.get_source_dirs")
     @patch("aec.commands.update._get_manifest_path")
     def test_reports_up_to_date_when_versions_match(
@@ -141,18 +143,17 @@ class TestUpdateCommand:
         assert "up to date" in output.lower()
         assert "test-skill" not in output
 
-    @patch("aec.commands.update.get_repo_root", return_value=None)
+    @patch("aec.lib.config.get_repo_root", return_value=None)
     def test_handles_missing_repo(self, mock_root, capsys):
         from aec.commands.update import run_update
 
-        run_update()
-        output = capsys.readouterr().out
-        assert "not found" in output.lower() or "setup" in output.lower()
+        with pytest.raises(AecError, match="repository checkout"):
+            run_update()
 
     @patch("aec.commands.update.find_tracked_repo", return_value=None)
     @patch("aec.commands.update.get_all_tracked_repos", return_value=[])
     @patch("aec.commands.update.fetch_latest", return_value=True)
-    @patch("aec.commands.update.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     @patch("aec.commands.update.get_source_dirs")
     @patch("aec.commands.update._get_manifest_path")
     def test_records_update_check_timestamp(
@@ -178,7 +179,7 @@ class TestUpdateCommand:
     @patch("aec.commands.update.find_tracked_repo")
     @patch("aec.commands.update.get_all_tracked_repos")
     @patch("aec.commands.update.fetch_latest", return_value=True)
-    @patch("aec.commands.update.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     @patch("aec.commands.update.get_source_dirs")
     @patch("aec.commands.update._get_manifest_path")
     def test_mentions_other_tracked_repos(

@@ -214,6 +214,23 @@ def get_repo_root() -> Optional[Path]:
     return None
 
 
+def require_repo_root() -> Path:
+    """The AEC repo checkout, or an AecError telling the user how to get one."""
+    from .errors import AecError
+
+    repo = get_repo_root()
+    if repo is None:
+        raise AecError(
+            "AEC could not find its repository checkout: this `aec` is not "
+            "installed from a clone of the AEC repo.",
+            fix=[
+                "git clone https://github.com/bernierllc/agents-environment-config.git",
+                "cd agents-environment-config && pip install -e .",
+            ],
+        )
+    return repo
+
+
 def get_projects_dir() -> Path:
     """
     Get the default projects directory.

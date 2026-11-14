@@ -1,7 +1,7 @@
 """Files commands: aec files {generate}"""
 
 
-from ..lib import Console, get_repo_root
+from ..lib import Console, require_repo_root
 
 
 def generate() -> None:
@@ -12,10 +12,7 @@ def generate() -> None:
     """
     Console.header("Generate Agent Instruction Files")
 
-    repo_root = get_repo_root()
-    if not repo_root:
-        Console.error("Could not find agents-environment-config repository")
-        raise SystemExit(1)
+    repo_root = require_repo_root()
 
     templates_dir = repo_root / "templates"
     if not templates_dir.exists():

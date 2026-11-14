@@ -5,7 +5,7 @@ from pathlib import Path
 from ..lib.claude_plugins import is_claude_managed, marketplace_of, refresh_marketplace
 from ..lib.console import Console
 from ..lib.errors import AecError
-from ..lib.config import get_repo_root, INSTALLED_MANIFEST_V2
+from ..lib.config import INSTALLED_MANIFEST_V2, require_repo_root
 from ..lib.manifest_v2 import (
     get_all_repo_scopes, get_installed, load_manifest, record_update_check, save_manifest,
 )
@@ -25,10 +25,7 @@ def run_update() -> bool:
     Returns True when an org config is left pending (review, trust change,
     or failed refresh), so the CLI can exit ``EXIT_PENDING``.
     """
-    repo = get_repo_root()
-    if repo is None:
-        Console.error("AEC repo not found. Run `aec setup` first.")
-        return False
+    repo = require_repo_root()
 
     Console.print("Pulling latest...", end=" ")
     try:

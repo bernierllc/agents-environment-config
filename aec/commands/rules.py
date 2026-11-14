@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import List, Tuple
 
-from ..lib import Console, get_repo_root, ensure_directory
+from ..lib import Console, ensure_directory, require_repo_root
 
 
 def _strip_frontmatter(content: str) -> str:
@@ -105,10 +105,7 @@ def generate(dry_run: bool = False) -> None:
     if dry_run:
         Console.warning("DRY RUN MODE - No changes will be made\n")
 
-    repo_root = get_repo_root()
-    if not repo_root:
-        Console.error("Could not find agents-environment-config repository")
-        raise SystemExit(1)
+    repo_root = require_repo_root()
 
     Console.print(f"Repository: {Console.path(repo_root)}")
 
@@ -169,10 +166,7 @@ def validate() -> Tuple[bool, List[str]]:
     """
     Console.header("Validate Rule Parity")
 
-    repo_root = get_repo_root()
-    if not repo_root:
-        Console.error("Could not find agents-environment-config repository")
-        return False, ["Repository not found"]
+    repo_root = require_repo_root()
 
     cursor_rules = _get_cursor_rules(repo_root)
     if not cursor_rules:

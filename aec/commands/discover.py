@@ -6,7 +6,7 @@ import typer
 
 from ..lib import (
     Console,
-    get_repo_root,
+    require_repo_root,
     discover_from_scripts,
     is_logged,
     log_setup,
@@ -32,10 +32,7 @@ def discover(
     """
     Console.header("Repo Discovery")
 
-    repo_root = get_repo_root()
-    if not repo_root:
-        Console.error("Could not find agents-environment-config repository")
-        raise SystemExit(1)
+    repo_root = require_repo_root()
 
     raycast_dir = repo_root / "raycast_scripts"
     if not raycast_dir.is_dir():

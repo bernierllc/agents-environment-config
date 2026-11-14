@@ -45,7 +45,7 @@ For detailed architecture, see `plans/cursor/architecture.md`.
 ### Maintenance Process
 - When you change behavior or standards, submit an edit to the relevant rule file in the same PR
 - When adopting a new convention, add it to the appropriate rule file and reference related docs in `/docs/`
-- Link to decisions or plans in `./plans/` when context helps future readers
+- Link to decisions or plans in `./.plans/` when context helps future readers
 - Run linting before committing rule changes to ensure formatting stays consistent
 
 ### Conflict Resolution
@@ -55,7 +55,7 @@ For detailed architecture, see `plans/cursor/architecture.md`.
 
 ### Documentation
 - When adopting a new convention, add it to the appropriate rule file and reference related docs in `/docs/`
-- Link to decisions or plans in `./plans/` when context helps future readers
+- Link to decisions or plans in `./.plans/` when context helps future readers
 - Cross-reference related rules appropriately
 
 ## References

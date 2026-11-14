@@ -5,7 +5,7 @@ from pathlib import Path
 
 from ..lib import (
     Console,
-    get_repo_root,
+    require_repo_root,
     AGENT_TOOLS_DIR,
     CLAUDE_DIR,
     CURSOR_DIR,
@@ -67,10 +67,7 @@ def setup(dry_run: bool = False) -> None:
     if dry_run:
         Console.warning("DRY RUN MODE - No changes will be made\n")
 
-    repo_root = get_repo_root()
-    if not repo_root:
-        Console.error("Could not find agents-environment-config repository")
-        raise SystemExit(1)
+    repo_root = require_repo_root()
 
     Console.print(f"Repository: {Console.path(repo_root)}")
     Console.print(f"Target: {Console.path(AGENT_TOOLS_DIR)}")
@@ -223,10 +220,7 @@ def migrate(dry_run: bool = False) -> None:
     if dry_run:
         Console.warning("DRY RUN MODE - No changes will be made\n")
 
-    repo_root = get_repo_root()
-    if not repo_root:
-        Console.error("Could not find agents-environment-config repository")
-        raise SystemExit(1)
+    repo_root = require_repo_root()
 
     # Check if already migrated
     marker = AGENT_TOOLS_DIR / ".aec-managed"

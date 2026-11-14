@@ -31,7 +31,7 @@ project/
 ### Documentation Standards
 - **Architecture, Design, Functionality, Principles**: Note in `.cursor/rules/*.mdc` files
 - **Be Pithy**: Link to files in `/docs/` rather than including all content
-- **Planning Docs**: Store in `./plans/**/*.md`, use task lists (- [ ] / - [x]) and cross-link
+- **Planning Docs**: Store in `./.plans/**/*.md`, use task lists (- [ ] / - [x]) and cross-link
 - **Implementation Docs**: If mock, ensure docs have implementation docs added/updated
 
 ## Code Quality
@@ -42,7 +42,7 @@ project/
 - **Validation**: Comprehensive input validation and error reporting
 
 ### Refactoring Guidelines
-- **Size Management**: If file/function/method/class gets too large, suggest refactor plan in `./plans/`
+- **Size Management**: If file/function/method/class gets too large, suggest refactor plan in `./.plans/`
 - **Reusability**: Consider reusability with other functionality in the project
 - **Safe Refactoring**: Move functionality to more manageable and reusable state
 
