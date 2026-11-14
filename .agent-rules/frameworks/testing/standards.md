@@ -283,4 +283,3 @@ Reference/lookup data (roles, statuses, categories, feature flags) MUST live in 
 - Martin Fowler — “Mocks Aren’t Stubs”
 - Google Testing Blog — Testing on the Toilet (test doubles, hermetic tests)
 - Thoughtworks Tech Radar — Testing strategies and contract testing
-
