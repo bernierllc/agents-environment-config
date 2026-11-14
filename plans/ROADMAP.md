@@ -17,6 +17,13 @@ unit of impact lives — not a contract.
 
 ## Review follow-ups awaiting prioritization
 
+- [Catalog support for per-repo records](2026-11-14-catalog-repo-records.md): catalogs can already
+  carry per-repo data; AEC should validate, expose and check it. Scheduling pending.
+
+- [Release pushes vs PR-only rules](2026-11-14-release-pushes-vs-pr-only-rules.md): the release
+  workflow pushes to `main` directly, which blocks PR-required rules and a `staging` branch.
+  Scheduling pending.
+
 - [Deterministic directory prefix rendering](2026-11-10-directory-prefix-rendering.md):
   P2 from PR #131; S1 replaces cascading rewrites with original-path matching
   and validates overlapping defaults. Scheduling pending.
