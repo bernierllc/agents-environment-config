@@ -238,14 +238,43 @@ def _git_out(repo_path: Path, *args: str) -> Optional[str]:
     return done.stdout.strip() if done.returncode == 0 else None
 
 
-def _paths_reset_would_overwrite(repo_path: Path, head: str, target: str) -> list:
-    """Files untracked or ignored here that the target commit tracks.
+def _git_paths(repo_path: Path, *args: str) -> Optional[list]:
+    """NUL-separated paths from git (no quoting), or None if git failed."""
+    done = subprocess.run(["git", *args, "-z"], cwd=repo_path, capture_output=True)
+    if done.returncode != 0:
+        return None
+    return [os.fsdecode(p) for p in done.stdout.split(b"\0") if p]
 
-    ``git reset --keep`` silently overwrites an ignored file whose path the
-    target tracks, so these block the remedy.
+
+def _paths_reset_would_overwrite(repo_path: Path, head: str, target: str) -> list:
+    """Untracked or ignored paths that a reset from head to target could clobber.
+
+    ``git reset --keep`` treats ignored files as expendable. Rather than model
+    each way it can overwrite one, this fails closed: any untracked or ignored
+    path that is, contains or sits under a changed path blocks the reset, as
+    does a changed submodule directory with anything in it. The comparison
+    ignores case, for case-insensitive filesystems.
     """
-    added = _git_out(repo_path, "diff", "--name-only", "--no-renames", "--diff-filter=A", head, target)
-    return [p for p in (added or "").splitlines() if os.path.lexists(repo_path / p)]
+    changed = _git_paths(repo_path, "diff", "--name-only", "--no-renames", head, target)
+    others = _git_paths(repo_path, "ls-files", "--others", "--directory")
+    before = _git_paths(repo_path, "ls-tree", "-r", head)
+    after = _git_paths(repo_path, "ls-tree", "-r", target)
+    if None in (changed, others, before, after):
+        return ["(git could not list the files a reset would touch)"]
+    # a submodule that stays a submodule keeps its directory; one that goes away doesn't
+    gitlinks = ({e.split("\t", 1)[1] for e in before if e.startswith("160000 ")}
+                - {e.split("\t", 1)[1] for e in after if e.startswith("160000 ")})
+    loose = {o.rstrip("/"): o.rstrip("/").casefold() for o in others}
+    blocking = []
+    for path in changed:
+        d = path.casefold()
+        hits = [o for o, u in loose.items()
+                if u == d or d.startswith(u + "/") or u.startswith(d + "/")]
+        sub = repo_path / path
+        if path in gitlinks and sub.is_dir() and any(sub.iterdir()):
+            hits.append(path)
+        blocking.extend(hits)
+    return sorted(set(blocking))
 
 
 def _reset_to_upstream_remedy(repo_path: Path, local_commits: int):
@@ -263,14 +292,18 @@ def _reset_to_upstream_remedy(repo_path: Path, local_commits: int):
 
     branch = _git_out(repo_path, "symbolic-ref", "-q", "HEAD")
     head = _git_out(repo_path, "rev-parse", "HEAD")
+    upstream = _git_out(repo_path, "rev-parse", "--symbolic-full-name", "@{u}")
     target = _git_out(repo_path, "rev-parse", "@{u}")
-    if not (branch and head and target) or _paths_reset_would_overwrite(repo_path, head, target):
+    if not (branch and head and upstream and target) or _paths_reset_would_overwrite(repo_path, head, target):
         return None
 
     def apply() -> str:
-        now = (_git_out(repo_path, "symbolic-ref", "-q", "HEAD"), _git_out(repo_path, "rev-parse", "HEAD"))
+        now = tuple(_git_out(repo_path, *a) for a in (
+            ("symbolic-ref", "-q", "HEAD"), ("rev-parse", "HEAD"),
+            ("rev-parse", "--symbolic-full-name", "@{u}"), ("rev-parse", "@{u}"),
+        ))
         blocking = _paths_reset_would_overwrite(repo_path, head, target)
-        if now != (branch, head) or not _tracked_tree_clean(repo_path) or blocking:
+        if now != (branch, head, upstream, target) or not _tracked_tree_clean(repo_path) or blocking:
             raise AecError(
                 "The AEC checkout changed before the reset, so nothing was reset.",
                 detail="\n".join(f"would overwrite: {p}" for p in blocking) or None,

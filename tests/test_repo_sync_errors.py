@@ -274,3 +274,75 @@ def test_failed_remedy_is_reported_and_exits_1(remedy_cli, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "Reset failed." in out and "do it by hand" in out
     assert remedy_cli["runs"] == 1
+
+
+def offered(seed, clone):
+    git(seed, "push", "-q", "origin", "main")
+    commit(clone, "local-only")
+    with pytest.raises(RepoSyncError) as exc:
+        fetch_latest(clone)
+    return exc.value.remedy is not None
+
+
+def test_no_remedy_for_ignored_file_with_a_quoted_name(remote_and_clone):
+    seed, clone = remote_and_clone
+    commit(seed, "café\tx", "upstream")
+    (clone / ".git" / "info" / "exclude").write_text("caf*\n")
+    (clone / "café\tx").write_text("SECRET")
+    assert not offered(seed, clone)
+
+
+def test_no_remedy_when_an_ignored_file_sits_where_upstream_adds_a_folder(remote_and_clone):
+    seed, clone = remote_and_clone
+    (seed / "folder").mkdir()
+    commit(seed, "folder/child", "upstream")
+    (clone / ".git" / "info" / "exclude").write_text("folder\n")
+    (clone / "folder").write_text("SECRET")
+    assert not offered(seed, clone)
+
+
+def test_no_remedy_when_a_submodule_dir_with_content_becomes_a_file(remote_and_clone, tmp_path):
+    seed, clone = remote_and_clone
+    lib = tmp_path / "lib"
+    git(tmp_path, "init", "-q", "-b", "main", str(lib))
+    commit(lib, "f")
+    for repo in (seed, clone):
+        git(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(lib), "sub")
+        git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "sub")
+    git(seed, "push", "-q", "-f", "origin", "main")
+    git(clone, "fetch", "-q")
+    git(clone, "reset", "-q", "--hard", "origin/main")
+    git(seed, "rm", "-q", "sub")
+    commit(seed, "sub", "now a file")
+    (clone / "sub" / "keep.txt").write_text("SECRET")
+    assert not offered(seed, clone)
+
+
+def test_remedy_refuses_when_upstream_changed_before_the_answer(remote_and_clone):
+    seed, clone = remote_and_clone
+    diverge(seed, clone)
+    with pytest.raises(RepoSyncError) as exc:
+        fetch_latest(clone)
+    commit(seed, "upstream2")
+    git(seed, "push", "-q", "origin", "main")
+    git(clone, "fetch", "-q")
+    before = rev(clone, "HEAD")
+    with pytest.raises(AecError, match="changed before the reset"):
+        exc.value.remedy.apply()
+    assert rev(clone, "HEAD") == before
+
+
+def test_submodule_pointer_bump_still_offers_the_remedy(remote_and_clone, tmp_path):
+    seed, clone = remote_and_clone
+    lib = tmp_path / "lib"
+    git(tmp_path, "init", "-q", "-b", "main", str(lib))
+    commit(lib, "f")
+    git(seed, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(lib), "sub")
+    git(seed, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "sub")
+    git(seed, "push", "-q", "origin", "main")
+    git(clone, "pull", "-q")
+    git(clone, "-c", "protocol.file.allow=always", "submodule", "update", "-q", "--init")
+    commit(lib, "g")
+    git(seed / "sub", "pull", "-q")
+    git(seed, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "bump")
+    assert offered(seed, clone)
