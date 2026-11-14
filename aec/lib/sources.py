@@ -1,6 +1,7 @@
 """Source management: discover items, check staleness, fetch updates."""
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -232,18 +233,52 @@ def _tracked_tree_clean(repo_path: Path) -> bool:
     return done.returncode == 0 and not done.stdout.strip()
 
 
+def _git_out(repo_path: Path, *args: str) -> Optional[str]:
+    done = subprocess.run(["git", *args], cwd=repo_path, capture_output=True, text=True)
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def _paths_reset_would_overwrite(repo_path: Path, head: str, target: str) -> list:
+    """Files untracked or ignored here that the target commit tracks.
+
+    ``git reset --keep`` silently overwrites an ignored file whose path the
+    target tracks, so these block the remedy.
+    """
+    added = _git_out(repo_path, "diff", "--name-only", "--no-renames", "--diff-filter=A", head, target)
+    return [p for p in (added or "").splitlines() if os.path.lexists(repo_path / p)]
+
+
 def _reset_to_upstream_remedy(repo_path: Path, local_commits: int):
-    """Back up HEAD on a new branch, then move the branch to its upstream."""
+    """Back up HEAD on a new branch, then move the branch to its upstream.
+
+    Bound to the branch, HEAD and upstream commit seen now: if any of them
+    changes before the user answers, it refuses instead of resetting
+    something else. Returns None when no safe reset exists.
+    """
     from datetime import datetime
 
     from .errors import AecError, Remedy
     from .prompt_catalog.maintenance_area import UPDATE_RESET_TO_REMOTE
     from .prompts import prompt, yes_no_hint
 
+    branch = _git_out(repo_path, "symbolic-ref", "-q", "HEAD")
+    head = _git_out(repo_path, "rev-parse", "HEAD")
+    target = _git_out(repo_path, "rev-parse", "@{u}")
+    if not (branch and head and target) or _paths_reset_would_overwrite(repo_path, head, target):
+        return None
+
     def apply() -> str:
+        now = (_git_out(repo_path, "symbolic-ref", "-q", "HEAD"), _git_out(repo_path, "rev-parse", "HEAD"))
+        blocking = _paths_reset_would_overwrite(repo_path, head, target)
+        if now != (branch, head) or not _tracked_tree_clean(repo_path) or blocking:
+            raise AecError(
+                "The AEC checkout changed before the reset, so nothing was reset.",
+                detail="\n".join(f"would overwrite: {p}" for p in blocking) or None,
+                fix=["Run `aec update` again."],
+            )
         backup = f"aec-backup/{datetime.now():%Y%m%d-%H%M%S}"
         # --keep (not --hard) refuses rather than discard any uncommitted change
-        for cmd in (["git", "branch", backup, "HEAD"], ["git", "reset", "--keep", "@{u}"]):
+        for cmd in (["git", "branch", backup, head], ["git", "reset", "--keep", target]):
             done = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True)
             if done.returncode != 0:
                 raise AecError(

@@ -163,6 +163,8 @@ def remedy_cli(monkeypatch, tmp_path):
     state = {"runs": 0, "applied": 0, "always_fail": False}
 
     def apply():
+        if state.get("apply_error"):
+            raise state["apply_error"]
         state["applied"] += 1
         return "fixed it"
 
@@ -213,3 +215,62 @@ def test_remedy_is_retried_only_once(remedy_cli):
         cli.main()
     assert exc.value.code == 1
     assert remedy_cli["runs"] == 2 and remedy_cli["applied"] == 1
+
+
+def test_no_remedy_when_reset_would_overwrite_an_ignored_file(remote_and_clone):
+    seed, clone = remote_and_clone
+    commit(seed, "settings.local", "upstream version")
+    git(seed, "push", "-q", "origin", "main")
+    commit(clone, "local-only")
+    (clone / ".git" / "info" / "exclude").write_text("settings.local\n")
+    (clone / "settings.local").write_text("my local secrets")
+
+    with pytest.raises(RepoSyncError) as exc:
+        fetch_latest(clone)
+    assert exc.value.remedy is None
+    assert (clone / "settings.local").read_text() == "my local secrets"
+
+
+def test_remedy_refuses_when_checkout_changed_before_the_answer(remote_and_clone):
+    seed, clone = remote_and_clone
+    diverge(seed, clone)
+    with pytest.raises(RepoSyncError) as exc:
+        fetch_latest(clone)
+    git(clone, "switch", "-q", "-c", "other")  # another terminal moved HEAD meanwhile
+    before = rev(clone, "HEAD")
+
+    with pytest.raises(AecError, match="changed before the reset"):
+        exc.value.remedy.apply()
+    assert rev(clone, "HEAD") == before
+    assert not subprocess.run(["git", "branch", "--list", "aec-backup/*"], cwd=clone,
+                              capture_output=True, text=True).stdout.strip()
+
+
+def test_invalid_answer_to_remedy_exits_2(remedy_cli, capsys):
+    prompts.set_answers({UPDATE_RESET_TO_REMOTE: "maybe"})
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 2
+    assert remedy_cli["applied"] == 0
+
+
+def test_ctrl_c_at_remedy_prompt_aborts_with_130(remedy_cli, monkeypatch):
+    def interrupted(*a, **k):
+        raise KeyboardInterrupt
+    monkeypatch.setattr("aec.lib.prompts.prompt", interrupted)
+    monkeypatch.setattr(__name__ + ".prompt", interrupted)
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 130
+    assert remedy_cli["applied"] == 0
+
+
+def test_failed_remedy_is_reported_and_exits_1(remedy_cli, monkeypatch, capsys):
+    prompts.set_answers({UPDATE_RESET_TO_REMOTE: "y"})
+    remedy_cli["apply_error"] = AecError("Reset failed.", fix=["do it by hand"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 1
+    out = capsys.readouterr().out
+    assert "Reset failed." in out and "do it by hand" in out
+    assert remedy_cli["runs"] == 1

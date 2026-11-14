@@ -802,8 +802,31 @@ def _remedy_accepted(remedy) -> bool:
         return False  # headless: the printed steps are the answer
 
 
-def _run(retried: bool = False) -> None:
-    """Run the CLI once; an accepted AecError remedy re-runs it one time."""
+def _attempt(retried: bool = False) -> None:
+    """Run the app; an accepted AecError remedy is applied and the app re-run once."""
+    from .lib.errors import AecError as _AecError
+    from .lib.feedback import capture as _capture
+
+    try:
+        app()
+        return
+    except _AecError as exc:
+        if exc.remedy is None or retried:
+            raise  # _run reports it
+        _capture("medium", f"{type(exc).__name__}: {exc.message}")
+        _report(exc)
+        remedy = exc.remedy
+    # Outside the except on purpose: _run's handlers cover a bad answer, Ctrl-C
+    # or a failure while confirming or applying the remedy.
+    if not _remedy_accepted(remedy):
+        sys.exit(1)
+    Console.success(remedy.apply())
+    Console.print("Retrying...")
+    _attempt(retried=True)
+
+
+def _run() -> None:
+    """Run the CLI, turning every failure into a message and an exit code."""
     from .lib import debug as _debug
     from .lib.errors import AecError as _AecError
     from .lib.prompts import PromptInvalidAnswer as _PromptInvalidAnswer
@@ -811,7 +834,7 @@ def _run(retried: bool = False) -> None:
     from .lib.prompts import env_var_name as _prompt_env_var
 
     try:
-        app()
+        _attempt()
     except SystemExit:
         raise
     except KeyboardInterrupt:
@@ -834,14 +857,6 @@ def _run(retried: bool = False) -> None:
         _capture("medium", f"{type(exc).__name__}: {exc.message}")
         # A known cause with user-fixable steps: say what to do, not "file an issue".
         _report(exc)
-        if exc.remedy and not retried and _remedy_accepted(exc.remedy):
-            try:
-                Console.success(exc.remedy.apply())
-            except _AecError as failed:
-                _report(failed)
-                sys.exit(1)
-            Console.print("Retrying...")
-            return _run(retried=True)
         sys.exit(1)
     except _PromptInvalidAnswer as exc:
         Console.error(f"Invalid answer for prompt: {exc.prompt_id}")
