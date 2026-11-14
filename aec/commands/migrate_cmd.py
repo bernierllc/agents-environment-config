@@ -116,6 +116,19 @@ def _git_changes(repo: Path) -> Optional[set]:
     return set(filter(None, r.stdout.split("\0")))
 
 
+def _report_unrecorded(repo: Path, agent: str, recorded: set, before: Optional[set]) -> None:
+    """Name files the agent changed that the changeset did not snapshot."""
+    after = _git_changes(repo)
+    if before is None or after is None:
+        Console.warning(f"Not a git repo: edits {agent} made outside {', '.join(sorted(recorded))} were not checked")
+        return
+    other = sorted({line[3:] for line in after ^ before} - recorded)  # ^: deletions drop an entry
+    if other:
+        Console.warning(f"{agent} also changed these files; {Console.cmd('aec rollback')} does not undo them:")
+        for path in other:
+            Console.print(f"    {path}")
+
+
 def _tidy(repo: Path, agent: str, config: dict, yes: bool) -> bool:
     exe = shutil.which(config["commands"][0])  # resolves .cmd/.exe on Windows too
     if exe is None:
@@ -147,21 +160,11 @@ def _tidy(repo: Path, agent: str, config: dict, yes: bool) -> bool:
     before = _git_changes(repo)
     try:
         result = subprocess.run(args, cwd=str(repo), timeout=TIDY_TIMEOUT_SECONDS)
-    finally:
+    finally:  # also on timeout: the agent may have edited files before it was stopped
         cs = pending.commit()
+        _report_unrecorded(repo, agent, {f.name for f in files}, before)
     if cs is not None:
         Console.success(f"Recorded as {cs.id} (undo: {Console.cmd('aec rollback apply ' + cs.id)})")
-    # The agent can edit any file; only the instruction files were snapshotted.
-    after = _git_changes(repo)
-    recorded = {f.name for f in files}
-    if before is None or after is None:
-        Console.warning(f"Not a git repo: edits {agent} made outside {', '.join(sorted(recorded))} were not checked")
-    else:
-        other = sorted({line[3:] for line in after - before} - recorded)
-        if other:
-            Console.warning(f"{agent} also changed these files; {Console.cmd('aec rollback')} does not undo them:")
-            for path in other:
-                Console.print(f"    {path}")
     if result.returncode != 0:
         Console.error(f"{agent} exited with code {result.returncode}")
         return False

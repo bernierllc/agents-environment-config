@@ -136,10 +136,12 @@ def test_tidy_runs_agent_in_repo_and_records_its_edits(store, legacy_repo, monke
         calls.append((args, cwd))
         (Path(cwd) / "AGENTS.md").write_text("tidied\n")
         (Path(cwd) / "notes.txt").write_text("stray edit\n")
+        (Path(cwd) / "scratch.txt").unlink()
         return type("R", (), {"returncode": 0})()
 
     monkeypatch.setattr(migrate_cmd.subprocess, "run", fake_run)
     real_run(["git", "init", "-q"], cwd=legacy_repo, check=True)
+    (legacy_repo / "scratch.txt").write_text("untracked\n")
     assert migrate_cmd.run_migrate_agents_md([str(legacy_repo)], yes=True, tidy_with="fake") == 0
     (args, cwd), = calls
     assert args == [str(fake), "-p", migrate_cmd.TIDY_PROMPT]
@@ -148,6 +150,7 @@ def test_tidy_runs_agent_in_repo_and_records_its_edits(store, legacy_repo, monke
     assert (tidy.kind, migrate.kind) == ("tidy", "migrate-agents-md")
     out = capsys.readouterr().out
     assert "does not undo them" in out and "notes.txt" in out
+    assert "scratch.txt" in out  # a deleted file is reported too
     assert "    AGENTS.md" not in out  # recorded files are not listed as unrecorded
 
 
@@ -233,6 +236,29 @@ def test_setup_leaves_a_symlinked_agents_md_alone(tmp_path, monkeypatch):
     (project / "AGENTS.md").symlink_to(shared)
     repo_cmd._copy_agent_files(project, TEMPLATES.parent)
     assert shared.read_text() == "shared notes\n"
+
+
+def test_tidy_timeout_still_reports_unrecorded_edits(store, legacy_repo, monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(
+        migrate_cmd,
+        "_headless_agents",
+        lambda: {"fake": {"commands": ["fake-agent"], "headless_args": ["{prompt}"]}},
+    )
+    monkeypatch.setattr(migrate_cmd.shutil, "which", lambda cmd: "fake-agent")
+    real_run = subprocess.run
+
+    def fake_run(args, cwd, **kw):
+        if args[0] == "git":
+            return real_run(args, cwd=cwd, **kw)
+        (Path(cwd) / "src.py").write_text("half done\n")
+        raise subprocess.TimeoutExpired(args, kw.get("timeout"))
+
+    monkeypatch.setattr(migrate_cmd.subprocess, "run", fake_run)
+    real_run(["git", "init", "-q"], cwd=legacy_repo, check=True)
+    with pytest.raises(subprocess.TimeoutExpired):
+        migrate_cmd.run_migrate_agents_md([str(legacy_repo)], yes=True, tidy_with="fake")
+    out = capsys.readouterr().out
+    assert "does not undo them" in out and "src.py" in out
 
 
 def test_rollback_apply_refuses_a_running_change(store, tmp_path, capsys):
