@@ -5,12 +5,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-try:
-    import typer
-    HAS_TYPER = True
-except ImportError:
-    HAS_TYPER = False
-
 from ..lib import Console, get_repo_root, AEC_HOME, CLAUDE_DIR
 from ..lib.filesystem import remove_installed_item
 from ..lib.prompt_catalog.install_flow_area import item_prompt_id
@@ -31,15 +25,9 @@ from ..lib.skills_manifest import (
     rebuild_manifest_from_installed,
     hash_skill_directory,
     version_is_newer,
-    parse_skill_frontmatter,
     plan_skill_directory_replace,
     build_skill_manifest_item,
 )
-
-if HAS_TYPER:
-    app = typer.Typer(help="Manage Claude Code skills")
-else:
-    app = None
 
 INSTALLED_MANIFEST = AEC_HOME / "installed-skills.json"
 
@@ -520,36 +508,3 @@ def install_step(dry_run: bool = False) -> None:
                 )
         else:
             Console.info("Skipped skills step")
-
-
-# Typer command decorators
-if HAS_TYPER:
-
-    @app.command("list")
-    def list_cmd():
-        """List all available and installed skills."""
-        list_skills()
-
-    @app.command("install")
-    def install_cmd(
-        names: List[str] = typer.Argument(..., help="Skill name(s) to install"),
-        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompts"),
-    ):
-        """Install one or more skills."""
-        install_skills(names=names, yes=yes)
-
-    @app.command("uninstall")
-    def uninstall_cmd(
-        names: List[str] = typer.Argument(..., help="Skill name(s) to uninstall"),
-        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompts"),
-    ):
-        """Uninstall one or more skills."""
-        uninstall_skills(names=names, yes=yes)
-
-    @app.command("update")
-    def update_cmd(
-        names: Optional[List[str]] = typer.Argument(None, help="Skill name(s) to update (all if omitted)"),
-        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompts"),
-    ):
-        """Update installed skills to latest versions."""
-        update_skills(names=names, yes=yes)

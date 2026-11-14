@@ -145,14 +145,14 @@ def test_unanswered_dynamic_prompt_records_its_family_not_the_path(store, monkey
     assert e["summary"] == f"run stopped on unanswered prompt {UNTRACK_CONFIRM_PREFIX}.*"
 
 
-def test_feedback_works_in_the_dependency_free_cli(store, tmp_path):
-    """The base install has no Typer, so `aec feedback` must exist in the argparse CLI too."""
+def test_feedback_cli_forwards_to_the_feedback_tool(store, tmp_path):
+    """`aec feedback opt-out` runs end to end in a fresh interpreter."""
     fake = tmp_path / "feedback.py"
     record = tmp_path / "args.json"
     fake.write_text(f"import json, sys\njson.dump(sys.argv[1:], open({str(record)!r}, 'w'))\n")
-    code = ("import sys; sys.modules['typer'] = None; "
+    code = ("import sys; "
             "sys.argv = ['aec', 'feedback', 'opt-out', 'skill:my-skill']; "
-            "from aec import cli; assert not cli.HAS_TYPER; cli.main()")
+            "from aec import cli; cli.main()")
     env = {**os.environ, "AGENT_FEEDBACK_BIN": str(fake), "AGENT_FEEDBACK_HOME": str(store),
            "HOME": str(tmp_path), "AEC_NO_UPDATE_CHECK": "1"}
     result = subprocess.run([sys.executable, "-c", code], cwd=REPO, env=env,

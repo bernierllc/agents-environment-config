@@ -268,7 +268,7 @@ class TestInstallMcp:
         from aec.lib import config as cfg
 
         monkeypatch.setattr(cfg, "get_repo_root", lambda: repo)
-        monkeypatch.setattr("aec.commands.install_cmd.get_repo_root", lambda: repo)
+        monkeypatch.setattr("aec.lib.config.get_repo_root", lambda: repo)
         monkeypatch.setattr("aec.lib.sources.get_repo_root", lambda: repo)
 
         with patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run:
@@ -297,7 +297,7 @@ class TestInstallMcp:
         (home / ".agents-environment-config").mkdir(parents=True)
 
         from aec.commands.install_cmd import _install_mcp
-        monkeypatch.setattr("aec.commands.install_cmd.get_repo_root", lambda: repo)
+        monkeypatch.setattr("aec.lib.config.get_repo_root", lambda: repo)
         monkeypatch.setattr("aec.lib.sources.get_repo_root", lambda: repo)
 
         with pytest.raises(SystemExit):

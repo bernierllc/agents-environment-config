@@ -3,6 +3,8 @@
 import json
 import shutil
 import pytest
+
+from aec.lib.errors import AecError
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -75,7 +77,7 @@ def _source_dirs(repo):
 
 class TestUpgradeCommand:
     @patch("aec.commands.upgrade.get_source_dirs")
-    @patch("aec.commands.upgrade.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     @patch("aec.commands.upgrade._manifest_path")
     def test_skips_catalog_repo(self, mock_mp, mock_root, mock_sd, upgrade_env):
         """A manifest entry for the aec repo itself must never be upgraded:
@@ -104,7 +106,7 @@ class TestUpgradeCommand:
         assert catalog_rec.get("version") != "2.0.0"
 
     @patch("aec.commands.upgrade.get_source_dirs")
-    @patch("aec.commands.upgrade.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     @patch("aec.commands.upgrade._manifest_path")
     def test_refreshes_hooks_in_the_catalog_worktree_it_runs_from(self, mock_mp, mock_root, mock_sd, upgrade_env, temp_dir):
         """Run from a worktree of the catalog, upgrade refreshes that worktree's
@@ -126,7 +128,7 @@ class TestUpgradeCommand:
     @patch("aec.commands.upgrade.find_tracked_repo", return_value=None)
     @patch("aec.commands.upgrade.get_all_tracked_repos", return_value=[])
     @patch("aec.commands.upgrade.get_source_dirs")
-    @patch("aec.commands.upgrade.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     @patch("aec.commands.upgrade._manifest_path")
     def test_upgrades_global_skill(
         self, mock_mp, mock_root, mock_sd, mock_all, mock_find, upgrade_env
@@ -145,7 +147,7 @@ class TestUpgradeCommand:
     @patch("aec.commands.upgrade.find_tracked_repo", return_value=None)
     @patch("aec.commands.upgrade.get_all_tracked_repos", return_value=[])
     @patch("aec.commands.upgrade.get_source_dirs")
-    @patch("aec.commands.upgrade.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     @patch("aec.commands.upgrade._manifest_path")
     def test_dry_run_does_not_modify(
         self, mock_mp, mock_root, mock_sd, mock_all, mock_find, upgrade_env
@@ -164,7 +166,7 @@ class TestUpgradeCommand:
     @patch("aec.commands.upgrade.find_tracked_repo", return_value=None)
     @patch("aec.commands.upgrade.get_all_tracked_repos", return_value=[])
     @patch("aec.commands.upgrade.get_source_dirs")
-    @patch("aec.commands.upgrade.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     @patch("aec.commands.upgrade._manifest_path")
     def test_reports_nothing_when_up_to_date(
         self, mock_mp, mock_root, mock_sd, mock_all, mock_find, upgrade_env, capsys
@@ -193,7 +195,7 @@ class TestUpgradeCommand:
     @patch("aec.commands.upgrade.find_tracked_repo", return_value=None)
     @patch("aec.commands.upgrade.get_all_tracked_repos", return_value=[])
     @patch("aec.commands.upgrade.get_source_dirs")
-    @patch("aec.commands.upgrade.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     @patch("aec.commands.upgrade._manifest_path")
     def test_dry_run_reports_what_would_change(
         self, mock_mp, mock_root, mock_sd, mock_all, mock_find, upgrade_env, capsys
@@ -210,19 +212,17 @@ class TestUpgradeCommand:
         assert "would upgrade" in output.lower()
         assert "test-skill" in output
 
-    @patch("aec.commands.upgrade.get_repo_root", return_value=None)
+    @patch("aec.lib.config.get_repo_root", return_value=None)
     def test_handles_missing_repo(self, mock_root, capsys):
         from aec.commands.upgrade import run_upgrade
 
-        run_upgrade()
-
-        output = capsys.readouterr().out
-        assert "not found" in output.lower() or "setup" in output.lower()
+        with pytest.raises(AecError, match="repository checkout"):
+            run_upgrade()
 
     @patch("aec.commands.upgrade.find_tracked_repo", return_value=None)
     @patch("aec.commands.upgrade.get_all_tracked_repos", return_value=[])
     @patch("aec.commands.upgrade.get_source_dirs")
-    @patch("aec.commands.upgrade.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     @patch("aec.commands.upgrade._manifest_path")
     def test_manifest_updated_after_upgrade(
         self, mock_mp, mock_root, mock_sd, mock_all, mock_find, upgrade_env
@@ -243,7 +243,7 @@ class TestUpgradeCommand:
     @patch("aec.commands.upgrade.find_tracked_repo", return_value=None)
     @patch("aec.commands.upgrade.get_all_tracked_repos", return_value=[])
     @patch("aec.commands.upgrade.get_source_dirs")
-    @patch("aec.commands.upgrade.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     @patch("aec.commands.upgrade._manifest_path")
     def test_syncs_manifest_when_disk_already_matches_source(
         self, mock_mp, mock_root, mock_sd, mock_all, mock_find, _stale, upgrade_env, capsys
@@ -370,7 +370,7 @@ class TestUpgradeAgent:
     @patch("aec.commands.upgrade.find_tracked_repo", return_value=None)
     @patch("aec.commands.upgrade.get_all_tracked_repos", return_value=[])
     @patch("aec.commands.upgrade.get_source_dirs")
-    @patch("aec.commands.upgrade.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     @patch("aec.commands.upgrade._manifest_path")
     def test_upgrades_agent_file_with_md_extension(
         self, mock_mp, mock_root, mock_sd, mock_all, mock_find, agent_upgrade_env
@@ -390,7 +390,7 @@ class TestUpgradeAgent:
     @patch("aec.commands.upgrade.find_tracked_repo", return_value=None)
     @patch("aec.commands.upgrade.get_all_tracked_repos", return_value=[])
     @patch("aec.commands.upgrade.get_source_dirs")
-    @patch("aec.commands.upgrade.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     @patch("aec.commands.upgrade._manifest_path")
     def test_upgrades_legacy_agent_removes_bare_file(
         self, mock_mp, mock_root, mock_sd, mock_all, mock_find, agent_upgrade_legacy_env
@@ -416,7 +416,7 @@ class TestRepairExtensionlessAgents:
     @patch("aec.commands.upgrade.find_tracked_repo", return_value=None)
     @patch("aec.commands.upgrade.get_all_tracked_repos", return_value=[])
     @patch("aec.commands.upgrade.get_source_dirs")
-    @patch("aec.commands.upgrade.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     @patch("aec.commands.upgrade._manifest_path")
     def test_repair_renames_bare_file_even_at_same_version(
         self, mock_mp, mock_root, mock_sd, mock_all, mock_find, agent_upgrade_legacy_env
@@ -441,7 +441,7 @@ class TestRepairExtensionlessAgents:
     @patch("aec.commands.upgrade.find_tracked_repo", return_value=None)
     @patch("aec.commands.upgrade.get_all_tracked_repos", return_value=[])
     @patch("aec.commands.upgrade.get_source_dirs")
-    @patch("aec.commands.upgrade.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     @patch("aec.commands.upgrade._manifest_path")
     def test_dry_run_reports_repair_without_renaming(
         self, mock_mp, mock_root, mock_sd, mock_all, mock_find, agent_upgrade_legacy_env, capsys
@@ -555,7 +555,7 @@ class TestUpgradeWithDepConflicts:
     def _patches(self, env):
         from unittest.mock import patch
         return [
-            patch("aec.commands.upgrade.get_repo_root", return_value=env["repo"]),
+            patch("aec.lib.config.get_repo_root", return_value=env["repo"]),
             patch("aec.commands.upgrade._manifest_path", return_value=env["manifest_path"]),
             patch("aec.commands.upgrade.get_source_dirs", return_value=_source_dirs(env["repo"])),
             patch("aec.commands.upgrade.find_tracked_repo", return_value=None),
@@ -571,6 +571,8 @@ class TestUpgradeWithDepConflicts:
             prompts_seen.append(msg)
             return "y"
         monkeypatch.setattr("builtins.input", capture)
+        # "y" would also accept 'run `aec update` first?', which pulls a real repo
+        monkeypatch.setattr("aec.commands.upgrade.is_stale", lambda m: False)
 
         with self._patches(dep_upgrade_env)[0], self._patches(dep_upgrade_env)[1], \
              self._patches(dep_upgrade_env)[2], self._patches(dep_upgrade_env)[3], \
@@ -599,6 +601,8 @@ class TestUpgradeWithDepConflicts:
         from aec.commands.upgrade import run_upgrade
 
         monkeypatch.setattr("builtins.input", lambda _: "y")
+        # "y" would also accept 'run `aec update` first?', which pulls a real repo
+        monkeypatch.setattr("aec.commands.upgrade.is_stale", lambda m: False)
 
         with self._patches(dep_upgrade_env)[0], self._patches(dep_upgrade_env)[1], \
              self._patches(dep_upgrade_env)[2], self._patches(dep_upgrade_env)[3], \
@@ -781,7 +785,7 @@ def test_yes_upgrades_discovered_other_repos(tmp_path, capsys):
     other.mkdir()
     manifest = {"global": {}, "repos": {str(other): {}}}
     scopes = []
-    with patch.object(upgrade, "get_repo_root", return_value=tmp_path), \
+    with patch("aec.lib.config.get_repo_root", return_value=tmp_path), \
          patch.object(upgrade, "get_source_dirs", return_value={}), \
          patch.object(upgrade, "load_manifest", return_value=manifest), \
          patch.object(upgrade, "save_manifest"), \
@@ -822,7 +826,7 @@ class TestUpgradeMigratesPortRegistryBlock:
 
     @patch("aec.commands.upgrade.find_tracked_repo", return_value=None)
     @patch("aec.commands.upgrade.get_source_dirs")
-    @patch("aec.commands.upgrade.get_repo_root")
+    @patch("aec.lib.config.get_repo_root")
     @patch("aec.commands.upgrade._manifest_path")
     def test_legacy_block_gets_the_marker(
         self, mock_mp, mock_root, mock_sd, mock_find, upgrade_env, monkeypatch

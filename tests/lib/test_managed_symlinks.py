@@ -231,12 +231,12 @@ class TestReviewRegressions:
         monkeypatch.setattr(agent_tools, "AGENT_TOOLS_DIR", agent_tools_dir)
         monkeypatch.setattr(agent_tools, "_is_claude_installed", lambda: False)
         monkeypatch.setattr(agent_tools, "_is_cursor_installed", lambda: False)
-        monkeypatch.setattr(agent_tools, "get_repo_root", lambda: checkout)
+        monkeypatch.setattr("aec.lib.config.get_repo_root", lambda: checkout)
         agent_tools.setup()
 
         moved = temp_dir / "moved-checkout"
         checkout.rename(moved)
-        monkeypatch.setattr(agent_tools, "get_repo_root", lambda: moved)
+        monkeypatch.setattr("aec.lib.config.get_repo_root", lambda: moved)
         agent_tools.setup()
 
         rules = agent_tools_dir / "rules" / "agents-environment-config"
@@ -255,7 +255,7 @@ class TestReviewRegressions:
         monkeypatch.setattr(agent_tools, "AGENT_TOOLS_DIR", agent_tools_dir)
         monkeypatch.setattr(agent_tools, "_is_claude_installed", lambda: False)
         monkeypatch.setattr(agent_tools, "_is_cursor_installed", lambda: False)
-        monkeypatch.setattr(agent_tools, "get_repo_root", lambda: checkout)
+        monkeypatch.setattr("aec.lib.config.get_repo_root", lambda: checkout)
         monkeypatch.setattr(ms, "_legacy_candidate_paths", lambda: [rules])
         agent_tools.setup(dry_run=True)
 
@@ -280,7 +280,7 @@ class TestReviewRegressions:
         monkeypatch.setattr(agent_tools, "AGENT_TOOLS_DIR", agent_tools_dir)
         monkeypatch.setattr(agent_tools, "_is_claude_installed", lambda: False)
         monkeypatch.setattr(agent_tools, "_is_cursor_installed", lambda: False)
-        monkeypatch.setattr(agent_tools, "get_repo_root", lambda: checkout)
+        monkeypatch.setattr("aec.lib.config.get_repo_root", lambda: checkout)
         agent_tools.setup()
 
         assert ms.MANAGED_SYMLINKS_PATH.exists()

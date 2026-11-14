@@ -7,21 +7,15 @@ import stat
 from pathlib import Path
 from typing import Optional, List, Tuple
 
-try:
-    import typer
-    HAS_TYPER = True
-except ImportError:
-    HAS_TYPER = False
-
 from ..lib import (
     Console,
     IS_MACOS,
     get_repo_root,
+    require_repo_root,
     get_projects_dir,
     get_github_orgs,
     ensure_directory,
     copy_file,
-    init_aec_home,
     log_setup,
     is_logged,
     get_version,
@@ -72,11 +66,6 @@ from ..lib.git_setup import (
     github_owner,
     write_git_essential,
 )
-
-if HAS_TYPER:
-    app = typer.Typer(help="Manage project repositories")
-else:
-    app = None
 
 # Agent files derived from agents.json registry
 AGENT_FILES = get_agent_files()
@@ -1216,10 +1205,7 @@ def setup(
     if dry_run:
         Console.warning("DRY RUN MODE - No changes will be made\n")
 
-    repo_root = get_repo_root()
-    if not repo_root:
-        Console.error("Could not find agents-environment-config repository")
-        raise SystemExit(1)
+    repo_root = require_repo_root()
 
     Console.print(f"Template source: {Console.path(repo_root)}")
 
@@ -1749,41 +1735,3 @@ def setup_all(dry_run: bool = False) -> None:
         raise SystemExit(1)
 
     _batch_project_setup(dry_run)
-
-
-# Typer command decorators (if available)
-if HAS_TYPER:
-    @app.command("setup")
-    def setup_cmd(
-        path: Optional[str] = typer.Argument(None, help="Project name or path"),
-        skip_raycast: bool = typer.Option(False, "--skip-raycast", help="Skip Raycast script creation"),
-    ):
-        """Setup a project with agent files."""
-        setup(path, skip_raycast)
-
-    @app.command("list")
-    def list_cmd():
-        """List all tracked repositories."""
-        list_repos()
-
-    @app.command("setup-all")
-    def setup_all_cmd():
-        """Setup all projects in the configured projects directory."""
-        setup_all()
-
-    @app.command("prune")
-    def prune_cmd(
-        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
-        dry_run: bool = typer.Option(False, "--dry-run", help="Preview without making changes"),
-    ):
-        """Remove stale entries from tracking where path no longer exists."""
-        prune(yes, dry_run)
-
-    @app.command("update")
-    def update_cmd(
-        path: Optional[str] = typer.Argument(None, help="Specific project to update"),
-        dry_run: bool = typer.Option(False, "--dry-run", help="Preview without making changes"),
-        update_all: bool = typer.Option(False, "--all", help="Update all tracked repos"),
-    ):
-        """Update tracked repositories with latest configurations."""
-        update(path, dry_run, update_all)

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from ..lib import Console
 from ..lib.apply_core import DesiredItem, execute_apply, plan_apply
-from ..lib.config import get_repo_root
+from ..lib.config import require_repo_root
 from ..lib.manifest_v2 import load_manifest
 from ..lib.portable_manifest import (
     ITEM_TYPES,
@@ -178,10 +178,7 @@ def run_apply(file: str, dry_run: bool = False, latest: bool = False, yes: bool 
         Console.error(str(exc))
         raise SystemExit(1)
 
-    repo = get_repo_root()
-    if repo is None:
-        Console.error("AEC repo not found. Run `aec setup` first.")
-        raise SystemExit(1)
+    repo = require_repo_root()
 
     source_dirs = get_source_dirs()
     available_by_type = {

@@ -4,7 +4,8 @@ from pathlib import Path
 
 from ..lib.claude_plugins import is_claude_managed, marketplace_of, refresh_marketplace
 from ..lib.console import Console
-from ..lib.config import get_repo_root, INSTALLED_MANIFEST_V2
+from ..lib.errors import AecError
+from ..lib.config import INSTALLED_MANIFEST_V2, require_repo_root
 from ..lib.manifest_v2 import (
     get_all_repo_scopes, get_installed, load_manifest, record_update_check, save_manifest,
 )
@@ -24,16 +25,14 @@ def run_update() -> bool:
     Returns True when an org config is left pending (review, trust change,
     or failed refresh), so the CLI can exit ``EXIT_PENDING``.
     """
-    repo = get_repo_root()
-    if repo is None:
-        Console.error("AEC repo not found. Run `aec setup` first.")
-        return False
+    repo = require_repo_root()
 
     Console.print("Pulling latest...", end=" ")
-    if not fetch_latest(repo):
+    try:
+        fetch_latest(repo)
+    except AecError:
         Console.print("failed!")
-        Console.error("Could not pull latest. Check your network and git status.")
-        return False
+        raise  # aec.cli.main prints the cause and the fix steps
     Console.print("done.")
 
     manifest_path = _get_manifest_path()
@@ -95,7 +94,7 @@ def _refresh_org_configs() -> bool:
     try:
         from ..lib.org_config import OrgConfigError, OrgPaths
         from .org import pending_fix, pending_orgs, refresh_remote_orgs
-    except ImportError:  # org-configs extra (PyYAML) or typer not installed
+    except ImportError:  # org-configs extra (PyYAML) not installed
         return False
 
     paths = OrgPaths.default()

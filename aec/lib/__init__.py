@@ -15,6 +15,7 @@ from .config import (
     detect_agents,
     generate_raycast_script,
     get_repo_root,
+    require_repo_root,
     get_projects_dir,
     get_github_orgs,
 )
@@ -172,6 +173,7 @@ __all__ = [
     "detect_agents",
     "generate_raycast_script",
     "get_repo_root",
+    "require_repo_root",
     "get_projects_dir",
     "get_github_orgs",
     # Registry
