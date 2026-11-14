@@ -24,6 +24,7 @@ from typing import Dict, Iterable, List, Optional
 
 from aec.lib.atomic_write import atomic_write_json
 from aec.lib.config import AEC_HOME
+from aec.lib.file_lock import locked
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,12 @@ class Changeset:
 
 def rollbacks_dir() -> Path:
     return AEC_HOME / "rollbacks"
+
+
+def _store_lock():
+    """Serialises finalizing and reverting across AEC processes, so a change that
+    is being rolled back can never finalize over the settled history."""
+    return locked(rollbacks_dir() / ".lock")
 
 
 def _sha(data: bytes) -> str:
@@ -176,7 +183,8 @@ def _from_journal(journal: dict) -> Changeset:
 
 
 def _finalize(d: Path, journal: dict) -> Optional[Changeset]:
-    """Record a journal's change: after-blobs plus manifest. None if nothing changed."""
+    """Record a journal's change: after-blobs plus manifest. None if nothing changed.
+    Caller holds _store_lock()."""
     if not (d / _PENDING).exists():
         # Someone rolled this change back while it was running; never touch that history.
         raise ChangesetError(f"change {journal['id']} was rolled back while running; not recorded")
@@ -241,7 +249,8 @@ class PendingChangeset:
 
     def commit(self) -> Optional[Changeset]:
         """Record every snapshotted file's current state; None if nothing changed."""
-        return _finalize(self._dir, self._journal)
+        with _store_lock():
+            return _finalize(self._dir, self._journal)
 
 
 def begin(
@@ -311,35 +320,36 @@ def diff_text(cs: Changeset, fc: FileChange) -> str:
 
 
 def revert(cs_id: str, force: bool = False) -> Changeset:
-    orig = load(cs_id)
-    if orig.reversed_by:
-        raise AlreadyReverted(f"{orig.id} was already reverted by {orig.reversed_by}")
-    found = conflicts(orig)
-    if found and not force:
-        raise ConflictError(found)
+    with _store_lock():  # load to settle in one critical section
+        orig = load(cs_id)
+        if orig.reversed_by:
+            raise AlreadyReverted(f"{orig.id} was already reverted by {orig.reversed_by}")
+        found = conflicts(orig)
+        if found and not force:
+            raise ConflictError(found)
 
-    # Load every blob before touching any file, so a missing blob can't leave a half-restore.
-    restore = [(fc.path, None if fc.before is None else _blob(orig, fc.before)) for fc in orig.files]
-    pending = begin(
-        [fc.path for fc in orig.files],
-        short=f"Revert: {orig.short}",
-        long=f"Reverts changeset {orig.id} ({orig.short}).",
-        kind="revert",
-        reverses=orig.id,
-    )
-    try:
-        for path, data in restore:
-            if data is None:
-                path.unlink(missing_ok=True)
-            else:
-                _write_bytes_atomic(path, data)
-    finally:
-        # Record even a partial restore, so edits it overwrote can be brought back.
-        new = pending.commit()
-    if new is None:
-        raise NothingToRevert(f"reverting {orig.id} would change no file")
-    orig.reversed_by = new.id
-    atomic_write_json(orig.dir / _MANIFEST, _to_json(orig))
-    # An interrupted original is now settled; a late commit from its process fails loudly.
-    (orig.dir / _PENDING).unlink(missing_ok=True)
-    return new
+        # Load every blob before touching any file, so a missing blob can't leave a half-restore.
+        restore = [(fc.path, None if fc.before is None else _blob(orig, fc.before)) for fc in orig.files]
+        pending = begin(
+            [fc.path for fc in orig.files],
+            short=f"Revert: {orig.short}",
+            long=f"Reverts changeset {orig.id} ({orig.short}).",
+            kind="revert",
+            reverses=orig.id,
+        )
+        try:
+            for path, data in restore:
+                if data is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    _write_bytes_atomic(path, data)
+        finally:
+            # Record even a partial restore, so edits it overwrote can be brought back.
+            new = _finalize(pending._dir, pending._journal)  # already under the lock
+        if new is None:
+            raise NothingToRevert(f"reverting {orig.id} would change no file")
+        orig.reversed_by = new.id
+        atomic_write_json(orig.dir / _MANIFEST, _to_json(orig))
+        # An interrupted original is now settled; a late commit from its process fails loudly.
+        (orig.dir / _PENDING).unlink(missing_ok=True)
+        return new

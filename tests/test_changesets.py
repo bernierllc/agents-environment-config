@@ -43,14 +43,14 @@ def test_unchanged_dropped_and_none_when_all_unchanged(tmp_path, rb):
     cs = change([f, g], lambda: g.write_bytes(b"z"))
     assert [x.path for x in cs.files] == [g]
     assert change([f], lambda: None) is None
-    assert len(list(rb.iterdir())) == 1
+    assert len([d for d in rb.iterdir() if d.is_dir()]) == 1
 
 
 def test_no_change_leaves_rollbacks_dir_empty(tmp_path, rb):
     f = tmp_path / "f"
     f.write_bytes(b"x")
     assert change([f], lambda: None) is None
-    assert not rb.exists() or not list(rb.iterdir())
+    assert not rb.exists() or not [d for d in rb.iterdir() if d.is_dir()]
 
 
 def test_created_and_deleted(tmp_path):
@@ -235,4 +235,42 @@ def test_late_commit_after_rollback_keeps_history(tmp_path):
     with pytest.raises(c.ChangesetError, match="rolled back while running"):
         pending.commit()
     assert c.load(cs.id).reversed_by == undo.id
+    assert f.read_bytes() == b"old"
+
+
+def test_rollback_waits_for_a_commit_in_progress(tmp_path, monkeypatch):
+    """Codex round 4 race: a revert that lands mid-commit must not erase history."""
+    import threading
+
+    f = tmp_path / "f"
+    f.write_bytes(b"old")
+    pending = c.begin([f], "s", "l", "test")
+    f.write_bytes(b"new")
+    (cs,) = c.list_changesets()  # still interrupted: no manifest yet
+
+    in_commit, release = threading.Event(), threading.Event()
+    real_read = c._read
+
+    def paused_read(path):
+        if threading.current_thread().name == "committer" and not in_commit.is_set():
+            in_commit.set()
+            assert release.wait(5)
+        return real_read(path)
+
+    monkeypatch.setattr(c, "_read", paused_read)
+    results = {}
+    committer = threading.Thread(target=lambda: results.update(commit=pending.commit()), name="committer")
+    committer.start()
+    assert in_commit.wait(5)
+    reverter = threading.Thread(target=lambda: results.update(undo=c.revert(cs.id)))
+    reverter.start()
+    reverter.join(0.3)
+    assert reverter.is_alive()  # blocked on the store lock while the commit runs
+    release.set()
+    committer.join(5)
+    reverter.join(5)
+
+    assert results["commit"].id == cs.id
+    assert c.load(cs.id).reversed_by == results["undo"].id
+    assert c.load(results["undo"].id).reverses == cs.id
     assert f.read_bytes() == b"old"
