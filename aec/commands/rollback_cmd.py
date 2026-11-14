@@ -110,7 +110,11 @@ def run_rollback_apply(cs_id: str, force: bool = False, yes: bool = False) -> in
             Console.skip("Nothing changed")
             return 0
 
-    new = changesets.revert(cs.id, force=True)  # conflicts were confirmed above
+    try:
+        new = changesets.revert(cs.id, force=True)  # conflicts were confirmed above
+    except changesets.ChangesetError as e:  # e.g. still running, or a missing blob
+        Console.error(f"Nothing rolled back: {e}")
+        return 1
     Console.success(f"Rolled back {cs.id}; recorded as {new.id}")
     Console.info(f"Redo: {Console.cmd('aec rollback apply ' + new.id)}")
     return 0

@@ -24,13 +24,14 @@ from typing import Dict, Iterable, List, Optional
 
 from aec.lib.atomic_write import atomic_write_json
 from aec.lib.config import AEC_HOME
-from aec.lib.file_lock import locked
+from aec.lib.file_lock import acquire, is_held, locked, release
 
 logger = logging.getLogger(__name__)
 
 SCHEMA = 1
 _MANIFEST = "rollback.json"
 _PENDING = "pending.json"  # journal of a change in progress
+_ACTIVE = "active.lock"  # held by the process making the change, until it commits
 
 
 class ChangesetError(Exception):
@@ -43,6 +44,10 @@ class ChangesetNotFound(ChangesetError, KeyError):
 
 class AlreadyReverted(ChangesetError):
     """The changeset already has a reverting changeset."""
+
+
+class StillRunning(ChangesetError):
+    """The change's process is still making it."""
 
 
 class NothingToRevert(ChangesetError):
@@ -229,6 +234,7 @@ class PendingChangeset:
         self.id = _new_id(root, now)
         self._dir = root / self.id
         (self._dir / "blobs").mkdir(parents=True)
+        self._active = acquire(self._dir / _ACTIVE)
         before: Dict[str, Optional[str]] = {}
         for p in paths:
             data = _read(p)
@@ -250,7 +256,12 @@ class PendingChangeset:
     def commit(self) -> Optional[Changeset]:
         """Record every snapshotted file's current state; None if nothing changed."""
         with _store_lock():
-            return _finalize(self._dir, self._journal)
+            return self._commit_locked()
+
+    def _commit_locked(self) -> Optional[Changeset]:
+        # Released under the store lock, so a revert never sees it free before this finalizes.
+        release(self._active)
+        return _finalize(self._dir, self._journal)
 
 
 def begin(
@@ -272,7 +283,7 @@ def load(cs_id: str) -> Changeset:
         cs = _from_journal(json.loads((d / _PENDING).read_text(encoding="utf-8")))
     except FileNotFoundError:
         raise ChangesetNotFound(cs_id) from None
-    cs.short += " (interrupted)"
+    cs.short += " (running)" if is_held(d / _ACTIVE) else " (interrupted)"
     return cs
 
 
@@ -322,6 +333,8 @@ def diff_text(cs: Changeset, fc: FileChange) -> str:
 def revert(cs_id: str, force: bool = False) -> Changeset:
     with _store_lock():  # load to settle in one critical section
         orig = load(cs_id)
+        if not (orig.dir / _MANIFEST).exists() and is_held(orig.dir / _ACTIVE):
+            raise StillRunning(f"{orig.id} is still being made by another aec command; roll it back when that finishes")
         if orig.reversed_by:
             raise AlreadyReverted(f"{orig.id} was already reverted by {orig.reversed_by}")
         found = conflicts(orig)
@@ -345,7 +358,7 @@ def revert(cs_id: str, force: bool = False) -> Changeset:
                     _write_bytes_atomic(path, data)
         finally:
             # Record even a partial restore, so edits it overwrote can be brought back.
-            new = _finalize(pending._dir, pending._journal)  # already under the lock
+            new = pending._commit_locked()  # already under the store lock
         if new is None:
             raise NothingToRevert(f"reverting {orig.id} would change no file")
         orig.reversed_by = new.id

@@ -19,6 +19,11 @@ def sha(b):
     return hashlib.sha256(b).hexdigest()
 
 
+def crash(pending):
+    """What the OS does to a change's lock when its process dies."""
+    c.release(pending._active)
+
+
 def change(paths, fn, short="s", kind="test"):
     p = c.begin(paths, short, "long text", kind)
     fn()
@@ -173,8 +178,9 @@ def test_store_failure_happens_before_any_change(tmp_path, monkeypatch):
 def test_interrupted_change_is_listed_and_revertible(tmp_path):
     f = tmp_path / "f"
     f.write_bytes(b"old")
-    c.begin([f], "s", "l", "test")  # process dies before commit
+    pending = c.begin([f], "s", "l", "test")
     f.write_bytes(b"new")
+    crash(pending)
     (cs,) = c.list_changesets()
     assert cs.short.endswith("(interrupted)")
     c.revert(cs.id)
@@ -230,8 +236,10 @@ def test_late_commit_after_rollback_keeps_history(tmp_path):
     f.write_bytes(b"old")
     pending = c.begin([f], "s", "l", "test")
     f.write_bytes(b"new")
+    crash(pending)  # looks dead to rollback, then commits anyway
     (cs,) = c.list_changesets()
     undo = c.revert(cs.id)
+    pending._active = open(pending._dir / "active.lock", "a+")  # commit() releases a handle
     with pytest.raises(c.ChangesetError, match="rolled back while running"):
         pending.commit()
     assert c.load(cs.id).reversed_by == undo.id
@@ -273,4 +281,21 @@ def test_rollback_waits_for_a_commit_in_progress(tmp_path, monkeypatch):
     assert results["commit"].id == cs.id
     assert c.load(cs.id).reversed_by == results["undo"].id
     assert c.load(results["undo"].id).reverses == cs.id
+    assert f.read_bytes() == b"old"
+
+
+def test_running_change_cannot_be_rolled_back(tmp_path):
+    """Codex round 5: a live change is never reverted under its process."""
+    f = tmp_path / "f"
+    f.write_bytes(b"old")
+    pending = c.begin([f], "s", "l", "test")
+    f.write_bytes(b"new")
+    (cs,) = c.list_changesets()
+    assert cs.short.endswith("(running)")
+    with pytest.raises(c.StillRunning):
+        c.revert(cs.id)
+    assert f.read_bytes() == b"new"
+    done = pending.commit()
+    undo = c.revert(done.id)
+    assert c.load(done.id).reversed_by == undo.id
     assert f.read_bytes() == b"old"

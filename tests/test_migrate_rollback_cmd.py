@@ -211,3 +211,15 @@ def test_setup_adds_rules_reference_to_existing_agents_md(tmp_path, monkeypatch)
     assert (project / "CLAUDE.md").read_text() == "@AGENTS.md\n"
     repo_cmd._copy_agent_files(project, TEMPLATES.parent)  # second run adds nothing
     assert (project / "AGENTS.md").read_bytes() == agents
+
+
+def test_rollback_apply_refuses_a_running_change(store, tmp_path, capsys):
+    f = tmp_path / "f"
+    f.write_bytes(b"old")
+    pending = changesets.begin([f], "s", "l", "test")
+    f.write_bytes(b"new")
+    (cs,) = changesets.list_changesets()
+    assert rollback_cmd.run_rollback_apply(cs.id, yes=True) == 1
+    assert "still being made" in capsys.readouterr().out
+    assert f.read_bytes() == b"new"
+    pending.commit()
