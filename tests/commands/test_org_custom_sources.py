@@ -550,6 +550,8 @@ def test_failed_second_org_state_write_restores_the_first(repos, home, paths, tm
     monkeypatch.setattr(state_mod, "write_state", write_second_fails)
     result = runner.invoke(app, ["org", "apply", "--yes"])
     assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
-    # apply_cmd restores the reviewed org itself; another-org's stamp needs _stamp_applied to undo it.
+    # apply_cmd restores the reviewed org's promotion; _stamp_applied undoes another-org's stamp.
     assert {o: read_state(paths, o) for o in before} == before
     assert _live_head(paths) == a
+    assert calls == ["another-org", "example-org"]  # rolled back by rename: no restore write
+    assert not list(paths.orgs_dir.glob("*.aec-prev.*"))

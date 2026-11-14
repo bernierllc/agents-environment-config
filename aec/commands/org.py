@@ -26,6 +26,7 @@ from ..lib.org_config import (
     discover_enrolled_orgs,
 )
 from ..lib.org_config import git_source
+from ..lib.atomic_write import atomic_write_text
 from ..lib.org_config.apply import apply_org_policy
 from ..lib.org_config.crypto import decode_pubkey, fingerprint
 from ..lib.org_config.discovery import migrate_state
@@ -36,7 +37,7 @@ from ..lib.org_config.reconcile import open_conflicts
 from ..lib.org_config.resolutions import Resolution, save_resolution
 from ..lib.org_config.rotation import rotation_status
 from ..lib.org_config.schema import ITEM_TYPES
-from ..lib.org_config.state import OrgState, read_state, write_state
+from ..lib.org_config.state import OrgState, StateSnapshot, read_state, write_state
 from ..lib.org_config.trust import UnsignedConsent, UnsignedConsentDeclined, verify_trust
 from ..lib.org_config.validator import validate_org_config
 
@@ -578,7 +579,8 @@ def _ref_only_tips(cfg) -> dict:
 
 def _promote(paths: OrgPaths, st: OrgState, raw: bytes, cfg, commit: str, now: str) -> OrgState:
     """Make verified bytes the enrolled config and clear any pending."""
-    paths.config_for(st.org_id).write_bytes(raw)
+    # By rename, never in place, so a StateSnapshot of the old file stays intact.
+    atomic_write_text(paths.config_for(st.org_id), raw.decode("utf-8"))
     st = dataclasses.replace(
         st,
         config_version=cfg.config_version,
@@ -1044,12 +1046,12 @@ def apply_cmd(
         )
     finally:
         applied = outcome is not None and outcome.skipped_reason is None
-        for org_id, (old_bytes, old_state) in backups.items():
+        for org_id, snapshot in backups.items():
             if applied:
                 _staged_path(paths, org_id).unlink(missing_ok=True)
+                snapshot.drop()
             else:
-                paths.config_for(org_id).write_bytes(old_bytes)
-                write_state(paths, old_state)
+                snapshot.restore()
     if outcome.skipped_reason == "locked":
         raise typer.Exit(code=EXIT_TRUST)
     if outcome.skipped_reason in ("source_failed", "install_failed"):
@@ -1057,14 +1059,14 @@ def apply_cmd(
 
 
 def _promote_staged_reviews(paths: OrgPaths, backups: dict) -> None:
-    """Promote every staged review, recording ``{org_id: (old_yaml_bytes, old_state)}``
-    in ``backups`` before each one so a failure part-way can still roll back."""
+    """Promote every staged review, recording ``{org_id: StateSnapshot}`` in
+    ``backups`` before each one so a failure part-way can still roll back."""
     for st in pending_orgs(paths):
         staged = _staged_path(paths, st.org_id)
         sources = st.pending.get("sources") or {}
         if st.pending.get("kind") != "review" or not (staged.exists() or sources):
             continue
-        backups[st.org_id] = (paths.config_for(st.org_id).read_bytes(), st)
+        backups[st.org_id] = StateSnapshot(paths, [st.org_id], config=True)
         if sources:
             # The reviewed source commits become the approved ones the apply checks out.
             st = dataclasses.replace(st, source_commits={**(st.source_commits or {}), **sources})
