@@ -9,7 +9,7 @@ pip install -e .
 aec install
 ```
 
-> This is a **template repository**. Project-specific content goes in each project's `AGENTINFO.md` — not here.
+> This is a **template repository**. Project-specific content goes in each project's `AGENTS.md` (or `AGENTINFO.md` in projects set up before AEC moved to AGENTS.md) — not here.
 
 ## What you get
 
@@ -99,9 +99,35 @@ aec test report [-g]         # latest results
 
 # Discovery
 aec discover [-g]            # find existing items matching the catalog
+
+# Instruction files
+aec migrate agents-md [path] # move a project from AGENTINFO.md to AGENTS.md
+aec rollback                 # list, inspect and undo recorded changes
 ```
 
 Full reference: [CLI commands](docs/users/cli-reference.md).
+
+## Project instructions: AGENTS.md
+
+`aec setup` writes one shared instructions file, `AGENTS.md`. Codex and Cursor read it directly, and so does [Claude Code](https://code.claude.com/docs/en/memory#agents-md). `CLAUDE.md`, `GEMINI.md` and `QWEN.md` are one-line `@AGENTS.md` imports, with room below for anything specific to that agent. Every agent loads your project instructions directly, and there is one file to edit.
+
+Projects set up by earlier AEC versions keep their `AGENTINFO.md` layout: AEC detects it and never changes it unless you ask. To move one over:
+
+```bash
+aec migrate agents-md --dry-run ~/projects/my-project   # see what would change
+aec migrate agents-md ~/projects/my-project             # or --all for every tracked project
+aec migrate agents-md --tidy-with codex                 # optional: an agent removes duplication
+```
+
+The migration is deterministic: AEC moves `AGENTINFO.md` into `AGENTS.md`, keeps anything you added to the per-agent files, and fixes references to `AGENTINFO.md`. An agent runs only if you pass `--tidy-with`, and you see its prompt first. Every change is recorded with before/after hashes under `~/.agents-environment-config/rollbacks/`, on every OS:
+
+```bash
+aec rollback                 # list recorded changes and browse them
+aec rollback show <id>       # what a change did and what undoing it would do
+aec rollback apply <id>      # restore the exact previous bytes
+```
+
+If a file changed after AEC recorded the change, `aec rollback apply` shows the diff and asks before overwriting it. An undo is itself recorded, so rolling back a rollback redoes the change. To keep writing the old layout in new projects: `aec preferences set instructions_layout agentinfo`.
 
 ## Plugins
 
