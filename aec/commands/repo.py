@@ -159,6 +159,23 @@ def _canonical_instructions_file(project_dir: Path) -> Path:
     return legacy if legacy.exists() else project_dir / "AGENTS.md"
 
 
+def _add_rules_reference(agents_md: Path, rules: str, dry_run: bool) -> None:
+    """Append AEC's Rules Reference to an existing AGENTS.md that lacks one, since
+    the per-agent files only import AGENTS.md. Nothing else in it is touched."""
+    from ..lib.agents_md_layout import split_stub
+
+    raw = agents_md.read_bytes().decode("utf-8")
+    if split_stub(raw.replace("\r\n", "\n"))[0]:
+        Console.skip("AGENTS.md already exists (skipping)")
+        return
+    if dry_run:
+        Console.info("Would add the Rules Reference section to AGENTS.md")
+        return
+    nl = "\r\n" if "\r\n" in raw else "\n"
+    agents_md.write_bytes((raw.rstrip() + nl * 2 + rules.replace("\n", nl) + nl).encode("utf-8"))
+    Console.success("Added the Rules Reference section to AGENTS.md")
+
+
 def _copy_agent_files(project_dir: Path, repo_root: Path, dry_run: bool = False) -> None:
     """Write missing agent instruction files in the repo's layout.
 
@@ -166,7 +183,7 @@ def _copy_agent_files(project_dir: Path, repo_root: Path, dry_run: bool = False)
     AGENTS.md layout, rendered from the same templates by the migration transform.
     Existing files are never overwritten.
     """
-    from ..lib.agents_md_layout import CURSOR_RULE, render_new_layout
+    from ..lib.agents_md_layout import CURSOR_RULE, render_new_layout, split_stub
 
     Console.subheader("Copying agent files...")
 
@@ -190,7 +207,9 @@ def _copy_agent_files(project_dir: Path, repo_root: Path, dry_run: bool = False)
 
     for name, text in contents.items():
         target = project_dir / name
-        if target.exists():
+        if name == "AGENTS.md" and layout != "agentinfo" and target.is_file():
+            _add_rules_reference(target, split_stub(text)[0], dry_run)
+        elif target.exists():
             Console.skip(f"{name} already exists (skipping)")
         elif dry_run:
             Console.info(f"Would create: {name}")

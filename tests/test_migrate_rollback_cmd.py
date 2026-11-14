@@ -194,3 +194,20 @@ def test_symlinked_stub_is_refused_without_touching_files(store, legacy_repo):
     assert _snapshot(legacy_repo) == before
     assert (legacy_repo / "CLAUDE.md").is_symlink()
     assert changesets.list_changesets() == []
+
+
+def test_setup_adds_rules_reference_to_existing_agents_md(tmp_path, monkeypatch):
+    from aec.commands import repo as repo_cmd
+
+    monkeypatch.setattr("aec.lib.preferences.get_setting", lambda key: None)
+    project = tmp_path / "my-app"
+    project.mkdir()
+    (project / "AGENTS.md").write_bytes(b"# my-app\r\n\r\nMy notes.\r\n")
+    repo_cmd._copy_agent_files(project, TEMPLATES.parent)
+
+    agents = (project / "AGENTS.md").read_bytes()
+    assert agents.startswith(b"# my-app\r\n\r\nMy notes.\r\n\r\n## Rules Reference")
+    assert b"\n" not in agents.replace(b"\r\n", b"")  # stays CRLF
+    assert (project / "CLAUDE.md").read_text() == "@AGENTS.md\n"
+    repo_cmd._copy_agent_files(project, TEMPLATES.parent)  # second run adds nothing
+    assert (project / "AGENTS.md").read_bytes() == agents
