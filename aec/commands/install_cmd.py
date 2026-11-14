@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 import subprocess
+from typing import Optional
 
 from ..lib import Console
 from ..lib.config import get_repo_root
@@ -25,7 +26,7 @@ from ..lib.prompt_catalog.install_flow_area import (
 )
 from ..lib.prompts import prompt as ask_prompt
 from ..lib.scope import catalog_repo_here, resolve_scope, Scope, ScopeError
-from ..lib.sources import discover_available, get_source_dirs
+from ..lib.sources import checkout_commit, discover_available, get_source_dirs
 from ..lib.installed_store import record_item_install
 from ..lib.skills_manifest import hash_skill_directory
 from ..lib.skill_dependencies import resolve_install_graph
@@ -326,6 +327,7 @@ def _install_single_item(
     installed_as: str = "explicit",
     yes: bool = False,
     install_hooks: bool = True,
+    source: Optional[str] = None,
 ) -> None:
     """Copy ``src`` to ``dst`` and record the install in the manifest.
 
@@ -358,7 +360,7 @@ def _install_single_item(
     record_install(
         manifest, scope_key, plural, name,
         item_info.get("version", "0.0.0"), content_hash,
-        installed_as=installed_as,
+        installed_as=installed_as, source=source, source_commit=checkout_commit(source, src),
     )
     save_manifest(manifest, manifest_file)
 

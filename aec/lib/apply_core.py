@@ -19,6 +19,7 @@ from .manifest_v2 import get_installed, load_manifest, record_mcp_install, save_
 from .mcp_settings import get_settings_path, write_mcp_server
 from .scope import Scope
 from .skills_manifest import version_is_newer
+from .sources import checkout_commit
 
 TYPE_TO_PLURAL = {"skill": "skills", "rule": "rules", "agent": "agents", "mcp": "mcps"}
 
@@ -32,12 +33,21 @@ class DesiredItem:
     scope: str  # "global" or an absolute repo-path string
     version_spec: str = "latest"  # "latest" or an exact version
     package: str = ""  # mcp only
+    # "<org_id>/<custom_source_id>" for an org custom source; "" is the AEC catalog.
+    # source_dirs / available_by_type key such items by (source_id, plural).
+    source_id: str = ""
+    # The approved commit of that custom source; a different one means reinstall.
+    source_commit: str = ""
+
+
+def _source_key(item: DesiredItem, plural: str):
+    return (item.source_id, plural) if item.source_id else plural
 
 
 @dataclass
 class ApplyPlanEntry:
     item: DesiredItem
-    action: str  # "install" | "upgrade" | "noop" | "skip-missing"
+    action: str  # "install" | "upgrade" | "noop" | "skip-missing" | "unsatisfiable"
     from_version: Optional[str] = None
     to_version: Optional[str] = None
     reason: str = ""
@@ -58,16 +68,30 @@ def plan_apply(items, *, manifest: dict, available_by_type: dict) -> list:
         if plural is None:
             plan.append(ApplyPlanEntry(item, "skip-missing", reason=f"unknown type '{item.item_type}'"))
             continue
-        avail = available_by_type.get(plural, {})
+        avail = available_by_type.get(_source_key(item, plural), {})
         if item.name not in avail:
             plan.append(ApplyPlanEntry(item, "skip-missing", reason="not in catalog"))
             continue
         avail_version = avail[item.name].get("version", "0.0.0")
+        if item.source_id and item.version_spec not in ("", "latest") and avail_version != item.version_spec:
+            # A custom source is the only place this item can come from; never swap in another version.
+            plan.append(ApplyPlanEntry(
+                item, "unsatisfiable", None, avail_version,
+                f"pinned to {item.version_spec} but the source has {avail_version}",
+            ))
+            continue
         installed = get_installed(manifest, item.scope, plural).get(item.name)
         if not installed:
             plan.append(ApplyPlanEntry(item, "install", None, avail_version, "not installed"))
             continue
         installed_version = installed.get("version", "0.0.0") if isinstance(installed, dict) else "0.0.0"
+        rec = installed if isinstance(installed, dict) else {}
+        if (rec.get("source") or "") != item.source_id or (
+            item.source_commit and rec.get("source_commit") != item.source_commit
+        ):
+            # Same version from another source (or another approved commit) is different content.
+            plan.append(ApplyPlanEntry(item, "upgrade", installed_version, avail_version, "source changed"))
+            continue
         if installed_version == avail_version:
             plan.append(ApplyPlanEntry(item, "noop", installed_version, avail_version, "up to date"))
             continue
@@ -99,16 +123,21 @@ def execute_apply(
 
     result = ApplyResult()
     for entry in plan:
+        if entry.action == "unsatisfiable":
+            result.errors.append((entry, entry.reason))
+            continue
         if entry.action not in ("install", "upgrade"):
             result.skipped.append(entry)
             continue
         item = entry.item
         plural = TYPE_TO_PLURAL[item.item_type]
-        item_info = available_by_type.get(plural, {}).get(item.name)
+        key = _source_key(item, plural)
+        source = item.source_id or None
+        item_info = available_by_type.get(key, {}).get(item.name)
         if item_info is None:
             result.errors.append((entry, "item disappeared from catalog"))
             continue
-        source_dir = source_dirs.get(plural)
+        source_dir = source_dirs.get(key)
         if not source_dir:
             result.errors.append((entry, f"no source directory for {plural}"))
             continue
@@ -132,6 +161,7 @@ def execute_apply(
                     item_info=item_info,
                     yes=True,
                     install_hooks=install_hooks,
+                    source=source,
                 )
             result.applied.append(entry)
         except Exception as exc:  # noqa: BLE001 — one bad item must not abort the rest
@@ -156,11 +186,16 @@ def _apply_mcp(
     mcp_def = json.loads(mcp_file.read_text(encoding="utf-8"))
     pip_package = mcp_def.get("install", {}).get("pip", "")
     if pip_package:
-        subprocess.run(["pip", "install", pip_package])
+        done = subprocess.run(["pip", "install", pip_package], check=False)
+        if done.returncode != 0:
+            raise RuntimeError(f"pip install {pip_package} failed (exit {done.returncode})")
     settings_path = get_settings_path(scope_obj)
     for server_name, server_entry in mcp_def.get("mcpServers", {}).items():
         write_mcp_server(settings_path, server_name, server_entry)
     manifest = load_manifest(manifest_path)
-    record_mcp_install(manifest, item.scope, item.name, item_info.get("version", "0.0.0"), pip_package)
+    record_mcp_install(
+        manifest, item.scope, item.name, item_info.get("version", "0.0.0"), pip_package,
+        source=item.source_id or None, source_commit=checkout_commit(item.source_id, mcp_file),
+    )
     save_manifest(manifest, manifest_path)
     record_item_install("mcp", item.name, item_info.get("version", "0.0.0"))

@@ -12,12 +12,14 @@ module holds the category appliers.
 """
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
 from .effective import EffectivePolicy, effective_policy
-
+from .errors import OrgConfigError
+from .schema import RESERVED_SOURCE_IDS
 
 _CI_PREFIX = "configurable_instructions."
 
@@ -86,7 +88,7 @@ def compile_desired_items(policy: EffectivePolicy, scope: str) -> list:
     from ..apply_core import DesiredItem
 
     desired: list = []
-    for subject, (_org_id, p) in sorted(policy.items.items()):
+    for subject, (org_id, p) in sorted(policy.items.items()):
         plural, name = subject.split("/", 1)
         if plural == "plugins" or p.stance.value not in _INSTALL_STANCES:
             continue
@@ -96,6 +98,7 @@ def compile_desired_items(policy: EffectivePolicy, scope: str) -> list:
                 name=name,
                 scope=scope,
                 version_spec=p.version or "latest",
+                source_id="" if p.source in RESERVED_SOURCE_IDS else f"{org_id}/{p.source}",
             )
         )
     return desired
@@ -119,13 +122,21 @@ def apply_items(
     available_by_type: dict,
     manifest_path,
     install_hooks: bool = True,
+    source_commits: Optional[dict] = None,
 ):
     """Install install-intent items and remove blocked ones. Returns
-    ``(ApplyResult, removed_keys)``."""
+    ``(ApplyResult, removed_keys)``. ``source_commits`` maps a custom source key
+    (``"<org_id>/<id>"``) to the commit being applied."""
+    import dataclasses
+
     from ..apply_core import execute_apply, plan_apply
     from ..manifest_v2 import get_installed, load_manifest
 
-    desired = compile_desired_items(policy, scope)
+    commits = source_commits or {}
+    desired = [
+        dataclasses.replace(i, source_commit=commits.get(i.source_id, ""))
+        for i in compile_desired_items(policy, scope)
+    ]
     manifest = load_manifest(manifest_path)
     plan = plan_apply(desired, manifest=manifest, available_by_type=available_by_type)
     result = execute_apply(
@@ -224,24 +235,152 @@ class ApplyOutcome:
     removed_items: int
     held: tuple[str, ...]
     preferences_applied: list
-    skipped_reason: Optional[str] = None  # "locked" | "declined" | "dry-run" | None
+    # "locked" | "declined" | "dry-run" | "source_failed" | "install_failed" | None
+    skipped_reason: Optional[str] = None
 
 
-def _catalog(scope: str):
-    from ..config import get_repo_root  # noqa: F401 - imported for side-effect parity
+@dataclass(frozen=True)
+class SyncedSource:
+    org_id: str
+    source_id: str
+    commit: str
+    contributes: tuple[str, ...]
+    # Staged checkout this apply installs from; published by publish_sources.
+    staged: Path
+
+    @property
+    def key(self) -> str:
+        return f"{self.org_id}/{self.source_id}"
+
+
+def _staging_dir(paths, org_id: str, source_id: str) -> Path:
+    return paths.org_dir_for(org_id) / "sources.next" / source_id
+
+
+def sync_custom_sources(paths) -> Optional[list[SyncedSource]]:
+    """Check out every enrolled org's custom sources before anything is written.
+
+    Each source is checked out into a staging dir at its ``commit`` pin, else the
+    commit last approved for it, else (first apply) the tip of its ref. The live
+    checkout at ``<org_id>.d/sources/<id>/`` (what outdated/upgrade read) only
+    changes in ``publish_sources``, after the whole apply succeeds. Returns None,
+    after printing why and discarding staged checkouts, if any source fails.
+    """
+    from ..console import Console
+    from .discovery import discover_enrolled_orgs
+    from .git_source import sync_source
+    from .state import read_state
+
+    synced: list[SyncedSource] = []
+    staged_dirs: list[Path] = []
+    for enrolled in discover_enrolled_orgs(paths):
+        cfg = enrolled.config
+        if not cfg.custom_sources:
+            continue
+        st = read_state(paths, cfg.org_id)
+        approved = (st.source_commits if st else None) or {}
+        for cs in cfg.custom_sources:
+            want = cs.commit or approved.get(cs.id)
+            staged = _staging_dir(paths, cfg.org_id, cs.id)
+            staged_dirs.append(staged)
+            try:
+                commit = sync_source(cs.url, cs.ref, want, staged)
+                synced.append(SyncedSource(cfg.org_id, cs.id, commit, cs.contributes, staged))
+                _check_item_paths(synced[-1])
+            except OrgConfigError as exc:
+                Console.error(
+                    f"org-config apply stopped: source {cfg.org_id}/{cs.id} failed: {exc}. "
+                    "Nothing was applied."
+                )
+                discard_staged(staged_dirs)
+                return None
+    return synced
+
+
+def _check_item_paths(s: SyncedSource) -> None:
+    """Refuse items whose files leave the checkout or include symlinks.
+
+    The pinned commit authenticates only the repo's own bytes; a path or link
+    pointing outside it would install files from this machine instead.
+    """
+    from ..sources import discover_available, get_source_dirs
+    from .errors import OrgConfigValidationError
+
+    root = s.staged.resolve()
+    dirs = get_source_dirs(s.staged)
+    for plural in s.contributes:
+        d = dirs[plural]
+        if not d.exists():
+            continue
+        for name, info in discover_available(d, plural).items():
+            p = d / str(info.get("path", name))
+            members = [p, *(p.rglob("*") if p.is_dir() and not p.is_symlink() else ())]
+            if any(m.is_symlink() for m in members) or not p.resolve().is_relative_to(root):
+                raise OrgConfigValidationError(
+                    f"{plural[:-1]} '{name}' points outside the source repo or contains a symlink",
+                    field_path=f"sources.custom.{s.source_id}",
+                )
+
+
+def discard_staged(dirs) -> None:
+    for d in dirs:
+        shutil.rmtree(d, ignore_errors=True)  # best-effort: the next apply re-stages it
+
+
+def publish_sources(paths, synced: list[SyncedSource], commit_state: Callable[[], None]) -> None:
+    """Make each staged checkout live, then ``commit_state()``; all or nothing.
+
+    Live checkouts move aside to ``sources.prev`` first, so any failure (a rename
+    or the approval-state write) puts every one back and leaves nothing approved.
+    """
+    done = []  # (live, prev or None), in publish order
+    try:
+        for s in synced:
+            live = paths.source_dir_for(s.org_id, s.source_id)
+            prev = live.parent.parent / "sources.prev" / s.source_id
+            live.parent.mkdir(parents=True, exist_ok=True)
+            prev.parent.mkdir(parents=True, exist_ok=True)
+            if prev.exists():
+                shutil.rmtree(prev)  # left by an interrupted earlier publish
+            if live.exists():
+                live.rename(prev)
+                done.append((live, prev))
+            else:
+                done.append((live, None))
+            s.staged.rename(live)
+        commit_state()
+    except Exception:
+        for live, prev in reversed(done):
+            if live.exists():
+                shutil.rmtree(live)
+            if prev is not None:
+                prev.rename(live)
+        discard_staged(s.staged for s in synced)
+        raise
+    for _, prev in done:
+        if prev is not None:
+            shutil.rmtree(prev, ignore_errors=True)  # best-effort: the next publish clears it
+
+
+def _catalog(paths, synced: list[SyncedSource]):
+    """Source dirs and available items: AEC catalog keyed by plural, custom
+    sources keyed by ``("<org_id>/<id>", plural)``."""
     from ..sources import discover_available, get_source_dirs
 
     manifest_path = Path.home() / ".agents-environment-config" / "installed-manifest.json"
-    source_dirs: dict = {}
+    source_dirs: dict = dict(get_source_dirs())
     available: dict = {}
-    try:
-        source_dirs = get_source_dirs()
-        for plural in ("skills", "rules", "agents", "mcps"):
-            d = source_dirs.get(plural)
-            if d and Path(d).exists():
-                available[plural] = discover_available(d, plural)
-    except Exception:  # noqa: BLE001 - missing catalog just means nothing installs
-        source_dirs, available = {}, {}
+    for plural in ("skills", "rules", "agents", "mcps"):
+        d = source_dirs.get(plural)
+        if d and Path(d).exists():
+            available[plural] = discover_available(d, plural)
+    for s in synced:
+        clone_dirs = get_source_dirs(s.staged)
+        for plural in s.contributes:
+            d = clone_dirs[plural]
+            key = (s.key, plural)
+            source_dirs[key] = d
+            available[key] = discover_available(d, plural) if d.exists() else {}
     return source_dirs, available, manifest_path
 
 
@@ -284,17 +423,32 @@ def apply_org_policy(
             Console.info("org-config apply declined.")
             return ApplyOutcome(0, 0, policy.held, [], skipped_reason="declined")
 
+    synced = sync_custom_sources(paths)
+    if synced is None:
+        return ApplyOutcome(0, 0, policy.held, [], skipped_reason="source_failed")
+
+    source_dirs, available_by_type, manifest_path = _catalog(paths, synced)
     prefs_applied = apply_preferences(policy)
     apply_prompts(policy)
 
-    source_dirs, available_by_type, manifest_path = _catalog(scope)
     result, removed = apply_items(
         policy,
         scope,
         source_dirs=source_dirs,
         available_by_type=available_by_type,
         manifest_path=manifest_path,
+        source_commits={s.key: s.commit for s in synced},
     )
+    if result.errors:
+        for entry, err in result.errors:
+            Console.error(f"org-config apply: {entry.item.item_type} '{entry.item.name}' failed: {err}")
+        Console.error("org-config apply failed; source commits and pending reviews were not approved.")
+        # shortcut: items installed before the failure stay installed; revert them if this bites.
+        discard_staged(s.staged for s in synced)
+        return ApplyOutcome(
+            len(result.applied), len(removed), policy.held, prefs_applied,
+            skipped_reason="install_failed",
+        )
 
     plugins_in, plugins_out = apply_plugins(
         policy, scope, source_dirs=source_dirs, manifest_path=manifest_path
@@ -309,7 +463,12 @@ def apply_org_policy(
         Console.warning(
             f"{len(policy.held)} item(s) held pending decision — run `aec org resolve`."
         )
-    _stamp_applied(paths, now)
+    try:
+        publish_sources(paths, synced, lambda: _stamp_applied(paths, now, synced))
+    except (OSError, OrgConfigError) as exc:
+        Console.error(f"org-config apply: could not publish custom sources: {exc}")
+        Console.error("org-config apply failed; source commits and pending reviews were not approved.")
+        return ApplyOutcome(applied, len(removed), policy.held, prefs_applied, skipped_reason="install_failed")
     return ApplyOutcome(
         applied_items=applied,
         removed_items=len(removed),
@@ -343,16 +502,28 @@ def _default_confirm(policy: EffectivePolicy) -> bool:
     ).strip().lower() == "y"
 
 
-def _stamp_applied(paths, now: Optional[str]) -> None:
-    """Record ``last_applied_at`` on every enrolled org after a successful apply."""
+def _stamp_applied(paths, now: Optional[str], synced: list[SyncedSource] = ()) -> None:
+    """Record ``last_applied_at`` and applied source commits on every enrolled org.
+
+    All or nothing: if one org's write fails, every org's state is put back
+    (by rename, so it works on a full disk too).
+    """
     import dataclasses
     from datetime import datetime, timezone
 
     from .discovery import discover_enrolled_orgs
-    from .state import read_state, write_state
+    from .state import all_or_nothing, read_state, write_state
 
     stamp = now or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    for enrolled in discover_enrolled_orgs(paths):
-        st = read_state(paths, enrolled.config.org_id)
-        if st is not None:
-            write_state(paths, dataclasses.replace(st, last_applied_at=stamp))
+    orgs = discover_enrolled_orgs(paths)
+    with all_or_nothing(paths, [e.config.org_id for e in orgs]):
+        for enrolled in orgs:
+            org_id = enrolled.config.org_id
+            st = read_state(paths, org_id)
+            if st is not None:
+                commits = {s.source_id: s.commit for s in synced if s.org_id == org_id} or None
+                failed = bool(st.pending and st.pending.get("kind") == "apply_failed")
+                write_state(paths, dataclasses.replace(
+                    st, last_applied_at=stamp, source_commits=commits,
+                    pending=None if failed else st.pending,
+                ))

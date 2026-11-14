@@ -26,6 +26,7 @@ from ..lib.org_config import (
     discover_enrolled_orgs,
 )
 from ..lib.org_config import git_source
+from ..lib.atomic_write import atomic_write_text
 from ..lib.org_config.apply import apply_org_policy
 from ..lib.org_config.crypto import decode_pubkey, fingerprint
 from ..lib.org_config.discovery import migrate_state
@@ -36,7 +37,7 @@ from ..lib.org_config.reconcile import open_conflicts
 from ..lib.org_config.resolutions import Resolution, save_resolution
 from ..lib.org_config.rotation import rotation_status
 from ..lib.org_config.schema import ITEM_TYPES
-from ..lib.org_config.state import OrgState, read_state, write_state
+from ..lib.org_config.state import OrgState, StateSnapshot, read_state, write_state
 from ..lib.org_config.trust import UnsignedConsent, UnsignedConsentDeclined, verify_trust
 from ..lib.org_config.validator import validate_org_config
 
@@ -480,10 +481,27 @@ def _refresh_one(paths: OrgPaths, st: OrgState) -> tuple[str, bool]:
 
     has_trust_change = bool(st.pending and st.pending.get("kind") == "trust_change")
     if hash_config_bytes(raw) == st.config_hash and not has_trust_change:
-        # Back to the applied content: a stale review or verify failure no longer applies.
-        if st.pending:
-            write_state(paths, dataclasses.replace(st, pending=None))
         _staged_path(paths, st.org_id).unlink(missing_ok=True)
+        try:
+            tips = _ref_only_tips(validate_org_config(*parse_org_config_text(raw.decode("utf-8"))))
+        except OrgConfigError as exc:
+            return failed(str(exc))
+        moved = {sid: sha for sid, sha in tips.items() if sid in (st.source_commits or {})}
+        moved = {sid: sha for sid, sha in moved.items() if sha != st.source_commits[sid]}
+        if moved:
+            summary = "; ".join(
+                f"source {sid} moved {st.source_commits[sid][:12]} -> {sha[:12]}"
+                for sid, sha in sorted(moved.items())
+            )
+            typer.echo(f"org '{st.org_id}': {summary}; review it, then run `aec org apply`")
+            _set_pending(
+                paths, st, {"kind": "review", "commit": commit, "summary": summary, "sources": moved}
+            )
+            return "pending review", False
+        # Back to the applied content: a stale review or verify failure no longer applies.
+        # apply_failed stays: the enrolled config is right but still unapplied.
+        if st.pending and st.pending.get("kind") != "apply_failed":
+            write_state(paths, dataclasses.replace(st, pending=None))
         return "unchanged", False
 
     try:
@@ -528,18 +546,41 @@ def _refresh_one(paths: OrgPaths, st: OrgState) -> tuple[str, bool]:
         _staged_path(paths, st.org_id).unlink(missing_ok=True)
         return "updated", True
 
+    try:
+        tips = _ref_only_tips(cfg)
+    except OrgConfigError as exc:
+        return failed(str(exc))
     staged = _staged_path(paths, st.org_id)
     staged.parent.mkdir(parents=True, exist_ok=True)
     staged.write_bytes(raw)
     typer.echo(f"org '{st.org_id}' changed upstream; review it, then run `aec org apply`:")
     summary = _review_summary(paths, st.org_id, cfg)
-    _set_pending(paths, st, {"kind": "review", "commit": commit, "summary": summary})
+    pending = {"kind": "review", "commit": commit, "summary": summary}
+    if tips:
+        # Approving the review approves these source commits too.
+        pending["sources"] = tips
+    _set_pending(paths, st, pending)
     return "pending review", False
+
+
+def _ref_only_tips(cfg) -> dict:
+    """``{source_id: commit}`` each ref-only custom source's ref points at now.
+
+    Sources pinned by ``commit`` cannot move, so they are not asked about.
+    """
+    from ..lib.org_config.git_source import remote_commit
+
+    return {
+        cs.id: remote_commit(cs.url, cs.ref)
+        for cs in (cfg.custom_sources if cfg else ())
+        if cs.commit is None
+    }
 
 
 def _promote(paths: OrgPaths, st: OrgState, raw: bytes, cfg, commit: str, now: str) -> OrgState:
     """Make verified bytes the enrolled config and clear any pending."""
-    paths.config_for(st.org_id).write_bytes(raw)
+    # By rename, never in place, so a StateSnapshot of the old file stays intact.
+    atomic_write_text(paths.config_for(st.org_id), raw.decode("utf-8"))
     st = dataclasses.replace(
         st,
         config_version=cfg.config_version,
@@ -575,7 +616,15 @@ def refresh_remote_orgs(paths: OrgPaths) -> list[tuple[str, str]]:
         results.append((org_id, status))
         promoted = promoted or did_promote
     if promoted:
-        apply_org_policy(paths, mode_override="managed")
+        outcome = apply_org_policy(paths, mode_override="managed")
+        if outcome.skipped_reason in ("source_failed", "install_failed"):
+            # The new config is enrolled but not applied; keep saying so until an apply succeeds.
+            reason = outcome.skipped_reason.replace("_", " ")
+            for i, (org_id, status) in enumerate(results):
+                st = read_state(paths, org_id) if status == "updated" else None
+                if st is not None:
+                    _set_pending(paths, st, {"kind": "apply_failed", "reason": reason})
+                    results[i] = (org_id, f"apply_failed: {reason}")
     return results
 
 
@@ -600,6 +649,11 @@ def pending_fix(st: OrgState) -> str:
     if kind == "trust_change":
         return (
             f"org '{st.org_id}' trust anchor changed: run `aec org enroll --replace {st.org_id} <source>`"
+        )
+    if kind == "apply_failed":
+        return (
+            f"org '{st.org_id}' was updated but not applied ({st.pending.get('reason')}): "
+            "run `aec org apply` to see why and retry"
         )
     return f"org '{st.org_id}' refresh failed ({st.pending.get('reason')}): fix the source, then `aec update`"
 
@@ -992,27 +1046,36 @@ def apply_cmd(
         )
     finally:
         applied = outcome is not None and outcome.skipped_reason is None
-        for org_id, (old_bytes, old_state) in backups.items():
+        for org_id, snapshot in backups.items():
             if applied:
                 _staged_path(paths, org_id).unlink(missing_ok=True)
+                snapshot.drop()
             else:
-                paths.config_for(org_id).write_bytes(old_bytes)
-                write_state(paths, old_state)
+                snapshot.restore()
     if outcome.skipped_reason == "locked":
         raise typer.Exit(code=EXIT_TRUST)
+    if outcome.skipped_reason in ("source_failed", "install_failed"):
+        raise typer.Exit(code=EXIT_VALIDATION)
 
 
 def _promote_staged_reviews(paths: OrgPaths, backups: dict) -> None:
-    """Promote every staged review, recording ``{org_id: (old_yaml_bytes, old_state)}``
-    in ``backups`` before each one so a failure part-way can still roll back."""
+    """Promote every staged review, recording ``{org_id: StateSnapshot}`` in
+    ``backups`` before each one so a failure part-way can still roll back."""
     for st in pending_orgs(paths):
         staged = _staged_path(paths, st.org_id)
-        if st.pending.get("kind") != "review" or not staged.exists():
+        sources = st.pending.get("sources") or {}
+        if st.pending.get("kind") != "review" or not (staged.exists() or sources):
+            continue
+        backups[st.org_id] = StateSnapshot(paths, [st.org_id], config=True)
+        if sources:
+            # The reviewed source commits become the approved ones the apply checks out.
+            st = dataclasses.replace(st, source_commits={**(st.source_commits or {}), **sources})
+        if not staged.exists():
+            write_state(paths, dataclasses.replace(st, pending=None))
             continue
         raw = staged.read_bytes()
         frontmatter, body = parse_org_config_text(raw.decode("utf-8"))
         cfg = validate_org_config(frontmatter, body)
-        backups[st.org_id] = (paths.config_for(st.org_id).read_bytes(), st)
         _promote(paths, st, raw, cfg, st.pending.get("commit"), _now_iso_utc())
 
 

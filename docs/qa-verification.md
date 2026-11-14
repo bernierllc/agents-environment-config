@@ -102,6 +102,12 @@ Use a scratch git repo you can push to, holding `org/my-org.yaml` (unsigned).
 ### Remove
 1. `aec org remove my-org --yes` deletes `~/.aec/orgs/my-org.d/`.
 
+### Custom sources
+Use a second scratch repo holding `.agent-rules/team/example-rule.md` (`name: example-rule`, `version: 1.0.0`), and add it to `my-org.yaml` under `sources.custom` with `id: team-rules`, `ref: main`, `contributes: ["rules"]`, plus an item `rules.example-rule` with `source: team-rules` and `stance: required`.
+1. `aec org apply --yes` installs the rule. `~/.aec/orgs/my-org.d/sources/team-rules/` holds the clone. The manifest record for `example-rule` has `"source": "my-org/team-rules"`.
+2. Bump the rule to `1.1.0` in the source repo and push. `aec update` reports "pending review" (exit 14) and the rule stays at `1.0.0`. `aec org apply --yes` installs `1.1.0`.
+3. Pin the source with `commit:` set to a SHA that does not exist. `aec org apply --yes` names the source, says "Nothing was applied", and exits non-zero.
+
 ## Hook resource setup
 
 1. In a fresh Git repository, run `aec install skill verification-writer`. Accept
