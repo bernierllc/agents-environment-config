@@ -3,6 +3,7 @@
 import json
 import os
 import subprocess
+import unicodedata
 from pathlib import Path
 from typing import Optional
 
@@ -264,10 +265,13 @@ def _paths_reset_would_overwrite(repo_path: Path, head: str, target: str) -> lis
     # a submodule that stays a submodule keeps its directory; one that goes away doesn't
     gitlinks = ({e.split("\t", 1)[1] for e in before if e.startswith("160000 ")}
                 - {e.split("\t", 1)[1] for e in after if e.startswith("160000 ")})
-    loose = {o.rstrip("/"): o.rstrip("/").casefold() for o in others}
+    def fold(path: str) -> str:  # APFS and NTFS match names case- and normalization-insensitively
+        return unicodedata.normalize("NFC", path).casefold()
+
+    loose = {o.rstrip("/"): fold(o.rstrip("/")) for o in others}
     blocking = []
     for path in changed:
-        d = path.casefold()
+        d = fold(path)
         hits = [o for o, u in loose.items()
                 if u == d or d.startswith(u + "/") or u.startswith(d + "/")]
         sub = repo_path / path
@@ -310,8 +314,9 @@ def _reset_to_upstream_remedy(repo_path: Path, local_commits: int):
                 fix=["Run `aec update` again."],
             )
         backup = f"aec-backup/{datetime.now():%Y%m%d-%H%M%S}"
-        # --keep (not --hard) refuses rather than discard any uncommitted change
-        for cmd in (["git", "branch", backup, head], ["git", "reset", "--keep", target]):
+        # --keep (not --hard) refuses rather than discard any uncommitted change;
+        # no recursion, so submodule working trees (and their ignored files) are untouched
+        for cmd in (["git", "branch", backup, head], ["git", "-c", "submodule.recurse=false", "reset", "--keep", target]):
             done = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True)
             if done.returncode != 0:
                 raise AecError(

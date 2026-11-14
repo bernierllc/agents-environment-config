@@ -362,3 +362,46 @@ def test_version_flag(monkeypatch, capsys):
         cli.main()
     assert exc.value.code == 0
     assert __version__ in capsys.readouterr().out
+
+
+def test_no_remedy_for_unicode_equivalent_ignored_name(remote_and_clone):
+    seed, clone = remote_and_clone
+    git(seed, "config", "core.precomposeunicode", "false")
+    git(clone, "config", "core.precomposeunicode", "false")
+    commit(seed, "café", "upstream")  # composed
+    (clone / ".git" / "info" / "exclude").write_text("caf*\n")
+    decomposed = clone / "café"
+    try:
+        decomposed.write_text("SECRET")
+    except OSError:
+        pytest.skip("filesystem rejects the name")
+    assert not offered(seed, clone)
+
+
+def test_reset_does_not_recurse_into_submodules(remote_and_clone, tmp_path):
+    seed, clone = remote_and_clone
+    lib = tmp_path / "lib"
+    git(tmp_path, "init", "-q", "-b", "main", str(lib))
+    commit(lib, "f")
+    git(seed, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(lib), "sub")
+    git(seed, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "sub")
+    git(seed, "push", "-q", "origin", "main")
+    git(clone, "pull", "-q")
+    git(clone, "-c", "protocol.file.allow=always", "submodule", "update", "-q", "--init")
+    git(clone, "config", "submodule.recurse", "true")
+    commit(lib, "secret", "UPSTREAM")
+    git(seed / "sub", "pull", "-q")
+    git(seed, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "bump")
+    git(seed, "push", "-q", "origin", "main")
+    commit(clone, "local-only")
+    git(clone / "sub", "fetch", "-q")
+    exclude = clone / ".git" / "modules" / "sub" / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    exclude.write_text("secret\n")
+    (clone / "sub" / "secret").write_text("LOCAL SECRET")
+
+    with pytest.raises(RepoSyncError) as exc:
+        fetch_latest(clone)
+    assert exc.value.remedy is not None
+    exc.value.remedy.apply()
+    assert (clone / "sub" / "secret").read_text() == "LOCAL SECRET"
