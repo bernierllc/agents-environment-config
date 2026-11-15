@@ -1,0 +1,54 @@
+# Promotion guard for PRs into main: only a same-repo `staging` branch may open one.
+#
+# Uses pull_request_target so the workflow + validator load from the trusted
+# base branch (main), not the PR head. Only PR *metadata* (head ref / repo)
+# is read from the event; no PR code is checked out or executed.
+#
+# pull_request_target attaches the Actions job to the base SHA, not the PR head,
+# so a required status check named after the job would never appear on the PR
+# head. The result is therefore published as a Check Run on
+# pull_request.head.sha through the Checks API (same approach as review-gate.yml).
+#
+# Activation: advisory until the `main promotion gate` ruleset requires the
+# check "PRs into main must come from staging".
+name: main via staging
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
+    branches: [main]
+permissions:
+  contents: read
+  checks: write
+concurrency:
+  group: main-via-staging-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  publish-guard-result:
+    name: Publish the promotion guard result
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted base (not PR head)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Check head branch and publish on the PR head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+          CHECK_NAME: PRs into main must come from staging
+        run: |
+          set -u
+          # A rejected source publishes nothing: the required check stays absent
+          # (which blocks the merge) and this job's own failure names the reason.
+          # Publishing a failure would overwrite the success a legitimate staging
+          # PR holds at the same SHA, since check runs are commit-scoped.
+          HEAD_REF="$HEAD_REF" HEAD_REPO="$HEAD_REPO" REPO="$REPO" bash scripts/check-main-source.sh
+          gh api -X POST "repos/$REPO/check-runs" \
+            -f name="$CHECK_NAME" -f head_sha="$SHA" \
+            -f status="completed" -f conclusion="success" \
+            -f "output[title]=source branch ok" \
+            -f "output[summary]=This PR comes from staging."

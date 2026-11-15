@@ -110,11 +110,11 @@ Loadout schema: `docs/loadout/` — plugin publishers ship a `plugin.json` at th
 ## Commits and PRs
 
 - Conventional commits: `feat:`, `fix:`, `docs:`, `chore:`
-- Feature branches from `main`. There is no `staging` branch: `main` is the integration branch, and the `version-bump` workflow cuts a release after each merge.
+- Feature branches from `staging`, and feature PRs target `staging`. `main` is promotion-only: the only allowed PR into `main` is `staging` → `main` (merge commit), enforced by the `main via staging` check and the `main promotion gate` ruleset. The `version-bump` workflow cuts a release after each promotion.
 
 ### Merging without maintainer approval
 
-An agent may merge a PR into `main` without asking the maintainer when every one of these holds:
+An agent may merge a PR into `staging`, or promote `staging` into `main`, without asking the maintainer when every one of these holds:
 
 1. The `adversarial-review` skill's loop is complete: the latest round on the current head found no new P0/P1, and every finding is resolved. A P0 is resolved only by a root fix or by the reviewer withdrawing it on its thread; nothing else lets a P0 through. A P1 is resolved by a fix, by the reviewer agreeing it away on its thread, or by the maintainer accepting it on its thread as a known limit. A P1 the author declined on their own still blocks.
 2. The `pr-merge-flow` skill's steps were followed: merge through GitHub, no base-branch merges into the PR unless there is a real conflict.
