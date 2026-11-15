@@ -25,6 +25,8 @@ from .schema import (
 _STANCE_VALUES = {s.value for s in Stance}
 # org_id names files and dirs under ~/.aec/orgs/, so it can never carry a path.
 _ORG_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+# The only version form `plan_apply` can compare for a custom source (see plans/2026-11-14-custom-source-version-ranges.md).
+_EXACT_VERSION = re.compile(r"^\d+(\.\d+)*$")
 
 
 def _require(d: dict, key: str, field_path: str) -> Any:
@@ -206,6 +208,12 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
                     "plugin versions are owned by the agent's plugin manager, so a "
                     "plugin cannot be pinned or given a version; use stance 'required'",
                     field_path=f"{base_path}.{'version' if version is not None else 'stance'}",
+                )
+            if source in contributes_by_source and version is not None and not _EXACT_VERSION.match(str(version)):
+                raise OrgConfigValidationError(
+                    f"version {version!r} must be an exact version like '1.2.0': constraints such as "
+                    "'>=2.0.0' are not evaluated for custom-source items",
+                    field_path=f"{base_path}.version",
                 )
             validated[item_name] = ItemPolicy(
                 source=source,

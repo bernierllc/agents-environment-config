@@ -410,6 +410,80 @@ def test_install_error_after_the_stamp_is_recorded_and_retried(repos, home, path
     assert "1.1.0" in installed.read_text()
 
 
+def test_preferences_write_failure_after_the_stamp_is_recorded_and_retried(repos, home, paths, monkeypatch):
+    """The preference write is a post-stamp install: when it raises, B stays approved and
+    published, apply_failed is recorded, exit is 13, and nothing is restored over the live source."""
+    import aec.lib.preferences as prefs
+
+    _enroll_ref_only_and_apply(repos, paths)
+    b = _push_rule(repos, "1.1.0")
+    with_prefs = _config(pin='      ref: "main"\n', version="1.0.1").replace(
+        'install:\n  mode: "managed"\n',
+        'install:\n  mode: "managed"\n  preferences:\n    update_check: false\n',
+    )
+    _commit(repos["config"], "org/example-org.yaml", with_prefs)
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+
+    real_save = prefs.save_preferences
+
+    def boom(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(prefs, "save_preferences", boom)
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
+    assert "preferences" in result.output and "disk full" in result.output
+    st = read_state(paths, "example-org")
+    assert st.source_commits == {"team-rules": b} and st.pending["kind"] == "apply_failed"
+    assert _live_head(paths) == b
+
+    monkeypatch.setattr(prefs, "save_preferences", real_save)
+    retry = runner.invoke(app, ["org", "apply", "--yes"])
+    assert retry.exit_code == 0, retry.output
+    assert read_state(paths, "example-org").pending is None
+
+
+@pytest.mark.parametrize("version", [">=2.0.0", "^1.0", "latest", "1.x"])
+def test_custom_source_item_rejects_a_version_constraint(version):
+    """Only exact versions are compared for a custom source; a range would be silently
+    treated as a literal string, so validation refuses it (plans/2026-11-14-custom-source-version-ranges.md)."""
+    text = _config(pin='      ref: "main"\n').replace(
+        '      source: "team-rules"\n', f'      source: "team-rules"\n      version: "{version}"\n'
+    )
+    with pytest.raises(OrgConfigValidationError, match="exact version") as exc:
+        _validate(text)
+    assert exc.value.field_path == "items.rules.example-rule.version"
+
+
+def test_custom_source_item_accepts_an_exact_version():
+    text = _config(pin='      ref: "main"\n').replace(
+        '      source: "team-rules"\n', '      source: "team-rules"\n      version: "2.1.0"\n'
+    )
+    assert _validate(text).items["rules"]["example-rule"].version == "2.1.0"
+
+
+def test_required_item_missing_from_the_source_publishes_and_stamps_nothing(repos, home, paths):
+    """A required item the source no longer provides is a pre-publish failure that names it."""
+    a = _enroll_ref_only_and_apply(repos, paths)
+    before = read_state(paths, "example-org")
+    dir_before = sorted(p.name for p in paths.org_dir_for("example-org").iterdir() if p.name != "sources.next")
+    _commit(repos["source"], ".agent-rules/team/other-rule.md", RULE.replace("example-rule", "other-rule").format(version="1.0.0"))
+    (repos["source"] / ".agent-rules/team/example-rule.md").unlink()
+    _git("add", "-A", cwd=repos["source"])
+    _git("commit", "-q", "-m", "drop", cwd=repos["source"])
+    _git("push", "-q", "--force", "origin", "HEAD:main", cwd=repos["source"])
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
+    assert "example-rule" in result.output
+    assert read_state(paths, "example-org").source_commits == before.source_commits
+    assert _live_head(paths) == a
+    org_dir = paths.org_dir_for("example-org")
+    assert not (org_dir / "sources.next" / "team-rules").exists()
+    assert sorted(p.name for p in org_dir.iterdir() if p.name != "sources.next") == dir_before
+
+
 def test_plan_reinstalls_when_source_or_commit_changes():
     from aec.lib.apply_core import DesiredItem, plan_apply
 

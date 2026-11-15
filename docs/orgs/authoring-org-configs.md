@@ -131,6 +131,10 @@ Required fields: `source` (must be a reserved or declared custom ID) and `stance
 
 `version` is optional except when stance is `pinned` (then required).
 
+Items from a custom source take an **exact** version only (for example `"2.1.0"`); constraints such as `>=2.0.0` are rejected at enrollment until range support lands (see `plans/2026-11-14-custom-source-version-ranges.md`).
+
+A `required` or `pinned` item that its source cannot provide (missing, or at a different version) stops `aec org apply` before anything is published or approved: the command exits non-zero and names the item. A `recommended` item that is missing is skipped.
+
 ### Plugins
 
 `items.plugins.<name>` uses the catalog plugin name (for example `my-plugin`). `required` and `recommended` install it, `blocked` uninstalls it, `silent` only records it. Installs run through the same loadout engine as `aec apply`, so a user's `plugins.execution=instructions-only` setting still prints the commands instead of running them. In managed mode there is no per-plugin confirmation; the policy is the approval.

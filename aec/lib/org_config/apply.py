@@ -464,7 +464,13 @@ def apply_org_policy(
         manifest_path=manifest_path,
         source_commits={s.key: s.commit for s in synced},
     )
-    unsatisfiable = [e for e in plan if e.action == "unsatisfiable"]
+    # A required or pinned item the source cannot provide (unsatisfiable, or missing from
+    # the catalog) must never be approved; only a merely recommended one may be skipped.
+    unsatisfiable = [
+        e for e in plan
+        if e.action == "unsatisfiable"
+        or (e.action == "skip-missing" and _mandatory(policy, e.item))
+    ]
     if unsatisfiable:
         for entry in unsatisfiable:
             Console.error(f"org-config apply: {entry.item.item_type} '{entry.item.name}' failed: {entry.reason}")
@@ -485,15 +491,20 @@ def apply_org_policy(
     # From here every failure is reported and recorded per item; the next apply
     # recomputes the plan and retries what is still missing.
     source_dirs, available_by_type, manifest_path = _catalog(paths, synced, published=True)
-    prefs_applied = apply_preferences(policy)
-    apply_prompts(policy)
+    errors: list[tuple[str, str]] = []
+    prefs_applied: list[str] = []
+    try:
+        prefs_applied = apply_preferences(policy)
+        apply_prompts(policy)
+    except (Exception, SystemExit) as exc:  # same per-item catch as uninstalls: recorded, never raised past the stamp
+        errors.append(("preferences", _failure(exc)))
     result = execute_apply(
         plan,
         source_dirs=source_dirs,
         available_by_type=available_by_type,
         manifest_path=manifest_path,
     )
-    errors = [(f"{e.item.item_type}s/{e.item.name}", msg) for e, msg in result.errors]
+    errors += [(f"{e.item.item_type}s/{e.item.name}", msg) for e, msg in result.errors]
     removed, remove_errors = remove_blocked_items(policy, scope, manifest_path=manifest_path)
     plugins_in, plugins_out, plugin_errors = apply_plugins(
         policy, scope, source_dirs=source_dirs, manifest_path=manifest_path
@@ -523,16 +534,31 @@ def apply_org_policy(
     )
 
 
+def _mandatory(policy: EffectivePolicy, item) -> bool:
+    """Whether the policy requires or pins this item (so it cannot be skipped)."""
+    owner = policy.items.get(f"{item.item_type}s/{item.name}")
+    return owner is not None and owner[1].stance.value in ("required", "pinned")
+
+
 def _record_item_failures(paths, policy: EffectivePolicy, errors: list[tuple[str, str]]) -> None:
     """Persist failed post-commit items as an ``apply_failed`` pending on each owning
-    org, so ``aec update`` and ``pending_fix`` keep saying so until an apply succeeds."""
+    org, so ``aec update`` and ``pending_fix`` keep saying so until an apply succeeds.
+    A preference is merged across orgs and has no single owner, so it is recorded on
+    every enrolled org."""
     import dataclasses
 
+    from .discovery import discover_enrolled_orgs
     from .state import read_state, write_state
 
     by_org: dict[str, list[dict]] = {}
     for subject, message in errors:
-        by_org.setdefault(policy.items[subject][0], []).append({"item": subject, "error": message})
+        owners = (
+            [policy.items[subject][0]]
+            if subject in policy.items
+            else [e.config.org_id for e in discover_enrolled_orgs(paths)]
+        )
+        for org_id in owners:
+            by_org.setdefault(org_id, []).append({"item": subject, "error": message})
     for org_id, items in by_org.items():
         st = read_state(paths, org_id)
         # A trust change is never downgraded (same rule as _set_pending).
