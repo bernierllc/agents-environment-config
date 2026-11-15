@@ -42,19 +42,13 @@ jobs:
           CHECK_NAME: PRs into main must come from staging
         run: |
           set -u
-          check_id=$(gh api -X POST "repos/$REPO/check-runs" \
-            -f name="$CHECK_NAME" -f head_sha="$SHA" -f status="in_progress" \
-            -f "output[title]=checking the source branch" \
-            -f "output[summary]=Checking that this PR comes from staging." \
-            --jq .id)
-          # Actions runs bash -e: capture the validator's status in a conditional
-          # so a rejected source still reaches the PATCH below.
-          rc=0
-          out=$(HEAD_REF="$HEAD_REF" HEAD_REPO="$HEAD_REPO" REPO="$REPO" bash scripts/check-main-source.sh 2>&1) || rc=$?
-          printf '%s\n' "$out"
-          conclusion=success; title="source branch ok"
-          if [ "$rc" -ne 0 ]; then conclusion=failure; title="source branch not allowed"; fi
-          gh api -X PATCH "repos/$REPO/check-runs/$check_id" \
-            -f status="completed" -f conclusion="$conclusion" \
-            -f "output[title]=$title" -f "output[summary]=$(printf '%s' "$out" | head -c 60000)"
-          exit "$rc"
+          # A rejected source publishes nothing: the required check stays absent
+          # (which blocks the merge) and this job's own failure names the reason.
+          # Publishing a failure would overwrite the success a legitimate staging
+          # PR holds at the same SHA, since check runs are commit-scoped.
+          HEAD_REF="$HEAD_REF" HEAD_REPO="$HEAD_REPO" REPO="$REPO" bash scripts/check-main-source.sh
+          gh api -X POST "repos/$REPO/check-runs" \
+            -f name="$CHECK_NAME" -f head_sha="$SHA" \
+            -f status="completed" -f conclusion="success" \
+            -f "output[title]=source branch ok" \
+            -f "output[summary]=This PR comes from staging."

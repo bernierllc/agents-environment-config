@@ -16,9 +16,11 @@
 # GitHub default branch; activating it as a merge gate requires a ruleset /
 # branch protection that requires the published Check Run named exactly
 # "PRs into main must come from staging" (not the Actions job name); see the
-# `main promotion gate` ruleset. That check is commit-scoped: a PR from another
-# branch at the very same SHA as staging delivers the identical commit, so the
-# result still certifies what reaches main.
+# `main promotion gate` ruleset. Only an allowed source publishes that check
+# (success); a rejected one publishes nothing, so the required context stays
+# absent and blocks the merge. The check is commit-scoped: a PR from another
+# branch at the very same SHA as staging delivers the identical commit, and a
+# rejected PR can never overwrite staging's success at that SHA.
 set -euo pipefail
 : "${HEAD_REF:?HEAD_REF is required}"
 : "${HEAD_REPO:?HEAD_REPO is required (empty means the head repo is gone; treat as a fork)}"
