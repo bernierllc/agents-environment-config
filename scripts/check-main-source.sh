@@ -14,7 +14,11 @@
 #
 # Bootstrap: this check runs for PRs targeting main. It does not move the
 # GitHub default branch; activating it as a merge gate requires a ruleset /
-# branch protection that requires the workflow job name (see the `main promotion gate` ruleset).
+# branch protection that requires the published Check Run named exactly
+# "PRs into main must come from staging" (not the Actions job name); see the
+# `main promotion gate` ruleset. That check is commit-scoped: a PR from another
+# branch at the very same SHA as staging delivers the identical commit, so the
+# result still certifies what reaches main.
 set -euo pipefail
 : "${HEAD_REF:?HEAD_REF is required}"
 : "${HEAD_REPO:?HEAD_REPO is required (empty means the head repo is gone; treat as a fork)}"
