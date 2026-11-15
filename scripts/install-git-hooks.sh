@@ -122,7 +122,7 @@ if [ $ERRORS -eq 0 ]; then
     if [ -f "$HOOKS_SOURCE_DIR/pre-push" ]; then
         cp "$HOOKS_SOURCE_DIR/pre-push" "$HOOKS_TARGET_DIR/pre-push"
         chmod +x "$HOOKS_TARGET_DIR/pre-push"
-        echo -e "  ${GREEN}✓${NC} Installed pre-push hook (submodule sync)"
+        echo -e "  ${GREEN}✓${NC} Installed pre-push hook (submodule push check)"
     else
         echo -e "  ${RED}✗${NC} pre-push hook not found"
         ((ERRORS++))
