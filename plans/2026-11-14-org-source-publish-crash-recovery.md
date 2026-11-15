@@ -1,7 +1,10 @@
 # Recover an interrupted custom-source publication
 
-Status: planned; scheduling pending. Origin: review finding on PR #132 (custom-source
-install), deferred there as a tracked follow-up.
+Status: planned; scheduling pending. **Blocked on PR #132 (custom-source install).** The
+code this plan describes (`publish_sources`, `sync_custom_sources`, `sources.prev`,
+`source_commits`) exists only on that PR's branch, not on `main`. Do not start until it
+merges; if it does not, this plan is void. Origin: review finding on that PR, deferred there
+as a tracked follow-up.
 
 ## Root cause and affected surfaces
 

@@ -1,9 +1,10 @@
 # Per-repo records in a catalog
 
-An org catalog is a git repo, and `aec org apply` clones all of it to
-`~/.aec/orgs/<org-id>.d/repo/`, not just the config file and the items it lists. Anything else
-committed there is readable by skills and scripts on every enrolled machine, so a catalog can
-carry data about *repos*, not only about installable items.
+An org catalog is a git repo. Enrolling it (`aec org enroll`) clones all of it to
+`~/.aec/orgs/<org-id>.d/repo/`, not just the config file and the items it lists, and
+`aec update` refreshes that clone; `aec org apply` only applies what is already there.
+Anything else committed in the catalog is readable by skills and scripts on every enrolled
+machine, so a catalog can carry data about *repos*, not only about installable items.
 
 This is a convention today, not an AEC feature: AEC delivers the files but does not read
 them. See `plans/2026-11-14-catalog-repo-records.md` for the feature that would make AEC
