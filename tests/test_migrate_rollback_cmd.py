@@ -294,6 +294,20 @@ def _tidy(repo: Path) -> int:
     return 0 if migrate_cmd._tidy(repo, "fake", config, yes=True) else 1
 
 
+def _ports(repo: Path) -> int:
+    from aec.commands import repo as repo_cmd
+
+    repo_cmd._inject_port_registry(repo)
+    return 0
+
+
+def _path_migration(repo: Path) -> int:
+    from aec.commands import repo as repo_cmd
+
+    repo_cmd._migrate_agent_files(repo)
+    return 0
+
+
 def _rollback(repo: Path) -> int:
     (cs,) = changesets.list_changesets()
     return rollback_cmd.run_rollback_apply(cs.id, yes=True)
@@ -301,17 +315,21 @@ def _rollback(repo: Path) -> int:
 
 # Every AEC command that writes repo files, each with a symlinked file and a
 # symlinked directory where it can reach one. All go through aec.lib.confine.
-CALLERS = ["migrate", "tidy", "setup", "rollback"]
+CALLERS = ["migrate", "tidy", "setup", "ports", "path-migration", "rollback"]
+REPO_ROOT_ONLY = {"tidy", "ports", "path-migration"}  # write only files at the repo root
 
 
 @pytest.mark.parametrize("caller", CALLERS)
 @pytest.mark.parametrize("kind", ["file", "dir"])
 def test_every_writer_refuses_paths_that_leave_the_repo(store, legacy_repo, tmp_path, monkeypatch, caller, kind):
     monkeypatch.setattr("aec.lib.preferences.get_setting", lambda key: None)
-    if caller == "tidy" and kind == "dir":
-        pytest.skip("tidy only records files at the repo root")
+    monkeypatch.setattr("aec.lib.preferences.get_preference", lambda key: key == "port_registry_enabled")
+    if caller in REPO_ROOT_ONLY and kind == "dir":
+        pytest.skip(f"{caller} only writes files at the repo root")
     outside = tmp_path / "shared"
-    rel = "CLAUDE.md" if kind == "file" else ".cursor/rules"
+    rel = {"ports": "AGENTINFO.md", "path-migration": "AGENTS.md"}.get(caller, "CLAUDE.md") if kind == "file" else ".cursor/rules"
+    if caller == "path-migration":  # give the updater an old-style reference to rewrite
+        (legacy_repo / rel).write_text("Read relevant `.agent-rules/general/architecture.md`\n")
     link = lambda: _link_out(legacy_repo, rel, outside)  # noqa: E731
     if caller == "setup":
         for name in list(LEGACY) + [".cursor"]:  # an empty repo, so setup has files to create
@@ -331,6 +349,8 @@ def test_every_writer_refuses_paths_that_leave_the_repo(store, legacy_repo, tmp_
         run = {
             "migrate": lambda r: migrate_cmd.run_migrate_agents_md([str(r)], yes=True),
             "tidy": _tidy,
+            "ports": _ports,
+            "path-migration": _path_migration,
             "rollback": _rollback,
         }[caller]
 
@@ -341,7 +361,7 @@ def test_every_writer_refuses_paths_that_leave_the_repo(store, legacy_repo, tmp_
     before, outside_before, recorded = _snapshot(legacy_repo), state(), changesets.list_changesets()
     status = run(legacy_repo)
     assert state() == outside_before  # nothing written through the link
-    if caller != "setup":
+    if caller not in ("setup", "ports", "path-migration"):  # these warn and skip instead of failing
         assert status == 1
         assert _snapshot(legacy_repo) == before
         assert changesets.list_changesets() == recorded

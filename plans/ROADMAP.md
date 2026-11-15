@@ -17,6 +17,11 @@ unit of impact lives — not a contract.
 
 ## Review follow-ups awaiting prioritization
 
+- [Confine the remaining setup writers](2026-11-14-confine-remaining-setup-writers.md):
+  writer sweep from PR #136; `.gitignore`, git-essentials templates and the
+  plans migration still follow symlinks. S1 routes them through
+  `aec.lib.confine`. Scheduling pending.
+
 - [Deterministic directory prefix rendering](2026-11-10-directory-prefix-rendering.md):
   P2 from PR #131; S1 replaces cascading rewrites with original-path matching
   and validates overlapping defaults. Scheduling pending.

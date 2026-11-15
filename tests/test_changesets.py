@@ -315,3 +315,20 @@ def test_running_change_cannot_be_rolled_back(tmp_path):
     undo = c.revert(done.id)
     assert c.load(done.id).reversed_by == undo.id
     assert f.read_bytes() == b"old"
+
+
+def test_recreated_file_gets_a_normal_mode(tmp_path):
+    """Codex round 10: rollback recreated deleted files as 0600."""
+    import os
+    import stat
+
+    f = tmp_path / "AGENTINFO.md"
+    f.write_bytes(b"x")
+    f.chmod(0o644)
+    cs = change([f], f.unlink)
+    old = os.umask(0o022)
+    try:
+        c.revert(cs.id)
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE(f.stat().st_mode) == 0o644

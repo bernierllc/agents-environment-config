@@ -52,6 +52,7 @@ from ..lib.prompt_catalog.repo_area import (
 from ..lib.prompts import parse_selection, prompt, selection_validator
 import subprocess
 from ..lib.config import load_env_file
+from ..lib.confine import escapes
 from ..lib.git import clone_repo
 from ..lib.git_providers import detect_git_provider, scan_git_essentials, GIT_PROVIDERS
 from ..lib.git_setup import (
@@ -173,7 +174,6 @@ def _copy_agent_files(project_dir: Path, repo_root: Path, dry_run: bool = False)
     Existing files are never overwritten.
     """
     from ..lib.agents_md_layout import CURSOR_RULE, render_new_layout, split_stub
-    from ..lib.confine import escapes
 
     Console.subheader("Copying agent files...")
 
@@ -496,6 +496,10 @@ def _migrate_agent_files(project_dir: Path, dry_run: bool = False) -> int:
         filepath = project_dir / filename
 
         if not filepath.exists():
+            continue
+        unsafe = escapes(project_dir, [filepath])
+        if unsafe:  # a linked file would send the edit outside the repo
+            Console.warning(f"Skipping {filename}: {unsafe[0]}")
             continue
 
         content = filepath.read_text()
@@ -958,6 +962,10 @@ def _inject_port_registry(
     agentinfo_path = _canonical_instructions_file(project_dir)
     name = agentinfo_path.name
     if port_enabled is None or not agentinfo_path.exists():
+        return
+    unsafe = escapes(project_dir, [agentinfo_path])
+    if unsafe:  # a linked file would send the edit outside the repo
+        Console.warning(f"Skipping the Port Registry section in {name}: {unsafe[0]}")
         return
 
     content = agentinfo_path.read_text()

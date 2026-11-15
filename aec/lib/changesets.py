@@ -16,7 +16,7 @@ import logging
 import os
 import secrets
 import shutil
-import tempfile
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -121,15 +121,17 @@ def _current_hash(path: Path) -> Optional[str]:
 
 def _write_bytes_atomic(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    tmp = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
+    # 0o666 under the umask, like a normal write: a recreated file must not come back 0600.
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o666)
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
         if path.exists():
-            os.chmod(tmp, path.stat().st_mode & 0o7777)  # mkstemp creates 0600
+            os.chmod(tmp, path.stat().st_mode & 0o7777)
         os.replace(tmp, path)
     except BaseException:
-        Path(tmp).unlink(missing_ok=True)
+        tmp.unlink(missing_ok=True)
         raise
 
 
