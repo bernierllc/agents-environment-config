@@ -342,7 +342,7 @@ def _install_single_item(
         raise ValueError(f"refusing to install '{name}': {problems[0]}")
     remove_installed_item(dst)
 
-    target_dir.mkdir(parents=True, exist_ok=True)
+    dst.parent.mkdir(parents=True, exist_ok=True)  # grouped names (`general/x`) nest under target_dir
     if src.is_dir():
         shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".*"))
     else:
