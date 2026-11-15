@@ -17,6 +17,17 @@ unit of impact lives — not a contract.
 
 ## Review follow-ups awaiting prioritization
 
+- [Catalog support for per-repo records](2026-11-14-catalog-repo-records.md): catalogs can already
+  carry per-repo data; AEC should validate, expose and check it. Scheduling pending.
+
+- [Release pushes vs PR-only rules](2026-11-14-release-pushes-vs-pr-only-rules.md): the release
+  workflow pushes to `main` directly, which blocks PR-required rules and a `staging` branch.
+  Scheduling pending.
+
+- [Recover an interrupted custom-source publication](2026-11-14-org-source-publish-crash-recovery.md):
+  P2 from PR #132; a kill between the source rename and the state write loses the known-good
+  checkout. S1 makes publication crash-safe. Scheduling pending.
+
 - [Confine the remaining setup writers](2026-11-14-confine-remaining-setup-writers.md):
   writer sweep from PR #136; `.gitignore`, git-essentials templates and the
   plans migration still follow symlinks. S1 routes them through
