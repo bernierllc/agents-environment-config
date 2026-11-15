@@ -42,8 +42,8 @@ for gitdir in "$ROOT"/*/.git "$ROOT"/*/*/.git; do
         if [ "$(git -C "$path" rev-parse HEAD)" != "$sha" ]; then
           echo "keep    $path  ($branch: HEAD is not the merged commit, may hold unpushed commits)"; continue
         fi
-        # a .env that is a symlink to, or a byte-identical copy of, the primary checkout's (T3 and worktree
-        # setup copy them in) holds no data of its own: only a .env that differs keeps the tree
+        # a .env that is a symlink to, or a byte-identical copy of, the primary checkout's (worktree tools
+        # that copy .env files in) holds no data of its own: only a .env that differs keeps the tree
         if git -C "$path" ls-files -o -i --exclude-standard | grep -E '(^|/)\.env' \
              | while IFS= read -r f; do [ -L "$path/$f" ] || cmp -s "$path/$f" "$repo/$f" || echo "$f"; done | grep -q .; then
           echo "keep    $path  ($branch: holds ignored .env files)"; continue
