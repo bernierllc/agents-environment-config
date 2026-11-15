@@ -1,5 +1,5 @@
 #!/bin/bash
-# Pre-push git hook: ensure submodules are pushed, then sync agents/skills to cursor commands
+# Pre-push git hook: ensure submodule commits are pushed before the parent push.
 
 # When git invokes pre-push from inside a worktree, it exports GIT_DIR /
 # GIT_WORK_TREE pointing at the *parent* repo's worktree gitdir. Those vars
@@ -17,75 +17,21 @@ NC='\033[0m' # No Color
 # Get the repository root
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PUSH_SUBMODULES="$REPO_ROOT/scripts/push-submodules.sh"
-SYNC_SCRIPT="$REPO_ROOT/scripts/sync-agents-skills.py"
 
 # --- 1. Ensure submodules are pushed (block push if they have uncommitted changes) ---
 echo -e "${GREEN}=== Submodule push check ===${NC}"
-if [ "${SKIP_SYNC}" = "1" ] || [ "${SKIP_SYNC}" = "true" ]; then
-    echo -e "${YELLOW}SKIP_SYNC is set, skipping submodule push and sync${NC}"
-    exit 0
-fi
 if [ -f "$PUSH_SUBMODULES" ]; then
     if ! bash "$PUSH_SUBMODULES"; then
         echo -e "${RED}Push aborted: fix submodule state above, then push again.${NC}"
         exit 1
     fi
-    # If push-submodules staged refs, commit so this push includes them
-    cd "$REPO_ROOT"
-    if ! git diff --cached --quiet -- .claude/agents .claude/skills 2>/dev/null; then
-        git commit -m "chore(submodules): update submodule refs" --no-verify
-        echo -e "${GREEN}✓ Committed submodule ref updates${NC}"
-    fi
 else
     echo -e "${YELLOW}push-submodules.sh not found, continuing${NC}"
 fi
 
-# --- 2. Sync agents/skills to cursor commands ---
-echo -e "${GREEN}=== Agent & Skill Sync (pre-push) ===${NC}"
-
-# Check if sync script exists
-if [ ! -f "$SYNC_SCRIPT" ]; then
-    echo -e "${YELLOW}Warning: Sync script not found at $SYNC_SCRIPT${NC}"
-    echo "Continuing with push..."
-    exit 0
-fi
-
-# Check if Python 3 is available
-if ! command -v python3 &> /dev/null; then
-    echo -e "${YELLOW}Warning: Python 3 not found, skipping sync${NC}"
-    echo "Continuing with push..."
-    exit 0
-fi
-
-# Run the sync script
-echo "Running sync operations..."
-if python3 "$SYNC_SCRIPT"; then
-    echo -e "${GREEN}✓ Sync completed successfully${NC}"
-    
-    # Check if there are changes to commit in cursor commands
-    cd "$REPO_ROOT"
-    if git diff --quiet .cursor/commands/ && [ -z "$(git ls-files --others --exclude-standard .cursor/commands/)" ]; then
-        echo "No cursor command changes to commit"
-    else
-        echo "Staging cursor command changes..."
-        git add .cursor/commands/
-        
-        # Check if we're in a rebase or merge
-        if [ -d ".git/rebase-merge" ] || [ -d ".git/rebase-apply" ] || [ -f ".git/MERGE_HEAD" ]; then
-            echo -e "${YELLOW}In rebase/merge, skipping auto-commit${NC}"
-        else
-            # Only commit if there are staged changes
-            if ! git diff --cached --quiet; then
-                git commit -m "chore: sync cursor commands from agents/skills" --no-verify
-                echo -e "${GREEN}✓ Committed cursor command updates${NC}"
-            fi
-        fi
-    fi
-else
-    echo -e "${YELLOW}Warning: Sync script encountered errors${NC}"
-    echo "Continuing with push anyway..."
-fi
-
-echo -e "${GREEN}=== Pre-push sync complete ===${NC}"
+# Never commit here: a commit made during pre-push is not part of the push
+# already in flight, so it stays local and leaves the branch diverged from its
+# remote. Regenerated .cursor/commands and floating submodule refs are left in
+# the working tree for the author to commit deliberately.
+echo -e "${GREEN}=== Pre-push checks complete ===${NC}"
 exit 0
-

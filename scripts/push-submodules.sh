@@ -79,16 +79,4 @@ if [ $FAILED -eq 1 ]; then
   exit 1
 fi
 
-# If parent has modified submodule refs (we just pushed submodules), stage them
-PARENT_REF_CHANGED=0
-for sub in "${SUBMODULES[@]}"; do
-  if git -C "$REPO_ROOT" diff --name-only -- "$sub" | grep -q .; then
-    PARENT_REF_CHANGED=1
-    break
-  fi
-done
-if [ $PARENT_REF_CHANGED -eq 1 ]; then
-  echo -e "${YELLOW}Submodule refs changed; staging for parent commit.${NC}"
-  git add "${SUBMODULES[@]}" 2>/dev/null || true
-fi
 exit 0

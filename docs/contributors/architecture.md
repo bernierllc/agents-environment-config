@@ -57,7 +57,7 @@ The sync system keeps agent and skill files synchronized between submodule repos
 
 ### How It Works
 
-1. **Pre-push hook**: Checks submodule state (pushes unpushed commits, blocks on uncommitted changes), then syncs agents/skills to `.cursor/commands/`
+1. **Pre-push hook**: Checks submodule state (pushes unpushed submodule commits, blocks on uncommitted changes). It never commits: a commit made during pre-push is not part of the push in flight and would leave the branch diverged from its remote. Regenerate `.cursor/commands/` with `python3 scripts/sync-agents-skills.py` (the post-merge hook does this) and commit it deliberately.
 2. **Post-merge hook**: Re-syncs after pulling changes
 3. **Content replacement**: `{{file:...}}` references in Cursor command files are replaced with actual source content
 4. **Frontmatter preservation**: Existing Cursor command frontmatter is kept intact
@@ -79,9 +79,13 @@ python3 scripts/sync-agents-skills.py
 
 ### Skip Sync
 
+Skip the post-merge sync:
+
 ```bash
-SKIP_SYNC=1 git push
+SKIP_SYNC=1 git pull
 ```
+
+The pre-push submodule check has no sync to skip. `git push --no-verify` bypasses it, and with it the guard against pushing a parent that points at unpushed submodule commits.
 
 ## File Flow: Rules to Projects
 

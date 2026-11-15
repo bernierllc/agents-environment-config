@@ -69,7 +69,8 @@ cd .claude/skills && git checkout main && cd ../..
 **Skip hooks temporarily:**
 
 ```bash
-SKIP_SYNC=1 git push
+SKIP_SYNC=1 git pull       # skips the post-merge sync
+git push --no-verify       # skips the pre-push submodule check; only when submodule commits are already pushed
 ```
 
 ## Missing .aec-managed Marker

@@ -122,7 +122,7 @@ if [ $ERRORS -eq 0 ]; then
     if [ -f "$HOOKS_SOURCE_DIR/pre-push" ]; then
         cp "$HOOKS_SOURCE_DIR/pre-push" "$HOOKS_TARGET_DIR/pre-push"
         chmod +x "$HOOKS_TARGET_DIR/pre-push"
-        echo -e "  ${GREEN}✓${NC} Installed pre-push hook (submodule sync)"
+        echo -e "  ${GREEN}✓${NC} Installed pre-push hook (submodule push check)"
     else
         echo -e "  ${RED}✗${NC} pre-push hook not found"
         ((ERRORS++))
@@ -156,8 +156,9 @@ fi
 
 echo ""
 echo -e "${BLUE}Usage:${NC}"
-echo "  • Sync will run automatically on git push and git pull/merge"
-echo "  • Skip sync: SKIP_SYNC=1 git push"
+echo "  • git pull/merge re-syncs .cursor/commands (post-merge hook)"
+echo "  • git push checks that submodule commits are pushed first (pre-push hook)"
+echo "  • Skip the post-merge sync: SKIP_SYNC=1 git pull"
 echo "  • Skip all hooks: git push --no-verify"
 echo ""
 echo -e "${BLUE}Troubleshooting:${NC}"
