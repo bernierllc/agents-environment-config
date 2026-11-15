@@ -1,13 +1,16 @@
-# Promotion guard for PRs into main.
+# Promotion guard for PRs into main: only a same-repo `staging` branch may open one.
 #
 # Uses pull_request_target so the workflow + validator load from the trusted
 # base branch (main), not the PR head. Only PR *metadata* (head ref / repo)
 # is read from the event; no PR code is checked out or executed.
 #
-# Bootstrap / activation:
-# - Default branch may still be main while staging is the integration branch.
-# - This workflow is advisory until the `main promotion gate` ruleset requires
-#   the job "PRs into main must come from staging".
+# pull_request_target attaches the Actions job to the base SHA, not the PR head,
+# so a required status check named after the job would never appear on the PR
+# head. The result is therefore published as a Check Run on
+# pull_request.head.sha through the Checks API (same approach as review-gate.yml).
+#
+# Activation: advisory until the `main promotion gate` ruleset requires the
+# check "PRs into main must come from staging".
 name: main via staging
 on:
   pull_request_target:
@@ -15,9 +18,13 @@ on:
     branches: [main]
 permissions:
   contents: read
+  checks: write
+concurrency:
+  group: main-via-staging-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 jobs:
-  source-branch:
-    name: PRs into main must come from staging
+  publish-guard-result:
+    name: Publish the promotion guard result
     runs-on: ubuntu-latest
     steps:
       - name: Checkout trusted base (not PR head)
@@ -25,9 +32,27 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
-      - name: Check head branch against base-owned validator
+      - name: Check head branch and publish on the PR head
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          SHA: ${{ github.event.pull_request.head.sha }}
           REPO: ${{ github.repository }}
-        run: bash scripts/check-main-source.sh
+          CHECK_NAME: PRs into main must come from staging
+        run: |
+          set -uo pipefail
+          check_id=$(gh api -X POST "repos/$REPO/check-runs" \
+            -f name="$CHECK_NAME" -f head_sha="$SHA" -f status="in_progress" \
+            -f "output[title]=checking the source branch" \
+            -f "output[summary]=Checking that this PR comes from staging." \
+            --jq .id)
+          out=$(HEAD_REF="$HEAD_REF" HEAD_REPO="$HEAD_REPO" REPO="$REPO" bash scripts/check-main-source.sh 2>&1)
+          rc=$?
+          printf '%s\n' "$out"
+          conclusion=success; title="source branch ok"
+          if [ "$rc" -ne 0 ]; then conclusion=failure; title="source branch not allowed"; fi
+          gh api -X PATCH "repos/$REPO/check-runs/$check_id" \
+            -f status="completed" -f conclusion="$conclusion" \
+            -f "output[title]=$title" -f "output[summary]=$(printf '%s' "$out" | head -c 60000)"
+          exit "$rc"
