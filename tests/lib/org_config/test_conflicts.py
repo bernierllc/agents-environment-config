@@ -131,6 +131,15 @@ def test_versions_of_different_sources_are_not_compared():
     assert [c.kind for c in detect_conflicts([a, b])] == ["source"]
 
 
+def test_a_blocker_with_installers_on_two_sources_is_one_conflict_naming_every_org():
+    a = _cfg("acme", items=_rule("foo", "required", "acme-catalog"))
+    b = _cfg("globex", items=_rule("foo", "blocked", "aec.default.rules"))
+    c = _cfg("initech", items=_rule("foo", "required", "initech-catalog"))
+    (conflict,) = detect_conflicts([a, b, c])
+    assert conflict.kind == "stance"
+    assert {p.org_id for p in conflict.participants} == {"acme", "globex", "initech"}
+
+
 def test_a_third_org_on_another_source_does_not_hide_a_version_conflict():
     a = _cfg("acme", items=_rule("foo", "required", "aec.default.rules", version="1.0.0"))
     b = _cfg("globex", items=_rule("foo", "pinned", "aec.default.rules", version="2.0.0"))

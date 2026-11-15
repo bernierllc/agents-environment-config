@@ -7,6 +7,7 @@ P2); it surfaces a :class:`Conflict` for the user to resolve.
 Detected kinds (design spec "Conflict types detected"):
 
   * ``stance``             — one org wants an item installed, another blocks it
+                             (covers the whole item: its source and version too)
   * ``source``             — install-intent orgs want the same item name from
                              different sources (a name has one install target)
   * ``version``            — install-intent orgs pin differing versions of one source
@@ -91,7 +92,12 @@ def _item_conflicts(configs: list[OrgConfig]) -> list[Conflict]:
         has_install = any(s in _INSTALL_INTENTS for s in stances.values())
         has_block = any(s in _BLOCK_INTENTS for s in stances.values())
         if has_install and has_block:
+            # Every org with a stance is a participant, and honoring one applies its whole
+            # policy (source and version included), so no separate source/version conflict
+            # is needed. Emitting one would offer only the installers and make it
+            # impossible to honor the blocking org.
             out.append(_make("stance", subject, stances))
+            continue
 
         installers = {
             oid: source_identity(oid, p.source)
