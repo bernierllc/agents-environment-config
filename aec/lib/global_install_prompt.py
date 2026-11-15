@@ -6,7 +6,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .console import Console
-from .filesystem import installed_dst_path, place_installed_item, remove_installed_item, resolve_installed_path
+from .filesystem import (
+    check_install_paths,
+    installed_dst_path,
+    place_installed_item,
+    remove_installed_item,
+    resolve_installed_path,
+)
 from .installed_store import record_item_install
 from .manifest_v2 import get_installed, record_install, remove_install, save_manifest
 from .preferences import load_preferences, save_preferences
@@ -125,6 +131,12 @@ def migrate_item_to_global(
     manifest_path: Path,
 ) -> None:
     """Remove per-repo installs and install ``name`` to global scope from ``src``."""
+    scope_g = Scope(is_global=True, repo_path=None)
+    gdir = getattr(scope_g, f"{plural}_dir")
+    gdst = installed_dst_path(gdir, name, src)
+    existing_gdst = resolve_installed_path(gdir, name)
+    # Refuse before deleting the per-repo copies, so a refusal loses nothing.
+    check_install_paths(gdir, name, gdst, existing_gdst)
     repo_keys = repo_keys_with_item(manifest, plural, name)
     for rk in repo_keys:
         repo_path = Path(rk)
@@ -132,12 +144,7 @@ def migrate_item_to_global(
         _delete_item_at_scope(plural, name, scope_l)
         remove_install(manifest, rk, plural, name)
 
-    scope_g = Scope(is_global=True, repo_path=None)
-    gdir = getattr(scope_g, f"{plural}_dir")
-    gdst = installed_dst_path(gdir, name, src)
-    existing_gdst = resolve_installed_path(gdir, name)
-    remove_installed_item(existing_gdst)
-    place_installed_item(src, gdst, gdir, name)
+    place_installed_item(src, gdst, gdir, name, replaces=existing_gdst)
 
     content_hash = hash_skill_directory(gdst) if gdst.is_dir() else ""
     record_install(
