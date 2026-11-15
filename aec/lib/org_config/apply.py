@@ -328,6 +328,7 @@ def _check_item_paths(s: SyncedSource) -> None:
     The pinned commit authenticates only the repo's own bytes; a path or link
     pointing outside it would install files from this machine instead.
     """
+    from ..confine import item_name_problem
     from ..sources import discover_available, get_source_dirs
     from .errors import OrgConfigValidationError
 
@@ -338,6 +339,10 @@ def _check_item_paths(s: SyncedSource) -> None:
         if not d.exists():
             continue
         for name, info in discover_available(d, plural).items():
+            if (problem := item_name_problem(plural, name)) is not None:
+                raise OrgConfigValidationError(
+                    f"{plural[:-1]} in source: {problem}", field_path=f"sources.custom.{s.source_id}"
+                )
             p = d / str(info.get("path", name))
             members = [p, *(p.rglob("*") if p.is_dir() and not p.is_symlink() else ())]
             if any(m.is_symlink() for m in members) or not p.resolve().is_relative_to(root):

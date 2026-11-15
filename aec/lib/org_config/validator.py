@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ..confine import item_name_problem
 from .allow_lists import (
     PREFERENCES_ALLOW_LIST,
     PREFERENCES_DYNAMIC_NAMESPACES,
@@ -170,6 +171,8 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
         validated: dict[str, ItemPolicy] = {}
         for item_name, policy_dict in type_items.items():
             base_path = f"items.{type_name}.{item_name}"
+            if (problem := item_name_problem(type_name, item_name)) is not None:
+                raise OrgConfigValidationError(problem, field_path=base_path)
             if not isinstance(policy_dict, dict):
                 raise OrgConfigValidationError(
                     "item policy must be a mapping", field_path=base_path

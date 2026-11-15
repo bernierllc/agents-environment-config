@@ -484,6 +484,46 @@ def test_required_item_missing_from_the_source_publishes_and_stamps_nothing(repo
     assert sorted(p.name for p in org_dir.iterdir() if p.name != "sources.next") == dir_before
 
 
+def _with_rule_key(key):
+    return _config(pin='      ref: "main"\n').replace('"example-rule":', f'"{key}":')
+
+
+@pytest.mark.parametrize(
+    "yaml_key, key",  # the YAML double-quoted escape "\\\\" is one real backslash
+    [("../../x",) * 2, ("/etc/x",) * 2, ("a/../../x",) * 2, ("a//b",) * 2, ("..",) * 2, ("a\\\\b", "a\\b")],
+)
+def test_policy_item_names_that_leave_the_install_dir_are_rejected(yaml_key, key):
+    with pytest.raises(OrgConfigValidationError) as exc:
+        _validate(_with_rule_key(yaml_key))
+    assert exc.value.field_path == f"items.rules.{key}"
+
+
+def test_nested_rule_names_are_accepted_but_other_types_stay_single_segment():
+    assert "general/foo" in _validate(_with_rule_key("general/foo")).items["rules"]
+    text = _config(pin='      ref: "main"\n').replace(
+        "  skills: {}\n", '  skills:\n    "a/b":\n      source: "aec.default.skills"\n      stance: required\n'
+    )
+    with pytest.raises(OrgConfigValidationError, match="only rule names nest"):
+        _validate(text)
+
+
+def test_a_source_publishing_a_traversal_name_is_refused_before_anything_is_written(repos, home, paths):
+    """The source scan rejects a rule named '../../victim', so nothing is published, approved or written."""
+    a = _enroll_ref_only_and_apply(repos, paths)
+    before = read_state(paths, "example-org")
+    victim = home / "victim.md"
+    victim.write_text("keep", encoding="utf-8")
+    _commit(repos["source"], ".agent-rules/team/evil.md", RULE.replace("example-rule", "../../victim").format(version="1.0.0"))
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code != 0, result.output
+    assert "'..'" in result.output
+    assert victim.read_text() == "keep"
+    assert read_state(paths, "example-org").source_commits == before.source_commits
+    assert _live_head(paths) == a
+
+
 def test_plan_reinstalls_when_source_or_commit_changes():
     from aec.lib.apply_core import DesiredItem, plan_apply
 
