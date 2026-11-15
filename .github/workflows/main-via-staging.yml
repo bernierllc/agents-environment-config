@@ -1,0 +1,33 @@
+# Promotion guard for PRs into main.
+#
+# Uses pull_request_target so the workflow + validator load from the trusted
+# base branch (main), not the PR head. Only PR *metadata* (head ref / repo)
+# is read from the event; no PR code is checked out or executed.
+#
+# Bootstrap / activation:
+# - Default branch may still be main while staging is the integration branch.
+# - This workflow is advisory until the `main promotion gate` ruleset requires
+#   the job "PRs into main must come from staging".
+name: main via staging
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  source-branch:
+    name: PRs into main must come from staging
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted base (not PR head)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Check head branch against base-owned validator
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+        run: bash scripts/check-main-source.sh
