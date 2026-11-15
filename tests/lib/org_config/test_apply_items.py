@@ -2,9 +2,9 @@
 
 import aec.lib.org_config.apply as apply_mod
 from aec.lib.org_config.apply import (
-    apply_items,
     blocked_item_keys,
     compile_desired_items,
+    remove_blocked_items,
 )
 from aec.lib.org_config.effective import EffectivePolicy
 from aec.lib.org_config.schema import ItemPolicy, Stance
@@ -61,11 +61,9 @@ def test_blocked_item_keys():
     assert blocked_item_keys(pol) == [("rule", "r1")]
 
 
-def test_apply_items_installs_and_removes_blocked(tmp_path, monkeypatch):
-    # Catalog has skills/baz available; rules/r1 is "installed" so it gets removed.
+def test_remove_blocked_items_removes_installed_blocked(tmp_path, monkeypatch):
+    # rules/r1 is "installed" so it gets removed.
     manifest_path = tmp_path / "manifest.json"
-    available_by_type = {"skills": {"baz": {"version": "1.0.0", "path": "baz"}}}
-    source_dirs = {"skills": tmp_path / "src"}
 
     # Manifest reports r1 installed at global scope so blocked removal triggers.
     from aec.lib.manifest_v2 import load_manifest, record_install, save_manifest
@@ -78,18 +76,10 @@ def test_apply_items_installs_and_removes_blocked(tmp_path, monkeypatch):
     monkeypatch.setattr(
         apply_mod, "_uninstall_blocked", lambda t, n, s: removed_calls.append((t, n, s))
     )
-    # Avoid real installs: stub execute_apply to a no-op result.
-    monkeypatch.setattr(apply_mod, "compile_desired_items", lambda p, s: [])
-
     items = {}
     items.update(_item("rules/r1", "blocked"))
     pol = _policy(items)
-    _result, removed = apply_items(
-        pol,
-        "global",
-        source_dirs=source_dirs,
-        available_by_type=available_by_type,
-        manifest_path=manifest_path,
-    )
+    removed, errors = remove_blocked_items(pol, "global", manifest_path=manifest_path)
+    assert errors == []
     assert removed == [("rule", "r1")]
     assert removed_calls == [("rule", "r1", "global")]

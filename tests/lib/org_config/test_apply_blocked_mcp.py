@@ -4,7 +4,7 @@ from pathlib import Path
 
 from aec.lib.manifest_v2 import get_installed, load_manifest, record_mcp_install, save_manifest
 from aec.lib.mcp_settings import get_settings_path, read_mcp_servers, write_mcp_server
-from aec.lib.org_config.apply import apply_items
+from aec.lib.org_config.apply import remove_blocked_items
 from aec.lib.org_config.effective import EffectivePolicy
 from aec.lib.org_config.schema import ItemPolicy, Stance
 from aec.lib.scope import Scope
@@ -41,13 +41,8 @@ def test_blocked_mcp_removed_from_settings_and_manifest(tmp_path, monkeypatch):
         {"mcps/risky-mcp": ("acme", ItemPolicy(source="aec.default.mcps", stance=Stance("blocked")))}
     )
 
-    _result, removed = apply_items(
-        pol,
-        "global",
-        source_dirs={},
-        available_by_type={},
-        manifest_path=manifest_path,
-    )
+    removed, errors = remove_blocked_items(pol, "global", manifest_path=manifest_path)
+    assert errors == []
 
     assert removed == [("mcp", "risky-mcp")]
     # Settings entry gone...

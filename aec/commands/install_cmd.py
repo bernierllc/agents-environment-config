@@ -1,13 +1,16 @@
 """aec install <type> <name> -- install a skill, rule, or agent."""
 
 import json
+import os
 import shutil
 from pathlib import Path
 
 import subprocess
+from typing import Optional
 
 from ..lib import Console
 from ..lib.config import require_repo_root
+from ..lib.confine import escapes
 from ..lib.filesystem import installed_dst_path, remove_installed_item
 from ..lib.hooks.legacy_pipeline import wire_git_hooks as _wire_git_hooks
 from ..lib.manifest_v2 import (
@@ -25,7 +28,7 @@ from ..lib.prompt_catalog.install_flow_area import (
 )
 from ..lib.prompts import prompt as ask_prompt
 from ..lib.scope import catalog_repo_here, resolve_scope, Scope, ScopeError
-from ..lib.sources import discover_available, get_source_dirs
+from ..lib.sources import checkout_commit, discover_available, get_source_dirs
 from ..lib.installed_store import record_item_install
 from ..lib.skills_manifest import hash_skill_directory
 from ..lib.skill_dependencies import resolve_install_graph
@@ -323,12 +326,20 @@ def _install_single_item(
     installed_as: str = "explicit",
     yes: bool = False,
     install_hooks: bool = True,
+    source: Optional[str] = None,
 ) -> None:
     """Copy ``src`` to ``dst`` and record the install in the manifest.
 
     Non-interactive: callers are responsible for any overwrite prompts before
     calling this function.
     """
+    # The one write chokepoint (install, upgrade, org apply, dependencies): a name
+    # or a symlinked parent must never send the delete + copy outside target_dir.
+    problems = escapes(target_dir, [dst])
+    if dst.is_symlink():  # a link AT dst is replaced below, never followed
+        problems = [p for p in problems if p != f"{os.path.abspath(dst)} is a symlink"]
+    if problems:
+        raise ValueError(f"refusing to install '{name}': {problems[0]}")
     remove_installed_item(dst)
 
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -355,7 +366,7 @@ def _install_single_item(
     record_install(
         manifest, scope_key, plural, name,
         item_info.get("version", "0.0.0"), content_hash,
-        installed_as=installed_as,
+        installed_as=installed_as, source=source, source_commit=checkout_commit(source, src),
     )
     save_manifest(manifest, manifest_file)
 

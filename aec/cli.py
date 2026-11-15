@@ -168,13 +168,13 @@ def install_cmd(
     """Run full setup (no arguments), install a skill, rule, agent, or MCP server,
     or apply an org config with --org-config."""
     if org_config:
-        from .commands.org import perform_enroll
+        from .commands.org import exit_for_outcome, perform_enroll
         from .lib.org_config import OrgPaths
         from .lib.org_config.apply import apply_org_policy
 
         perform_enroll(org_config, allow_unsigned=allow_unsigned, yes=yes)
         confirm = (lambda _policy: True) if yes else None
-        apply_org_policy(OrgPaths.default(), confirm=confirm)
+        exit_for_outcome(apply_org_policy(OrgPaths.default(), confirm=confirm))
         return
     if not item_type and not name:
         from .commands.install import install

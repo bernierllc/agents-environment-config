@@ -38,7 +38,9 @@ items:
 """
 
 
-def _write(home, oid, *, mode="managed", projects_dir="~/work", foo_stance="required"):
+# "foo" is not in any catalog, so these mode/lockout tests keep it merely recommended:
+# a required item the catalog cannot provide now blocks the whole apply.
+def _write(home, oid, *, mode="managed", projects_dir="~/work", foo_stance="recommended"):
     orgs = home / ".aec" / "orgs"
     orgs.mkdir(parents=True, exist_ok=True)
     (orgs / f"{oid}.yaml").write_text(

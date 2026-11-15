@@ -44,6 +44,10 @@ class OrgPaths:
         """Per-org working dir (git clone, staged review). ``.d`` keeps it out of the ``*.yaml`` glob."""
         return self.orgs_dir / f"{org_id}.d"
 
+    def source_dir_for(self, org_id: str, source_id: str) -> Path:
+        """Checkout of one of the org's ``sources.custom`` repos."""
+        return self.org_dir_for(org_id) / "sources" / source_id
+
     def state_for(self, org_id: str) -> Path:
         return self.orgs_dir / f"{org_id}.state.json"
 

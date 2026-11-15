@@ -47,8 +47,11 @@ class ItemPolicy:
 class CustomSource:
     id: str
     url: str
-    ref: str
+    ref: Optional[str]
     contributes: tuple[str, ...]
+    # Exact commit to install. Required in signed orgs, where the signature
+    # must cover the content, not a ref that can move after signing.
+    commit: Optional[str] = None
 
 
 @dataclass(frozen=True)

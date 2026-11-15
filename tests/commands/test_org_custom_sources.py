@@ -1,0 +1,867 @@
+"""Org-config Phase 2: custom sources install.
+
+Real git against local bare repos reached through https URLs that a test-only
+git config rewrites (``url.<file-url>.insteadOf``), and a real ``~/.aec`` under
+``tmp_path``. Nothing AEC owns is mocked.
+"""
+import json
+import subprocess
+from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
+
+import aec.commands.org as org_cmd
+from aec.cli import app
+from aec.lib.org_config import git_source
+from aec.lib.org_config.errors import OrgConfigFetchError, OrgConfigValidationError
+from aec.lib.org_config.parser import parse_org_config_text
+from aec.lib.org_config.paths import OrgPaths
+from aec.lib.org_config.state import read_state
+from aec.lib.org_config.validator import validate_org_config
+
+runner = CliRunner()
+
+CONFIG_URL = "https://git.example.test/example-org/org-config.git"
+SOURCE_URL = "https://git.example.test/example-org/team-catalog.git"
+
+CONFIG = """---
+schema_version: "1.0"
+org_id: "example-org"
+org_name: "Example Org"
+config_version: "{version}"
+trust:
+  mode: "{trust_mode}"
+{trust_extra}---
+
+sources:
+  default: {{ skills: keep, rules: keep, agents: keep, mcps: keep }}
+  custom:
+    - id: "team-rules"
+      url: "{url}"
+{pin}      contributes: ["rules"]
+
+install:
+  mode: "managed"
+
+items:
+  skills: {{}}
+  rules:
+    "example-rule":
+      source: "team-rules"
+      stance: required
+  agents: {{}}
+  mcps: {{}}
+"""
+
+RULE = """---
+name: example-rule
+version: "{version}"
+description: An example rule
+---
+
+# Example rule {version}
+"""
+
+
+def _config(*, pin, version="1.0.0", trust_mode="unsigned", trust_extra="", url=SOURCE_URL):
+    return CONFIG.format(
+        version=version, trust_mode=trust_mode, trust_extra=trust_extra, url=url, pin=pin
+    )
+
+
+def _validate(text):
+    frontmatter, body = parse_org_config_text(text)
+    return validate_org_config(frontmatter, body)
+
+
+def _git(*args, cwd=None):
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _commit(work: Path, rel: str, content: str) -> str:
+    path = work / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    _git("add", "-A", cwd=work)
+    _git("commit", "-q", "-m", "update", cwd=work)
+    _git("push", "-q", "--force", "origin", "HEAD:main", cwd=work)
+    return _git("rev-parse", "HEAD", cwd=work)
+
+
+@pytest.fixture
+def repos(tmp_path, monkeypatch):
+    """Two bare repos (org config, team catalog) behind https URLs; returns work clones."""
+    lines = ["[user]\n\tname = Test\n\temail = test@example.test\n", '[protocol "file"]\n\tallow = always\n']
+    works = {}
+    for key, url in (("config", CONFIG_URL), ("source", SOURCE_URL)):
+        bare = tmp_path / f"{key}.git"
+        _git("init", "-q", "--bare", "-b", "main", str(bare))
+        lines.append(f'[url "{bare.as_uri()}"]\n\tinsteadOf = {url}\n')
+        works[key] = tmp_path / f"{key}-work"
+    gitconfig = tmp_path / "gitconfig"
+    gitconfig.write_text("".join(lines), encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(gitconfig))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for key, url in (("config", CONFIG_URL), ("source", SOURCE_URL)):
+        _git("init", "-q", "-b", "main", str(works[key]))
+        _git("remote", "add", "origin", str(tmp_path / f"{key}.git"), cwd=works[key])
+    return works
+
+
+@pytest.fixture
+def home(tmp_path, monkeypatch):
+    h = tmp_path / "home"
+    h.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: h)
+    monkeypatch.setenv("HOME", str(h))
+    return h
+
+
+@pytest.fixture
+def paths(home):
+    return OrgPaths(home_dir=home)
+
+
+def _enroll_local(tmp_path, text):
+    src = tmp_path / "example-org.yaml"
+    src.write_text(text, encoding="utf-8")
+    result = runner.invoke(app, ["org", "enroll", str(src), "--allow-unsigned", "--yes"])
+    assert result.exit_code == 0, result.output
+
+
+def _manifest(home):
+    return json.loads((home / ".agents-environment-config" / "installed-manifest.json").read_text())
+
+
+def _push_rule(repos, version):
+    return _commit(repos["source"], ".agent-rules/team/example-rule.md", RULE.format(version=version))
+
+
+# --------------------------------------------------------------------------- #
+#  validation                                                                  #
+# --------------------------------------------------------------------------- #
+
+SHA = "a" * 40
+
+
+def test_commit_pin_makes_ref_optional():
+    cfg = _validate(_config(pin=f'      commit: "{SHA}"\n'))
+    (cs,) = cfg.custom_sources
+    assert (cs.ref, cs.commit) == (None, SHA)
+
+
+def test_ref_only_source_accepted_in_unsigned_org():
+    cfg = _validate(_config(pin='      ref: "main"\n'))
+    assert cfg.custom_sources[0].ref == "main"
+
+
+@pytest.mark.parametrize(
+    "pin, message",
+    [
+        ("", "ref or commit"),
+        ('      commit: "abc123"\n', "40"),
+        ('      ref: "--upload-pack=x"\n', "ref"),
+    ],
+)
+def test_bad_pins_rejected(pin, message):
+    with pytest.raises(OrgConfigValidationError, match=message):
+        _validate(_config(pin=pin))
+
+
+def test_source_url_validated():
+    with pytest.raises(OrgConfigValidationError, match="url"):
+        _validate(_config(pin='      ref: "main"\n', url="file:///tmp/x"))
+
+
+def test_signed_org_requires_commit_pin():
+    with pytest.raises(OrgConfigValidationError, match="commit"):
+        _validate(
+            _config(
+                pin='      ref: "main"\n',
+                trust_mode="pinned_key",
+                trust_extra='  pubkey: "AAAA"\n',
+            )
+        )
+
+
+def test_item_type_must_be_contributed_by_its_source():
+    text = _config(pin='      ref: "main"\n').replace('contributes: ["rules"]', 'contributes: ["skills"]')
+    with pytest.raises(OrgConfigValidationError, match="contribute"):
+        _validate(text)
+
+
+def test_reserved_source_id_rejected():
+    text = _config(pin='      ref: "main"\n').replace('"team-rules"', '"aec.default.rules"')
+    with pytest.raises(OrgConfigValidationError, match="reserved"):
+        _validate(text)
+
+
+def test_signed_org_without_commit_exits_validation_at_enroll(home, tmp_path):
+    src = tmp_path / "example-org.yaml"
+    src.write_text(
+        _config(pin='      ref: "main"\n', trust_mode="pinned_key", trust_extra='  pubkey: "AAAA"\n'),
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["org", "enroll", str(src), "--yes"])
+    assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
+
+
+# --------------------------------------------------------------------------- #
+#  pinned fetch                                                                #
+# --------------------------------------------------------------------------- #
+
+
+def test_sync_source_installs_the_pin_not_the_ref_tip(repos, tmp_path):
+    a = _push_rule(repos, "1.0.0")
+    b = _push_rule(repos, "2.0.0")
+    dest = tmp_path / "clone"
+    assert git_source.sync_source(SOURCE_URL, "main", a, dest) == a
+    assert "1.0.0" in (dest / ".agent-rules/team/example-rule.md").read_text()
+    # Ref-only follows the tip; the same clone dir is reused.
+    assert git_source.sync_source(SOURCE_URL, "main", None, dest) == b
+    assert git_source.remote_commit(SOURCE_URL, "main") == b
+
+
+def test_sync_source_names_an_unserved_pin(repos, tmp_path):
+    _push_rule(repos, "1.0.0")
+    with pytest.raises(OrgConfigFetchError, match="pinned commit"):
+        git_source.sync_source(SOURCE_URL, None, "0" * 40, tmp_path / "clone")
+
+
+# --------------------------------------------------------------------------- #
+#  apply                                                                       #
+# --------------------------------------------------------------------------- #
+
+
+def test_apply_installs_from_custom_source_with_provenance(repos, home, paths, tmp_path):
+    a = _push_rule(repos, "1.0.0")
+    _push_rule(repos, "2.0.0")  # the ref moved past the pin
+    _enroll_local(tmp_path, _config(pin=f'      commit: "{a}"\n'))
+
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code == 0, result.output
+
+    record = _manifest(home)["global"]["rules"]["example-rule"]
+    assert record["version"] == "1.0.0"
+    assert record["source"] == "example-org/team-rules"
+    assert record["source_commit"] == a
+    clone = paths.org_dir_for("example-org") / "sources" / "team-rules"
+    assert _git("rev-parse", "HEAD", cwd=clone) == a
+    installed = list((home / ".agent-tools" / "rules").rglob("example-rule*"))
+    assert installed and "Example rule 1.0.0" in installed[0].read_text()
+    assert read_state(paths, "example-org").source_commits == {"team-rules": a}
+
+
+def test_unserved_pin_applies_nothing(repos, home, paths, tmp_path):
+    _push_rule(repos, "1.0.0")
+    _enroll_local(tmp_path, _config(pin=f'      commit: "{"0" * 40}"\n'))
+
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code != 0
+    assert "team-rules" in result.output and "pinned commit" in result.output
+    manifest_file = home / ".agents-environment-config" / "installed-manifest.json"
+    assert not manifest_file.exists() or "example-rule" not in _manifest(home)["global"]["rules"]
+    assert not (home / ".agent-tools" / "rules").exists() or not list(
+        (home / ".agent-tools" / "rules").rglob("example-rule*")
+    )
+
+
+def test_outdated_and_upgrade_resolve_against_the_items_source(repos, home, paths, tmp_path):
+    a = _push_rule(repos, "1.0.0")
+    _enroll_local(tmp_path, _config(pin=f'      commit: "{a}"\n'))
+    assert runner.invoke(app, ["org", "apply", "--yes"]).exit_code == 0
+
+    # The source clone moves to a newer version (as a later apply/refresh would).
+    b = _push_rule(repos, "1.1.0")
+    git_source.sync_source(SOURCE_URL, None, b, paths.org_dir_for("example-org") / "sources" / "team-rules")
+
+    out = runner.invoke(app, ["outdated"])
+    assert out.exit_code == 0, out.output
+    assert "example-rule" in out.output and "1.1.0" in out.output
+
+    up = runner.invoke(app, ["upgrade", "--yes"])
+    assert up.exit_code == 0, up.output
+    record = _manifest(home)["global"]["rules"]["example-rule"]
+    assert record["version"] == "1.1.0"
+    assert record["source"] == "example-org/team-rules"
+    assert record["source_commit"] == b  # upgrade keeps provenance, so apply sees no change
+
+
+# --------------------------------------------------------------------------- #
+#  refresh: a ref-only source that moves goes to review                        #
+# --------------------------------------------------------------------------- #
+
+
+def test_moved_ref_only_source_goes_to_pending_review(repos, home, paths):
+    a = _push_rule(repos, "1.0.0")
+    _commit(repos["config"], "org/example-org.yaml", _config(pin='      ref: "main"\n'))
+    result = runner.invoke(
+        app,
+        ["org", "enroll", f"git+{CONFIG_URL}#main:org/example-org.yaml", "--allow-unsigned", "--yes"],
+    )
+    assert result.exit_code == 0, result.output
+    assert runner.invoke(app, ["org", "apply", "--yes"]).exit_code == 0
+    assert read_state(paths, "example-org").source_commits == {"team-rules": a}
+
+    # Unchanged YAML and unchanged source: nothing to review.
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "unchanged")]
+
+    b = _push_rule(repos, "1.1.0")
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+    pending = read_state(paths, "example-org").pending
+    assert pending["kind"] == "review" and pending["sources"] == {"team-rules": b}
+    # Not installed until reviewed.
+    assert _manifest(home)["global"]["rules"]["example-rule"]["version"] == "1.0.0"
+
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code == 0, result.output
+    st = read_state(paths, "example-org")
+    assert st.pending is None and st.source_commits == {"team-rules": b}
+    assert _manifest(home)["global"]["rules"]["example-rule"]["version"] == "1.1.0"
+
+
+def test_signed_org_source_without_commit_is_verify_failed_at_refresh(repos, home, paths):
+    """A refresh that fetches a signed config whose source lost its pin never applies it."""
+    _commit(repos["config"], "org/example-org.yaml", _config(pin='      ref: "main"\n'))
+    assert runner.invoke(
+        app,
+        ["org", "enroll", f"git+{CONFIG_URL}#main:org/example-org.yaml", "--allow-unsigned", "--yes"],
+    ).exit_code == 0
+    _commit(
+        repos["config"],
+        "org/example-org.yaml",
+        _config(pin='      ref: "main"\n', version="1.1.0", trust_mode="pinned_key", trust_extra='  pubkey: "AAAA"\n'),
+    )
+    ((_org_id, status),) = org_cmd.refresh_remote_orgs(paths)
+    assert status.startswith("verify_failed") and "commit" in status
+    assert read_state(paths, "example-org").pending["kind"] == "verify_failed"
+
+
+# --------------------------------------------------------------------------- #
+#  review round 1: failures never approve or publish anything                  #
+# --------------------------------------------------------------------------- #
+
+
+def _enroll_ref_only_and_apply(repos, paths):
+    a = _push_rule(repos, "1.0.0")
+    _commit(repos["config"], "org/example-org.yaml", _config(pin='      ref: "main"\n'))
+    assert runner.invoke(
+        app,
+        ["org", "enroll", f"git+{CONFIG_URL}#main:org/example-org.yaml", "--allow-unsigned", "--yes"],
+    ).exit_code == 0
+    assert runner.invoke(app, ["org", "apply", "--yes"]).exit_code == 0
+    return a
+
+
+def _live_head(paths):
+    return _git("rev-parse", "HEAD", cwd=paths.source_dir_for("example-org", "team-rules"))
+
+
+def test_symlinked_item_is_refused_and_review_kept(repos, home, paths, tmp_path):
+    a = _enroll_ref_only_and_apply(repos, paths)
+    secret = tmp_path / "private.txt"
+    secret.write_text(RULE.format(version="1.1.0") + "not for installing\n", encoding="utf-8")
+    rule = repos["source"] / ".agent-rules/team/example-rule.md"
+    rule.unlink()
+    rule.symlink_to(secret)
+    _git("add", "-A", cwd=repos["source"])
+    _git("commit", "-q", "-m", "link", cwd=repos["source"])
+    _git("push", "-q", "origin", "HEAD:main", cwd=repos["source"])
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
+    assert "symlink" in result.output
+    st = read_state(paths, "example-org")
+    assert st.source_commits == {"team-rules": a} and st.pending["kind"] == "review"
+    assert _live_head(paths) == a
+    installed = list((home / ".agent-tools" / "rules").rglob("example-rule*"))
+    assert "not for installing" not in installed[0].read_text()
+
+
+def test_install_error_after_the_stamp_is_recorded_and_retried(repos, home, paths):
+    """An item that fails to install runs after the stamp: B is approved and published,
+    the failure exits non-zero and is recorded as apply_failed, and the retry installs it."""
+    _enroll_ref_only_and_apply(repos, paths)
+    b = _push_rule(repos, "1.1.0")
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+
+    installed = next((home / ".agent-tools" / "rules").rglob("example-rule*"))
+    locked = [installed.parent, installed]
+    for p in locked:
+        p.chmod(0o500 if p.is_dir() else 0o400)
+    try:
+        result = runner.invoke(app, ["org", "apply", "--yes"])
+    finally:
+        for p in locked:
+            p.chmod(0o700 if p.is_dir() else 0o600)
+    assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
+    st = read_state(paths, "example-org")
+    assert st.source_commits == {"team-rules": b} and st.pending["kind"] == "apply_failed"
+    assert _live_head(paths) == b
+    assert not (paths.org_dir_for("example-org") / "sources.next" / "team-rules").exists()
+
+    retry = runner.invoke(app, ["org", "apply", "--yes"])
+    assert retry.exit_code == 0, retry.output
+    assert read_state(paths, "example-org").pending is None
+    assert "1.1.0" in installed.read_text()
+
+
+def test_preferences_write_failure_after_the_stamp_is_recorded_and_retried(repos, home, paths, monkeypatch):
+    """The preference write is a post-stamp install: when it raises, B stays approved and
+    published, apply_failed is recorded, exit is 13, and nothing is restored over the live source."""
+    import aec.lib.preferences as prefs
+
+    _enroll_ref_only_and_apply(repos, paths)
+    b = _push_rule(repos, "1.1.0")
+    with_prefs = _config(pin='      ref: "main"\n', version="1.0.1").replace(
+        'install:\n  mode: "managed"\n',
+        'install:\n  mode: "managed"\n  preferences:\n    update_check: false\n',
+    )
+    _commit(repos["config"], "org/example-org.yaml", with_prefs)
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+
+    real_save = prefs.save_preferences
+
+    def boom(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(prefs, "save_preferences", boom)
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
+    assert "preferences" in result.output and "disk full" in result.output
+    st = read_state(paths, "example-org")
+    assert st.source_commits == {"team-rules": b} and st.pending["kind"] == "apply_failed"
+    assert _live_head(paths) == b
+
+    monkeypatch.setattr(prefs, "save_preferences", real_save)
+    retry = runner.invoke(app, ["org", "apply", "--yes"])
+    assert retry.exit_code == 0, retry.output
+    assert read_state(paths, "example-org").pending is None
+
+
+# --------------------------------------------------------------------------- #
+#  review round 11: the commit point is explicit and durably marked            #
+# --------------------------------------------------------------------------- #
+
+
+def test_failing_failure_recording_after_the_stamp_never_restores(repos, home, paths, monkeypatch):
+    """Post-stamp work fails and the write that records it fails too. The exception that
+    escapes apply_org_policy is a post-commit one, so apply_cmd must not restore the old
+    config and state over the published source: exit is non-zero, B stays approved and
+    live, and the stamp's apply_failed marker is what the next apply retries."""
+    import aec.lib.org_config.apply as org_apply
+    import aec.lib.preferences as prefs
+
+    _enroll_ref_only_and_apply(repos, paths)
+    b = _push_rule(repos, "1.1.0")
+    with_prefs = _config(pin='      ref: "main"\n', version="1.0.1").replace(
+        'install:\n  mode: "managed"\n',
+        'install:\n  mode: "managed"\n  preferences:\n    update_check: false\n',
+    )
+    new_hash = _commit(repos["config"], "org/example-org.yaml", with_prefs)
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+    assert read_state(paths, "example-org").pending["kind"] == "review"
+
+    def disk_full(*_a, **_k):
+        raise OSError("disk full")
+
+    real_save, real_settle = prefs.save_preferences, org_apply._settle_apply_marker
+    monkeypatch.setattr(prefs, "save_preferences", disk_full)
+    monkeypatch.setattr(org_apply, "_settle_apply_marker", disk_full)
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
+    assert "committed" in result.output and "disk full" in result.output
+    st = read_state(paths, "example-org")
+    assert st.source_commits == {"team-rules": b} and _live_head(paths) == b
+    assert st.config_version == "1.0.1", "the reviewed config must stay promoted, not restored"
+    assert st.pending["kind"] == "apply_failed"  # the stamp's marker, not the old review
+    assert not _staged_path_exists(paths)
+
+    monkeypatch.setattr(prefs, "save_preferences", real_save)
+    monkeypatch.setattr(org_apply, "_settle_apply_marker", real_settle)
+    retry = runner.invoke(app, ["org", "apply", "--yes"])
+    assert retry.exit_code == 0, retry.output
+    assert read_state(paths, "example-org").pending is None
+    assert new_hash
+
+
+def _staged_path_exists(paths) -> bool:
+    return org_cmd._staged_path(paths, "example-org").exists()
+
+
+def test_a_kill_after_the_stamp_leaves_a_marker_and_the_next_update_converges(repos, home, paths, tmp_path):
+    """The stamp itself writes the in-progress marker. A process killed mid-install (os._exit,
+    no handler runs) leaves new commits stamped but the rule still old; the next
+    `aec update` reports retry needed instead of 'up to date', and `aec org apply` converges."""
+    import os
+    import subprocess
+    import sys
+
+    _enroll_ref_only_and_apply(repos, paths)
+    b = _push_rule(repos, "1.1.0")
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+    installed = next((home / ".agent-tools" / "rules").rglob("example-rule*"))
+
+    script = (
+        "import os, aec.lib.apply_core as ac\n"
+        "ac.execute_apply = lambda *a, **k: os._exit(137)\n"  # the kill: right after the stamp
+        "from typer.testing import CliRunner\n"
+        "from aec.cli import app\n"
+        "CliRunner().invoke(app, ['org', 'apply', '--yes'])\n"
+        "os._exit(0)\n"
+    )
+    killed = subprocess.run([sys.executable, "-c", script], cwd=Path(__file__).resolve().parents[2], env=os.environ.copy())
+    assert killed.returncode == 137  # died at the kill, not by finishing or failing earlier
+    st = read_state(paths, "example-org")
+    assert st.source_commits == {"team-rules": b} and _live_head(paths) == b, "the stamp must survive the kill"
+    assert "1.0.0" in installed.read_text(), "the kill came before the install"
+    assert st.pending["kind"] == "apply_failed"
+
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "unchanged")]
+    pending = org_cmd.pending_orgs(paths)
+    assert [org_cmd.pending_fix(p) for p in pending] and "aec org apply" in org_cmd.pending_fix(pending[0])
+
+    retry = runner.invoke(app, ["org", "apply", "--yes"])
+    assert retry.exit_code == 0, retry.output
+    assert read_state(paths, "example-org").pending is None
+    assert "1.1.0" in installed.read_text()
+    assert org_cmd.pending_orgs(paths) == []
+
+
+def test_install_org_config_exits_non_zero_when_a_source_cannot_be_fetched(repos, home, tmp_path):
+    """`aec install --org-config` maps the apply outcome to an exit code the way
+    `aec org apply` does: the source repo has no commits, so nothing applies and CI
+    scripts must see a failure, not exit 0."""
+    cfg = tmp_path / "example-org.yaml"
+    cfg.write_text(_config(pin='      ref: "main"\n'), encoding="utf-8")
+    result = runner.invoke(app, ["install", "--org-config", str(cfg), "--allow-unsigned", "--yes"])
+    assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
+    assert not list((home / ".agent-tools" / "rules").rglob("example-rule*"))
+
+
+@pytest.mark.parametrize("version", [">=2.0.0", "^1.0", "latest", "1.x"])
+def test_custom_source_item_rejects_a_version_constraint(version):
+    """Only exact versions are compared for a custom source; a range would be silently
+    treated as a literal string, so validation refuses it (plans/2026-11-14-custom-source-version-ranges.md)."""
+    text = _config(pin='      ref: "main"\n').replace(
+        '      source: "team-rules"\n', f'      source: "team-rules"\n      version: "{version}"\n'
+    )
+    with pytest.raises(OrgConfigValidationError, match="exact version") as exc:
+        _validate(text)
+    assert exc.value.field_path == "items.rules.example-rule.version"
+
+
+def test_custom_source_item_accepts_an_exact_version():
+    text = _config(pin='      ref: "main"\n').replace(
+        '      source: "team-rules"\n', '      source: "team-rules"\n      version: "2.1.0"\n'
+    )
+    assert _validate(text).items["rules"]["example-rule"].version == "2.1.0"
+
+
+def test_required_item_missing_from_the_source_publishes_and_stamps_nothing(repos, home, paths):
+    """A required item the source no longer provides is a pre-publish failure that names it."""
+    a = _enroll_ref_only_and_apply(repos, paths)
+    before = read_state(paths, "example-org")
+    dir_before = sorted(p.name for p in paths.org_dir_for("example-org").iterdir() if p.name != "sources.next")
+    _commit(repos["source"], ".agent-rules/team/other-rule.md", RULE.replace("example-rule", "other-rule").format(version="1.0.0"))
+    (repos["source"] / ".agent-rules/team/example-rule.md").unlink()
+    _git("add", "-A", cwd=repos["source"])
+    _git("commit", "-q", "-m", "drop", cwd=repos["source"])
+    _git("push", "-q", "--force", "origin", "HEAD:main", cwd=repos["source"])
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
+    assert "example-rule" in result.output
+    assert read_state(paths, "example-org").source_commits == before.source_commits
+    assert _live_head(paths) == a
+    org_dir = paths.org_dir_for("example-org")
+    assert not (org_dir / "sources.next" / "team-rules").exists()
+    assert sorted(p.name for p in org_dir.iterdir() if p.name != "sources.next") == dir_before
+
+
+def _with_rule_key(key):
+    return _config(pin='      ref: "main"\n').replace('"example-rule":', f'"{key}":')
+
+
+@pytest.mark.parametrize(
+    "yaml_key, key",  # the YAML double-quoted escape "\\\\" is one real backslash
+    [("../../x",) * 2, ("/etc/x",) * 2, ("a/../../x",) * 2, ("a//b",) * 2, ("..",) * 2, ("a\\\\b", "a\\b")],
+)
+def test_policy_item_names_that_leave_the_install_dir_are_rejected(yaml_key, key):
+    with pytest.raises(OrgConfigValidationError) as exc:
+        _validate(_with_rule_key(yaml_key))
+    assert exc.value.field_path == f"items.rules.{key}"
+
+
+def test_nested_rule_names_are_accepted_but_other_types_stay_single_segment():
+    assert "general/foo" in _validate(_with_rule_key("general/foo")).items["rules"]
+    text = _config(pin='      ref: "main"\n').replace(
+        "  skills: {}\n", '  skills:\n    "a/b":\n      source: "aec.default.skills"\n      stance: required\n'
+    )
+    with pytest.raises(OrgConfigValidationError, match="only rule names nest"):
+        _validate(text)
+
+
+def test_a_source_publishing_a_traversal_name_is_refused_before_anything_is_written(repos, home, paths):
+    """The source scan rejects a rule named '../../victim', so nothing is published, approved or written."""
+    a = _enroll_ref_only_and_apply(repos, paths)
+    before = read_state(paths, "example-org")
+    victim = home / "victim.md"
+    victim.write_text("keep", encoding="utf-8")
+    _commit(repos["source"], ".agent-rules/team/evil.md", RULE.replace("example-rule", "../../victim").format(version="1.0.0"))
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code != 0, result.output
+    assert "'..'" in result.output
+    assert victim.read_text() == "keep"
+    assert read_state(paths, "example-org").source_commits == before.source_commits
+    assert _live_head(paths) == a
+
+
+def test_plan_reinstalls_when_source_or_commit_changes():
+    from aec.lib.apply_core import DesiredItem, plan_apply
+
+    avail = {("example-org/team-rules", "rules"): {"example-rule": {"version": "1.0.0"}}}
+    item = DesiredItem("rule", "example-rule", "global", source_id="example-org/team-rules",
+                       source_commit="b" * 40)
+
+    def plan(record):
+        manifest = {"global": {"rules": {"example-rule": record}}}
+        return plan_apply([item], manifest=manifest, available_by_type=avail)[0].action
+
+    assert plan({"version": "1.0.0"}) == "upgrade"  # was from the AEC catalog
+    assert plan({"version": "1.0.0", "source": "example-org/team-rules",
+                 "source_commit": "a" * 40}) == "upgrade"
+    assert plan({"version": "1.0.0", "source": "example-org/team-rules",
+                 "source_commit": "b" * 40}) == "noop"
+
+
+def test_installed_by_source_needs_no_pyyaml_for_catalog_items(tmp_path):
+    code = (
+        "import sys; sys.modules['yaml'] = None\n"
+        "from pathlib import Path\n"
+        "from aec.lib.sources import installed_by_source\n"
+        "m = {'global': {'rules': {'r': {'version': '1.0.0'}}}}\n"
+        f"print(len(installed_by_source(m, 'global', {{'rules': Path({str(tmp_path)!r})}})))\n"
+    )
+    out = subprocess.run(
+        [__import__("sys").executable, "-c", code], capture_output=True, text=True, check=False,
+        cwd=Path(__file__).resolve().parents[2],
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "1"
+
+
+def test_remote_commit_peels_a_fully_qualified_annotated_tag(repos):
+    a = _push_rule(repos, "1.0.0")
+    _git("tag", "-a", "v1", "-m", "v1", cwd=repos["source"])
+    _git("push", "-q", "origin", "v1", cwd=repos["source"])
+    assert git_source.remote_commit(SOURCE_URL, "v1") == a
+    assert git_source.remote_commit(SOURCE_URL, "refs/tags/v1") == a
+
+
+# --------------------------------------------------------------------------- #
+#  review round 2                                                              #
+# --------------------------------------------------------------------------- #
+
+
+def _installed_snapshot(home):
+    """Bytes of every installed item file plus the install manifest."""
+    roots = [home / ".agent-tools", home / ".agents-environment-config" / "installed-manifest.json"]
+    files = [f for r in roots for f in ([r] if r.is_file() else r.rglob("*")) if f.is_file()]
+    return {str(f.relative_to(home)): f.read_bytes() for f in files}
+
+
+def test_failed_state_write_installs_nothing_and_a_retry_recovers(repos, home, paths, monkeypatch):
+    """Nothing is installed until publish and stamp succeed, so a failed stamp on a pending
+    review of B leaves A's installed files and manifest byte-identical, decline has nothing to
+    reconcile, and a retry installs B."""
+    import aec.lib.org_config.apply as org_apply
+
+    a = _enroll_ref_only_and_apply(repos, paths)
+    b = _push_rule(repos, "1.1.0")
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+    before = _installed_snapshot(home)
+    assert before
+
+    def boom(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    with monkeypatch.context() as m:
+        m.setattr(org_apply, "_stamp_applied", boom)
+        result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
+    assert "disk full" in result.output
+    st = read_state(paths, "example-org")
+    assert st.source_commits == {"team-rules": a} and st.pending["kind"] == "review"
+    assert _live_head(paths) == a
+    org_dir = paths.org_dir_for("example-org")
+    assert not (org_dir / "sources.next" / "team-rules").exists()
+    assert not (org_dir / "sources.prev" / "team-rules").exists()
+    assert _installed_snapshot(home) == before
+
+    retry = runner.invoke(app, ["org", "apply", "--yes"])
+    assert retry.exit_code == 0, retry.output
+    assert read_state(paths, "example-org").source_commits == {"team-rules": b}
+    assert _live_head(paths) == b
+
+
+def test_decline_after_a_failed_stamp_leaves_installed_state_untouched(repos, home, paths, monkeypatch):
+    import aec.lib.org_config.apply as org_apply
+
+    _enroll_ref_only_and_apply(repos, paths)
+    _push_rule(repos, "1.1.0")
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+    before = _installed_snapshot(home)
+
+    def boom(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    with monkeypatch.context() as m:
+        m.setattr(org_apply, "_stamp_applied", boom)
+        assert runner.invoke(app, ["org", "apply", "--yes"]).exit_code == org_cmd.EXIT_VALIDATION
+
+    pending_commit = read_state(paths, "example-org").pending["commit"]
+    declined = runner.invoke(app, ["org", "apply", "--decline", pending_commit[:12]])
+    assert declined.exit_code == 0, declined.output
+    assert read_state(paths, "example-org").pending is None
+    assert _installed_snapshot(home) == before
+
+
+def test_failed_blocked_uninstall_runs_after_commit_and_retries(repos, home, paths, monkeypatch):
+    """A blocked uninstall is irreversible, so it runs after the stamp: its failure exits
+    non-zero and is recorded per item, but nothing is rolled back; the next apply retries it."""
+    import aec.lib.org_config.apply as org_apply
+    from aec.lib.manifest_v2 import load_manifest, record_install, save_manifest
+
+    a = _push_rule(repos, "1.0.0")
+    text = _config(pin='      ref: "main"\n').replace(
+        '  agents: {}',
+        '    "gone-rule":\n      source: "aec.default.rules"\n      stance: blocked\n  agents: {}',
+    )
+    _commit(repos["config"], "org/example-org.yaml", text)
+    assert runner.invoke(
+        app, ["org", "enroll", f"git+{CONFIG_URL}#main:org/example-org.yaml", "--allow-unsigned", "--yes"]
+    ).exit_code == 0
+    manifest_path = home / ".agents-environment-config" / "installed-manifest.json"
+    m = load_manifest(manifest_path)
+    record_install(m, "global", "rules", "gone-rule", "1.0.0")
+    save_manifest(m, manifest_path)
+
+    def remove(item_type, name, scope):
+        m = load_manifest(manifest_path)
+        del m["global"]["rules"][name]
+        save_manifest(m, manifest_path)
+
+    def boom(*_args):
+        raise RuntimeError("uninstall refused")
+
+    monkeypatch.setattr(org_apply, "_uninstall_blocked", boom)
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
+    assert "rules/gone-rule" in result.output and "uninstall refused" in result.output
+    # Committed, not rolled back: the approved commit is live and the rule is installed.
+    st = read_state(paths, "example-org")
+    assert st.source_commits == {"team-rules": a} and _live_head(paths) == a
+    assert _manifest(home)["global"]["rules"]["example-rule"]["version"] == "1.0.0"
+    # Recorded per item, and still in the manifest so a retry sees it.
+    assert st.pending["kind"] == "apply_failed"
+    assert [i["item"] for i in st.pending["items"]] == ["rules/gone-rule"]
+    assert "gone-rule" in _manifest(home)["global"]["rules"]
+
+    monkeypatch.setattr(org_apply, "_uninstall_blocked", remove)
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert read_state(paths, "example-org").pending is None
+    assert "gone-rule" not in _manifest(home)["global"]["rules"]
+
+
+def test_custom_source_never_replaces_a_pinned_version(tmp_path):
+    from aec.lib.apply_core import DesiredItem, execute_apply, plan_apply
+
+    key = ("example-org/team-rules", "rules")
+    avail = {key: {"example-rule": {"version": "1.0.0"}}}
+    item = DesiredItem("rule", "example-rule", "global", version_spec="2.0.0",
+                       source_id="example-org/team-rules", source_commit="b" * 40)
+    manifest = {"global": {"rules": {"example-rule": {"version": "2.0.0"}}}}
+    plan = plan_apply([item], manifest=manifest, available_by_type=avail)
+    assert plan[0].action == "unsatisfiable"
+    result = execute_apply(plan, source_dirs={key: str(tmp_path)}, available_by_type=avail,
+                           manifest_path=tmp_path / "m.json")
+    assert not result.applied and "pinned to 2.0.0" in result.errors[0][1]
+    assert not (tmp_path / "m.json").exists()
+
+
+def test_failed_pip_install_records_nothing(tmp_path, monkeypatch):
+    import aec.lib.apply_core as core
+    from aec.lib.scope import Scope
+
+    mcp_dir = tmp_path / "srv"
+    mcp_dir.mkdir()
+    (mcp_dir / "mcp.json").write_text(
+        json.dumps({"install": {"pip": "example-mcp"}, "mcpServers": {"x": {"command": "x"}}})
+    )
+    monkeypatch.setattr(core.subprocess, "run",
+                        lambda argv, **kw: subprocess.CompletedProcess(argv, 1))
+    item = core.DesiredItem("mcp", "srv", "global", source_id="example-org/team-mcps")
+    with pytest.raises(RuntimeError, match="pip install example-mcp failed"):
+        core._apply_mcp(item, Scope(is_global=True, repo_path=None), {"path": "srv"},
+                        tmp_path, tmp_path / "m.json")
+    assert not (tmp_path / "m.json").exists()
+
+
+ANOTHER_ORG = """---
+schema_version: "1.0"
+org_id: "another-org"
+org_name: "Another Org"
+config_version: "1.0.0"
+trust:
+  mode: "unsigned"
+---
+
+sources:
+  default: { skills: keep, rules: keep, agents: keep, mcps: keep }
+  custom: []
+
+items:
+  skills: {}
+  rules: {}
+  agents: {}
+  mcps: {}
+"""
+
+
+def test_failed_second_org_state_write_restores_the_first(repos, home, paths, tmp_path, monkeypatch):
+    import aec.lib.org_config.state as state_mod
+
+    a = _enroll_ref_only_and_apply(repos, paths)
+    another = tmp_path / "another-org.yaml"
+    another.write_text(ANOTHER_ORG, encoding="utf-8")
+    assert runner.invoke(app, ["org", "enroll", str(another), "--allow-unsigned", "--yes"]).exit_code == 0
+    _push_rule(repos, "1.1.0")
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+    before = {o: read_state(paths, o) for o in ("example-org", "another-org")}
+
+    real_write = state_mod.write_state
+    calls = []
+
+    def write_second_fails(p, st):
+        calls.append(st.org_id)
+        if len(calls) == 2:  # another-org (no review to roll back) is stamped first; this one fails
+            raise OSError("disk full")
+        real_write(p, st)
+
+    monkeypatch.setattr(state_mod, "write_state", write_second_fails)
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
+    # apply_cmd restores the reviewed org's promotion; _stamp_applied undoes another-org's stamp.
+    assert {o: read_state(paths, o) for o in before} == before
+    assert _live_head(paths) == a
+    assert calls == ["another-org", "example-org"]  # rolled back by rename: no restore write
+    assert not list(paths.orgs_dir.glob("*.aec-prev.*"))
