@@ -152,10 +152,9 @@ def _canonical_instructions_file(project_dir: Path) -> Path:
 def _add_rules_reference(agents_md: Path, rules: str, dry_run: bool) -> None:
     """Append AEC's Rules Reference to an existing AGENTS.md that lacks one, since
     the per-agent files only import AGENTS.md. Nothing else in it is touched."""
-    from ..lib.agents_md_layout import split_stub
-
     raw = agents_md.read_bytes().decode("utf-8")
-    if split_stub(raw.replace("\r\n", "\n"))[0]:
+    # The installed-rules path, not the heading: a user may have their own "Rules Reference".
+    if "agent-tools/rules/agents-environment-config/" in raw:
         Console.skip("AGENTS.md already exists (skipping)")
         return
     if dry_run:
