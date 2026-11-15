@@ -445,6 +445,7 @@ def apply_org_policy(
         Console.error("org-config apply failed; source commits and pending reviews were not approved.")
         # shortcut: items installed before the failure stay installed; revert them if this bites.
         discard_staged(s.staged for s in synced)
+        result.undo.drop()
         return ApplyOutcome(
             len(result.applied), len(removed), policy.held, prefs_applied,
             skipped_reason="install_failed",
@@ -465,10 +466,16 @@ def apply_org_policy(
         )
     try:
         publish_sources(paths, synced, lambda: _stamp_applied(paths, now, synced))
-    except (OSError, OrgConfigError) as exc:
+    except Exception as exc:
+        # The items were installed from sources that never became approved: put
+        # the installed files and manifest back with the sources and state.
+        result.undo.restore()
+        if not isinstance(exc, (OSError, OrgConfigError)):
+            raise
         Console.error(f"org-config apply: could not publish custom sources: {exc}")
         Console.error("org-config apply failed; source commits and pending reviews were not approved.")
-        return ApplyOutcome(applied, len(removed), policy.held, prefs_applied, skipped_reason="install_failed")
+        return ApplyOutcome(0, 0, policy.held, prefs_applied, skipped_reason="install_failed")
+    result.undo.drop()
     return ApplyOutcome(
         applied_items=applied,
         removed_items=len(removed),

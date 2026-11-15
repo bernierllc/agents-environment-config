@@ -7,14 +7,16 @@ there is exactly one engine that installs items from a declarative source.
 """
 
 import json
+import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 from .console import Console
 from .filesystem import installed_dst_path
-from .installed_store import record_item_install
+from .installed_store import _installed_path, record_item_install
 from .manifest_v2 import get_installed, load_manifest, record_mcp_install, save_manifest
 from .mcp_settings import get_settings_path, write_mcp_server
 from .scope import Scope
@@ -53,11 +55,59 @@ class ApplyPlanEntry:
     reason: str = ""
 
 
+class InstallUndo:
+    """Copies of what ``execute_apply`` overwrites, taken just before each write.
+
+    ``restore()`` puts every saved path back (or removes what did not exist);
+    ``drop()`` discards the copies. The caller that learns a later step failed
+    decides which. Covers the item files, the manifest, the per-type installed
+    file and the MCP settings file; repo-scope git hooks are not restored.
+    """
+
+    def __init__(self) -> None:
+        self._tmp: Optional[Path] = None
+        self._saved: list = []  # (path, copy or None), in save order
+        self._seen: set = set()
+
+    def save(self, path: Path) -> None:
+        if path in self._seen:
+            return
+        self._seen.add(path)
+        if self._tmp is None:
+            self._tmp = Path(tempfile.mkdtemp(prefix="aec-undo-"))
+        copy = None
+        if path.is_symlink() or path.exists():
+            copy = self._tmp / str(len(self._saved))
+            if path.is_dir() and not path.is_symlink():
+                shutil.copytree(path, copy, symlinks=True)
+            else:
+                shutil.copy2(path, copy, follow_symlinks=False)
+        self._saved.append((path, copy))
+
+    def restore(self) -> None:
+        for path, copy in reversed(self._saved):
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path)
+            elif path.is_symlink() or path.exists():
+                path.unlink()
+            if copy is not None:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(copy), path)
+        self.drop()
+
+    def drop(self) -> None:
+        if self._tmp is not None:
+            shutil.rmtree(self._tmp, ignore_errors=True)  # best-effort: it is a temp dir
+        self._tmp, self._saved, self._seen = None, [], set()
+
+
 @dataclass
 class ApplyResult:
     applied: list = field(default_factory=list)
     skipped: list = field(default_factory=list)
     errors: list = field(default_factory=list)
+    # Holds the pre-apply copies until the caller commits (drop) or rolls back (restore).
+    undo: InstallUndo = field(default_factory=InstallUndo)
 
 
 def plan_apply(items, *, manifest: dict, available_by_type: dict) -> list:
@@ -143,12 +193,16 @@ def execute_apply(
             continue
         scope_obj = _scope_from_key(item.scope)
         try:
+            result.undo.save(manifest_path)
+            result.undo.save(_installed_path(item.item_type))
             if item.item_type == "mcp":
+                result.undo.save(get_settings_path(scope_obj))
                 _apply_mcp(item, scope_obj, item_info, Path(source_dir), manifest_path)
             else:
                 target_dir = getattr(scope_obj, f"{plural}_dir")
                 src = Path(source_dir) / item_info.get("path", item.name)
                 dst = installed_dst_path(target_dir, item.name, src)
+                result.undo.save(dst)
                 _install_single_item(
                     item_type=item.item_type,
                     plural=plural,

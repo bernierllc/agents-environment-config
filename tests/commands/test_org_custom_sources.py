@@ -460,10 +460,19 @@ def test_failed_state_write_rolls_back_publication(repos, home, paths, monkeypat
     def boom(*_args, **_kwargs):
         raise OSError("disk full")
 
+    installed = next((home / ".agent-tools" / "rules").rglob("example-rule*"))
+    manifest = home / ".agents-environment-config" / "installed-manifest.json"
+    store_files = sorted((home / ".agents-environment-config").rglob("*.json"))
+    before = {p: p.read_bytes() for p in [installed, *store_files]}
+
     monkeypatch.setattr(org_apply, "_stamp_applied", boom)
     result = runner.invoke(app, ["org", "apply", "--yes"])
     assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
     assert "disk full" in result.output
+    # The 1.1.0 content was installed before publication failed: it must be gone again.
+    assert manifest in before
+    assert {p: p.read_bytes() for p in before} == before
+    assert sorted((home / ".agents-environment-config").rglob("*.json")) == store_files
     st = read_state(paths, "example-org")
     assert st.source_commits == {"team-rules": a} and st.pending["kind"] == "review"
     assert _live_head(paths) == a
