@@ -217,49 +217,27 @@ def test_a_blocker_meeting_two_sources_is_held_until_decided(tmp_path):
     assert SUBJECT in pol.held
 
 
-# A source conflict and a version conflict on one item are two decisions about one item.
-def _source_and_version_conflict(home):
-    _orgs(home, ("acme", "required", "aec.default.rules", "1.0.0"),
+# Two orgs pin different versions of one source while a third wants another source: still
+# ONE conflict, and any of the three can be honored.
+@pytest.mark.parametrize("winner", ["acme", "globex", "initech"])
+def test_any_org_can_be_honored_when_versions_and_sources_both_differ(tmp_path, winner):
+    _orgs(tmp_path, ("acme", "required", "aec.default.rules", "1.0.0"),
           ("globex", "pinned", "aec.default.rules", "2.0.0"),
           ("initech", "required", None, None))
-
-
-def test_an_item_with_two_open_conflicts_is_held_until_both_are_decided(tmp_path):
-    _source_and_version_conflict(tmp_path)
     paths = OrgPaths(home_dir=tmp_path)
-    _decide(paths, {"source", "version"}, {"source": "honor:acme"})
+    _decide(paths, {"source"}, {"source": f"honor:{winner}"})
     pol = effective_policy(paths)
-    assert SUBJECT not in pol.items
-    assert SUBJECT in pol.held
-
-
-@pytest.mark.parametrize("source_decision, version_decision", [("skip", "honor:acme"), ("honor:acme", "skip")])
-def test_a_skip_on_either_conflict_leaves_the_item_alone(tmp_path, source_decision, version_decision):
-    # Whichever conflict id sorts first, the answer is the same: the user said skip.
-    _source_and_version_conflict(tmp_path)
-    paths = OrgPaths(home_dir=tmp_path)
-    _decide(paths, {"source", "version"}, {"source": source_decision, "version": version_decision})
-    pol = effective_policy(paths)
-    assert SUBJECT not in pol.items
+    assert pol.items[SUBJECT][0] == winner
     assert SUBJECT not in pol.held
 
 
-@pytest.mark.parametrize("source_decision, version_decision", [("honor:initech", "honor:acme"), ("honor:acme", "honor:globex")])
-def test_decisions_naming_different_orgs_stay_held(tmp_path, source_decision, version_decision):
-    _source_and_version_conflict(tmp_path)
+def test_a_skip_drops_the_item_and_leaves_nothing_held(tmp_path):
+    _orgs(tmp_path, ("acme", "required", "aec.default.rules", "1.0.0"),
+          ("initech", "required", None, None))
     paths = OrgPaths(home_dir=tmp_path)
-    _decide(paths, {"source", "version"}, {"source": source_decision, "version": version_decision})
+    _decide(paths, {"source"}, {"source": "skip"})
     pol = effective_policy(paths)
     assert SUBJECT not in pol.items
-    assert SUBJECT in pol.held
-
-
-def test_decisions_naming_the_same_org_apply_that_org(tmp_path):
-    _source_and_version_conflict(tmp_path)
-    paths = OrgPaths(home_dir=tmp_path)
-    _decide(paths, {"source", "version"}, {"source": "honor:acme", "version": "honor:acme"})
-    pol = effective_policy(paths)
-    assert pol.items[SUBJECT][0] == "acme"
     assert SUBJECT not in pol.held
 
 

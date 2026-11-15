@@ -44,17 +44,15 @@ class EffectivePolicy:
 def _subject_status(paths: OrgPaths) -> dict[str, tuple]:
     """Map each conflicting subject to its disposition.
 
-    Values: ``("held",)`` | ``("honor", org_id)`` | ``("skip",)``. A subject can
-    have several conflicts (stance, source, version), so every decision is
-    reconciled: ``held`` dominates, then ``skip`` (the user said to leave it
-    alone), and ``honor`` applies only when every decision names the same org.
+    Values: ``("held",)`` | ``("honor", org_id)`` | ``("skip",)``. ``held``
+    dominates when a subject has multiple conflicts in mixed states.
     """
     orgs = discover_enrolled_orgs(paths)
     org_hashes = {e.config.org_id: e.content_hash for e in orgs}
     conflicts = detect_conflicts([e.config for e in orgs])
     resolutions = load_resolutions(paths)
 
-    dispositions: dict[str, list[tuple]] = {}
+    status: dict[str, tuple] = {}
     for conflict in conflicts:
         ih = input_hash_for((p.org_id for p in conflict.participants), org_hashes)
         res = resolutions.get(conflict.conflict_id)
@@ -68,19 +66,9 @@ def _subject_status(paths: OrgPaths) -> dict[str, tuple]:
         else:
             disposition = ("held",)
 
-        dispositions.setdefault(conflict.subject, []).append(disposition)
-
-    status: dict[str, tuple] = {}
-    for subject, decided in dispositions.items():
-        honored = {d[1] for d in decided if d[0] == "honor"}
-        if any(d[0] == "held" for d in decided):
-            status[subject] = ("held",)
-        elif any(d[0] == "skip" for d in decided):
-            status[subject] = ("skip",)
-        elif len(honored) == 1:
-            status[subject] = ("honor", next(iter(honored)))
-        else:  # honors name different orgs: the decisions contradict, so ask again
-            status[subject] = ("held",)
+        prior = status.get(conflict.subject)
+        if prior is None or disposition[0] == "held":
+            status[conflict.subject] = disposition
     return status
 
 

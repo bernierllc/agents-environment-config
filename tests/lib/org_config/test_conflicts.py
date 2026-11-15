@@ -140,14 +140,28 @@ def test_a_blocker_with_installers_on_two_sources_is_one_conflict_naming_every_o
     assert {p.org_id for p in conflict.participants} == {"acme", "globex", "initech"}
 
 
-def test_a_third_org_on_another_source_does_not_hide_a_version_conflict():
+def test_a_third_org_on_another_source_is_one_conflict_naming_every_org():
+    # The version difference between acme and globex is settled by whichever org is honored.
     a = _cfg("acme", items=_rule("foo", "required", "aec.default.rules", version="1.0.0"))
     b = _cfg("globex", items=_rule("foo", "pinned", "aec.default.rules", version="2.0.0"))
     c = _cfg("initech", items=_rule("foo", "required", "initech-catalog"))
-    by_kind = {c.kind: c for c in detect_conflicts([a, b, c])}
-    assert set(by_kind) == {"source", "version"}
-    assert {p.org_id for p in by_kind["version"].participants} == {"acme", "globex"}
-    assert {p.org_id for p in by_kind["source"].participants} == {"acme", "globex", "initech"}
+    (conflict,) = detect_conflicts([a, b, c])
+    assert conflict.kind == "source"
+    assert {p.org_id for p in conflict.participants} == {"acme", "globex", "initech"}
+
+
+def test_an_item_never_has_more_than_one_conflict():
+    scenarios = [
+        [("acme", "required", "acme-catalog", "1.0.0"), ("globex", "blocked", "aec.default.rules", None),
+         ("initech", "required", "initech-catalog", "2.0.0")],
+        [("acme", "required", "aec.default.rules", "1.0.0"), ("globex", "pinned", "aec.default.rules", "2.0.0"),
+         ("initech", "required", "initech-catalog", None)],
+        [("acme", "required", "aec.default.rules", "1.0.0"), ("globex", "pinned", "aec.default.rules", "2.0.0")],
+    ]
+    for scenario in scenarios:
+        configs = [_cfg(oid, items=_rule("foo", st, src, version=v)) for oid, st, src, v in scenario]
+        subjects = [c.subject for c in detect_conflicts(configs)]
+        assert subjects == ["rules/foo"], scenario
 
 
 def test_source_replacement_conflict():

@@ -11,6 +11,9 @@ Detected kinds (design spec "Conflict types detected"):
   * ``source``             — install-intent orgs want the same item name from
                              different sources (a name has one install target)
   * ``version``            — install-intent orgs pin differing versions of one source
+
+An item has at most one conflict (stance, else source, else version), so it never needs
+several decisions that could contradict each other.
   * ``source_replacement`` — orgs disagree on a default source's stance
   * ``preference``         — orgs set the same install preference to different values
   * ``install_mode``       — orgs disagree on managed vs guided
@@ -91,11 +94,11 @@ def _item_conflicts(configs: list[OrgConfig]) -> list[Conflict]:
         stances = {oid: p.stance.value for oid, p in by_org.items() if p.stance.value != "silent"}
         has_install = any(s in _INSTALL_INTENTS for s in stances.values())
         has_block = any(s in _BLOCK_INTENTS for s in stances.values())
+        # One conflict per item, most fundamental first: stance, then source, then version.
+        # Every org that has a say is a participant, and honoring one applies its whole
+        # policy (source and version included), so a single decision settles the item.
+        # Several conflicts on one item would need decisions that can contradict each other.
         if has_install and has_block:
-            # Every org with a stance is a participant, and honoring one applies its whole
-            # policy (source and version included), so no separate source/version conflict
-            # is needed. Emitting one would offer only the installers and make it
-            # impossible to honor the blocking org.
             out.append(_make("stance", subject, stances))
             continue
 
@@ -106,15 +109,16 @@ def _item_conflicts(configs: list[OrgConfig]) -> list[Conflict]:
         }
         if len(set(installers.values())) > 1:
             out.append(_make("source", subject, installers))
+            continue
 
-        # Versions are only comparable within one source, so each source gets its own check.
-        by_source: dict[str, dict[str, str]] = {}
-        for oid, identity in installers.items():
-            if by_org[oid].version is not None:
-                by_source.setdefault(identity, {})[oid] = by_org[oid].version
-        for versions in by_source.values():
-            if len(set(versions.values())) > 1:
-                out.append(_make("version", subject, versions))
+        # Every installer names the same source here, so their versions are comparable.
+        versions = {
+            oid: p.version
+            for oid, p in by_org.items()
+            if p.stance.value in _INSTALL_INTENTS and p.version is not None
+        }
+        if len(set(versions.values())) > 1:
+            out.append(_make("version", subject, versions))
     return out
 
 
