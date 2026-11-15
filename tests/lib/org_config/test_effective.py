@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 import aec.commands.org as org_cmd
 from aec.lib.org_config.effective import effective_policy
 from aec.lib.org_config.paths import OrgPaths
@@ -123,6 +125,110 @@ def test_resolved_skip_drops_subject(tmp_path):
     pol = effective_policy(paths)
     assert "skills/foo" not in pol.items
     assert "skills/foo" not in pol.held
+
+
+_CUSTOM_RULE_TMPL = """---
+schema_version: "1.0"
+org_id: "{oid}"
+org_name: "{oid}"
+config_version: "1.0.0"
+trust:
+  mode: "unsigned"
+---
+
+sources:
+  default: {{ skills: keep, rules: keep, agents: keep, mcps: keep }}
+  custom:
+    - id: "{oid}-catalog"
+      url: "https://example.com/{oid}-catalog.git"
+      ref: "main"
+      contributes: ["rules"]
+
+items:
+  skills: {{}}
+  rules:
+    "shared-rule":
+      source: "{oid}-catalog"
+      stance: {stance}
+  agents: {{}}
+  mcps: {{}}
+"""
+
+
+def _three_orgs_one_blocks(home):
+    """acme and initech require the rule from their own sources; globex blocks it."""
+    orgs = home / ".aec" / "orgs"
+    orgs.mkdir(parents=True, exist_ok=True)
+    for oid, stance in (("acme", "required"), ("globex", "blocked"), ("initech", "required")):
+        (orgs / f"{oid}.yaml").write_text(
+            _CUSTOM_RULE_TMPL.format(oid=oid, stance=stance), encoding="utf-8"
+        )
+
+
+def _decide(paths, decisions):
+    """Record a decision per conflict kind on rules/shared-rule."""
+    from aec.lib.org_config.reconcile import open_conflicts
+    from aec.lib.org_config.resolutions import Resolution, save_resolution
+
+    by_kind = {
+        oc.conflict.kind: oc for oc in open_conflicts(paths) if oc.conflict.subject == "rules/shared-rule"
+    }
+    assert set(by_kind) == {"stance", "source"}
+    for kind, decision in decisions.items():
+        save_resolution(
+            paths,
+            Resolution(
+                conflict_id=by_kind[kind].conflict.conflict_id,
+                decision=decision,
+                input_hash=by_kind[kind].input_hash,
+                decided_at="2026-05-24T00:00:00Z",
+            ),
+        )
+
+
+def test_a_subject_with_two_conflicts_is_held_until_both_are_decided(tmp_path):
+    _three_orgs_one_blocks(tmp_path)
+    paths = OrgPaths(home_dir=tmp_path)
+    _decide(paths, {"stance": "honor:acme"})
+    pol = effective_policy(paths)
+    assert "rules/shared-rule" not in pol.items
+    assert "rules/shared-rule" in pol.held
+
+
+@pytest.mark.parametrize(
+    "stance_decision, source_decision",
+    [("skip", "honor:acme"), ("honor:acme", "skip")],
+)
+def test_a_skip_on_either_conflict_leaves_the_subject_alone(tmp_path, stance_decision, source_decision):
+    # Whichever conflict id sorts first, the answer is the same: the user said skip.
+    _three_orgs_one_blocks(tmp_path)
+    paths = OrgPaths(home_dir=tmp_path)
+    _decide(paths, {"stance": stance_decision, "source": source_decision})
+    pol = effective_policy(paths)
+    assert "rules/shared-rule" not in pol.items
+    assert "rules/shared-rule" not in pol.held
+
+
+@pytest.mark.parametrize(
+    "stance_decision, source_decision",
+    [("honor:acme", "honor:initech"), ("honor:initech", "honor:acme")],
+)
+def test_decisions_naming_different_orgs_stay_held(tmp_path, stance_decision, source_decision):
+    _three_orgs_one_blocks(tmp_path)
+    paths = OrgPaths(home_dir=tmp_path)
+    _decide(paths, {"stance": stance_decision, "source": source_decision})
+    pol = effective_policy(paths)
+    assert "rules/shared-rule" not in pol.items
+    assert "rules/shared-rule" in pol.held
+
+
+def test_decisions_naming_the_same_org_apply_that_org(tmp_path):
+    _three_orgs_one_blocks(tmp_path)
+    paths = OrgPaths(home_dir=tmp_path)
+    _decide(paths, {"stance": "honor:acme", "source": "honor:acme"})
+    pol = effective_policy(paths)
+    assert pol.items["rules/shared-rule"][0] == "acme"
+    assert "rules/shared-rule" not in pol.held
 
 
 def test_no_orgs_is_empty(tmp_path):

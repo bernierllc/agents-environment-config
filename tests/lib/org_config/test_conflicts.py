@@ -131,6 +131,16 @@ def test_versions_of_different_sources_are_not_compared():
     assert [c.kind for c in detect_conflicts([a, b])] == ["source"]
 
 
+def test_a_third_org_on_another_source_does_not_hide_a_version_conflict():
+    a = _cfg("acme", items=_rule("foo", "required", "aec.default.rules", version="1.0.0"))
+    b = _cfg("globex", items=_rule("foo", "pinned", "aec.default.rules", version="2.0.0"))
+    c = _cfg("initech", items=_rule("foo", "required", "initech-catalog"))
+    by_kind = {c.kind: c for c in detect_conflicts([a, b, c])}
+    assert set(by_kind) == {"source", "version"}
+    assert {p.org_id for p in by_kind["version"].participants} == {"acme", "globex"}
+    assert {p.org_id for p in by_kind["source"].participants} == {"acme", "globex", "initech"}
+
+
 def test_source_replacement_conflict():
     a = _cfg("acme", default_sources={"skills": "keep"})
     b = _cfg("globex", default_sources={"skills": "replace"})

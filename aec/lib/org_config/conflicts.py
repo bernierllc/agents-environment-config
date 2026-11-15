@@ -100,15 +100,15 @@ def _item_conflicts(configs: list[OrgConfig]) -> list[Conflict]:
         }
         if len(set(installers.values())) > 1:
             out.append(_make("source", subject, installers))
-            continue  # versions of different sources are not comparable
 
-        versions = {
-            oid: p.version
-            for oid, p in by_org.items()
-            if p.stance.value in _INSTALL_INTENTS and p.version is not None
-        }
-        if len(set(versions.values())) > 1:
-            out.append(_make("version", subject, versions))
+        # Versions are only comparable within one source, so each source gets its own check.
+        by_source: dict[str, dict[str, str]] = {}
+        for oid, identity in installers.items():
+            if by_org[oid].version is not None:
+                by_source.setdefault(identity, {})[oid] = by_org[oid].version
+        for versions in by_source.values():
+            if len(set(versions.values())) > 1:
+                out.append(_make("version", subject, versions))
     return out
 
 
