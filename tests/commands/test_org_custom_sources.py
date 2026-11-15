@@ -865,3 +865,78 @@ def test_failed_second_org_state_write_restores_the_first(repos, home, paths, tm
     assert _live_head(paths) == a
     assert calls == ["another-org", "example-org"]  # rolled back by rename: no restore write
     assert not list(paths.orgs_dir.glob("*.aec-prev.*"))
+
+
+# --------------------------------------------------------------------------- #
+#  two orgs requiring the same item from different sources                     #
+# --------------------------------------------------------------------------- #
+
+OTHER_URL = "https://git.example.test/other-org/team-catalog.git"
+
+
+def _second_org_with_a_different_rule_body(repos, tmp_path):
+    """Enroll a second org (id sorts first) whose own source ships a different
+    ``example-rule`` at the same version, so a silent winner changes the bytes."""
+    bare = tmp_path / "other.git"
+    _git("init", "-q", "--bare", "-b", "main", str(bare))
+    gitconfig = tmp_path / "gitconfig"
+    gitconfig.write_text(
+        gitconfig.read_text() + f'[url "{bare.as_uri()}"]\n\tinsteadOf = {OTHER_URL}\n',
+        encoding="utf-8",
+    )
+    work = tmp_path / "other-work"
+    _git("init", "-q", "-b", "main", str(work))
+    _git("remote", "add", "origin", str(bare), cwd=work)
+    _commit(
+        work,
+        ".agent-rules/team/example-rule.md",
+        RULE.format(version="1.0.0").replace("# Example rule", "# The OTHER org's rule"),
+    )
+    text = (
+        _config(pin='      ref: "main"\n', url=OTHER_URL)
+        .replace("example-org", "aaa-org")
+        .replace("team-rules", "other-rules")
+    )
+    src = tmp_path / "aaa-org.yaml"
+    src.write_text(text, encoding="utf-8")
+    result = runner.invoke(app, ["org", "enroll", str(src), "--allow-unsigned", "--yes"])
+    assert result.exit_code == 0, result.output
+
+
+def _installed_rule_text(home):
+    (path,) = (home / ".agent-tools" / "rules").rglob("example-rule*")
+    return path.read_text()
+
+
+def test_the_same_item_from_two_orgs_sources_is_held_and_nothing_is_overwritten(
+    repos, home, paths, tmp_path
+):
+    _enroll_ref_only_and_apply(repos, paths)  # example-org's rule is installed
+    assert "Example rule 1.0.0" in _installed_rule_text(home)
+
+    _second_org_with_a_different_rule_body(repos, tmp_path)
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+
+    assert result.exit_code == 0, result.output
+    assert "held pending decision" in result.output
+    # The first org's rule is untouched, and provenance still names its source.
+    assert "Example rule 1.0.0" in _installed_rule_text(home)
+    assert _manifest(home)["global"]["rules"]["example-rule"]["source"] == "example-org/team-rules"
+    listed = runner.invoke(app, ["org", "resolve", "--list"])
+    assert "source on rules/example-rule" in listed.output
+
+
+def test_honoring_one_org_after_a_source_conflict_installs_that_orgs_rule(
+    repos, home, paths, tmp_path
+):
+    _enroll_ref_only_and_apply(repos, paths)
+    _second_org_with_a_different_rule_body(repos, tmp_path)
+    (conflict_line,) = runner.invoke(app, ["org", "resolve", "--list"]).output.splitlines()
+    conflict_id = conflict_line[1 : conflict_line.index("]")]
+
+    resolved = runner.invoke(app, ["org", "resolve", conflict_id], input="1\n")
+    assert resolved.exit_code == 0, resolved.output
+    assert runner.invoke(app, ["org", "apply", "--yes"]).exit_code == 0
+
+    assert "OTHER org's rule" in _installed_rule_text(home)
+    assert _manifest(home)["global"]["rules"]["example-rule"]["source"] == "aaa-org/other-rules"

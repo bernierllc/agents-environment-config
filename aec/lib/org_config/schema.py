@@ -22,6 +22,16 @@ RESERVED_SOURCE_IDS = frozenset({
 })
 
 
+def source_identity(org_id: str, source: str) -> str:
+    """What an item's ``source`` field names, as one comparable identity.
+
+    A reserved source is the same source for every org. A custom source id is
+    only unique within the org that declares it (``<org_id>/<id>``), so two orgs
+    that both call theirs ``team-rules`` still name different sources.
+    """
+    return source if source in RESERVED_SOURCE_IDS else f"{org_id}/{source}"
+
+
 ITEM_TYPES = ("skills", "rules", "agents", "mcps", "plugins")
 
 

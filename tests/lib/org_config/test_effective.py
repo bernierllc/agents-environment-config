@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 import aec.commands.org as org_cmd
 from aec.lib.org_config.effective import effective_policy
 from aec.lib.org_config.paths import OrgPaths
@@ -123,6 +125,120 @@ def test_resolved_skip_drops_subject(tmp_path):
     pol = effective_policy(paths)
     assert "skills/foo" not in pol.items
     assert "skills/foo" not in pol.held
+
+
+_RULE_TMPL = """---
+schema_version: "1.0"
+org_id: "{oid}"
+org_name: "{oid}"
+config_version: "1.0.0"
+trust:
+  mode: "unsigned"
+---
+
+sources:
+  default: {{ skills: keep, rules: keep, agents: keep, mcps: keep }}
+  custom:
+    - id: "{oid}-catalog"
+      url: "https://example.com/{oid}-catalog.git"
+      ref: "main"
+      contributes: ["rules"]
+
+items:
+  skills: {{}}
+  rules:
+    "shared-rule":
+      source: "{source}"
+      stance: {stance}{version}
+  agents: {{}}
+  mcps: {{}}
+"""
+
+SUBJECT = "rules/shared-rule"
+
+
+def _orgs(home, *specs):
+    """specs: (org_id, stance, source or None for the org's own catalog, version or None)."""
+    orgs = home / ".aec" / "orgs"
+    orgs.mkdir(parents=True, exist_ok=True)
+    for oid, stance, source, version in specs:
+        (orgs / f"{oid}.yaml").write_text(
+            _RULE_TMPL.format(
+                oid=oid,
+                stance=stance,
+                source=source or f"{oid}-catalog",
+                version=f'\n      version: "{version}"' if version else "",
+            ),
+            encoding="utf-8",
+        )
+
+
+def _decide(paths, expected_kinds, decisions):
+    """Record a decision for each conflict kind on the shared rule."""
+    from aec.lib.org_config.reconcile import open_conflicts
+    from aec.lib.org_config.resolutions import Resolution, save_resolution
+
+    by_kind = {oc.conflict.kind: oc for oc in open_conflicts(paths) if oc.conflict.subject == SUBJECT}
+    assert set(by_kind) == expected_kinds
+    for kind, decision in decisions.items():
+        save_resolution(
+            paths,
+            Resolution(
+                conflict_id=by_kind[kind].conflict.conflict_id,
+                decision=decision,
+                input_hash=by_kind[kind].input_hash,
+                decided_at="2026-05-24T00:00:00Z",
+            ),
+        )
+
+
+# A blocker plus two installers on different sources is ONE conflict: every org is a
+# participant, so the blocking org can be honored (and its block applied).
+def _blocker_and_two_installers(home):
+    _orgs(home, ("acme", "required", None, None), ("globex", "blocked", None, None),
+          ("initech", "required", None, None))
+
+
+@pytest.mark.parametrize("winner, stance", [("globex", "blocked"), ("acme", "required"), ("initech", "required")])
+def test_any_org_can_be_honored_when_a_blocker_meets_two_sources(tmp_path, winner, stance):
+    _blocker_and_two_installers(tmp_path)
+    paths = OrgPaths(home_dir=tmp_path)
+    _decide(paths, {"stance"}, {"stance": f"honor:{winner}"})
+    pol = effective_policy(paths)
+    assert pol.items[SUBJECT][0] == winner
+    assert pol.items[SUBJECT][1].stance.value == stance
+    assert SUBJECT not in pol.held
+
+
+def test_a_blocker_meeting_two_sources_is_held_until_decided(tmp_path):
+    _blocker_and_two_installers(tmp_path)
+    pol = effective_policy(OrgPaths(home_dir=tmp_path))
+    assert SUBJECT not in pol.items
+    assert SUBJECT in pol.held
+
+
+# Two orgs pin different versions of one source while a third wants another source: still
+# ONE conflict, and any of the three can be honored.
+@pytest.mark.parametrize("winner", ["acme", "globex", "initech"])
+def test_any_org_can_be_honored_when_versions_and_sources_both_differ(tmp_path, winner):
+    _orgs(tmp_path, ("acme", "required", "aec.default.rules", "1.0.0"),
+          ("globex", "pinned", "aec.default.rules", "2.0.0"),
+          ("initech", "required", None, None))
+    paths = OrgPaths(home_dir=tmp_path)
+    _decide(paths, {"source"}, {"source": f"honor:{winner}"})
+    pol = effective_policy(paths)
+    assert pol.items[SUBJECT][0] == winner
+    assert SUBJECT not in pol.held
+
+
+def test_a_skip_drops_the_item_and_leaves_nothing_held(tmp_path):
+    _orgs(tmp_path, ("acme", "required", "aec.default.rules", "1.0.0"),
+          ("initech", "required", None, None))
+    paths = OrgPaths(home_dir=tmp_path)
+    _decide(paths, {"source"}, {"source": "skip"})
+    pol = effective_policy(paths)
+    assert SUBJECT not in pol.items
+    assert SUBJECT not in pol.held
 
 
 def test_no_orgs_is_empty(tmp_path):
