@@ -286,6 +286,7 @@ class TestMigrateItemToGlobal:
                 manifest=json.loads(manifest_path.read_text()), manifest_path=manifest_path,
             )
         assert local.read_text() == "keep" and not (outside / "x.md").exists()
+        assert json.loads(manifest_path.read_text()) == manifest  # nothing recorded or removed
 
 
 class TestPromptMultiRepoGlobalOrProceed:
