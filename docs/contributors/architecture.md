@@ -79,9 +79,13 @@ python3 scripts/sync-agents-skills.py
 
 ### Skip Sync
 
+Skip the post-merge sync:
+
 ```bash
-SKIP_SYNC=1 git push
+SKIP_SYNC=1 git pull
 ```
+
+The pre-push submodule check has no sync to skip. `git push --no-verify` bypasses it, and with it the guard against pushing a parent that points at unpushed submodule commits.
 
 ## File Flow: Rules to Projects
 

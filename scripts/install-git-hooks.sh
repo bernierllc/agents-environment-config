@@ -156,8 +156,9 @@ fi
 
 echo ""
 echo -e "${BLUE}Usage:${NC}"
-echo "  • Sync will run automatically on git push and git pull/merge"
-echo "  • Skip sync: SKIP_SYNC=1 git push"
+echo "  • git pull/merge re-syncs .cursor/commands (post-merge hook)"
+echo "  • git push checks that submodule commits are pushed first (pre-push hook)"
+echo "  • Skip the post-merge sync: SKIP_SYNC=1 git pull"
 echo "  • Skip all hooks: git push --no-verify"
 echo ""
 echo -e "${BLUE}Troubleshooting:${NC}"
