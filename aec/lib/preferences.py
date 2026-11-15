@@ -83,6 +83,7 @@ KNOWN_PREFERENCE_KEYS: frozenset[str] = frozenset({
     "plans_gitignored",
     "plans_completion",
     "pr_open_mode",
+    "instructions_layout",
     "hook_mode",
     "aec_json_gitignored",
     "report_viewer",

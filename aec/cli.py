@@ -287,6 +287,57 @@ def untrack_cmd(
     from .commands.untrack import run_untrack
     run_untrack(path=path, yes=yes)
 
+# --- migrate ---
+migrate_app = typer.Typer(help="Move repos to a newer AEC layout (recorded; `aec rollback` undoes it)")
+app.add_typer(migrate_app, name="migrate")
+
+@migrate_app.command("agents-md")
+def migrate_agents_md_cmd(
+    paths: Optional[List[str]] = typer.Argument(None, help="Repo paths (default: current directory)"),
+    all_repos: bool = typer.Option(False, "--all", help="Every tracked repo"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would change"),
+    tidy_with: Optional[str] = typer.Option(
+        None, "--tidy-with", help="Afterwards, run this agent headless to remove duplication"
+    ),
+):
+    """Move AGENTINFO.md into AGENTS.md; CLAUDE.md, GEMINI.md, QWEN.md import it."""
+    from .commands.migrate_cmd import run_migrate_agents_md
+    raise typer.Exit(run_migrate_agents_md(paths or [], all_repos, yes, dry_run, tidy_with))
+
+# --- rollback ---
+rollback_app = typer.Typer(help="List, inspect and undo changes AEC recorded")
+app.add_typer(rollback_app, name="rollback")
+
+@rollback_app.callback(invoke_without_command=True)
+def rollback_root(ctx: typer.Context):
+    """List recorded changes and browse them."""
+    if ctx.invoked_subcommand is None:
+        from .commands.rollback_cmd import run_rollback
+        raise typer.Exit(run_rollback())
+
+@rollback_app.command("list")
+def rollback_list_cmd():
+    """List recorded changes, newest first."""
+    from .commands.rollback_cmd import run_rollback_list
+    raise typer.Exit(run_rollback_list())
+
+@rollback_app.command("show")
+def rollback_show_cmd(change_id: str = typer.Argument(..., help="Change id from `aec rollback list`")):
+    """Show a change's description and the files it touched."""
+    from .commands.rollback_cmd import run_rollback_show
+    raise typer.Exit(run_rollback_show(change_id))
+
+@rollback_app.command("apply")
+def rollback_apply_cmd(
+    change_id: str = typer.Argument(..., help="Change id from `aec rollback list`"),
+    force: bool = typer.Option(False, "--force", help="Overwrite files edited since the change"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+):
+    """Undo a change byte-exact. The undo is recorded too, so it can be redone."""
+    from .commands.rollback_cmd import run_rollback_apply
+    raise typer.Exit(run_rollback_apply(change_id, force=force, yes=yes))
+
 # --- config subcommands ---
 config_app = typer.Typer(help="Manage configuration preferences")
 app.add_typer(config_app, name="config")
