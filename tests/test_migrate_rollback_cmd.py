@@ -225,11 +225,11 @@ def test_setup_adds_aec_rules_next_to_a_users_own_rules_reference(tmp_path, monk
     monkeypatch.setattr("aec.lib.preferences.get_setting", lambda key: None)
     project = tmp_path / "my-app"
     project.mkdir()
-    (project / "AGENTS.md").write_text("# my-app\n\n## Rules Reference\n\n- see docs/internal.md\n")
+    (project / "AGENTS.md").write_text("# my-app\n\n## Rules Reference\n\n- see ~/.agent-tools/rules/my-team/security.md\n")
     repo_cmd._copy_agent_files(project, TEMPLATES.parent)
 
     agents = (project / "AGENTS.md").read_text()
-    assert "- see docs/internal.md" in agents and "agent-tools/rules/" in agents
+    assert "my-team/security.md" in agents and "agent-tools/rules/agents-environment-config/" in agents
     repo_cmd._copy_agent_files(project, TEMPLATES.parent)  # second run adds nothing
     assert (project / "AGENTS.md").read_text() == agents
 

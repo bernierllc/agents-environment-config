@@ -154,7 +154,7 @@ def _add_rules_reference(agents_md: Path, rules: str, dry_run: bool) -> None:
     the per-agent files only import AGENTS.md. Nothing else in it is touched."""
     raw = agents_md.read_bytes().decode("utf-8")
     # The installed-rules path, not the heading: a user may have their own "Rules Reference".
-    if "agent-tools/rules/" in raw:
+    if "agent-tools/rules/agents-environment-config/" in raw:
         Console.skip("AGENTS.md already exists (skipping)")
         return
     if dry_run:
