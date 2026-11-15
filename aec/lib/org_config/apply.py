@@ -114,23 +114,21 @@ def blocked_item_keys(policy: EffectivePolicy) -> list[tuple[str, str]]:
     return out
 
 
-def apply_items(
+def plan_items(
     policy: EffectivePolicy,
     scope: str,
     *,
-    source_dirs: dict,
     available_by_type: dict,
     manifest_path,
-    install_hooks: bool = True,
     source_commits: Optional[dict] = None,
-):
-    """Install install-intent items. Blocked removals are not here: they cannot be
-    undone, so they run after the commit point (``remove_blocked_items``).
-    ``source_commits`` maps a custom source key (``"<org_id>/<id>"``) to the commit
-    being applied."""
+) -> list:
+    """Plan the install-intent items (pure; ``execute_apply`` runs the plan).
+    Blocked removals are not planned: they run after the commit point
+    (``remove_blocked_items``). ``source_commits`` maps a custom source key
+    (``"<org_id>/<id>"``) to the commit being applied."""
     import dataclasses
 
-    from ..apply_core import execute_apply, plan_apply
+    from ..apply_core import plan_apply
     from ..manifest_v2 import load_manifest
 
     commits = source_commits or {}
@@ -138,15 +136,7 @@ def apply_items(
         dataclasses.replace(i, source_commit=commits.get(i.source_id, ""))
         for i in compile_desired_items(policy, scope)
     ]
-    manifest = load_manifest(manifest_path)
-    plan = plan_apply(desired, manifest=manifest, available_by_type=available_by_type)
-    return execute_apply(
-        plan,
-        source_dirs=source_dirs,
-        available_by_type=available_by_type,
-        manifest_path=manifest_path,
-        install_hooks=install_hooks,
-    )
+    return plan_apply(desired, manifest=load_manifest(manifest_path), available_by_type=available_by_type)
 
 
 def _failure(exc: BaseException) -> str:
@@ -397,9 +387,10 @@ def publish_sources(paths, synced: list[SyncedSource], commit_state: Callable[[]
             shutil.rmtree(prev, ignore_errors=True)  # best-effort: the next publish clears it
 
 
-def _catalog(paths, synced: list[SyncedSource]):
+def _catalog(paths, synced: list[SyncedSource], published: bool = False):
     """Source dirs and available items: AEC catalog keyed by plural, custom
-    sources keyed by ``("<org_id>/<id>", plural)``."""
+    sources keyed by ``("<org_id>/<id>", plural)``. Custom sources read from their
+    staged checkout, or from the live one once ``publish_sources`` has run."""
     from ..sources import discover_available, get_source_dirs
 
     manifest_path = Path.home() / ".agents-environment-config" / "installed-manifest.json"
@@ -410,7 +401,7 @@ def _catalog(paths, synced: list[SyncedSource]):
         if d and Path(d).exists():
             available[plural] = discover_available(d, plural)
     for s in synced:
-        clone_dirs = get_source_dirs(s.staged)
+        clone_dirs = get_source_dirs(paths.source_dir_for(s.org_id, s.source_id) if published else s.staged)
         for plural in s.contributes:
             d = clone_dirs[plural]
             key = (s.key, plural)
@@ -434,10 +425,11 @@ def apply_org_policy(
     Refuses while any org's signing key is in rotation lockout. Managed mode
     applies silently; guided mode shows the plan and asks for confirmation.
     """
+    from ..apply_core import execute_apply
     from ..console import Console
     from .propagation import run_propagation_gate
 
-    gate = run_propagation_gate(paths, now=now, pubkey_fetcher=pubkey_fetcher)
+    gate =run_propagation_gate(paths, now=now, pubkey_fetcher=pubkey_fetcher)
     if gate.locked:
         Console.error(
             "org-config apply blocked: key rotation locked for "
@@ -462,45 +454,51 @@ def apply_org_policy(
     if synced is None:
         return ApplyOutcome(0, 0, policy.held, [], skipped_reason="source_failed")
 
+    # Plan against the staged checkouts (pure: nothing is written), so an item the
+    # catalog cannot satisfy stops the apply before anything is published.
     source_dirs, available_by_type, manifest_path = _catalog(paths, synced)
-    prefs_applied = apply_preferences(policy)
-    apply_prompts(policy)
-
-    result = apply_items(
+    plan = plan_items(
         policy,
         scope,
-        source_dirs=source_dirs,
         available_by_type=available_by_type,
         manifest_path=manifest_path,
         source_commits={s.key: s.commit for s in synced},
     )
-    if result.errors:
-        for entry, err in result.errors:
-            Console.error(f"org-config apply: {entry.item.item_type} '{entry.item.name}' failed: {err}")
+    unsatisfiable = [e for e in plan if e.action == "unsatisfiable"]
+    if unsatisfiable:
+        for entry in unsatisfiable:
+            Console.error(f"org-config apply: {entry.item.item_type} '{entry.item.name}' failed: {entry.reason}")
         Console.error("org-config apply failed; source commits and pending reviews were not approved.")
-        # shortcut: items installed before the failure stay installed; revert them if this bites.
         discard_staged(s.staged for s in synced)
-        return ApplyOutcome(
-            len(result.applied), 0, policy.held, prefs_applied,
-            skipped_reason="install_failed",
-        )
+        return ApplyOutcome(0, 0, policy.held, [], skipped_reason="install_failed")
 
+    # The stamp is the commit point and nothing is installed before it: if publishing
+    # or stamping fails, the caller's restore of config, checkouts and state to the
+    # approved version is the whole undo, because nothing else has changed.
     try:
         publish_sources(paths, synced, lambda: _stamp_applied(paths, now, synced))
     except (OSError, OrgConfigError) as exc:
-        # shortcut: items installed above stay installed though their sources were never approved; the next apply reinstalls them from the approved commit.
         Console.error(f"org-config apply: could not publish custom sources: {exc}")
         Console.error("org-config apply failed; source commits and pending reviews were not approved.")
-        return ApplyOutcome(len(result.applied), 0, policy.held, prefs_applied, skipped_reason="install_failed")
+        return ApplyOutcome(0, 0, policy.held, [], skipped_reason="install_failed")
 
-    # The stamp is the commit point, so blocked uninstalls and plugin-manager commands
-    # run only now. A failure here is reported and recorded per item; the next apply
-    # recomputes and retries them.
-    removed, errors = remove_blocked_items(policy, scope, manifest_path=manifest_path)
+    # From here every failure is reported and recorded per item; the next apply
+    # recomputes the plan and retries what is still missing.
+    source_dirs, available_by_type, manifest_path = _catalog(paths, synced, published=True)
+    prefs_applied = apply_preferences(policy)
+    apply_prompts(policy)
+    result = execute_apply(
+        plan,
+        source_dirs=source_dirs,
+        available_by_type=available_by_type,
+        manifest_path=manifest_path,
+    )
+    errors = [(f"{e.item.item_type}s/{e.item.name}", msg) for e, msg in result.errors]
+    removed, remove_errors = remove_blocked_items(policy, scope, manifest_path=manifest_path)
     plugins_in, plugins_out, plugin_errors = apply_plugins(
         policy, scope, source_dirs=source_dirs, manifest_path=manifest_path
     )
-    errors += plugin_errors
+    errors += remove_errors + plugin_errors
     removed += [("plugin", n) for n in plugins_out]
     applied = len(result.applied) + len(plugins_in)
     Console.success(

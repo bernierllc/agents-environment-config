@@ -382,9 +382,11 @@ def test_symlinked_item_is_refused_and_review_kept(repos, home, paths, tmp_path)
     assert "not for installing" not in installed[0].read_text()
 
 
-def test_install_error_does_not_approve_or_publish(repos, home, paths):
-    a = _enroll_ref_only_and_apply(repos, paths)
-    _push_rule(repos, "1.1.0")
+def test_install_error_after_the_stamp_is_recorded_and_retried(repos, home, paths):
+    """An item that fails to install runs after the stamp: B is approved and published,
+    the failure exits non-zero and is recorded as apply_failed, and the retry installs it."""
+    _enroll_ref_only_and_apply(repos, paths)
+    b = _push_rule(repos, "1.1.0")
     assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
 
     installed = next((home / ".agent-tools" / "rules").rglob("example-rule*"))
@@ -398,9 +400,14 @@ def test_install_error_does_not_approve_or_publish(repos, home, paths):
             p.chmod(0o700 if p.is_dir() else 0o600)
     assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
     st = read_state(paths, "example-org")
-    assert st.source_commits == {"team-rules": a} and st.pending["kind"] == "review"
-    assert _live_head(paths) == a
+    assert st.source_commits == {"team-rules": b} and st.pending["kind"] == "apply_failed"
+    assert _live_head(paths) == b
     assert not (paths.org_dir_for("example-org") / "sources.next" / "team-rules").exists()
+
+    retry = runner.invoke(app, ["org", "apply", "--yes"])
+    assert retry.exit_code == 0, retry.output
+    assert read_state(paths, "example-org").pending is None
+    assert "1.1.0" in installed.read_text()
 
 
 def test_plan_reinstalls_when_source_or_commit_changes():
@@ -450,14 +457,24 @@ def test_remote_commit_peels_a_fully_qualified_annotated_tag(repos):
 # --------------------------------------------------------------------------- #
 
 
-def test_failed_state_write_does_not_publish_and_a_retry_recovers(repos, home, paths, monkeypatch):
-    """Publication is all-or-nothing for sources and state. Items installed just before it
-    failed stay installed (no item rollback); the retry reinstalls them from the approved commit."""
+def _installed_snapshot(home):
+    """Bytes of every installed item file plus the install manifest."""
+    roots = [home / ".agent-tools", home / ".agents-environment-config" / "installed-manifest.json"]
+    files = [f for r in roots for f in ([r] if r.is_file() else r.rglob("*")) if f.is_file()]
+    return {str(f.relative_to(home)): f.read_bytes() for f in files}
+
+
+def test_failed_state_write_installs_nothing_and_a_retry_recovers(repos, home, paths, monkeypatch):
+    """Nothing is installed until publish and stamp succeed, so a failed stamp on a pending
+    review of B leaves A's installed files and manifest byte-identical, decline has nothing to
+    reconcile, and a retry installs B."""
     import aec.lib.org_config.apply as org_apply
 
     a = _enroll_ref_only_and_apply(repos, paths)
     b = _push_rule(repos, "1.1.0")
     assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+    before = _installed_snapshot(home)
+    assert before
 
     def boom(*_args, **_kwargs):
         raise OSError("disk full")
@@ -473,11 +490,34 @@ def test_failed_state_write_does_not_publish_and_a_retry_recovers(repos, home, p
     org_dir = paths.org_dir_for("example-org")
     assert not (org_dir / "sources.next" / "team-rules").exists()
     assert not (org_dir / "sources.prev" / "team-rules").exists()
+    assert _installed_snapshot(home) == before
 
     retry = runner.invoke(app, ["org", "apply", "--yes"])
     assert retry.exit_code == 0, retry.output
     assert read_state(paths, "example-org").source_commits == {"team-rules": b}
     assert _live_head(paths) == b
+
+
+def test_decline_after_a_failed_stamp_leaves_installed_state_untouched(repos, home, paths, monkeypatch):
+    import aec.lib.org_config.apply as org_apply
+
+    _enroll_ref_only_and_apply(repos, paths)
+    _push_rule(repos, "1.1.0")
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+    before = _installed_snapshot(home)
+
+    def boom(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    with monkeypatch.context() as m:
+        m.setattr(org_apply, "_stamp_applied", boom)
+        assert runner.invoke(app, ["org", "apply", "--yes"]).exit_code == org_cmd.EXIT_VALIDATION
+
+    pending_commit = read_state(paths, "example-org").pending["commit"]
+    declined = runner.invoke(app, ["org", "apply", "--decline", pending_commit[:12]])
+    assert declined.exit_code == 0, declined.output
+    assert read_state(paths, "example-org").pending is None
+    assert _installed_snapshot(home) == before
 
 
 def test_failed_blocked_uninstall_runs_after_commit_and_retries(repos, home, paths, monkeypatch):
