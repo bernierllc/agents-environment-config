@@ -15,7 +15,7 @@ from ..lib.prompt_catalog.maintenance_area import (
 )
 from ..lib.prompts import prompt
 from ..lib.config import require_repo_root
-from ..lib.filesystem import installed_dst_path, remove_installed_item, resolve_installed_path
+from ..lib.filesystem import installed_dst_path, place_installed_item, remove_installed_item, resolve_installed_path
 from ..lib.installed_store import record_item_install as record_item_install_pertype
 from ..lib.manifest_v2 import (
     load_manifest,
@@ -643,12 +643,7 @@ def _upgrade_scope(
                     continue
 
             remove_installed_item(existing_path)
-
-            target.mkdir(parents=True, exist_ok=True)
-            if src_path.is_dir():
-                shutil.copytree(src_path, dst_path, ignore=shutil.ignore_patterns(".*"))
-            else:
-                shutil.copy2(src_path, dst_path)
+            place_installed_item(src_path, dst_path, target, name)
 
             _refresh_upgrade_hooks(scope, item_type, name, avail_v, dst_path, yes)
 

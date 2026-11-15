@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .console import Console
-from .filesystem import installed_dst_path, remove_installed_item, resolve_installed_path
+from .filesystem import installed_dst_path, place_installed_item, remove_installed_item, resolve_installed_path
 from .installed_store import record_item_install
 from .manifest_v2 import get_installed, record_install, remove_install, save_manifest
 from .preferences import load_preferences, save_preferences
@@ -138,11 +137,7 @@ def migrate_item_to_global(
     gdst = installed_dst_path(gdir, name, src)
     existing_gdst = resolve_installed_path(gdir, name)
     remove_installed_item(existing_gdst)
-    gdir.mkdir(parents=True, exist_ok=True)
-    if src.is_dir():
-        shutil.copytree(src, gdst, ignore=shutil.ignore_patterns(".*"))
-    else:
-        shutil.copy2(src, gdst)
+    place_installed_item(src, gdst, gdir, name)
 
     content_hash = hash_skill_directory(gdst) if gdst.is_dir() else ""
     record_install(

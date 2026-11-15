@@ -378,3 +378,25 @@ def remove_installed_item(path: Path) -> None:
         shutil.rmtree(path)
     elif path.exists() or path.is_symlink():
         path.unlink()
+
+
+def place_installed_item(src: Path, dst: Path, target_dir: Path, name: str) -> None:
+    """Replace the installed copy at ``dst`` with ``src``: the one write chokepoint.
+
+    Install, upgrade, org apply and global migration all write through here, so a
+    hostile name or a symlinked parent can never send the delete + copy outside
+    ``target_dir``, and a grouped name (``group/name``) gets its group folder.
+    """
+    from .confine import escapes
+
+    problems = escapes(target_dir, [dst])
+    if dst.is_symlink():  # a link AT dst is replaced below, never followed
+        problems = [p for p in problems if p != f"{os.path.abspath(dst)} is a symlink"]
+    if problems:
+        raise ValueError(f"refusing to install '{name}': {problems[0]}")
+    remove_installed_item(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if src.is_dir():
+        shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".*"))
+    else:
+        shutil.copy2(src, dst)
