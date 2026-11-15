@@ -480,7 +480,6 @@ def apply_org_policy(
         Console.error("org-config apply failed; source commits and pending reviews were not approved.")
         # shortcut: items installed before the failure stay installed; revert them if this bites.
         discard_staged(s.staged for s in synced)
-        result.undo.drop()
         return ApplyOutcome(
             len(result.applied), 0, policy.held, prefs_applied,
             skipped_reason="install_failed",
@@ -488,20 +487,15 @@ def apply_org_policy(
 
     try:
         publish_sources(paths, synced, lambda: _stamp_applied(paths, now, synced))
-    except Exception as exc:
-        # The items were installed from sources that never became approved: put
-        # the installed files and manifest back with the sources and state.
-        result.undo.restore()
-        if not isinstance(exc, (OSError, OrgConfigError)):
-            raise
+    except (OSError, OrgConfigError) as exc:
+        # shortcut: items installed above stay installed though their sources were never approved; the next apply reinstalls them from the approved commit.
         Console.error(f"org-config apply: could not publish custom sources: {exc}")
         Console.error("org-config apply failed; source commits and pending reviews were not approved.")
-        return ApplyOutcome(0, 0, policy.held, prefs_applied, skipped_reason="install_failed")
-    result.undo.drop()
+        return ApplyOutcome(len(result.applied), 0, policy.held, prefs_applied, skipped_reason="install_failed")
 
-    # The stamp is the commit point, so the effects the undo cannot reverse (blocked
-    # uninstalls, plugin-manager commands) run only now. A failure here is reported and
-    # recorded per item, never rolled back; the next apply recomputes and retries them.
+    # The stamp is the commit point, so blocked uninstalls and plugin-manager commands
+    # run only now. A failure here is reported and recorded per item; the next apply
+    # recomputes and retries them.
     removed, errors = remove_blocked_items(policy, scope, manifest_path=manifest_path)
     plugins_in, plugins_out, plugin_errors = apply_plugins(
         policy, scope, source_dirs=source_dirs, manifest_path=manifest_path

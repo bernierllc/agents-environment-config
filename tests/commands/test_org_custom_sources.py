@@ -450,35 +450,34 @@ def test_remote_commit_peels_a_fully_qualified_annotated_tag(repos):
 # --------------------------------------------------------------------------- #
 
 
-def test_failed_state_write_rolls_back_publication(repos, home, paths, monkeypatch):
+def test_failed_state_write_does_not_publish_and_a_retry_recovers(repos, home, paths, monkeypatch):
+    """Publication is all-or-nothing for sources and state. Items installed just before it
+    failed stay installed (no item rollback); the retry reinstalls them from the approved commit."""
     import aec.lib.org_config.apply as org_apply
 
     a = _enroll_ref_only_and_apply(repos, paths)
-    _push_rule(repos, "1.1.0")
+    b = _push_rule(repos, "1.1.0")
     assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
 
     def boom(*_args, **_kwargs):
         raise OSError("disk full")
 
-    installed = next((home / ".agent-tools" / "rules").rglob("example-rule*"))
-    manifest = home / ".agents-environment-config" / "installed-manifest.json"
-    store_files = sorted((home / ".agents-environment-config").rglob("*.json"))
-    before = {p: p.read_bytes() for p in [installed, *store_files]}
-
-    monkeypatch.setattr(org_apply, "_stamp_applied", boom)
-    result = runner.invoke(app, ["org", "apply", "--yes"])
+    with monkeypatch.context() as m:
+        m.setattr(org_apply, "_stamp_applied", boom)
+        result = runner.invoke(app, ["org", "apply", "--yes"])
     assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
     assert "disk full" in result.output
-    # The 1.1.0 content was installed before publication failed: it must be gone again.
-    assert manifest in before
-    assert {p: p.read_bytes() for p in before} == before
-    assert sorted((home / ".agents-environment-config").rglob("*.json")) == store_files
     st = read_state(paths, "example-org")
     assert st.source_commits == {"team-rules": a} and st.pending["kind"] == "review"
     assert _live_head(paths) == a
     org_dir = paths.org_dir_for("example-org")
     assert not (org_dir / "sources.next" / "team-rules").exists()
     assert not (org_dir / "sources.prev" / "team-rules").exists()
+
+    retry = runner.invoke(app, ["org", "apply", "--yes"])
+    assert retry.exit_code == 0, retry.output
+    assert read_state(paths, "example-org").source_commits == {"team-rules": b}
+    assert _live_head(paths) == b
 
 
 def test_failed_blocked_uninstall_runs_after_commit_and_retries(repos, home, paths, monkeypatch):
