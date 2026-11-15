@@ -49,6 +49,10 @@ unit of impact lives — not a contract.
   opt-in AGENTINFO.md → AGENTS.md migration recorded as reversible changesets.
   In progress on `feat/agents-md-migration`.
 
+- [Custom-source validation hardening](2026-11-15-custom-source-validation-hardening.md): two
+  P2s from PR #132; a non-UTF-8 source file crashes apply instead of failing the source, and a
+  numeric YAML `version` passes validation then never matches. Scheduling pending.
+
 ## Tier 1 — Now (active this cycle)
 
 Work that is in flight or unblocked and at the front of the queue.
