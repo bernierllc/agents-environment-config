@@ -76,6 +76,9 @@ def get_supported_agents() -> dict:
         if agent["has_resume"]:
             config["resume_args"] = agent.get("resume_args", "")
 
+        if "headless_args" in agent:
+            config["headless_args"] = list(agent["headless_args"])
+
         result[name] = config
 
     return result

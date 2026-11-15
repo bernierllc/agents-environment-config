@@ -13,7 +13,8 @@
       "has_resume": true,
       "resume_args": "--dangerously-skip-permissions --resume",
       "use_agent_rules": true,
-      "supports_hooks": true
+      "supports_hooks": true,
+      "headless_args": ["-p", "{prompt}", "--permission-mode", "acceptEdits"]
     },
     "cursor": {
       "display_name": "Cursor",
@@ -38,7 +39,8 @@
       "has_resume": true,
       "resume_args": "--yolo --resume",
       "use_agent_rules": true,
-      "supports_hooks": true
+      "supports_hooks": true,
+      "headless_args": ["-p", "{prompt}", "--yolo"]
     },
     "qwen": {
       "display_name": "Qwen Code",
@@ -51,7 +53,8 @@
       "has_resume": true,
       "resume_args": "--yolo --continue",
       "use_agent_rules": true,
-      "supports_hooks": false
+      "supports_hooks": false,
+      "headless_args": ["-p", "{prompt}", "--yolo"]
     },
     "codex": {
       "display_name": "Codex",
@@ -64,7 +67,8 @@
       "has_resume": true,
       "resume_args": "resume --last",
       "use_agent_rules": true,
-      "supports_hooks": false
+      "supports_hooks": false,
+      "headless_args": ["exec", "--sandbox", "workspace-write", "{prompt}"]
     }
   }
 }

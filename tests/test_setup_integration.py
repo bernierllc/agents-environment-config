@@ -251,11 +251,11 @@ class TestRegisterPorts:
 
 
 class TestInjectPortRegistryAgentinfo:
-    """Test _inject_port_registry_agentinfo in repo.py."""
+    """Test _inject_port_registry in repo.py."""
 
     def test_appends_to_agentinfo(self, temp_dir, monkeypatch):
         """Appends Port Registry section to AGENTINFO.md."""
-        from aec.commands.repo import _inject_port_registry_agentinfo
+        from aec.commands.repo import _inject_port_registry
 
         project_dir = temp_dir / "agentinfo-project"
         project_dir.mkdir()
@@ -268,7 +268,7 @@ class TestInjectPortRegistryAgentinfo:
             lambda key: True if key == "port_registry_enabled" else None,
         )
 
-        _inject_port_registry_agentinfo(project_dir)
+        _inject_port_registry(project_dir)
 
         content = agentinfo.read_text()
         assert "## Port Registry" in content
@@ -276,7 +276,7 @@ class TestInjectPortRegistryAgentinfo:
 
     def test_skips_if_section_already_exists(self, temp_dir, monkeypatch):
         """Does not duplicate AEC's marked Port Registry block."""
-        from aec.commands.repo import _PORT_END, _PORT_START, _inject_port_registry_agentinfo
+        from aec.commands.repo import _PORT_END, _PORT_START, _inject_port_registry
 
         project_dir = temp_dir / "existing-section"
         project_dir.mkdir()
@@ -290,14 +290,14 @@ class TestInjectPortRegistryAgentinfo:
             lambda key: True if key == "port_registry_enabled" else None,
         )
 
-        _inject_port_registry_agentinfo(project_dir)
+        _inject_port_registry(project_dir)
 
         content = agentinfo.read_text()
         assert content == original  # Unchanged
 
     def test_skips_when_no_agentinfo(self, temp_dir, monkeypatch):
         """Does nothing when AGENTINFO.md doesn't exist."""
-        from aec.commands.repo import _inject_port_registry_agentinfo
+        from aec.commands.repo import _inject_port_registry
 
         project_dir = temp_dir / "no-agentinfo"
         project_dir.mkdir()
@@ -307,7 +307,7 @@ class TestInjectPortRegistryAgentinfo:
             lambda key: True if key == "port_registry_enabled" else None,
         )
 
-        _inject_port_registry_agentinfo(project_dir)
+        _inject_port_registry(project_dir)
         # No AGENTINFO.md created
         assert not (project_dir / "AGENTINFO.md").exists()
 
