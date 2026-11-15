@@ -72,11 +72,63 @@ def test_no_version_conflict_when_pins_match():
     assert [c for c in detect_conflicts([a, b]) if c.kind == "version"] == []
 
 
-def test_different_sources_are_not_the_same_item():
+def test_stance_conflict_on_the_same_default_source():
     a = _cfg("acme", items=_skill("foo", "required", source="aec.default.skills"))
     b = _cfg("globex", items=_skill("foo", "blocked", source="aec.default.skills"))
-    # same source -> conflict
     assert any(c.kind == "stance" for c in detect_conflicts([a, b]))
+
+
+def _rule(name, stance, source, version=None):
+    return {"rules": {name: ItemPolicy(source=source, stance=Stance(stance), version=version)}}
+
+
+def test_same_name_from_different_custom_sources_is_a_source_conflict():
+    a = _cfg("acme", items=_rule("foo", "required", "acme-catalog"))
+    b = _cfg("globex", items=_rule("foo", "required", "globex-catalog"))
+    (conflict,) = detect_conflicts([a, b])
+    assert (conflict.kind, conflict.subject) == ("source", "rules/foo")
+    assert {p.org_id: p.value for p in conflict.participants} == {
+        "acme": "acme/acme-catalog",
+        "globex": "globex/globex-catalog",
+    }
+
+
+def test_custom_source_ids_are_scoped_to_their_org():
+    # Both orgs call their source "team-rules"; they are still two different sources.
+    a = _cfg("acme", items=_rule("foo", "required", "team-rules"))
+    b = _cfg("globex", items=_rule("foo", "recommended", "team-rules"))
+    (conflict,) = detect_conflicts([a, b])
+    assert conflict.kind == "source"
+
+
+def test_default_source_versus_custom_source_is_a_source_conflict():
+    a = _cfg("acme", items=_rule("foo", "required", "aec.default.rules"))
+    b = _cfg("globex", items=_rule("foo", "required", "globex-catalog"))
+    assert [c.kind for c in detect_conflicts([a, b])] == ["source"]
+
+
+def test_same_default_source_is_not_a_source_conflict():
+    a = _cfg("acme", items=_rule("foo", "required", "aec.default.rules"))
+    b = _cfg("globex", items=_rule("foo", "required", "aec.default.rules"))
+    assert detect_conflicts([a, b]) == []
+
+
+def test_a_block_conflicts_with_a_requirement_from_any_source():
+    a = _cfg("acme", items=_rule("foo", "blocked", "aec.default.rules"))
+    b = _cfg("globex", items=_rule("foo", "required", "globex-catalog"))
+    assert [c.kind for c in detect_conflicts([a, b])] == ["stance"]
+
+
+def test_a_silent_org_does_not_make_a_source_conflict():
+    a = _cfg("acme", items=_rule("foo", "silent", "acme-catalog"))
+    b = _cfg("globex", items=_rule("foo", "required", "globex-catalog"))
+    assert detect_conflicts([a, b]) == []
+
+
+def test_versions_of_different_sources_are_not_compared():
+    a = _cfg("acme", items=_rule("foo", "required", "acme-catalog", version="1.0.0"))
+    b = _cfg("globex", items=_rule("foo", "required", "globex-catalog", version="2.0.0"))
+    assert [c.kind for c in detect_conflicts([a, b])] == ["source"]
 
 
 def test_source_replacement_conflict():

@@ -19,7 +19,7 @@ from typing import Callable, Optional
 
 from .effective import EffectivePolicy, effective_policy
 from .errors import OrgApplyCommittedError, OrgConfigError
-from .schema import RESERVED_SOURCE_IDS
+from .schema import RESERVED_SOURCE_IDS, source_identity
 
 _CI_PREFIX = "configurable_instructions."
 
@@ -98,7 +98,7 @@ def compile_desired_items(policy: EffectivePolicy, scope: str) -> list:
                 name=name,
                 scope=scope,
                 version_spec=p.version or "latest",
-                source_id="" if p.source in RESERVED_SOURCE_IDS else f"{org_id}/{p.source}",
+                source_id="" if p.source in RESERVED_SOURCE_IDS else source_identity(org_id, p.source),
             )
         )
     return desired

@@ -7,7 +7,9 @@ P2); it surfaces a :class:`Conflict` for the user to resolve.
 Detected kinds (design spec "Conflict types detected"):
 
   * ``stance``             — one org wants an item installed, another blocks it
-  * ``version``            — install-intent orgs declare differing version pins
+  * ``source``             — install-intent orgs want the same item name from
+                             different sources (a name has one install target)
+  * ``version``            — install-intent orgs pin differing versions of one source
   * ``source_replacement`` — orgs disagree on a default source's stance
   * ``preference``         — orgs set the same install preference to different values
   * ``install_mode``       — orgs disagree on managed vs guided
@@ -22,7 +24,7 @@ import hashlib
 from dataclasses import dataclass
 from typing import Iterable
 
-from .schema import ITEM_TYPES, OrgConfig
+from .schema import ITEM_TYPES, OrgConfig, source_identity
 
 _INSTALL_INTENTS = {"required", "recommended", "pinned"}
 _BLOCK_INTENTS = {"blocked"}
@@ -71,16 +73,16 @@ def detect_conflicts(configs: list[OrgConfig]) -> list[Conflict]:
 
 
 def _item_conflicts(configs: list[OrgConfig]) -> list[Conflict]:
-    # Group every declared item policy by (type, name, source) across all orgs.
-    groups: dict[tuple[str, str, str], dict[str, object]] = {}
+    # An item name has one install target, so orgs meet on (type, name) whatever
+    # source each one names.
+    groups: dict[tuple[str, str], dict[str, object]] = {}
     for cfg in configs:
         for item_type in ITEM_TYPES:
             for name, policy in cfg.items.get(item_type, {}).items():
-                key = (item_type, name, policy.source)
-                groups.setdefault(key, {})[cfg.org_id] = policy
+                groups.setdefault((item_type, name), {})[cfg.org_id] = policy
 
     out: list[Conflict] = []
-    for (item_type, name, _source), by_org in groups.items():
+    for (item_type, name), by_org in groups.items():
         if len(by_org) < 2:
             continue
         subject = f"{item_type}/{name}"
@@ -90,6 +92,15 @@ def _item_conflicts(configs: list[OrgConfig]) -> list[Conflict]:
         has_block = any(s in _BLOCK_INTENTS for s in stances.values())
         if has_install and has_block:
             out.append(_make("stance", subject, stances))
+
+        installers = {
+            oid: source_identity(oid, p.source)
+            for oid, p in by_org.items()
+            if p.stance.value in _INSTALL_INTENTS
+        }
+        if len(set(installers.values())) > 1:
+            out.append(_make("source", subject, installers))
+            continue  # versions of different sources are not comparable
 
         versions = {
             oid: p.version

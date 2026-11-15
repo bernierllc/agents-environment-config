@@ -199,7 +199,7 @@ For `dns_anchor` orgs, AEC re-checks the published key when its cache is older t
 
 ## Multi-org & conflicts
 
-Users may enroll more than one org at once. AEC never silently picks a winner: when orgs disagree on the same item stance, version, default-source stance, preference, or install mode, the conflict is surfaced in `aec doctor` / `aec org status` and resolved with `aec org resolve`. Unaffected items still apply (only the conflicting subjects wait for a decision). Resolutions are remembered and automatically re-opened if any contributing config changes.
+Users may enroll more than one org at once. AEC never silently picks a winner: when orgs disagree on the same item stance, version, default-source stance, preference, or install mode, or when they require the same item name from different sources (an item name has one install target, and a custom source id belongs to the org that declares it), the conflict is surfaced in `aec doctor` / `aec org status` and resolved with `aec org resolve`. Unaffected items still apply (only the conflicting subjects wait for a decision). Resolutions are remembered and automatically re-opened if any contributing config changes.
 
 ## Key rotation
 
