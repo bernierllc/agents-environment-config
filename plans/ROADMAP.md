@@ -24,6 +24,10 @@ unit of impact lives — not a contract.
   workflow pushes to `main` directly, which blocks PR-required rules and a `staging` branch.
   Scheduling pending.
 
+- [Recover an interrupted custom-source publication](2026-11-14-org-source-publish-crash-recovery.md):
+  P2 from PR #132; a kill between the source rename and the state write loses the known-good
+  checkout. S1 makes publication crash-safe. Scheduling pending.
+
 - [Deterministic directory prefix rendering](2026-11-10-directory-prefix-rendering.md):
   P2 from PR #131; S1 replaces cascading rewrites with original-path matching
   and validates overlapping defaults. Scheduling pending.
