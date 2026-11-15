@@ -49,10 +49,9 @@ git submodule update --init --recursive --remote
 
 | File | Purpose | Edit in project? |
 |------|---------|------------------|
-| `AGENTINFO.md` | Project-specific info | **YES** — fill this in |
-| `CLAUDE.md` | Rule references for Claude | No — regenerated |
-| `AGENTS.md` | Rule references for Codex | No — regenerated |
-| `GEMINI.md` | Rule references for Gemini | No — regenerated |
-| `QWEN.md` | Rule references for Qwen | No — regenerated |
+| `AGENTS.md` | Project-specific info plus rule references, read by every agent | **YES** — fill this in |
+| `CLAUDE.md`, `GEMINI.md`, `QWEN.md` | `@AGENTS.md` import, plus agent-specific notes | Only for agent-specific notes |
 | `.cursor/rules/*.mdc` | Development standards (Cursor) | No — shared across projects |
 | `.agent-rules/*.md` | Development standards (other agents) | No — generated from `.cursor/rules/` |
+
+Projects set up before AEC moved to `AGENTS.md` use the older layout: `AGENTINFO.md` holds the project info and `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` and `QWEN.md` point to it. AEC keeps that layout until you run `aec migrate agents-md`, which `aec rollback` can undo. Claude Code reads `AGENTS.md` through the `@AGENTS.md` import ([docs](https://code.claude.com/docs/en/memory#agents-md)).
