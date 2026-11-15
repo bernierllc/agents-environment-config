@@ -59,8 +59,8 @@ def _target_repos(paths: List[str], all_repos: bool) -> List[Path]:
     if all_repos:
         from ..lib.scope import get_all_tracked_repos, git_dirs
 
-        # Main checkouts only (a --separate-git-dir one included); linked worktrees share them.
-        return [p for p in get_all_tracked_repos() if git_dirs(p) != (None, False) and not git_dirs(p)[1]]
+        # Linked worktrees share their main checkout's files; every other tracked project counts.
+        return [p for p in get_all_tracked_repos() if not git_dirs(p)[1]]
     return [Path(p).expanduser().resolve() for p in (paths or ["."])]
 
 

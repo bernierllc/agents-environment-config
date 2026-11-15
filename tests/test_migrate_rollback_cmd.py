@@ -219,6 +219,21 @@ def test_setup_adds_rules_reference_to_existing_agents_md(tmp_path, monkeypatch)
     assert (project / "AGENTS.md").read_bytes() == agents
 
 
+def test_setup_adds_aec_rules_next_to_a_users_own_rules_reference(tmp_path, monkeypatch):
+    from aec.commands import repo as repo_cmd
+
+    monkeypatch.setattr("aec.lib.preferences.get_setting", lambda key: None)
+    project = tmp_path / "my-app"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("# my-app\n\n## Rules Reference\n\n- see docs/internal.md\n")
+    repo_cmd._copy_agent_files(project, TEMPLATES.parent)
+
+    agents = (project / "AGENTS.md").read_text()
+    assert "- see docs/internal.md" in agents and "agent-tools/rules/" in agents
+    repo_cmd._copy_agent_files(project, TEMPLATES.parent)  # second run adds nothing
+    assert (project / "AGENTS.md").read_text() == agents
+
+
 
 
 def test_tidy_timeout_still_reports_unrecorded_edits(store, legacy_repo, monkeypatch, tmp_path, capsys):
@@ -367,7 +382,7 @@ def test_every_writer_refuses_paths_that_leave_the_repo(store, legacy_repo, tmp_
         assert changesets.list_changesets() == recorded
 
 
-def test_all_keeps_separate_git_dir_checkouts_and_skips_linked_worktrees(tmp_path, monkeypatch):
+def test_all_keeps_non_git_and_separate_git_dir_projects_and_skips_linked_worktrees(tmp_path, monkeypatch):
     main, sep, plain = tmp_path / "main", tmp_path / "sep", tmp_path / "plain"
     plain.mkdir()
     run = lambda *a: subprocess.run(["git", *a], check=True, capture_output=True)  # noqa: E731
@@ -377,4 +392,4 @@ def test_all_keeps_separate_git_dir_checkouts_and_skips_linked_worktrees(tmp_pat
     run("-C", str(main), "worktree", "add", "-q", str(tmp_path / "wt"))
     tracked = [main, sep, tmp_path / "wt", plain]
     monkeypatch.setattr("aec.lib.scope.get_all_tracked_repos", lambda: tracked)
-    assert migrate_cmd._target_repos([], all_repos=True) == [main, sep]
+    assert migrate_cmd._target_repos([], all_repos=True) == [main, sep, plain]
