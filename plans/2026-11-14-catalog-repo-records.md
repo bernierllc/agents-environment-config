@@ -5,10 +5,13 @@ Status: planned; scheduling pending.
 ## Root cause and affected surfaces
 
 A catalog can already hold per-repo data (branch roles, review-setting expectations) because
-`aec org apply` clones the whole catalog repo (`docs/orgs/catalog-repo-records.md`). AEC does
-not know the data exists. Consequences today: each skill must locate the clone path itself,
-nothing validates the record schema, `aec org status` cannot report a stale record, and the
-live check is a script the catalog author wrote and each skill has to know to run.
+enrollment (`aec org enroll`) clones the whole catalog repo and `aec update` refreshes that
+clone; `aec org apply` only promotes the staged config (`docs/orgs/catalog-repo-records.md`).
+AEC does not know the data exists. Consequences today: each skill must locate the clone path
+itself, and must know to read at the approved commit (`resolved_commit`) because the refresh
+moves the working tree ahead of approval for unsigned and guided orgs; nothing validates the
+record schema, `aec org status` cannot report a stale record, and the live check is a script
+the catalog author wrote and each skill has to know to run.
 
 Surfaces: `aec/lib/org_config` (schema, fetch, state), `aec org apply|status|doctor`,
 `docs/orgs/authoring-org-configs.md`, and every skill that reads branch roles.
@@ -18,19 +21,21 @@ Surfaces: `aec/lib/org_config` (schema, fetch, state), `aec org apply|status|doc
 1. Add an optional top-level `records:` block to the org config schema: a record type
    (`repos`), a directory in the catalog, a JSON Schema for each record, and an optional
    `check` command path inside the catalog.
-2. Validate records at `aec org apply` and report failures the way item conflicts are reported.
+2. Validate records at `aec org apply`, against the commit being approved, and report failures
+   the way item conflicts are reported.
 3. Tests with a local bare git repo catalog and example-org records.
 
 ## S2 — Read access for skills
 
-1. `aec org record <type> <name>` prints the record as JSON for the enrolled org that owns it.
-   Skills call it instead of building the clone path.
+1. `aec org record <type> <name>` prints the record as JSON for the enrolled org that owns it,
+   read from `resolved_commit` (`git show`), never from the refreshed working tree. Skills
+   call it instead of building the clone path.
 2. Conflicting records across enrolled orgs are surfaced, not silently picked.
 
 ## S3 — Run the catalog's check
 
-1. `aec org check [<type>] [--name <name>]` runs the declared `check` and exits non-zero on
-   error. Output is the check's own.
+1. `aec org check [<type>] [--name <name>]` runs the declared `check` from a checkout of
+   `resolved_commit` and exits non-zero on error. Output is the check's own.
 2. Decide whether `aec doctor` includes it. Do not add a scheduler: lazy checking at
    operation time is enough, and an optional cron/launchd recipe belongs in the docs.
 
