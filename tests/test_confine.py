@@ -96,3 +96,30 @@ def test_install_still_replaces_a_symlink_at_the_destination(tmp_path):
     _install(target, "foo", src, target / "foo.md", tmp_path)
     assert not (target / "foo.md").is_symlink() and (target / "foo.md").read_text() == "new"
     assert elsewhere.read_text() == "not ours"
+
+
+def test_install_creates_the_group_dir_of_a_grouped_rule_on_a_clean_target(tmp_path):
+    from aec.lib.filesystem import installed_dst_path
+
+    target, src = tmp_path / "rules", tmp_path / "src.md"
+    src.write_text("new")
+    dst = installed_dst_path(target, "nevar/pr-merge-protocol", src)
+    _install(target, "nevar/pr-merge-protocol", src, dst, tmp_path)
+    assert dst == target / "nevar" / "pr-merge-protocol.md" and dst.read_text() == "new"
+
+
+def test_a_refused_replacement_deletes_nothing(tmp_path):
+    # upgrade passes the old copy as `replaces`; a refusal must leave it in place
+    from aec.lib.filesystem import place_installed_item
+
+    target, outside = tmp_path / "rules", tmp_path / "outside"
+    (target / "nevar").mkdir(parents=True)
+    outside.mkdir()
+    old = target / "nevar" / "x.md"
+    old.write_text("old")
+    (target / "general").symlink_to(outside, target_is_directory=True)
+    src = tmp_path / "src.md"
+    src.write_text("new")
+    with pytest.raises(ValueError, match="symlink"):
+        place_installed_item(src, target / "general" / "x.md", target, "general/x", replaces=old)
+    assert old.read_text() == "old"

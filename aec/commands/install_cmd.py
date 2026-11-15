@@ -1,7 +1,6 @@
 """aec install <type> <name> -- install a skill, rule, or agent."""
 
 import json
-import os
 import shutil
 from pathlib import Path
 
@@ -10,8 +9,7 @@ from typing import Optional
 
 from ..lib import Console
 from ..lib.config import require_repo_root
-from ..lib.confine import escapes
-from ..lib.filesystem import installed_dst_path, remove_installed_item
+from ..lib.filesystem import installed_dst_path, place_installed_item
 from ..lib.hooks.legacy_pipeline import wire_git_hooks as _wire_git_hooks
 from ..lib.manifest_v2 import (
     load_manifest, save_manifest, record_install, record_mcp_install, record_plugin_install,
@@ -333,20 +331,7 @@ def _install_single_item(
     Non-interactive: callers are responsible for any overwrite prompts before
     calling this function.
     """
-    # The one write chokepoint (install, upgrade, org apply, dependencies): a name
-    # or a symlinked parent must never send the delete + copy outside target_dir.
-    problems = escapes(target_dir, [dst])
-    if dst.is_symlink():  # a link AT dst is replaced below, never followed
-        problems = [p for p in problems if p != f"{os.path.abspath(dst)} is a symlink"]
-    if problems:
-        raise ValueError(f"refusing to install '{name}': {problems[0]}")
-    remove_installed_item(dst)
-
-    target_dir.mkdir(parents=True, exist_ok=True)
-    if src.is_dir():
-        shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".*"))
-    else:
-        shutil.copy2(src, dst)
+    place_installed_item(src, dst, target_dir, name)
 
     if install_hooks and scope_key != "global":
         from ..lib.hooks.lifecycle import install_hooks_for_item

@@ -378,3 +378,43 @@ def remove_installed_item(path: Path) -> None:
         shutil.rmtree(path)
     elif path.exists() or path.is_symlink():
         path.unlink()
+
+
+def check_install_paths(target_dir: Path, name: str, *paths: Path) -> None:
+    """Raise ValueError unless every path is confined to ``target_dir``.
+
+    A symlink AT a path is allowed (it is replaced, never followed); a hostile
+    name or a symlinked parent is not. Callers that delete anything before
+    ``place_installed_item`` run this first, so a refusal never loses a file.
+    """
+    from .confine import escapes
+
+    for path in paths:
+        problems = escapes(target_dir, [path])
+        if path.is_symlink():
+            problems = [p for p in problems if p != f"{os.path.abspath(path)} is a symlink"]
+        if problems:
+            raise ValueError(f"refusing to install '{name}': {problems[0]}")
+
+
+def place_installed_item(
+    src: Path, dst: Path, target_dir: Path, name: str, replaces: Optional[Path] = None,
+) -> None:
+    """Replace the installed copy at ``dst`` (and ``replaces``, the old copy if it
+    lives elsewhere) with ``src``: the one write chokepoint.
+
+    Install, upgrade, org apply and global migration all write through here, so a
+    hostile name or a symlinked parent can never send the delete + copy outside
+    ``target_dir``, and a grouped name (``group/name``) gets its group folder.
+    Every path is checked before anything is deleted.
+    """
+    old = [p for p in (replaces,) if p is not None and p != dst]
+    check_install_paths(target_dir, name, dst, *old)
+    for path in old:
+        remove_installed_item(path)
+    remove_installed_item(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if src.is_dir():
+        shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".*"))
+    else:
+        shutil.copy2(src, dst)

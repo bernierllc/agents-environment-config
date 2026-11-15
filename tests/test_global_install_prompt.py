@@ -235,6 +235,60 @@ class TestMigrateItemToGlobal:
         assert after["global"]["skills"]["my-skill"]["version"] == "2.0.0"
 
 
+    def test_grouped_rule_migrates_into_a_missing_group_folder(self, temp_dir, monkeypatch):
+        monkeypatch.setattr(Path, "home", lambda: temp_dir)
+        aec_home = temp_dir / ".agents-environment-config"
+        aec_home.mkdir(parents=True)
+        monkeypatch.setattr("aec.lib.installed_store.AEC_HOME", aec_home)
+        src = temp_dir / "upstream" / "nevar" / "x.md"
+        src.parent.mkdir(parents=True)
+        src.write_text("---\nname: nevar/x\nversion: 1.0.0\n---\nbody\n")
+        manifest_path = aec_home / "installed-manifest.json"
+        manifest_path.write_text(json.dumps(_empty_manifest()))
+
+        migrate_item_to_global(
+            item_type="rule", plural="rules", name="nevar/x",
+            item_info={"version": "1.0.0"}, src=src,
+            manifest=json.loads(manifest_path.read_text()), manifest_path=manifest_path,
+        )
+
+        assert (temp_dir / ".agent-tools" / "rules" / "nevar" / "x.md").read_text().endswith("body\n")
+
+
+    def test_a_refused_migration_keeps_the_repo_copies(self, temp_dir, monkeypatch):
+        monkeypatch.setattr(Path, "home", lambda: temp_dir)
+        aec_home = temp_dir / ".agents-environment-config"
+        aec_home.mkdir(parents=True)
+        monkeypatch.setattr("aec.lib.installed_store.AEC_HOME", aec_home)
+        outside = temp_dir / "outside"
+        outside.mkdir()
+        grules = temp_dir / ".agent-tools" / "rules"
+        grules.mkdir(parents=True)
+        (grules / "nevar").symlink_to(outside, target_is_directory=True)
+        repo = temp_dir / "p0"
+        local = repo / ".agent-rules" / "nevar" / "x.md"
+        local.parent.mkdir(parents=True)
+        local.write_text("keep")
+        src = temp_dir / "upstream" / "x.md"
+        src.parent.mkdir(parents=True)
+        src.write_text("new")
+        manifest = _empty_manifest()
+        manifest["repos"][str(repo.resolve())] = {
+            "skills": {}, "agents": {}, "rules": {"nevar/x": {"version": "1.0.0", "contentHash": ""}},
+        }
+        manifest_path = aec_home / "installed-manifest.json"
+        manifest_path.write_text(json.dumps(manifest))
+
+        with pytest.raises(ValueError, match="symlink"):
+            migrate_item_to_global(
+                item_type="rule", plural="rules", name="nevar/x",
+                item_info={"version": "1.0.0"}, src=src,
+                manifest=json.loads(manifest_path.read_text()), manifest_path=manifest_path,
+            )
+        assert local.read_text() == "keep" and not (outside / "x.md").exists()
+        assert json.loads(manifest_path.read_text()) == manifest  # nothing recorded or removed
+
+
 class TestPromptMultiRepoGlobalOrProceed:
     def test_returns_local_when_not_eligible(self, temp_dir, monkeypatch):
         monkeypatch.setattr(Path, "home", lambda: temp_dir)

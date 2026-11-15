@@ -1,6 +1,5 @@
 """aec upgrade -- apply available upgrades to installed items."""
 
-import shutil
 from typing import Optional
 from pathlib import Path
 
@@ -15,7 +14,7 @@ from ..lib.prompt_catalog.maintenance_area import (
 )
 from ..lib.prompts import prompt
 from ..lib.config import require_repo_root
-from ..lib.filesystem import installed_dst_path, remove_installed_item, resolve_installed_path
+from ..lib.filesystem import installed_dst_path, place_installed_item, resolve_installed_path
 from ..lib.installed_store import record_item_install as record_item_install_pertype
 from ..lib.manifest_v2 import (
     load_manifest,
@@ -275,13 +274,7 @@ def _check_and_upgrade_dep_conflicts(
         dep_existing = resolve_installed_path(target_dir, vc.name)
         dep_dst = installed_dst_path(target_dir, vc.name, dep_src)
 
-        remove_installed_item(dep_existing)
-
-        target_dir.mkdir(parents=True, exist_ok=True)
-        if dep_src.is_dir():
-            shutil.copytree(dep_src, dep_dst, ignore=shutil.ignore_patterns(".*"))
-        else:
-            shutil.copy2(dep_src, dep_dst)
+        place_installed_item(dep_src, dep_dst, target_dir, vc.name, replaces=dep_existing)
 
         dep_hash = hash_skill_directory(dep_dst) if dep_dst.is_dir() else ""
         dep_ver = dep_avail.get("version", "0.0.0")
@@ -312,13 +305,7 @@ def _check_and_upgrade_dep_conflicts(
             dep_existing = resolve_installed_path(target_dir, d.name)
             dep_dst = installed_dst_path(target_dir, d.name, dep_src)
 
-            remove_installed_item(dep_existing)
-
-            target_dir.mkdir(parents=True, exist_ok=True)
-            if dep_src.is_dir():
-                shutil.copytree(dep_src, dep_dst, ignore=shutil.ignore_patterns(".*"))
-            else:
-                shutil.copy2(dep_src, dep_dst)
+            place_installed_item(dep_src, dep_dst, target_dir, d.name, replaces=dep_existing)
 
             dep_hash = hash_skill_directory(dep_dst) if dep_dst.is_dir() else ""
             dep_ver = dep_avail.get("version", "0.0.0")
@@ -642,13 +629,7 @@ def _upgrade_scope(
                     upgraded = True  # still outdated; never report "up to date"
                     continue
 
-            remove_installed_item(existing_path)
-
-            target.mkdir(parents=True, exist_ok=True)
-            if src_path.is_dir():
-                shutil.copytree(src_path, dst_path, ignore=shutil.ignore_patterns(".*"))
-            else:
-                shutil.copy2(src_path, dst_path)
+            place_installed_item(src_path, dst_path, target, name, replaces=existing_path)
 
             _refresh_upgrade_hooks(scope, item_type, name, avail_v, dst_path, yes)
 
