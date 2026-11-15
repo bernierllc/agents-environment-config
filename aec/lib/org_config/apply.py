@@ -13,7 +13,7 @@ module holds the category appliers.
 from __future__ import annotations
 
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -124,13 +124,14 @@ def apply_items(
     install_hooks: bool = True,
     source_commits: Optional[dict] = None,
 ):
-    """Install install-intent items and remove blocked ones. Returns
-    ``(ApplyResult, removed_keys)``. ``source_commits`` maps a custom source key
-    (``"<org_id>/<id>"``) to the commit being applied."""
+    """Install install-intent items. Blocked removals are not here: they cannot be
+    undone, so they run after the commit point (``remove_blocked_items``).
+    ``source_commits`` maps a custom source key (``"<org_id>/<id>"``) to the commit
+    being applied."""
     import dataclasses
 
     from ..apply_core import execute_apply, plan_apply
-    from ..manifest_v2 import get_installed, load_manifest
+    from ..manifest_v2 import load_manifest
 
     commits = source_commits or {}
     desired = [
@@ -139,7 +140,7 @@ def apply_items(
     ]
     manifest = load_manifest(manifest_path)
     plan = plan_apply(desired, manifest=manifest, available_by_type=available_by_type)
-    result = execute_apply(
+    return execute_apply(
         plan,
         source_dirs=source_dirs,
         available_by_type=available_by_type,
@@ -147,14 +148,34 @@ def apply_items(
         install_hooks=install_hooks,
     )
 
+
+def _failure(exc: BaseException) -> str:
+    return f"{type(exc).__name__}: {exc}"
+
+
+def remove_blocked_items(
+    policy: EffectivePolicy, scope: str, *, manifest_path
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Uninstall blocked items still in the manifest (so a retry skips finished ones).
+
+    Returns ``(removed_keys, errors)``; ``errors`` holds ``(subject, message)`` per
+    failed item and the loop continues past one. ``SystemExit`` is caught because
+    the uninstall command exits on some failures; it is reported, not swallowed.
+    """
+    from ..manifest_v2 import get_installed, load_manifest
+
     removed: list[tuple[str, str]] = []
+    errors: list[tuple[str, str]] = []
     for item_type, name in blocked_item_keys(policy):
-        plural = item_type + "s"
-        installed = get_installed(load_manifest(manifest_path), scope, plural)
-        if name in installed:
+        if name not in get_installed(load_manifest(manifest_path), scope, item_type + "s"):
+            continue
+        try:
             _uninstall_blocked(item_type, name, scope)
+        except (Exception, SystemExit) as exc:
+            errors.append((f"{item_type}s/{name}", _failure(exc)))
+        else:
             removed.append((item_type, name))
-    return result, removed
+    return removed, errors
 
 
 def _uninstall_blocked(item_type: str, name: str, scope: str) -> None:
@@ -169,13 +190,15 @@ def apply_plugins(
     *,
     source_dirs: dict,
     manifest_path,
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], list[tuple[str, str]]]:
     """Install install-intent plugins and uninstall blocked ones.
 
     Runs through the same loadout engine as ``aec apply`` (``install_plugin`` /
     ``uninstall_plugin``), so ``plugins.execution=instructions-only`` still
     prints instead of running. Versions are whatever the agent's plugin manager
-    reports (``installed_record``). Returns ``(installed, removed)`` names.
+    reports (``installed_record``). Returns ``(installed, removed, errors)``:
+    names, plus ``(subject, message)`` per failed plugin (the loop continues past
+    one; ``SystemExit`` is caught because the uninstall command exits on some failures).
     """
     import subprocess
 
@@ -191,6 +214,7 @@ def apply_plugins(
     blocked = _plugin_names(policy, {"blocked"})
     installed_names: list[str] = []
     removed_names: list[str] = []
+    errors: list[tuple[str, str]] = []
 
     source_dir = source_dirs.get("plugins")
     available = (
@@ -213,20 +237,28 @@ def apply_plugins(
             Console.warning(f"Invalid plugin '{name}': {exc}; skipping.")
             continue
         # The org policy was approved up front; external plugins never run anyway.
-        install_and_record(
-            manifest_def, scope, name, detected,
-            runner=lambda cmd: subprocess.run(cmd),
-            confirm=lambda *a: True, printer=Console.print, pref=pref,
-            manifest_path=manifest_path,
-        )
-        installed_names.append(name)
+        try:
+            install_and_record(
+                manifest_def, scope, name, detected,
+                runner=lambda cmd: subprocess.run(cmd),
+                confirm=lambda *a: True, printer=Console.print, pref=pref,
+                manifest_path=manifest_path,
+            )
+        except (Exception, SystemExit) as exc:
+            errors.append((f"plugins/{name}", _failure(exc)))
+        else:
+            installed_names.append(name)
 
     for name in blocked:
         if name in get_installed(load_manifest(manifest_path), scope, "plugins"):
-            _uninstall_blocked("plugin", name, scope)
-            removed_names.append(name)
+            try:
+                _uninstall_blocked("plugin", name, scope)
+            except (Exception, SystemExit) as exc:
+                errors.append((f"plugins/{name}", _failure(exc)))
+            else:
+                removed_names.append(name)
 
-    return installed_names, removed_names
+    return installed_names, removed_names, errors
 
 
 @dataclass
@@ -237,6 +269,9 @@ class ApplyOutcome:
     preferences_applied: list
     # "locked" | "declined" | "dry-run" | "source_failed" | "install_failed" | None
     skipped_reason: Optional[str] = None
+    # (subject, message) for removals/plugin commands that failed AFTER the apply was
+    # committed. The apply still counts as applied; the caller must exit non-zero.
+    item_errors: list = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -431,7 +466,7 @@ def apply_org_policy(
     prefs_applied = apply_preferences(policy)
     apply_prompts(policy)
 
-    result, removed = apply_items(
+    result = apply_items(
         policy,
         scope,
         source_dirs=source_dirs,
@@ -447,23 +482,10 @@ def apply_org_policy(
         discard_staged(s.staged for s in synced)
         result.undo.drop()
         return ApplyOutcome(
-            len(result.applied), len(removed), policy.held, prefs_applied,
+            len(result.applied), 0, policy.held, prefs_applied,
             skipped_reason="install_failed",
         )
 
-    plugins_in, plugins_out = apply_plugins(
-        policy, scope, source_dirs=source_dirs, manifest_path=manifest_path
-    )
-    applied = len(result.applied) + len(plugins_in)
-    removed = [*removed, *plugins_out]
-    Console.success(
-        f"Org policy applied: {applied} installed, {len(removed)} removed, "
-        f"{len(prefs_applied)} preference(s) set."
-    )
-    if policy.held:
-        Console.warning(
-            f"{len(policy.held)} item(s) held pending decision — run `aec org resolve`."
-        )
     try:
         publish_sources(paths, synced, lambda: _stamp_applied(paths, now, synced))
     except Exception as exc:
@@ -476,12 +498,59 @@ def apply_org_policy(
         Console.error("org-config apply failed; source commits and pending reviews were not approved.")
         return ApplyOutcome(0, 0, policy.held, prefs_applied, skipped_reason="install_failed")
     result.undo.drop()
+
+    # The stamp is the commit point, so the effects the undo cannot reverse (blocked
+    # uninstalls, plugin-manager commands) run only now. A failure here is reported and
+    # recorded per item, never rolled back; the next apply recomputes and retries them.
+    removed, errors = remove_blocked_items(policy, scope, manifest_path=manifest_path)
+    plugins_in, plugins_out, plugin_errors = apply_plugins(
+        policy, scope, source_dirs=source_dirs, manifest_path=manifest_path
+    )
+    errors += plugin_errors
+    removed += [("plugin", n) for n in plugins_out]
+    applied = len(result.applied) + len(plugins_in)
+    Console.success(
+        f"Org policy applied: {applied} installed, {len(removed)} removed, "
+        f"{len(prefs_applied)} preference(s) set."
+    )
+    if policy.held:
+        Console.warning(
+            f"{len(policy.held)} item(s) held pending decision — run `aec org resolve`."
+        )
+    if errors:
+        for subject, message in errors:
+            Console.error(f"org-config apply: {subject} failed after the policy was applied: {message}")
+        Console.error("Run `aec org apply` to retry the failed items.")
+        _record_item_failures(paths, policy, errors)
     return ApplyOutcome(
         applied_items=applied,
         removed_items=len(removed),
         held=policy.held,
         preferences_applied=prefs_applied,
+        item_errors=errors,
     )
+
+
+def _record_item_failures(paths, policy: EffectivePolicy, errors: list[tuple[str, str]]) -> None:
+    """Persist failed post-commit items as an ``apply_failed`` pending on each owning
+    org, so ``aec update`` and ``pending_fix`` keep saying so until an apply succeeds."""
+    import dataclasses
+
+    from .state import read_state, write_state
+
+    by_org: dict[str, list[dict]] = {}
+    for subject, message in errors:
+        by_org.setdefault(policy.items[subject][0], []).append({"item": subject, "error": message})
+    for org_id, items in by_org.items():
+        st = read_state(paths, org_id)
+        # A trust change is never downgraded (same rule as _set_pending).
+        if st is None or (st.pending or {}).get("kind") == "trust_change":
+            continue
+        write_state(paths, dataclasses.replace(st, pending={
+            "kind": "apply_failed",
+            "reason": f"{len(items)} item(s) failed to apply: " + ", ".join(i["item"] for i in items),
+            "items": items,
+        }))
 
 
 def _print_policy_plan(policy: EffectivePolicy) -> None:

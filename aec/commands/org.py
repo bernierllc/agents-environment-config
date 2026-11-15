@@ -625,6 +625,12 @@ def refresh_remote_orgs(paths: OrgPaths) -> list[tuple[str, str]]:
                 if st is not None:
                     _set_pending(paths, st, {"kind": "apply_failed", "reason": reason})
                     results[i] = (org_id, f"apply_failed: {reason}")
+        elif outcome.item_errors:
+            # Applied, but some items failed afterwards; apply_org_policy recorded them per org.
+            for i, (org_id, status) in enumerate(results):
+                st = read_state(paths, org_id)
+                if st is not None and (st.pending or {}).get("kind") == "apply_failed":
+                    results[i] = (org_id, f"apply_failed: {st.pending.get('reason')}")
     return results
 
 
@@ -1054,7 +1060,7 @@ def apply_cmd(
                 snapshot.restore()
     if outcome.skipped_reason == "locked":
         raise typer.Exit(code=EXIT_TRUST)
-    if outcome.skipped_reason in ("source_failed", "install_failed"):
+    if outcome.skipped_reason in ("source_failed", "install_failed") or outcome.item_errors:
         raise typer.Exit(code=EXIT_VALIDATION)
 
 

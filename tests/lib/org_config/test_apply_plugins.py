@@ -105,7 +105,7 @@ def test_plugin_policies_do_not_reach_the_file_copy_pipeline():
 
 
 def test_required_plugin_installs_and_is_recorded(catalog):
-    installed, removed = apply_plugins(
+    installed, removed, _errors = apply_plugins(
         _policy(_item("demo", "required")), "global",
         source_dirs=catalog["source_dirs"], manifest_path=catalog["manifest_path"],
     )
@@ -133,7 +133,7 @@ def test_blocked_plugin_is_uninstalled(catalog, monkeypatch):
     import aec.lib.org_config.apply as apply_mod
     monkeypatch.setattr(apply_mod, "_uninstall_blocked",
                         lambda item_type, name, scope: called.append((item_type, name, scope)))
-    _, removed = apply_plugins(
+    _, removed, _errors = apply_plugins(
         _policy(_item("demo", "blocked")), "global",
         source_dirs=catalog["source_dirs"], manifest_path=catalog["manifest_path"],
     )

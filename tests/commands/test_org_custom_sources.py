@@ -481,6 +481,54 @@ def test_failed_state_write_rolls_back_publication(repos, home, paths, monkeypat
     assert not (org_dir / "sources.prev" / "team-rules").exists()
 
 
+def test_failed_blocked_uninstall_runs_after_commit_and_retries(repos, home, paths, monkeypatch):
+    """A blocked uninstall is irreversible, so it runs after the stamp: its failure exits
+    non-zero and is recorded per item, but nothing is rolled back; the next apply retries it."""
+    import aec.lib.org_config.apply as org_apply
+    from aec.lib.manifest_v2 import load_manifest, record_install, save_manifest
+
+    a = _push_rule(repos, "1.0.0")
+    text = _config(pin='      ref: "main"\n').replace(
+        '  agents: {}',
+        '    "gone-rule":\n      source: "aec.default.rules"\n      stance: blocked\n  agents: {}',
+    )
+    _commit(repos["config"], "org/example-org.yaml", text)
+    assert runner.invoke(
+        app, ["org", "enroll", f"git+{CONFIG_URL}#main:org/example-org.yaml", "--allow-unsigned", "--yes"]
+    ).exit_code == 0
+    manifest_path = home / ".agents-environment-config" / "installed-manifest.json"
+    m = load_manifest(manifest_path)
+    record_install(m, "global", "rules", "gone-rule", "1.0.0")
+    save_manifest(m, manifest_path)
+
+    def remove(item_type, name, scope):
+        m = load_manifest(manifest_path)
+        del m["global"]["rules"][name]
+        save_manifest(m, manifest_path)
+
+    def boom(*_args):
+        raise RuntimeError("uninstall refused")
+
+    monkeypatch.setattr(org_apply, "_uninstall_blocked", boom)
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
+    assert "rules/gone-rule" in result.output and "uninstall refused" in result.output
+    # Committed, not rolled back: the approved commit is live and the rule is installed.
+    st = read_state(paths, "example-org")
+    assert st.source_commits == {"team-rules": a} and _live_head(paths) == a
+    assert _manifest(home)["global"]["rules"]["example-rule"]["version"] == "1.0.0"
+    # Recorded per item, and still in the manifest so a retry sees it.
+    assert st.pending["kind"] == "apply_failed"
+    assert [i["item"] for i in st.pending["items"]] == ["rules/gone-rule"]
+    assert "gone-rule" in _manifest(home)["global"]["rules"]
+
+    monkeypatch.setattr(org_apply, "_uninstall_blocked", remove)
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert read_state(paths, "example-org").pending is None
+    assert "gone-rule" not in _manifest(home)["global"]["rules"]
+
+
 def test_custom_source_never_replaces_a_pinned_version(tmp_path):
     from aec.lib.apply_core import DesiredItem, execute_apply, plan_apply
 
