@@ -23,10 +23,7 @@ install:
   mode: "managed"
 
 items:
-  skills:
-    "foo":
-      source: "aec.default.skills"
-      stance: required
+  skills: {}
   rules: {}
   agents: {}
   mcps: {}

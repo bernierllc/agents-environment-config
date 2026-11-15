@@ -532,6 +532,17 @@ def test_a_kill_after_the_stamp_leaves_a_marker_and_the_next_update_converges(re
     assert org_cmd.pending_orgs(paths) == []
 
 
+def test_install_org_config_exits_non_zero_when_a_source_cannot_be_fetched(repos, home, tmp_path):
+    """`aec install --org-config` maps the apply outcome to an exit code the way
+    `aec org apply` does: the source repo has no commits, so nothing applies and CI
+    scripts must see a failure, not exit 0."""
+    cfg = tmp_path / "example-org.yaml"
+    cfg.write_text(_config(pin='      ref: "main"\n'), encoding="utf-8")
+    result = runner.invoke(app, ["install", "--org-config", str(cfg), "--allow-unsigned", "--yes"])
+    assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
+    assert not list((home / ".agent-tools" / "rules").rglob("example-rule*"))
+
+
 @pytest.mark.parametrize("version", [">=2.0.0", "^1.0", "latest", "1.x"])
 def test_custom_source_item_rejects_a_version_constraint(version):
     """Only exact versions are compared for a custom source; a range would be silently

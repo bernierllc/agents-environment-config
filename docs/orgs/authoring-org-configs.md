@@ -98,7 +98,7 @@ custom:
 - `ref`: a branch or tag. Allowed without `commit` in unsigned orgs only.
 - `contributes`: a non-empty subset of `["skills", "rules", "agents", "mcps"]`. An item may only name a source that contributes its type. Plugins install only from `aec.default.plugins`.
 
-**Repo layout.** A source repo uses the same layout as the AEC catalog: `.claude/skills/<name>/`, `.agent-rules/<group>/<name>.md`, `.claude/agents/<name>.md`, `mcps/<name>/mcp.json`. Each item carries `name` and `version` (frontmatter for skills, rules and agents; JSON for MCPs). Rules use one format: Markdown under `.agent-rules/`.
+**Repo layout.** A source repo uses the same layout as the AEC catalog: `.claude/skills/<name>/`, `.agent-rules/<group>/<name>.md`, `.claude/agents/<name>.md`, `mcp-servers/<name>/mcp.json`. Each item carries `name` and `version` (frontmatter for skills, rules and agents; JSON for MCPs). Rules use one format: Markdown under `.agent-rules/`.
 
 **How sources are applied.** `aec org apply` clones each source to `~/.aec/orgs/<org_id>.d/sources/<id>/` and checks out the chosen commit. Every source is fetched and verified before anything is installed; if any source fails, nothing is applied and the command exits non-zero. Installed items record their source (`<org_id>/<id>`), so `aec outdated` and `aec upgrade` compare each item against the repo it came from.
 

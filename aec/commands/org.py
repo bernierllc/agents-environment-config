@@ -1068,6 +1068,13 @@ def apply_cmd(
     finally:
         for snapshot in backups.values():  # empty once committed
             snapshot.restore()
+    exit_for_outcome(outcome)
+
+
+def exit_for_outcome(outcome) -> None:
+    """The one mapping from an ApplyOutcome to an exit code, for every command that
+    applies org policy (`aec org apply`, `aec install --org-config`): raises
+    ``typer.Exit`` for a locked or failed apply, returns for a clean or skipped one."""
     if outcome.skipped_reason == "locked":
         raise typer.Exit(code=EXIT_TRUST)
     if outcome.skipped_reason in ("source_failed", "install_failed") or outcome.item_errors:
