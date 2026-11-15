@@ -443,6 +443,95 @@ def test_preferences_write_failure_after_the_stamp_is_recorded_and_retried(repos
     assert read_state(paths, "example-org").pending is None
 
 
+# --------------------------------------------------------------------------- #
+#  review round 11: the commit point is explicit and durably marked            #
+# --------------------------------------------------------------------------- #
+
+
+def test_failing_failure_recording_after_the_stamp_never_restores(repos, home, paths, monkeypatch):
+    """Post-stamp work fails and the write that records it fails too. The exception that
+    escapes apply_org_policy is a post-commit one, so apply_cmd must not restore the old
+    config and state over the published source: exit is non-zero, B stays approved and
+    live, and the stamp's apply_failed marker is what the next apply retries."""
+    import aec.lib.org_config.apply as org_apply
+    import aec.lib.preferences as prefs
+
+    _enroll_ref_only_and_apply(repos, paths)
+    b = _push_rule(repos, "1.1.0")
+    with_prefs = _config(pin='      ref: "main"\n', version="1.0.1").replace(
+        'install:\n  mode: "managed"\n',
+        'install:\n  mode: "managed"\n  preferences:\n    update_check: false\n',
+    )
+    new_hash = _commit(repos["config"], "org/example-org.yaml", with_prefs)
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+    assert read_state(paths, "example-org").pending["kind"] == "review"
+
+    def disk_full(*_a, **_k):
+        raise OSError("disk full")
+
+    real_save, real_settle = prefs.save_preferences, org_apply._settle_apply_marker
+    monkeypatch.setattr(prefs, "save_preferences", disk_full)
+    monkeypatch.setattr(org_apply, "_settle_apply_marker", disk_full)
+    result = runner.invoke(app, ["org", "apply", "--yes"])
+    assert result.exit_code == org_cmd.EXIT_VALIDATION, result.output
+    assert "committed" in result.output and "disk full" in result.output
+    st = read_state(paths, "example-org")
+    assert st.source_commits == {"team-rules": b} and _live_head(paths) == b
+    assert st.config_version == "1.0.1", "the reviewed config must stay promoted, not restored"
+    assert st.pending["kind"] == "apply_failed"  # the stamp's marker, not the old review
+    assert not _staged_path_exists(paths)
+
+    monkeypatch.setattr(prefs, "save_preferences", real_save)
+    monkeypatch.setattr(org_apply, "_settle_apply_marker", real_settle)
+    retry = runner.invoke(app, ["org", "apply", "--yes"])
+    assert retry.exit_code == 0, retry.output
+    assert read_state(paths, "example-org").pending is None
+    assert new_hash
+
+
+def _staged_path_exists(paths) -> bool:
+    return org_cmd._staged_path(paths, "example-org").exists()
+
+
+def test_a_kill_after_the_stamp_leaves_a_marker_and_the_next_update_converges(repos, home, paths, tmp_path):
+    """The stamp itself writes the in-progress marker. A process killed mid-install (os._exit,
+    no handler runs) leaves new commits stamped but the rule still old; the next
+    `aec update` reports retry needed instead of 'up to date', and `aec org apply` converges."""
+    import os
+    import subprocess
+    import sys
+
+    _enroll_ref_only_and_apply(repos, paths)
+    b = _push_rule(repos, "1.1.0")
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "pending review")]
+    installed = next((home / ".agent-tools" / "rules").rglob("example-rule*"))
+
+    script = (
+        "import os, aec.lib.apply_core as ac\n"
+        "ac.execute_apply = lambda *a, **k: os._exit(137)\n"  # the kill: right after the stamp
+        "from typer.testing import CliRunner\n"
+        "from aec.cli import app\n"
+        "CliRunner().invoke(app, ['org', 'apply', '--yes'])\n"
+        "os._exit(0)\n"
+    )
+    killed = subprocess.run([sys.executable, "-c", script], cwd=Path(__file__).resolve().parents[2], env=os.environ.copy())
+    assert killed.returncode == 137  # died at the kill, not by finishing or failing earlier
+    st = read_state(paths, "example-org")
+    assert st.source_commits == {"team-rules": b} and _live_head(paths) == b, "the stamp must survive the kill"
+    assert "1.0.0" in installed.read_text(), "the kill came before the install"
+    assert st.pending["kind"] == "apply_failed"
+
+    assert org_cmd.refresh_remote_orgs(paths) == [("example-org", "unchanged")]
+    pending = org_cmd.pending_orgs(paths)
+    assert [org_cmd.pending_fix(p) for p in pending] and "aec org apply" in org_cmd.pending_fix(pending[0])
+
+    retry = runner.invoke(app, ["org", "apply", "--yes"])
+    assert retry.exit_code == 0, retry.output
+    assert read_state(paths, "example-org").pending is None
+    assert "1.1.0" in installed.read_text()
+    assert org_cmd.pending_orgs(paths) == []
+
+
 @pytest.mark.parametrize("version", [">=2.0.0", "^1.0", "latest", "1.x"])
 def test_custom_source_item_rejects_a_version_constraint(version):
     """Only exact versions are compared for a custom source; a range would be silently

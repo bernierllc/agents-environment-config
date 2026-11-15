@@ -12,6 +12,14 @@ class OrgConfigError(Exception):
     """Base for all org-config errors."""
 
 
+class OrgApplyCommittedError(OrgConfigError):
+    """An apply failed AFTER its commit point (sources published, approval stamped).
+
+    The committed state stays; callers must never restore over it. The stamp left an
+    ``apply_failed`` marker, so the next ``aec org apply`` retries what is missing.
+    """
+
+
 class OrgConfigParseError(OrgConfigError):
     """YAML or frontmatter could not be parsed."""
 

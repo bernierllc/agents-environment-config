@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .effective import EffectivePolicy, effective_policy
-from .errors import OrgConfigError
+from .errors import OrgApplyCommittedError, OrgConfigError
 from .schema import RESERVED_SOURCE_IDS
 
 _CI_PREFIX = "configurable_instructions."
@@ -424,13 +424,17 @@ def apply_org_policy(
     confirm: Optional[Callable[[EffectivePolicy], bool]] = None,
     now: Optional[str] = None,
     pubkey_fetcher=None,
+    on_commit: Optional[Callable[[], None]] = None,
 ) -> ApplyOutcome:
     """Apply effective org policy to the environment.
+
+    ``on_commit`` runs once, right after publish + stamp: the caller releases its
+    undo state (a snapshot left on disk by a killed process is rolled back by the
+    next reader, which would erase the stamp and its marker).
 
     Refuses while any org's signing key is in rotation lockout. Managed mode
     applies silently; guided mode shows the plan and asks for confirmation.
     """
-    from ..apply_core import execute_apply
     from ..console import Console
     from .propagation import run_propagation_gate
 
@@ -493,8 +497,26 @@ def apply_org_policy(
         Console.error("org-config apply failed; source commits and pending reviews were not approved.")
         return ApplyOutcome(0, 0, policy.held, [], skipped_reason="install_failed")
 
-    # From here every failure is reported and recorded per item; the next apply
-    # recomputes the plan and retries what is still missing.
+    # Committed. Whatever escapes from here is a post-commit failure: it is re-raised as
+    # OrgApplyCommittedError so no caller can mistake it for a pre-commit one and restore
+    # over the published sources. The stamp already left an apply_failed marker.
+    try:
+        if on_commit is not None:
+            on_commit()  # the caller's undo is void from here; a kill must not trigger it either
+        return _apply_committed(paths, policy, scope, plan, synced)
+    except BaseException as exc:  # incl. Ctrl-C/SystemExit: the commit stands either way
+        raise OrgApplyCommittedError(
+            f"org-config apply was committed but did not finish ({type(exc).__name__}: {exc}); "
+            "run `aec org apply` to retry"
+        ) from exc
+
+
+def _apply_committed(paths, policy: EffectivePolicy, scope: str, plan, synced: list[SyncedSource]) -> ApplyOutcome:
+    """Everything after the commit point. Every failure is reported and recorded per
+    item; the next apply recomputes the plan and retries what is still missing."""
+    from ..apply_core import execute_apply
+    from ..console import Console
+
     source_dirs, available_by_type, manifest_path = _catalog(paths, synced, published=True)
     errors: list[tuple[str, str]] = []
     prefs_applied: list[str] = []
@@ -529,7 +551,10 @@ def apply_org_policy(
         for subject, message in errors:
             Console.error(f"org-config apply: {subject} failed after the policy was applied: {message}")
         Console.error("Run `aec org apply` to retry the failed items.")
-        _record_item_failures(paths, policy, errors)
+    # Only here does the stamp's in-progress marker give way: to the per-item failures,
+    # or to nothing when every post-stamp step succeeded. If this write itself fails,
+    # the marker stays and the next apply retries.
+    _settle_apply_marker(paths, policy, errors)
     return ApplyOutcome(
         applied_items=applied,
         removed_items=len(removed),
@@ -545,11 +570,13 @@ def _mandatory(policy: EffectivePolicy, item) -> bool:
     return owner is not None and owner[1].stance.value in ("required", "pinned")
 
 
-def _record_item_failures(paths, policy: EffectivePolicy, errors: list[tuple[str, str]]) -> None:
-    """Persist failed post-commit items as an ``apply_failed`` pending on each owning
-    org, so ``aec update`` and ``pending_fix`` keep saying so until an apply succeeds.
-    A preference is merged across orgs and has no single owner, so it is recorded on
-    every enrolled org."""
+def _settle_apply_marker(paths, policy: EffectivePolicy, errors: list[tuple[str, str]]) -> None:
+    """Replace the stamp's in-progress ``apply_failed`` marker once the post-commit work ran.
+
+    An org owning failed items gets them recorded as ``apply_failed``, so ``aec update``
+    and ``pending_fix`` keep saying so until an apply succeeds; an org with none has the
+    marker cleared. A preference is merged across orgs and has no single owner, so it is
+    recorded on every enrolled org."""
     import dataclasses
 
     from .discovery import discover_enrolled_orgs
@@ -564,16 +591,22 @@ def _record_item_failures(paths, policy: EffectivePolicy, errors: list[tuple[str
         )
         for org_id in owners:
             by_org.setdefault(org_id, []).append({"item": subject, "error": message})
-    for org_id, items in by_org.items():
+    for enrolled in discover_enrolled_orgs(paths):
+        org_id = enrolled.config.org_id
         st = read_state(paths, org_id)
+        pending = (st.pending if st else None) or {}
         # A trust change is never downgraded (same rule as _set_pending).
-        if st is None or (st.pending or {}).get("kind") == "trust_change":
+        if st is None or pending.get("kind") == "trust_change":
             continue
-        write_state(paths, dataclasses.replace(st, pending={
-            "kind": "apply_failed",
-            "reason": f"{len(items)} item(s) failed to apply: " + ", ".join(i["item"] for i in items),
-            "items": items,
-        }))
+        items = by_org.get(org_id)
+        if items:
+            write_state(paths, dataclasses.replace(st, pending={
+                "kind": "apply_failed",
+                "reason": f"{len(items)} item(s) failed to apply: " + ", ".join(i["item"] for i in items),
+                "items": items,
+            }))
+        elif pending.get("kind") == "apply_failed":
+            write_state(paths, dataclasses.replace(st, pending=None))
 
 
 def _print_policy_plan(policy: EffectivePolicy) -> None:
@@ -602,7 +635,11 @@ def _default_confirm(policy: EffectivePolicy) -> bool:
 
 
 def _stamp_applied(paths, now: Optional[str], synced: list[SyncedSource] = ()) -> None:
-    """Record ``last_applied_at`` and applied source commits on every enrolled org.
+    """Record ``last_applied_at`` and applied source commits on every enrolled org, and in
+    the same write mark the apply as in progress (``apply_failed``), so a process killed
+    before the post-stamp installs finish leaves a marker the next ``aec update`` or
+    ``aec org apply`` sees. ``_settle_apply_marker`` clears it on full completion. A
+    ``review``/``verify_failed``/``trust_change`` pending is left as it is.
 
     All or nothing: if one org's write fails, every org's state is put back
     (by rename, so it works on a full disk too).
@@ -621,8 +658,13 @@ def _stamp_applied(paths, now: Optional[str], synced: list[SyncedSource] = ()) -
             st = read_state(paths, org_id)
             if st is not None:
                 commits = {s.source_id: s.commit for s in synced if s.org_id == org_id} or None
-                failed = bool(st.pending and st.pending.get("kind") == "apply_failed")
+                pending = st.pending
+                if not pending or pending.get("kind") == "apply_failed":
+                    pending = {
+                        "kind": "apply_failed",
+                        "reason": "apply interrupted before every install finished",
+                        "items": [],
+                    }
                 write_state(paths, dataclasses.replace(
-                    st, last_applied_at=stamp, source_commits=commits,
-                    pending=None if failed else st.pending,
+                    st, last_applied_at=stamp, source_commits=commits, pending=pending,
                 ))

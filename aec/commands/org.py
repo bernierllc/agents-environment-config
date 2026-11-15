@@ -28,6 +28,7 @@ from ..lib.org_config import (
 from ..lib.org_config import git_source
 from ..lib.atomic_write import atomic_write_text
 from ..lib.org_config.apply import apply_org_policy
+from ..lib.org_config.errors import OrgApplyCommittedError
 from ..lib.org_config.crypto import decode_pubkey, fingerprint
 from ..lib.org_config.discovery import migrate_state
 from ..lib.org_config.fetch import fetch_bytes
@@ -1038,10 +1039,20 @@ def apply_cmd(
         perform_enroll(enroll, allow_unsigned=allow_unsigned, yes=yes)
 
     # Promote staged reviews first so the propagation gate sees them as the
-    # enrolled content; roll back unless the apply happens (declined, dry-run,
-    # locked, an exception, Ctrl-C).
+    # enrolled content; roll back unless apply_org_policy reached its commit point
+    # (publish + stamp). It says so itself by calling ``on_commit``, which releases the
+    # snapshots; a failure after that surfaces as OrgApplyCommittedError. Anything else
+    # (declined, dry-run, locked, a pre-commit failure, Ctrl-C) restores.
     backups: dict = {}
-    outcome = None
+
+    def release_backups() -> None:
+        # Called at the commit point, not after: a process killed between the stamp and
+        # here would leave snapshots that the next reader rolls back over the stamp.
+        while backups:  # pop first: a failure here must never leave a snapshot to restore
+            org_id, snapshot = backups.popitem()
+            snapshot.drop()
+            _staged_path(paths, org_id).unlink(missing_ok=True)
+
     try:
         _promote_staged_reviews(paths, backups)
         outcome = apply_org_policy(
@@ -1049,15 +1060,14 @@ def apply_cmd(
             mode_override="managed" if managed else None,
             dry_run=dry_run,
             confirm=(lambda _policy: True) if yes else None,
+            on_commit=release_backups,
         )
+    except OrgApplyCommittedError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=EXIT_VALIDATION) from exc
     finally:
-        applied = outcome is not None and outcome.skipped_reason is None
-        for org_id, snapshot in backups.items():
-            if applied:
-                _staged_path(paths, org_id).unlink(missing_ok=True)
-                snapshot.drop()
-            else:
-                snapshot.restore()
+        for snapshot in backups.values():  # empty once committed
+            snapshot.restore()
     if outcome.skipped_reason == "locked":
         raise typer.Exit(code=EXIT_TRUST)
     if outcome.skipped_reason in ("source_failed", "install_failed") or outcome.item_errors:
