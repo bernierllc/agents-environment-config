@@ -20,8 +20,12 @@ _GH_SUBPROCESS_ENV: ContextVar[dict[str, str] | None] = ContextVar(
 )
 
 P2_ROOT = re.compile(r"\bp2\b", re.I)
+# A closing reply must *say* it: the token starts a rendered line (optionally a
+# list bullet), so "still open; later reply `fixed in abc1234`", a quote, or a
+# fenced example does not close the thread.
 CLOSING = re.compile(
-    r"notion\.(so|com)/|fixed in (commit )?`?[0-9a-f]{7,40}`?|not-a-finding:\s*\S",
+    r"(?m)^[ \t]*(?:[-*+][ \t]+)?(?:tracked:?[ \t]+)?"
+    r"(?:(?:\[[^\]\n]*\]\()?<?https?://(?:[a-z0-9-]+\.)?notion\.(?:so|com)/|fixed in (?:commit )?`?[0-9a-f]{7,40}\b`?|not-a-finding:[ \t]*\S)",
     re.I,
 )
 FALLBACK_ATTESTATION = re.compile(
@@ -30,7 +34,7 @@ FALLBACK_ATTESTATION = re.compile(
     re.I,
 )
 INCOMPLETE_REVIEW = re.compile(r"\b(pending|running|todo)\b", re.I)
-REVIEW_SECTION = re.compile(r"(?m)^##\s+Review\b")
+REVIEW_SECTION = re.compile(r"(?m)^##[ \t]+Review(?![\w-])")
 MAIN_REVIEW_LABELS = {"review:high"}
 # Exact bot logins only — substring matches like "codex-helper" must not pass the gate.
 CODEX_AUTHORS = frozenset({"chatgpt-codex-connector"})
@@ -436,22 +440,37 @@ def _paginate_labels(owner: str, name: str, number: int, hostname: str | None = 
 def _codex_comments(
     owner: str, name: str, number: int, hostname: str | None = None
 ) -> list[dict[str, Any]]:
-    """Last 100 PR conversation comments; Codex keeps one summary comment updated.
-
-    ponytail: last 100 only; paginate if a PR ever buries the summary deeper.
-    """
+    """Every PR conversation comment (Codex keeps one summary comment updated)."""
+    out: list[dict[str, Any]] = []
+    cursor: str | None = None
     q = """
-    query($owner:String!, $name:String!, $number:Int!) {
+    query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
       repository(owner:$owner, name:$name) {
         pullRequest(number:$number) {
-          comments(last: 100) { nodes { author { login } body } }
+          comments(first: 100, after: $cursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes { author { login } body }
+          }
         }
       }
     }
     """
-    data = _graphql(q, hostname=hostname, owner=owner, name=name, number=number)
-    pr = (data.get("repository") or {}).get("pullRequest") or {}
-    return (pr.get("comments") or {}).get("nodes") or []
+    while True:
+        variables: dict[str, Any] = {"owner": owner, "name": name, "number": number}
+        if cursor:
+            variables["cursor"] = cursor
+        conn = (
+            _graphql(q, hostname=hostname, **variables)
+            .get("repository", {})
+            .get("pullRequest", {})
+            .get("comments")
+            or {}
+        )
+        out.extend(conn.get("nodes") or [])
+        page = conn.get("pageInfo") or {}
+        cursor = page.get("endCursor")
+        if not page.get("hasNextPage") or not cursor:
+            return out
 
 
 def codex_clean_comment_on_head(pr: dict[str, Any]) -> bool:
@@ -463,19 +482,18 @@ def codex_clean_comment_on_head(pr: dict[str, Any]) -> bool:
     for c in pr.get("comments", {}).get("nodes") or []:
         if not is_codex_author((c.get("author") or {}).get("login")):
             continue
-        m = CODEX_STATE.search(c.get("body") or "")
-        if not m:
-            continue
-        try:
-            review = json.loads(m.group(1)).get("code_review") or {}
-        except (ValueError, AttributeError):
-            continue  # malformed marker: not evidence of a review; fail closed
-        if (
-            review.get("commit_sha") == head
-            and review.get("status") == "completed"
-            and review.get("has_unresolved_findings") is False
-        ):
-            return True
+        # every marker in the comment, not only the first one
+        for m in CODEX_STATE.finditer(c.get("body") or ""):
+            try:
+                review = json.loads(m.group(1)).get("code_review") or {}
+            except (ValueError, AttributeError):
+                continue  # malformed marker: not evidence of a review; fail closed
+            if (
+                review.get("commit_sha") == head
+                and review.get("status") == "completed"
+                and review.get("has_unresolved_findings") is False
+            ):
+                return True
     return False
 
 
@@ -533,30 +551,101 @@ def codex_done_on_head(pr: dict[str, Any]) -> bool:
     return False
 
 
-def _rendered_markdown(body: str) -> str:
-    """Drop what GitHub does not render as prose: HTML comments, <pre>, code.
+_BLOCK_TAGS = (
+    "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|"
+    "dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|"
+    "iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|"
+    "summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul"
+)
+# CommonMark html block type 6 (named block tags) ...
+_HTML_BLOCK6 = re.compile(rf" {{0,3}}</?(?:{_BLOCK_TAGS})(?:[\s/>]|$)", re.I)
+# ... and type 7 (one complete tag alone on its line; cannot interrupt a paragraph; quoted attrs may hold <>)
+_HTML_BLOCK7 = re.compile(
+    r" {0,3}(?:<[A-Za-z][A-Za-z0-9-]*(?:\s+(?:[^<>\"']|\"[^\"]*\"|'[^']*')*)?/?>"
+    r"|</[A-Za-z][A-Za-z0-9-]*\s*>)\s*$")
+# types 1, 3, 4, 5: (start, end marker); the block runs to the line holding the end marker
+_RAW_BLOCKS = (
+    (re.compile(r" {0,3}<(pre|script|style|textarea)\b", re.I), None),  # closes on its own </tag>
+    (re.compile(r" {0,3}<\?"), re.compile(r"\?>")),
+    (re.compile(r" {0,3}<![A-Za-z]"), re.compile(r">")),
+    (re.compile(r" {0,3}<!\[CDATA\["), re.compile(r"\]\]>")),
+)
+# a backtick fence's info string cannot contain a backtick (CommonMark), or it is not a fence
+_FENCE_OPEN = re.compile(r" {0,3}(?:(`{3,})[^`]*$|(~{3,}))")
 
-    An attestation shown as an example (comment, fence, indented code) must not
-    count. Unclosed comments and fences run to the end of the body, as GitHub
-    renders them, so this only ever removes more, never less.
+
+def _rendered_markdown(body: str) -> str:
+    """Keep only what GitHub renders as prose, in one pass over the lines.
+
+    Dropped: fenced and indented code, HTML comments, raw HTML blocks (a block
+    opened by any tag at line start runs to the next blank line; pre/script/
+    style/textarea run to their closing tag). One state machine, so an example
+    inside a fence can never open a comment or block, and nothing opened is
+    silently closed early. Unclosed constructs run to the end of the body, as
+    GitHub renders them, so this only ever removes more, never less.
     """
-    text = body.replace("\r\n", "\n")
-    text = re.sub(r"<!--.*?(?:-->|\Z)", "", text, flags=re.S)
-    text = re.sub(r"<pre\b.*?(?:</pre\s*>|\Z)", "", text, flags=re.S | re.I)
     kept: list[str] = []
     fence: str | None = None
-    for line in text.split("\n"):
-        marker = re.match(r" {0,3}(`{3,}|~{3,})", line)
+    in_comment = False
+    raw_close: re.Pattern[str] | None = None  # end marker of an open <pre>-style block
+    in_html = False  # inside a blank-line-terminated html block
+    para = False  # previous line was paragraph text (type-7 blocks cannot interrupt it)
+    for line in body.replace("\r\n", "\n").split("\n"):
+        was_para, para = para, False
         if fence is not None:
-            if marker and marker.group(1)[0] == fence[0] and len(marker.group(1)) >= len(fence):
+            marker = re.match(r" {0,3}(`{3,}|~{3,})", line)
+            # a closing fence is the marker plus optional whitespace only (CommonMark)
+            if (marker and marker.group(1)[0] == fence[0] and len(marker.group(1)) >= len(fence)
+                    and not line[marker.end():].strip()):
                 fence = None
             continue
-        if marker:
-            fence = marker.group(1)
+        if raw_close is not None:
+            if raw_close.search(line):
+                raw_close = None
             continue
-        if line.startswith(("    ", "\t")):
-            continue
-        kept.append(line)
+        if in_html:
+            if line.strip():
+                continue
+            in_html = False
+        if not in_comment:
+            opener = _FENCE_OPEN.match(line)
+            if opener:
+                fence = opener.group(1) or opener.group(2)
+                kept.append("")  # the dropped fence still ends a paragraph (and a quote's lazy continuation)
+                continue
+            if line.startswith(("    ", "\t")):
+                continue
+            raw = next(((m, c) for st, c in _RAW_BLOCKS if (m := st.match(line))), None)
+            if raw:
+                raw_close = raw[1] or re.compile(rf"</{raw[0].group(1)}\s*>", re.I)
+                if raw_close.search(line[raw[0].end():]):
+                    raw_close = None
+                continue
+            if _HTML_BLOCK6.match(line) or (not was_para and _HTML_BLOCK7.match(line)):
+                in_html = True
+                continue
+        # strip HTML comment spans, which may open or close mid-line
+        out = ""
+        rest = line
+        while rest:
+            if in_comment:
+                end = rest.find("-->")
+                if end < 0:
+                    rest = ""
+                else:
+                    in_comment, rest = False, rest[end + 3 :]
+            else:
+                start = rest.find("<!--")
+                if start < 0:
+                    out += rest
+                    rest = ""
+                else:
+                    out += rest[:start]
+                    in_comment, rest = True, rest[start + 4 :]
+        # a heading or thematic break is a complete block, so a tag on the next line may open an html block
+        para = bool(out.strip()) and not re.match(r" {0,3}(?:#{1,6}(?:\s|$)|(?:[-*_][ \t]*){3,}$)", out)
+        if out.strip() or not line.strip():
+            kept.append(out)
     return "\n".join(kept)
 
 
@@ -569,7 +658,7 @@ def review_section_names_fallback(body: str, head: str | None = None) -> bool:
     """
     if not head or len(head) < 7:
         return False
-    body = _rendered_markdown(body or "")
+    body = _prose(body)
     m = REVIEW_SECTION.search(body)
     if not m:
         return False
@@ -586,6 +675,48 @@ def review_section_names_fallback(body: str, head: str | None = None) -> bool:
     return False
 
 
+# What may interrupt a paragraph (CommonMark), so a lazy continuation ends: an ATX heading, a
+# thematic break, a NON-EMPTY list item (ordered ones only when starting at 1), or a real fence
+# (left to _FENCE_OPEN: a ``` line whose info string holds a backtick is not a fence). Anything
+# else, such as `2. note` or an empty `-`, is lazy continuation text and stays inside the quote.
+_INTERRUPTS = re.compile(
+    r" {0,3}(?:#{1,6}(?:[ \t]|$)|([-*_])(?:[ \t]*\1){2,}[ \t]*$|(?:[-*+]|0{0,8}1[.)])[ \t]+\S)")
+
+
+def _unquoted(text: str) -> str:
+    """Drop blockquotes, including lazy continuation lines (a non-blank line
+    after a `>` line stays inside the quote until a blank line or a line that
+    interrupts a paragraph) and quotes nested in list items (`- > example`)."""
+    kept: list[str] = []
+    in_quote = False
+    for line in text.split("\n"):
+        if re.match(r"[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)*>", line):
+            in_quote = True
+            continue
+        # A lazy continuation is paragraph text only: a line that interrupts a paragraph
+        # (ATX heading, fence, thematic break, list item) ends the quote and is kept.
+        if in_quote and line.strip() and not (_INTERRUPTS.match(line) or _FENCE_OPEN.match(line)):
+            continue
+        in_quote = False
+        kept.append(line)
+    return "\n".join(kept)
+
+
+# a code span: a backtick run closed by a run of the same length, never across a blank line
+_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n).)+?)(?<!`)\1(?!`)", re.S)
+
+
+def _prose(body: str) -> str:
+    """Rendered prose only: no code blocks, comments or HTML blocks, no quotes,
+    and every inline code span collapsed to the word `code`, so an example
+    span (even one wrapping onto its own line) cannot start a line. A span that
+    is only a commit SHA keeps its text, so `fixed in `abc1234`` still reads."""
+    def span(m: re.Match[str]) -> str:
+        inner = m.group(2).strip()
+        return inner if re.fullmatch(r"[0-9a-f]{7,40}", inner, re.I) else "code"
+    return _CODE_SPAN.sub(span, _unquoted(_rendered_markdown(body or "")))
+
+
 def p2_threads_closed(pr: dict[str, Any]) -> list[str]:
     failures: list[str] = []
     for i, thread in enumerate(pr.get("reviewThreads", {}).get("nodes") or [], 1):
@@ -596,7 +727,7 @@ def p2_threads_closed(pr: dict[str, Any]) -> list[str]:
         if not P2_ROOT.search(root):
             continue
         replies = comments[1:]
-        if any(CLOSING.search(c.get("body") or "") for c in replies):
+        if any(CLOSING.search(_prose(c.get("body") or "")) for c in replies):
             continue
         failures.append(
             f"P2 thread #{i} has no closing reply (Notion link / fixed in <sha> / not-a-finding:)"
@@ -608,7 +739,8 @@ def evaluate(pr: dict[str, Any]) -> list[str]:
     reasons: list[str] = []
     body = pr.get("body") or ""
     head = pr.get("headRefOid") or ""
-    if not REVIEW_SECTION.search(body):
+    # Rendered view: a heading inside a comment or fence is not visible.
+    if not REVIEW_SECTION.search(_rendered_markdown(body)):
         reasons.append("PR body missing ## Review section")
     if not (
         codex_done_on_head(pr)
