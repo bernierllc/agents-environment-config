@@ -102,7 +102,9 @@ the default branch alone:
 | main | legacy on `main` | yes | one, see "Bootstrap for a repo whose main ruleset already requires the context" |
 | staging | legacy (`pull_request`) | yes | one, on the scripts promotion |
 | staging | legacy (`pull_request`) | no | none: follow "Waiver-free variant when `main` does not require the context" (delete the legacy file first), not the waiver order |
-| staging | canonical (`pull_request_target`) | either | none |
+| staging | canonical (`pull_request_target`), `main` already has the scripts | either | none |
+| staging | canonical (`pull_request_target`), `main` lacks the scripts | no | none: the guard check is red ("guard script missing on base") on the scripts promotion but is not required; note it on the PR |
+| staging | canonical (`pull_request_target`), `main` lacks the scripts | yes | one, of the guard check itself: it cannot pass until the scripts are on `main`, see "Canonical workflow already on staging, scripts missing on main" |
 
 Which downstream repo falls in which row is tracked outside this product repo.
 
@@ -175,6 +177,21 @@ The order:
 5. Flip the required check to the guard name only after a green canonical run.
 
 A repo that already runs the canonical workflow starts at the promotion step and needs no waiver.
+
+#### Canonical workflow already on staging, scripts missing on main
+
+This is the combined-rollout failure above reached by another route: with `staging` as the default branch the
+canonical workflow runs on every main-targeted PR, checks out `main`, and fails on the missing scripts. Fourth
+fact to read before choosing a row: whether `main` has `scripts/check-main-source.sh` and
+`scripts/check-forged-gate-names.py` (`gh api "repos/<repo>/contents/scripts?ref=main" --jq '.[].name'`).
+No order fixes it, because the scripts can only reach `main` through a promotion the guard then judges:
+
+- `main` does not require the guard context: the scripts promotion carries a red, non-required guard check. Merge it
+  with that stated on the PR; the next promotion is green.
+- `main` requires it: the owner waives the guard check once, on the scripts promotion only, with the same
+  record-on-the-PR rule as the scan waiver (a directive or a cop never waives). The next promotion must pass with no
+  waiver. Do not delete the canonical workflow to dodge it: with the publisher gone the required context never
+  appears and the promotion is blocked anyway.
 
 #### Waiver-free variant when `main` does not require the context
 
