@@ -59,6 +59,14 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
    a state-less vendored fork is classified `to_install` by `resolve_install_graph`; the gate sees that destination
    too. `yes=True` means "no prompt", never "skip provenance": a non-canonical, unknown, modified or forked
    destination is reported and left untouched unless the caller passes an explicit overwrite/adopt confirmation.
+   **Preflight before any delete, mirroring `check_install_paths`.** The gate is a function
+   (`check_install_provenance`, beside `check_install_paths` in `aec/lib/filesystem.py`) that `place_installed_item`
+   always runs before it deletes anything, and that every caller which deletes something of its own first runs
+   too, ahead of those deletions. `migrate_item_to_global` (`aec/lib/global_install_prompt.py`) removes every
+   per-repo copy and its manifest rows before it reaches `place_installed_item`; it must call the preflight for the
+   global destination (and `replaces`) before that loop, so a refusal loses nothing, exactly as the existing
+   `check_install_paths` call there already guarantees for path escapes. The same applies to any other caller that
+   removes or rewrites state before placing; the per-caller enumeration records which ones do.
    The gate only applies when the destination exists and is not already an AEC-tracked install (a normal
    re-install over a tracked copy keeps its current behaviour); the first implementation step is to enumerate every
    `place_installed_item` caller and state, per caller, whether its destination can be a vendored copy.
@@ -91,13 +99,16 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
   state-less vendored fork (classified `to_install`): the dependency write is gated, the fork is reported and
   left untouched, and the same for a dependency upgrade path in `aec/commands/upgrade.py`. A test enumerates every
   `place_installed_item` caller (including `global_install_prompt.py`) so a caller added later must pass it.
+- Global migration collision: the global destination already holds a state-less vendored fork and per-repo copies
+  of the same skill exist. The provenance refusal happens before the per-repo copies are deleted: every per-repo
+  copy, the manifest rows and the fork are all unchanged afterwards, and the refusal is reported.
 - A repo with no vendored copies: unchanged output.
 - `doctor` exits non-zero and names the fix when a vendored copy is stale.
 
 ## Affected surfaces
 
 `aec/commands/update.py`, `aec/commands/outdated.py`, `aec/commands/upgrade.py`,
-`aec/lib/filesystem.py` (`place_installed_item`, the gate), `aec/commands/install_cmd.py` (`_install_single_item`),
+`aec/lib/filesystem.py` (`place_installed_item` and the `check_install_provenance` preflight, the gate), `aec/commands/install_cmd.py` (`_install_single_item`),
 `aec/lib/global_install_prompt.py`, `aec/lib/apply_core.py`,
 `aec/lib/catalog_hashes.py`, `aec/lib/skills_manifest.py`, the release/catalog generation step, `aec/commands/run_doctor.py`
 (or its equivalent), docs for `outdated` / `upgrade`.
