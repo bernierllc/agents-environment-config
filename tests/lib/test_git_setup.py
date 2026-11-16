@@ -123,6 +123,53 @@ class TestRenderedGitEssentials:
         write_git_essential(tmp_path, "license", "github", TEMPLATES, ctx)
         assert "Bernier LLC" in (tmp_path / "LICENSE").read_text()
 
+    def test_license_kind_defaults_to_mit(self, tmp_path):
+        from aec.lib.git_setup import default_git_context, write_git_essential
+        _git_repo(tmp_path)
+        write_git_essential(tmp_path, "license", "github", TEMPLATES, default_git_context(tmp_path))
+        assert "Permission is hereby granted" in (tmp_path / "LICENSE").read_text()
+
+    def test_proprietary_license_is_all_rights_reserved_and_never_mit(self, tmp_path):
+        from datetime import date
+        from aec.lib.git_setup import default_git_context, write_git_essential
+        _git_repo(tmp_path)
+        ctx = default_git_context(tmp_path, copyright_holder="Acme Corp", license_kind="proprietary")
+        write_git_essential(tmp_path, "license", "github", TEMPLATES, ctx)
+        text = (tmp_path / "LICENSE").read_text()
+        assert text.startswith(f"Copyright (c) {date.today().year} Acme Corp. All rights reserved.\n")
+        assert "No license or other right to use" in text
+        assert "Permission is hereby granted" not in text and "MIT" not in text
+        assert "{{" not in text
+
+    def test_proprietary_license_matches_canonical_text_byte_for_byte(self, tmp_path):
+        from datetime import date
+        from aec.lib.git_setup import default_git_context, write_git_essential
+        _git_repo(tmp_path)
+        ctx = default_git_context(tmp_path, copyright_holder="Acme Corp", license_kind="proprietary")
+        write_git_essential(tmp_path, "license", "github", TEMPLATES, ctx)
+        assert (tmp_path / "LICENSE").read_text() == (
+            f"Copyright (c) {date.today().year} Acme Corp. All rights reserved.\n\n"
+            "This software and its source code are proprietary and confidential to\n"
+            "Acme Corp. No license or other right to use, copy, modify, merge, publish,\n"
+            "distribute, sublicense or sell this software, in whole or in part, is\n"
+            "granted except by prior written agreement with Acme Corp.\n"
+        )
+
+    def test_proprietary_holder_ending_in_period_is_not_doubled(self, tmp_path):
+        from aec.lib.git_setup import default_git_context, write_git_essential
+        _git_repo(tmp_path)
+        ctx = default_git_context(tmp_path, copyright_holder="Acme, Inc.", license_kind="proprietary")
+        write_git_essential(tmp_path, "license", "github", TEMPLATES, ctx)
+        text = (tmp_path / "LICENSE").read_text()
+        assert "Acme, Inc. All rights reserved." in text and ".." not in text
+
+    def test_license_kind_never_changes_where_license_is_written(self, tmp_path):
+        from aec.lib.git_setup import default_git_context, write_git_essential
+        _git_repo(tmp_path)
+        ctx = default_git_context(tmp_path, license_kind="proprietary")
+        assert write_git_essential(tmp_path, "license", "github", TEMPLATES, ctx)
+        assert sorted(f.name for f in tmp_path.glob("LICENSE*")) == ["LICENSE"]
+
     def test_readme_title_is_project_name(self, tmp_path):
         from aec.lib.git_setup import write_git_essential
         project = tmp_path / "my-api"

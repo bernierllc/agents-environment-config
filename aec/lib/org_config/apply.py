@@ -12,6 +12,7 @@ module holds the category appliers.
 """
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +20,7 @@ from typing import Callable, Optional
 
 from .effective import EffectivePolicy, effective_policy
 from .errors import OrgApplyCommittedError, OrgConfigError
+from .paths import OrgPaths
 from .schema import RESERVED_SOURCE_IDS, source_identity
 
 _CI_PREFIX = "configurable_instructions."
@@ -62,11 +64,58 @@ def apply_preferences(policy: EffectivePolicy) -> list[str]:
     return applied
 
 
-def apply_prompts(policy: EffectivePolicy) -> None:
-    """Register the policy's prompt answers so the prompt() seam pre-answers."""
+def apply_prompts(policy: EffectivePolicy, paths: Optional[OrgPaths] = None) -> None:
+    """Register the policy's prompt answers so the prompt() seam pre-answers.
+
+    With ``paths`` (the real ``aec org apply``), also persist exactly these answers as
+    the approved set that later commands load. Only this function writes that file, so
+    enrolling, refreshing or re-enrolling a config can never change what is trusted.
+    """
+    from ..atomic_write import atomic_write_text
+    from ..prompts import set_overlay_answers
+    from .discovery import discover_enrolled_orgs
+
+    answers = dict(policy.prompts)
+    set_overlay_answers(answers)
+    if paths is not None:
+        # Only orgs that supplied answers: unenrolling an org with none must not drop the rest.
+        org_ids = sorted(e.config.org_id for e in discover_enrolled_orgs(paths) if e.config.install_prompts)
+        # Fail closed: drop the previous approval first so a failed write cannot leave stale answers loading.
+        paths.approved_prompts.unlink(missing_ok=True)
+        atomic_write_text(paths.approved_prompts, json.dumps({"org_ids": org_ids, "answers": answers}, indent=2))
+
+
+def revoke_approved_prompts(paths: OrgPaths, org_id: str) -> None:
+    """Drop the approved answers when a contributing org is removed (`aec org remove`).
+
+    The snapshot merges every contributor's answers, so one org's share cannot be
+    subtracted: it is deleted and the next `aec org apply` approves what remains. This
+    stops a later org with the same id from inheriting the removed org's approval.
+    """
+    if not paths.approved_prompts.exists():
+        return
+    if org_id in json.loads(paths.approved_prompts.read_text())["org_ids"]:
+        paths.approved_prompts.unlink()
+
+
+def load_enrolled_prompt_answers(paths: OrgPaths) -> int:
+    """Pre-answer prompts from the answers a person approved with ``aec org apply``.
+
+    ``set_overlay_answers`` only lives for one process, so every command other than
+    ``aec org apply`` (``aec repo setup``) calls this at startup. Returns the count loaded.
+
+    Reads only the approved-answers file, never the enrolled configs. The answers are
+    dropped when any org that contributed to them has since been unenrolled.
+    """
     from ..prompts import set_overlay_answers
 
-    set_overlay_answers(dict(policy.prompts))
+    if not paths.approved_prompts.exists():
+        return 0
+    approved = json.loads(paths.approved_prompts.read_text())
+    if not all(paths.config_for(org_id).exists() for org_id in approved["org_ids"]):
+        return 0
+    set_overlay_answers(approved["answers"])
+    return len(approved["answers"])
 
 
 _INSTALL_STANCES = frozenset({"required", "recommended", "pinned"})
@@ -522,7 +571,7 @@ def _apply_committed(paths, policy: EffectivePolicy, scope: str, plan, synced: l
     prefs_applied: list[str] = []
     try:
         prefs_applied = apply_preferences(policy)
-        apply_prompts(policy)
+        apply_prompts(policy, paths)
     except (Exception, SystemExit) as exc:  # same per-item catch as uninstalls: recorded, never raised past the stamp
         errors.append(("preferences", _failure(exc)))
     result = execute_apply(

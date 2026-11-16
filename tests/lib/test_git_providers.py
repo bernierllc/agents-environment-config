@@ -34,10 +34,9 @@ class TestGitProvidersRegistry:
         missing = []
         for pkey, provider in GIT_PROVIDERS.items():
             for ekey, essential in provider["essentials"].items():
-                tpl = essential["template"]
-                if tpl is not None:
-                    path = templates_dir / tpl
-                    if not path.exists():
+                tpls = [essential["template"], *essential.get("variants", {}).values()]
+                for tpl in tpls:
+                    if tpl is not None and not (templates_dir / tpl).exists():
                         missing.append(f"{pkey}.{ekey}: {tpl}")
         assert not missing, f"Missing template files: {missing}"
 

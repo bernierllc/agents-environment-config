@@ -34,6 +34,11 @@ class OrgPaths:
         return self.aec_dir / "conflict-resolutions.history.json"
 
     @property
+    def approved_prompts(self) -> Path:
+        """Prompt answers approved by `aec org apply`; the only prompt answers other commands trust."""
+        return self.aec_dir / "approved-prompts.json"
+
+    @property
     def trusted_orgs(self) -> Path:
         return self.aec_dir / "trusted-orgs.json"
 

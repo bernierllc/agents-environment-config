@@ -54,3 +54,145 @@ def test_clear_restores_input(monkeypatch):
     prompts.clear_overlay_answers()
     monkeypatch.setattr("builtins.input", lambda _t: "typed")
     assert prompts.prompt("x", "Q? ") == "typed"
+
+
+def _enroll(tmp_path):
+    """Enroll `my-org` (prompt answer repo.git.license_kind) without applying it."""
+    from aec.lib.org_config import OrgPaths
+
+    paths = OrgPaths(home_dir=tmp_path)
+    paths.orgs_dir.mkdir(parents=True)
+    paths.config_for("my-org").write_text(
+        "---\n"
+        'schema_version: "1.0"\n'
+        "org_id: my-org\n"
+        "org_name: my-org\n"
+        'config_version: "1.0.0"\n'
+        "trust:\n"
+        '  mode: "unsigned"\n'
+        "---\n\n"
+        "install:\n"
+        "  prompts:\n"
+        "    repo.git.license_kind: proprietary\n"
+    )
+    return paths
+
+
+def _approve(paths, answers):
+    """What `aec org apply` does with the merged policy's prompt answers."""
+    from aec.lib.org_config.apply import apply_prompts
+    from aec.lib.org_config.effective import EffectivePolicy
+
+    apply_prompts(
+        EffectivePolicy(
+            items={}, preferences={}, prompts=answers, default_sources={},
+            custom_sources=[], install_mode=None, held=(),
+        ),
+        paths,
+    )
+    prompts.clear_overlay_answers()  # a later command starts with nothing loaded
+
+
+def _ask_license_kind(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _t: "mit")
+    return prompts.prompt("repo.git.license_kind", "Q? ", type="enum", choices=["mit", "proprietary"])
+
+
+def test_approved_org_prompt_answers_load_in_a_fresh_process(tmp_path, monkeypatch):
+    """`aec org apply` approves the answers; a later command must still see them."""
+    from aec.lib.org_config.apply import load_enrolled_prompt_answers
+
+    paths = _enroll(tmp_path)
+    _approve(paths, {"repo.git.license_kind": "proprietary"})
+    assert load_enrolled_prompt_answers(paths) == 1
+    assert _ask_license_kind(monkeypatch) == "proprietary"
+
+
+def test_enrolled_but_never_applied_org_answers_are_not_loaded(tmp_path, monkeypatch):
+    from aec.lib.org_config.apply import load_enrolled_prompt_answers
+
+    paths = _enroll(tmp_path)
+    assert load_enrolled_prompt_answers(paths) == 0
+    assert _ask_license_kind(monkeypatch) == "mit"
+
+
+def test_re_enrolling_or_editing_a_config_never_changes_approved_answers(tmp_path, monkeypatch):
+    """Only `aec org apply` writes the approved file, so a rewritten config cannot widen it."""
+    from aec.lib.org_config.apply import load_enrolled_prompt_answers
+
+    paths = _enroll(tmp_path)
+    _approve(paths, {"repo.git.license_kind": "mit"})
+    paths.config_for("my-org").write_text(paths.config_for("my-org").read_text())  # re-enroll rewrite
+    assert load_enrolled_prompt_answers(paths) == 1
+    assert _ask_license_kind(monkeypatch) == "mit"  # the approved value, not the config's "proprietary"
+
+
+def test_answers_are_dropped_when_a_contributing_org_is_unenrolled(tmp_path, monkeypatch):
+    from aec.lib.org_config.apply import load_enrolled_prompt_answers
+
+    paths = _enroll(tmp_path)
+    _approve(paths, {"repo.git.license_kind": "proprietary"})
+    paths.config_for("my-org").unlink()
+    assert load_enrolled_prompt_answers(paths) == 0
+    assert _ask_license_kind(monkeypatch) == "mit"
+
+
+def test_unenrolling_an_org_that_gave_no_answers_keeps_the_approved_answers(tmp_path, monkeypatch):
+    from aec.lib.org_config.apply import load_enrolled_prompt_answers
+
+    paths = _enroll(tmp_path)  # my-org supplies repo.git.license_kind
+    other = paths.config_for("other-org")
+    other.write_text(
+        paths.config_for("my-org").read_text()
+        .replace("my-org", "other-org")
+        .replace("    repo.git.license_kind: proprietary\n", "")
+        .replace("  prompts:\n", "  mode: guided\n")
+    )
+    _approve(paths, {"repo.git.license_kind": "proprietary"})
+    other.unlink()
+    assert load_enrolled_prompt_answers(paths) == 1
+    assert _ask_license_kind(monkeypatch) == "proprietary"
+
+
+def test_failed_snapshot_write_leaves_no_stale_approval(tmp_path, monkeypatch):
+    """A new apply that cannot persist must not leave the previous answers loading."""
+    from aec.lib import atomic_write
+    from aec.lib.org_config.apply import load_enrolled_prompt_answers
+
+    paths = _enroll(tmp_path)
+    _approve(paths, {"repo.git.license_kind": "proprietary"})
+
+    def unwritable(*_a, **_k):
+        raise OSError("read-only")
+
+    monkeypatch.setattr(atomic_write, "atomic_write_text", unwritable)
+    with pytest.raises(OSError):
+        _approve(paths, {"repo.git.license_kind": "mit"})
+    assert load_enrolled_prompt_answers(paths) == 0
+    assert _ask_license_kind(monkeypatch) == "mit"
+
+
+def test_no_enrolled_orgs_loads_nothing(tmp_path):
+    from aec.lib.org_config import OrgPaths
+    from aec.lib.org_config.apply import load_enrolled_prompt_answers
+
+    assert load_enrolled_prompt_answers(OrgPaths(home_dir=tmp_path)) == 0
+
+
+def test_cli_startup_loads_org_answers_and_survives_a_broken_org_config(monkeypatch):
+    from aec import cli
+    from aec.lib.org_config import apply
+
+    calls = []
+    monkeypatch.setattr(apply, "load_enrolled_prompt_answers", lambda paths: calls.append(paths) or 1)
+    cli._load_org_prompt_answers()
+    assert len(calls) == 1
+
+    def broken(_paths):
+        raise ValueError("bad org config")
+
+    warnings = []
+    monkeypatch.setattr(apply, "load_enrolled_prompt_answers", broken)
+    monkeypatch.setattr(cli.Console, "warning", lambda msg: warnings.append(msg))
+    cli._load_org_prompt_answers()  # must not raise
+    assert "bad org config" in warnings[0]

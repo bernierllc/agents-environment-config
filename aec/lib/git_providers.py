@@ -45,7 +45,9 @@ GIT_PROVIDERS: Dict[str, Dict[str, Any]] = {
             "license": {
                 "display": "LICENSE file",
                 "check": lambda d: any(d.glob("LICENSE*")),
-                "template": "github/LICENSE",
+                "template": "github/LICENSE",  # the default kind, "mit"
+                # Other kinds, chosen by the context's ``license_kind``; all write ``LICENSE``.
+                "variants": {"proprietary": "github/LICENSE.proprietary"},
             },
             "editorconfig": {
                 "display": ".editorconfig",

@@ -151,6 +151,23 @@ The runtime list of accepted keys lives in [`aec/lib/org_config/allow_lists.py`]
 
 Pre-answer interactive prompts. Same closed-allow-list pattern; see `PROMPTS_ALLOW_LIST` in [`allow_lists.py`](../../aec/lib/org_config/allow_lists.py).
 
+### LICENSE kind and holder
+
+`aec repo setup` generates a `LICENSE` file. By default it writes the MIT license, with the git user as holder. An org that keeps its code proprietary can pre-answer both prompts so every repo set up on an enrolled machine gets all-rights-reserved text instead:
+
+```yaml
+install:
+  prompts:
+    repo.git.license_kind: proprietary   # mit (default) | proprietary
+    repo.git.license_holder: "My Company, Inc."
+```
+
+`proprietary` writes `Copyright (c) <year> <holder>. All rights reserved.` followed by a paragraph granting no license except by written agreement. Existing `LICENSE*` files are never replaced.
+
+Prompt answers take effect only after the user approves the org policy with `aec org apply`, which records exactly those answers in `~/.aec/approved-prompts.json`. Enrolling, refreshing or re-enrolling a config never changes them, and `aec org remove` of a contributing org revokes them until the next `aec org apply`.
+
+Overlay answers apply to every repo set up on the machine, not per owner, so use this only when every repo your users set up with AEC belongs to the org.
+
 ## install.agents
 
 ```yaml

@@ -27,7 +27,7 @@ from ..lib.org_config import (
 )
 from ..lib.org_config import git_source
 from ..lib.atomic_write import atomic_write_text
-from ..lib.org_config.apply import apply_org_policy
+from ..lib.org_config.apply import apply_org_policy, revoke_approved_prompts
 from ..lib.org_config.errors import OrgApplyCommittedError
 from ..lib.org_config.crypto import decode_pubkey, fingerprint
 from ..lib.org_config.discovery import migrate_state
@@ -810,6 +810,8 @@ def remove_cmd(
             typer.echo("aborted")
             raise typer.Exit(code=1)
 
+    # Revoke first: if it fails the org stays enrolled, so `aec org remove` can be retried.
+    revoke_approved_prompts(paths, org_id)
     for p in (cfg_path, state_path, lock_path):
         try:
             if p.exists():

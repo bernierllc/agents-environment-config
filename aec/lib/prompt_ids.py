@@ -45,6 +45,10 @@ INSTALL_CLAUDE_STATUSLINE = "install.claude.statusline"
 # Setup (setup.py)
 SETUP_TRACK_CURRENT_REPO = "setup.track_current_repo"
 
+# Repo setup (repo.py): the generated LICENSE. An org states which kind and whose name.
+REPO_GIT_LICENSE_KIND = "repo.git.license_kind"
+REPO_GIT_LICENSE_HOLDER = "repo.git.license_holder"
+
 
 # --- Dynamic prompt-ID prefixes ---------------------------------------------
 #
@@ -90,6 +94,8 @@ ALL_STATIC_PROMPT_IDS: tuple[str, ...] = (
     INSTALL_QUALITY_REPORT_RETENTION_DAYS,
     INSTALL_CLAUDE_STATUSLINE,
     SETUP_TRACK_CURRENT_REPO,
+    REPO_GIT_LICENSE_KIND,
+    REPO_GIT_LICENSE_HOLDER,
 )
 
 # Prefixes for dynamic prompt families.
