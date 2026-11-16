@@ -810,6 +810,8 @@ def remove_cmd(
             typer.echo("aborted")
             raise typer.Exit(code=1)
 
+    # Revoke first: if it fails the org stays enrolled, so `aec org remove` can be retried.
+    revoke_approved_prompts(paths, org_id)
     for p in (cfg_path, state_path, lock_path):
         try:
             if p.exists():
@@ -817,7 +819,6 @@ def remove_cmd(
         except OSError as exc:
             typer.echo(f"warning: could not remove {p}: {exc}", err=True)
     shutil.rmtree(paths.org_dir_for(org_id), ignore_errors=True)  # git clone + staged review
-    revoke_approved_prompts(paths, org_id)
 
     typer.echo(f"removed org '{org_id}'")
 

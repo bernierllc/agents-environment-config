@@ -83,6 +83,23 @@ def test_org_remove_revokes_approved_prompt_answers(tmp_path: Path):
     assert load_enrolled_prompt_answers(paths) == 0
 
 
+def test_org_remove_keeps_enrollment_when_revocation_fails(tmp_path: Path, monkeypatch):
+    """If revoking the approval fails the org must stay enrolled so the remove can be retried."""
+    from aec.commands import org as org_cmd
+
+    cfg = FIXTURES / "valid-minimal.yaml"
+    _run(["org", "enroll", str(cfg), "--allow-unsigned", "--yes"], tmp_path)
+
+    def failing_revoke(*_a, **_k):
+        raise OSError("cannot unlink")
+
+    monkeypatch.setattr(org_cmd, "revoke_approved_prompts", failing_revoke)
+    result = _run(["org", "remove", "minimal", "--yes"], tmp_path)
+
+    assert result.exit_code != 0
+    assert (tmp_path / ".aec" / "orgs" / "minimal.yaml").exists()
+
+
 def test_org_enroll_rejects_non_https_url(tmp_path: Path):
     # https URL enrollment is supported (see test_org_enroll_url.py); plaintext
     # http is refused before any network access.

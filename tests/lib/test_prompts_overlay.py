@@ -154,6 +154,24 @@ def test_unenrolling_an_org_that_gave_no_answers_keeps_the_approved_answers(tmp_
     assert _ask_license_kind(monkeypatch) == "proprietary"
 
 
+def test_failed_snapshot_write_leaves_no_stale_approval(tmp_path, monkeypatch):
+    """A new apply that cannot persist must not leave the previous answers loading."""
+    from aec.lib import atomic_write
+    from aec.lib.org_config.apply import load_enrolled_prompt_answers
+
+    paths = _enroll(tmp_path)
+    _approve(paths, {"repo.git.license_kind": "proprietary"})
+
+    def unwritable(*_a, **_k):
+        raise OSError("read-only")
+
+    monkeypatch.setattr(atomic_write, "atomic_write_text", unwritable)
+    with pytest.raises(OSError):
+        _approve(paths, {"repo.git.license_kind": "mit"})
+    assert load_enrolled_prompt_answers(paths) == 0
+    assert _ask_license_kind(monkeypatch) == "mit"
+
+
 def test_no_enrolled_orgs_loads_nothing(tmp_path):
     from aec.lib.org_config import OrgPaths
     from aec.lib.org_config.apply import load_enrolled_prompt_answers
