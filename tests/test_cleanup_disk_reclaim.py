@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
+
+import pytest
 
 from tests.test_cleanup_hung_processes_script import _helper_prelude
 
@@ -26,6 +29,7 @@ def _mkdir(p: Path, old: bool) -> Path:
     return p
 
 
+@pytest.mark.skipif(shutil.which("lsof") is None, reason="pruning is skipped without lsof")
 def test_updater_staging_removes_old_entries_and_keeps_newest(tmp_path):
     staging = tmp_path / "com.example.app.ShipIt"
     older = _mkdir(staging / "update.AAA", old=True)
@@ -46,6 +50,7 @@ def test_updater_staging_keeps_recent_entries(tmp_path):
     assert a.exists() and b.exists()
 
 
+@pytest.mark.skipif(shutil.which("lsof") is None, reason="needs lsof to see the open file")
 def test_updater_staging_keeps_an_old_entry_a_process_has_open(tmp_path):
     staging = tmp_path / "Installation"
     held = _mkdir(staging / "a", old=True)
