@@ -7,10 +7,12 @@ workflows in its own head. So a PR can add a job named exactly like a required c
 
 A legitimate result for a protected name is either published through the Checks API (its
 details_url is `.../runs/<id>`, no `/actions/`) or comes from one pinned trusted workflow
-(path + event) whose PR targets a protected base branch: `pull_request_target` runs the workflow file from
-the base branch, so a stacked PR whose base is the outer PR's (unprotected, contributor-controlled)
-branch can run a rewritten copy of the trusted file. Any other Actions-job check run bearing a protected
-name is forged.
+(path + event) whose PR targets a trusted base branch: `pull_request_target` runs the workflow file from
+the base branch, so a stacked PR whose base is the outer PR's (contributor-controlled) branch can run a
+rewritten copy of the trusted file. Trusted bases are the repo's default branch plus the comma-separated
+TRUSTED_BASE_BRANCHES env var (for example `staging`); GitHub's `protected` flag is not used, because a
+wildcard rule can cover branches a collaborator may still create. Any other Actions-job check run bearing
+a protected name is forged.
 
 This is DETECTION, not prevention: the forged success still sits beside our result. The
 unforgeable fix is a required workflow or a distinct publisher app (plan `plans/2026-11-16-unforgeable-required-checks.md` in the aec repo; copies of this
@@ -31,19 +33,20 @@ not seen by it, so whoever merges runs this again immediately before the merge.
 
 Usage (filter=all: the default lists only the latest run per name and can hide an earlier same-name one):
   set -o pipefail; gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" --paginate | \
-    REPO=$REPO python3 scripts/check-forged-gate-names.py
+    REPO=$REPO TRUSTED_BASE_BRANCHES=staging python3 scripts/check-forged-gate-names.py
+(TRUSTED_BASE_BRANCHES lists the owner-controlled integration branches besides the default branch.)
 `pipefail` is required: a failed or truncated listing must not reach this script as empty input.
 Exit 0: none forged. Exit 1: forged names listed on stderr. Exit 2: could not evaluate (fails closed).
 """
+import functools
 import json
 import os
 import re
 import subprocess
 import sys
-import urllib.parse
 
 # name -> allowed (workflow path, event) pairs for an Actions-job check run bearing that name. A run
-# from an allowed pair must also target a protected base branch (see forged()).
+# from an allowed pair must also target a trusted base branch (see forged()).
 # An empty set means no Actions job may use the name: only the Checks API publishes it.
 PROTECTED = {
     "PRs into main must come from staging": set(),
@@ -64,11 +67,11 @@ def job_run_id(check_run):
 def forged(check_runs, run_lookup, protected=None):
     """Names/ids of check runs created by an untrusted Actions job under a protected name.
 
-    run_lookup(run_id) -> (workflow path, event, base_protected); it may raise, which propagates
+    run_lookup(run_id) -> (workflow path, event, base_trusted); it may raise, which propagates
     (fail closed). A trusted (path, event) pair names a workflow file, but a `pull_request_target` run
-    executes the file from the PR's BASE branch. When that base is not protected (a stacked PR whose
-    base is the outer PR's branch) the file is contributor-controlled, so the pair proves nothing:
-    base_protected must also be true.
+    executes the file from the PR's BASE branch. When that base is not an owner-trusted branch (a
+    stacked PR whose base is the outer PR's branch) the file is contributor-controlled, so the pair
+    proves nothing: base_trusted must also be true.
     """
     protected = PROTECTED if protected is None else protected
     found = []
@@ -79,13 +82,16 @@ def forged(check_runs, run_lookup, protected=None):
         run_id = job_run_id(check_run)
         if run_id is None:
             continue
-        path, event, base_protected = run_lookup(run_id)
-        if (path, event) not in protected[name] or not base_protected:
+        path, event, base_trusted = run_lookup(run_id)
+        if (path, event) not in protected[name] or not base_trusted:
             found.append((name, check_run.get("html_url") or run_id))
     return found
 
 
-def _gh_run_lookup(repo):
+def _gh_run_lookup(repo, trusted_bases):
+    """trusted_bases() is called only once a run needs judging, so a page with no Actions-job
+    check run under a protected name makes no `gh` call at all."""
+
     def lookup(run_id):
         out = subprocess.run(
             ["gh", "api", f"repos/{repo}/actions/runs/{run_id}", "--jq",
@@ -94,19 +100,26 @@ def _gh_run_lookup(repo):
         ).stdout.rstrip("\n")  # not strip(): an empty last field leaves a trailing tab that must stay
         path, event, bases = out.split("\t")
         # Required/reusable workflow runs report `path@ref`; compare the file path only.
-        # A run with no PR (empty list) has no base to vouch for it: not protected.
+        # A run with no PR (empty list) has no base to vouch for it: not trusted.
         base_refs = [ref for ref in bases.split(",") if ref]
-        return path.split("@", 1)[0], event, bool(base_refs) and all(_branch_protected(repo, ref) for ref in base_refs)
+        return path.split("@", 1)[0], event, bool(base_refs) and all(ref in trusted_bases() for ref in base_refs)
 
     return lookup
 
 
-def _branch_protected(repo, branch):
-    out = subprocess.run(
-        ["gh", "api", f"repos/{repo}/branches/{urllib.parse.quote(branch, safe='')}", "--jq", ".protected"],
-        capture_output=True, text=True, check=True,
+def trusted_base_branches(repo):
+    """The default branch plus the owner-listed TRUSTED_BASE_BRANCHES (comma separated).
+
+    Not GitHub's `protected` flag: a wildcard protection rule can cover branches a collaborator is
+    still allowed to create, so it does not prove the branch content is owner-controlled.
+    """
+    default = subprocess.run(
+        ["gh", "api", f"repos/{repo}", "--jq", ".default_branch"], capture_output=True, text=True, check=True,
     ).stdout.strip()
-    return out == "true"
+    if not default:
+        raise ValueError("could not read the default branch")
+    listed = os.environ.get("TRUSTED_BASE_BRANCHES", "")
+    return {default, *(branch.strip() for branch in listed.split(",") if branch.strip())}
 
 
 def _load_check_runs(text):
@@ -138,7 +151,7 @@ def main():
         print("::error::REPO is required", file=sys.stderr)
         return 2
     try:
-        bad = forged(_load_check_runs(sys.stdin.read()), _gh_run_lookup(repo))
+        bad = forged(_load_check_runs(sys.stdin.read()), _gh_run_lookup(repo, functools.cache(lambda: trusted_base_branches(repo))))
     except (ValueError, KeyError, TypeError, subprocess.CalledProcessError) as exc:
         print(f"::error::could not evaluate check runs, failing closed: {exc}", file=sys.stderr)
         return 2

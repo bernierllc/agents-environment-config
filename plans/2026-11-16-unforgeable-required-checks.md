@@ -256,8 +256,10 @@ always has check runs by merge time; an empty set is not "no forgery". Callers s
   commit is not the hole. The hole is the workflow FILE: a `pull_request_target` run executes the file from the PR's
   base branch, and a stacked child's base is the outer PR's branch, which its author can rewrite. A pair names a
   file, not the content that ran. Fix (done in the S6 PR): the trusted pair counts only when every PR the run
-  belongs to targets a protected base branch (`gh api repos/<repo>/branches/<name>` `.protected`); a run with no PR
-  has no base and is flagged. Two rejected designs: excluding only the caller's own run id (one commit carries
+  belongs to targets an owner-trusted base branch: the repo's default branch plus the comma-separated
+  `TRUSTED_BASE_BRANCHES` env var (aec's integration branch is `staging`, so its callers set it); a run with no PR
+  has no base and is flagged. GitHub's `protected` flag is not used (Codex P1): it aggregates wildcard rules that can
+  cover branches a collaborator may still create. Two rejected designs: excluding only the caller's own run id (one commit carries
   several legitimate `Review Gate` jobs from reruns, so every merge-time scan would flag the others) and requiring
   the run's `head_sha` to equal the check run's (empirically always true, so it pins nothing). Owned by the aec
   thread; the claude-skills re-vendor follows as a separate PR. Note from the claude-skills

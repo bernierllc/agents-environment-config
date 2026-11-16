@@ -16,7 +16,7 @@ spec.loader.exec_module(mod)
 REPO = "https://github.com/my-org/my-repo"
 GUARD = "PRs into main must come from staging"
 TRUSTED_GATE = (".github/workflows/review-gate.yml", "pull_request_target")
-PROTECTED_BASE = True  # the run's PR targets a protected branch (main, staging)
+PROTECTED_BASE = True  # the run's PR targets an owner-trusted branch (the default branch, a listed one)
 UNPROTECTED_BASE = False  # a stacked PR: base is the outer PR's contributor-controlled branch
 
 
@@ -130,40 +130,56 @@ def test_cli_passes_a_page_whose_protected_name_came_from_the_checks_api():
     assert _cli(json.dumps({"check_runs": [api_run(GUARD)]})).returncode == 0
 
 
-def _fake_gh(monkeypatch, run_tsv, protected_branches):
-    """Stand in for `gh api`: the run listing, and branches/<name> protection."""
-    calls = []
+def _fake_gh(monkeypatch, run_tsv="", default_branch="main\n"):
+    """Stand in for `gh api`: the workflow-run listing and the repo's default branch."""
 
     def fake(cmd, **kwargs):
-        calls.append(cmd[2])
-
         class Done:
-            stdout = run_tsv if "/actions/runs/" in cmd[2] else (
-                "true\n" if cmd[2].rsplit("/", 1)[1] in protected_branches else "false\n"
-            )
+            stdout = run_tsv if "/actions/runs/" in cmd[2] else default_branch
 
         return Done()
 
     monkeypatch.setattr(mod.subprocess, "run", fake)
-    return calls
+
+
+TRUSTED = {"main", "staging"}
 
 
 def test_workflow_run_path_with_a_ref_suffix_is_normalized(monkeypatch):
-    _fake_gh(monkeypatch, ".github/workflows/review-gate.yml@refs/heads/main\tpull_request_target\tstaging\n", {"staging"})
-    looked_up = mod._gh_run_lookup("my-org/my-repo")("890")
+    _fake_gh(monkeypatch, ".github/workflows/review-gate.yml@refs/heads/main\tpull_request_target\tstaging\n")
+    looked_up = mod._gh_run_lookup("my-org/my-repo", lambda: TRUSTED)("890")
     assert looked_up == (*TRUSTED_GATE, True)
     assert mod.forged([job_run("Review Gate", "890")], lambda _: looked_up) == []
 
 
-def test_a_stacked_run_base_is_looked_up_url_encoded_and_is_unprotected(monkeypatch):
-    calls = _fake_gh(monkeypatch, f"{TRUSTED_GATE[0]}\tpull_request_target\tfeat/outer\n", {"staging"})
-    assert mod._gh_run_lookup("my-org/my-repo")("894") == (*TRUSTED_GATE, False)
-    assert calls[-1] == "repos/my-org/my-repo/branches/feat%2Fouter"
+def test_a_stacked_run_whose_base_is_a_contributor_branch_is_untrusted(monkeypatch):
+    _fake_gh(monkeypatch, f"{TRUSTED_GATE[0]}\tpull_request_target\tfeat/outer\n")
+    assert mod._gh_run_lookup("my-org/my-repo", lambda: TRUSTED)("894") == (*TRUSTED_GATE, False)
 
 
-def test_a_run_without_a_pull_request_has_no_protected_base(monkeypatch):
-    _fake_gh(monkeypatch, f"{TRUSTED_GATE[0]}\tpull_request_target\t\n", {"staging"})
-    assert mod._gh_run_lookup("my-org/my-repo")("895") == (*TRUSTED_GATE, False)
+def test_a_branch_is_trusted_only_when_listed_not_because_it_is_protected(monkeypatch):
+    # No branch-protection lookup exists: a wildcard-protected contributor branch is still untrusted.
+    _fake_gh(monkeypatch, f"{TRUSTED_GATE[0]}\tpull_request_target\tstaging\n")
+    assert mod._gh_run_lookup("my-org/my-repo", lambda: {"main"})("896")[2] is False
+
+
+def test_a_run_without_a_pull_request_has_no_trusted_base(monkeypatch):
+    _fake_gh(monkeypatch, f"{TRUSTED_GATE[0]}\tpull_request_target\t\n")
+    assert mod._gh_run_lookup("my-org/my-repo", lambda: TRUSTED)("895") == (*TRUSTED_GATE, False)
+
+
+def test_trusted_bases_are_the_default_branch_plus_the_env_list(monkeypatch):
+    _fake_gh(monkeypatch, default_branch="main\n")
+    monkeypatch.setenv("TRUSTED_BASE_BRANCHES", " staging, release/1 ,,")
+    assert mod.trusted_base_branches("my-org/my-repo") == {"main", "staging", "release/1"}
+    monkeypatch.delenv("TRUSTED_BASE_BRANCHES")
+    assert mod.trusted_base_branches("my-org/my-repo") == {"main"}
+
+
+def test_an_unreadable_default_branch_fails_closed(monkeypatch):
+    _fake_gh(monkeypatch, default_branch="\n")
+    with pytest.raises(ValueError):
+        mod.trusted_base_branches("my-org/my-repo")
 
 
 # This file is copied byte-identically into downstream repos: it may read only
