@@ -7,9 +7,10 @@ copy silently stops matching aec. This compares each vendored file with the same
 repo (public, read through `gh api`) so the drift is a failing check, not something to remember.
 
 Usage: python3 scripts/check-vendored-drift.py --canonical-repo OWNER/aec-repo [--ref main] [path ...]
-With no paths, every file of the default copy set that exists locally is compared.
-Exit 0: identical. Exit 1: drift (listed on stderr). Exit 2: could not evaluate (fails closed), including
-when none of the files exist locally.
+With no paths, the whole default copy set is compared and a member missing locally is drift (a deleted or
+renamed guard file must not pass); a repo that vendors only a subset names those paths explicitly.
+Exit 0: identical. Exit 1: drift or a missing file (listed on stderr). Exit 2: could not evaluate (fails
+closed), including when none of the files exist locally.
 """
 import argparse
 import subprocess
@@ -32,8 +33,8 @@ def gh_fetch(repo, ref, path):
 
 
 def drifted(root, paths, fetch):
-    """Paths whose local bytes differ from the canonical bytes; fetch(path) may raise (fail closed)."""
-    return [p for p in paths if (root / p).read_bytes() != fetch(p)]
+    """Paths whose local bytes differ from the canonical bytes, or are missing; fetch(path) may raise (fail closed)."""
+    return [p for p in paths if not (root / p).is_file() or (root / p).read_bytes() != fetch(p)]
 
 
 def main(argv=None):
@@ -44,8 +45,8 @@ def main(argv=None):
     ap.add_argument("paths", nargs="*")
     args = ap.parse_args(argv)
     root = Path(args.root)
-    paths = args.paths or [p for p in COPY_SET if (root / p).is_file()]
-    if not paths:
+    paths = args.paths or list(COPY_SET)
+    if not any((root / p).is_file() for p in paths):
         print("::error::no vendored guard files found to compare, failing closed", file=sys.stderr)
         return 2
     try:

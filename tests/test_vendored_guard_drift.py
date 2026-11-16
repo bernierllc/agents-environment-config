@@ -47,6 +47,18 @@ def test_a_dependabot_style_edit_is_drift(tmp_path):
     assert mod.drifted(tmp_path, ["a.yml", "b.sh"], canonical.__getitem__) == ["a.yml"]
 
 
+def test_a_missing_vendored_file_is_drift(tmp_path):
+    _tree(tmp_path, {"a.yml": b"x"})
+    assert mod.drifted(tmp_path, ["a.yml", "gone.sh"], lambda p: b"x") == ["gone.sh"]
+
+
+def test_cli_default_set_flags_a_deleted_member_instead_of_passing(tmp_path, monkeypatch):
+    # Only one of the four default files exists locally; the rest were deleted. Must not exit 0.
+    _tree(tmp_path, {mod.COPY_SET[0]: b"x"})
+    monkeypatch.setattr(mod, "gh_fetch", lambda repo, ref, path: b"x")
+    assert mod.main(["--canonical-repo", "my-org/my-aec", "--root", str(tmp_path)]) == 1
+
+
 def _cli(tmp_path, *args):
     return subprocess.run([sys.executable, str(ROOT / "scripts" / "check-vendored-drift.py"), "--root", str(tmp_path), *args],
                           capture_output=True, text=True)
