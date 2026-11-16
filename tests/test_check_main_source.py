@@ -41,3 +41,11 @@ def test_guard_fails_closed_named_check_exists_before_validation_and_fails_on_re
     assert 'complete_check failure "source branch rejected"' in WORKFLOW
     assert 'complete_check failure "forged check name"' in WORKFLOW
     assert WORKFLOW.count('complete_check success') == 1
+
+
+def test_missing_guard_script_on_base_fails_with_a_clear_message_before_running_them():
+    # Bootstrap artifact: workflow on the base branch before its scripts (was a silent exit 127).
+    missing = WORKFLOW.index("guard script missing on base")
+    assert WORKFLOW.index('status="in_progress"') < missing
+    assert missing < WORKFLOW.index("scripts/check-forged-gate-names.py 2>&1")
+    assert "scripts/check-forged-gate-names.py scripts/check-main-source.sh; do" in WORKFLOW

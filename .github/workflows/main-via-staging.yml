@@ -65,6 +65,16 @@ jobs:
               -f status="completed" -f conclusion="$1" \
               -f "output[title]=$2" -f "output[summary]=$3"
           }
+          # Bootstrap: the scripts load from the base sha. If the workflow reached the
+          # default branch before them, say so; never exit 127 silently.
+          for guard_script in scripts/check-forged-gate-names.py scripts/check-main-source.sh; do
+            if [ ! -f "$guard_script" ]; then
+              msg="guard script missing on base: $guard_script. Land the scripts and this workflow together; the scripts go to staging first."
+              echo "::error::$msg"
+              complete_check failure "guard script missing on base" "$msg"
+              exit 1
+            fi
+          done
           # A PR-controlled job can borrow a required check's name (see
           # scripts/check-forged-gate-names.py). Detection only; the unforgeable
           # fix is a required workflow or a distinct publisher app.
