@@ -1148,7 +1148,8 @@ def _git_essentials_context(project_dir: Path, items: List[str], test_commands: 
 
 def _validate_single_line(value: str) -> str:
     """The holder is written into LICENSE text, so it is one line of plain text."""
-    if re.search(r"[\x00-\x1f\x7f]", value):
+    # splitlines() also breaks on U+0085/U+2028/U+2029, which the regex alone would let through.
+    if re.search(r"[\x00-\x1f\x7f]", value) or value != "".join(value.splitlines()):
         raise ValueError("must be a single line without control characters")
     return value
 
