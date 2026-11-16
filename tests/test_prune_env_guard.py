@@ -56,10 +56,10 @@ class Fixture:
         assert proc.returncode == 0, proc.stdout + proc.stderr
         return proc.stdout
 
-    def verdict(self, dry: bool = True, path: str | None = None) -> str:
+    def verdict(self, dry: bool = True, path: str | None = None, wt: Path | None = None) -> str:
         """The first word printed for the worktree: keep | would | removed."""
         for line in self.run(dry, path).splitlines():
-            if str(self.wt) in line:
+            if f"{wt or self.wt}  (" in line:
                 return line.split()[0]
         raise AssertionError("script printed nothing for the worktree")
 
@@ -287,3 +287,129 @@ def test_git_ls_files_failure_keeps_the_worktree(fx: Fixture) -> None:
     line = next(ln for ln in out.splitlines() if str(fx.wt) in ln)
     assert line.startswith("keep"), out
     assert "ls-files" in line, line
+
+
+# Round 2: "outside this worktree" and "a copy exists" must be proven by filesystem identity and by the data
+# surviving the whole sweep, never by comparing path text or looking at one inode.
+
+
+def _second_worktree(fx: Fixture, at: Path) -> Path:
+    """A second merged linked worktree of the same repo, so the sweep may remove both."""
+    _git(fx.repo, "worktree", "add", "-q", "-b", "feat/y", str(at))
+    gh = fx.bindir / "gh"
+    gh.write_text(
+        '#!/bin/bash\ncase "$*" in *"--state merged"*) echo "$GH_MERGED"; '
+        f'echo "feat/y {fx.sha}";; esac\nexit 0\n'
+    )
+    return at
+
+
+def test_symlink_target_through_a_case_alias_of_the_worktree_keeps(fx: Fixture) -> None:
+    alias = fx.wt.parent / "WT"
+    if not alias.exists():
+        pytest.skip("case-sensitive filesystem: /WT does not alias /wt")
+    (fx.wt / "only-copy").write_text("unique\n")
+    (fx.wt / ".env").symlink_to(alias / "only-copy")
+    assert fx.verdict() == "keep"
+
+
+def test_symlink_target_through_a_firmlink_alias_of_the_worktree_keeps(fx: Fixture) -> None:
+    # /System/Volumes/Data/<path> and <path> are one directory with two spellings, on any macOS volume layout
+    alias = Path("/System/Volumes/Data") / str(fx.wt).lstrip("/")
+    if not alias.exists():
+        pytest.skip("no firmlink alias on this platform")
+    (fx.wt / "only-copy").write_text("unique\n")
+    (fx.wt / ".env").symlink_to(alias / "only-copy")
+    assert fx.verdict() == "keep"
+
+
+def test_symlink_into_another_removable_worktree_keeps_both(fx: Fixture) -> None:
+    other = _second_worktree(fx, fx.wt.parent / "other")
+    (fx.wt / "only-copy").write_text("one\n")
+    (other / "only-copy").write_text("two\n")
+    (fx.wt / ".env").symlink_to(other / "only-copy")
+    (other / ".env").symlink_to(fx.wt / "only-copy")
+    assert fx.verdict() == "keep"
+    assert fx.verdict(wt=other) == "keep"
+
+
+def test_other_worktree_registered_through_a_symlinked_path_still_keeps(fx: Fixture) -> None:
+    # git records the worktree under the spelling it was given; the target resolves to a different spelling
+    real = fx.wt.parent / "real"
+    real.mkdir()
+    (fx.wt.parent / "link").symlink_to(real, target_is_directory=True)
+    other = _second_worktree(fx, fx.wt.parent / "link" / "other")
+    (other / "only-copy").write_text("two\n")
+    (fx.wt / ".env").symlink_to(other / "only-copy")
+    assert fx.verdict() == "keep"
+
+
+@pytest.mark.parametrize("name", [".ENV", ".Env.local", "conf/.eNv"], ids=["upper", "mixed", "nested"])
+def test_env_names_match_in_any_case(fx: Fixture, name: str) -> None:
+    (fx.wt / name).parent.mkdir(exist_ok=True)
+    (fx.wt / name).write_text("unique\n")
+    assert fx.verdict() == "keep"
+
+
+def test_primary_copies_reached_through_parent_symlinks_keep(fx: Fixture) -> None:
+    # primary a -> wt/b and b -> wt/a: each "primary copy" resolves back into the worktree being removed
+    for d in ("a", "b"):
+        (fx.wt / d).mkdir()
+        (fx.wt / d / ".env").write_text("unique\n")  # equal bytes, so only the resolved location can tell
+    (fx.repo / "a").symlink_to(fx.wt / "b", target_is_directory=True)
+    (fx.repo / "b").symlink_to(fx.wt / "a", target_is_directory=True)
+    assert fx.verdict() == "keep"
+
+
+def test_primary_copy_reached_through_a_parent_symlink_to_a_safe_place_is_removable(fx: Fixture) -> None:
+    safe = fx.wt.parent / "elsewhere"
+    safe.mkdir()
+    (safe / ".env").write_text("SAME=1\n")
+    (fx.repo / "conf").symlink_to(safe, target_is_directory=True)
+    (fx.wt / "conf").mkdir()
+    (fx.wt / "conf" / ".env").write_text("SAME=1\n")
+    assert fx.verdict() == "would"
+
+
+def test_symlink_target_in_an_unrelated_directory_outside_the_projects_root_is_removable(fx: Fixture) -> None:
+    unrelated = fx.wt.parent / "unrelated"
+    unrelated.mkdir()
+    (unrelated / "data").write_text("shared\n")
+    (fx.wt / ".env").symlink_to(unrelated / "data")
+    assert fx.verdict() == "would"
+
+
+def test_symlink_target_in_the_primary_checkout_outside_every_worktree_is_removable(fx: Fixture) -> None:
+    (fx.repo / "conf").mkdir()
+    (fx.repo / "conf" / "shared").write_text("shared\n")
+    (fx.wt / ".env").symlink_to(fx.repo / "conf" / "shared")
+    assert fx.verdict() == "would"
+
+
+def test_symlink_target_in_another_repo_under_the_projects_root_keeps(fx: Fixture) -> None:
+    # the sweep walks the whole projects root and may remove that repo's worktrees too
+    sibling = fx.root / "sibling"
+    sibling.mkdir()
+    (sibling / "data").write_text("shared\n")
+    (fx.wt / ".env").symlink_to(sibling / "data")
+    assert fx.verdict() == "keep"
+
+
+def test_ignored_nested_repo_holding_an_env_file_keeps(fx: Fixture) -> None:
+    # git lists an ignored nested repo as one `vendor/lib/` entry and never enumerates its files
+    (fx.repo / ".git" / "info" / "exclude").write_text("vendor/\n")
+    nested = fx.wt / "vendor" / "lib"
+    nested.mkdir(parents=True)
+    _git(nested, "init", "-q")
+    (nested / ".env").write_text("unique\n")
+    assert _git(fx.wt, "status", "--porcelain") == ""
+    assert fx.verdict() == "keep"
+
+
+def test_ignored_nested_repo_without_env_files_is_removable(fx: Fixture) -> None:
+    (fx.repo / ".git" / "info" / "exclude").write_text("vendor/\n")
+    nested = fx.wt / "vendor" / "lib"
+    nested.mkdir(parents=True)
+    _git(nested, "init", "-q")
+    (nested / "readme").write_text("nothing secret\n")
+    assert fx.verdict() == "would"

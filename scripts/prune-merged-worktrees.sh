@@ -37,21 +37,50 @@ resolve_physical() { # path -> prints it with every symlink followed; non-zero o
   printf '%s\n' "$p"
 }
 
+survives_removal() { # physical-path repo linked-worktrees -> 0 only when the path is proven to outlive this sweep
+  # Containment is decided by filesystem identity (-ef), never by comparing path text: a case alias on APFS, a
+  # firmlink or a symlinked ancestor names the same directory with different text. Not proven (returns 1): inside
+  # any linked worktree of this repo (the one being removed included), or under $ROOT but outside the primary
+  # checkout, because the sweep walks $ROOT and may remove other repos' worktrees too.
+  local anc="$1" repo="$2" wts="$3" w in_root=0 in_repo=0
+  while :; do
+    while IFS= read -r w; do
+      [ -n "$w" ] && [ "$anc" -ef "$w" ] && return 1
+    done <<<"$wts"
+    [ "$anc" -ef "$repo" ] && in_repo=1
+    [ "$anc" -ef "$ROOT" ] && in_root=1
+    [ "$anc" = / ] && break
+    anc="${anc%/*}"; [ -n "$anc" ] || anc=/
+  done
+  [ "$in_root" -eq 0 ] || [ "$in_repo" -eq 1 ]
+}
+
 env_data_scan() { # worktree primary listfile -> returns 0 and prints why when the tree must be kept, 1 when it holds no .env data
   # Fails closed: only a .env that is positively proven to hold no data of its own is skipped; anything else keeps
-  # the tree. Proven safe: a regular file byte-identical to a regular (non-symlink) copy in the primary checkout;
-  # a symlink that resolves outside the worktree; a symlink that resolves to a regular tracked file inside it.
-  # Everything else (a symlink to an ignored file, a directory or the root of the worktree; a symlink that cannot
-  # be resolved, dangling or unreadable included) is kept: deleting the worktree would delete the target.
+  # the tree. Proven safe: a regular file byte-identical to a regular (non-symlink) copy in the primary checkout
+  # that survives the sweep; a symlink whose target survives the sweep; a symlink to a regular tracked file inside
+  # the worktree. Everything else (a symlink to an ignored file, a directory or the root of the worktree; a symlink
+  # that cannot be resolved, dangling or unreadable included; a copy or target inside any worktree the sweep may
+  # remove) is kept: deleting the worktree would delete the data.
   # The list is NUL-separated (git quotes odd names otherwise) and read from a file: no `grep -q` at the end of a
   # pipeline, whose early exit SIGPIPEs the writer under pipefail and reads as "none".
-  local path="$1" repo="$2" list="$3" wt f tgt r rel tag
+  local path="$1" repo="$2" list="$3" wt wts f tgt r rel tag pc n
   git -C "$path" ls-files -z -o -i --exclude-standard >"$list"
   r=$?
   [ "$r" -eq 0 ] || { echo "could not list ignored files (git ls-files exit $r)"; return 0; }
   wt="$(cd -P "$path" 2>/dev/null && pwd -P)" || { echo "could not resolve the worktree path"; return 0; }
+  wts="$(git -C "$repo" worktree list --porcelain 2>&1)" || { echo "could not list the repo's worktrees"; return 0; }
+  wts="$(awk '/^worktree /{n++; if (n > 1) print substr($0, 10)}' <<<"$wts")
+$path" # every linked worktree (the first entry is the primary checkout), the candidate always included
   while IFS= read -r -d '' f; do
-    case "/$f" in */.env*) ;; *) continue ;; esac
+    case "$f" in
+      */) # git lists an ignored nested repo or worktree as one entry and never enumerates its files; any .env* inside
+          # (or an error reading it, which find prints and so counts) keeps the tree
+          n="$(find "$path/$f" -iname '.env*' 2>&1 | head -n 1)"
+          [ -z "$n" ] || { echo "holds ignored .env files"; return 0; }
+          continue ;;
+    esac
+    case "/$f" in */.[eE][nN][vV]*) ;; *) continue ;; esac # any case: APFS is case-insensitive by default
     if [ -L "$path/$f" ]; then
       tgt="$(resolve_physical "$path/$f")" && [ -n "$tgt" ] && [ -e "$tgt" ] \
         || { echo "could not resolve a .env symlink target"; return 0; }
@@ -63,10 +92,12 @@ env_data_scan() { # worktree primary listfile -> returns 0 and prints why when t
                    && case "$tag" in "H "*) true ;; *) false ;; esac \
                    && git --literal-pathspecs -C "$path" diff --quiet -- "$rel" \
                    || { echo "holds ignored .env files"; return 0; } ;;
-        "$wt") echo "holds ignored .env files"; return 0 ;;
+        *) survives_removal "$tgt" "$repo" "$wts" || { echo "holds ignored .env files"; return 0; } ;;
       esac
     else
-      { [ -f "$repo/$f" ] && [ ! -L "$repo/$f" ] && [ ! "$path/$f" -ef "$repo/$f" ] && cmp -s "$path/$f" "$repo/$f"; } \
+      # the primary copy is resolved first so a symlinked parent cannot point it back into a worktree
+      { pc="$(resolve_physical "$repo/$f")" && [ -f "$pc" ] && [ ! -L "$repo/$f" ] && [ ! "$path/$f" -ef "$pc" ] \
+          && survives_removal "$pc" "$repo" "$wts" && cmp -s "$path/$f" "$pc"; } \
         || { echo "holds ignored .env files"; return 0; }
     fi
   done <"$list"
