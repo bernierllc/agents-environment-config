@@ -17,6 +17,10 @@ unit of impact lives — not a contract.
 
 ## Review follow-ups awaiting prioritization
 
+- [prune-merged-worktrees ignored-.env guard fails open](2026-11-16-prune-env-guard-fail-open.md): `grep -q`
+  under pipefail read 2+ unique `.env` files as none, and any `.env` symlink was exempt; both deleted unique
+  data. P1 data loss; fix shipped with the plan.
+
 - [Unforgeable required checks (SEC-MVS-01)](2026-11-16-unforgeable-required-checks.md): required checks
   match name + Actions app id, so a PR workflow can publish a protected name (as a job or through the Checks
   API). Interim detector covers the job case; the permanent fix is an org required workflow or our own App.
