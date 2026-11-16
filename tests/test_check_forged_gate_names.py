@@ -192,6 +192,12 @@ def test_trusted_bases_are_the_default_branch_plus_the_env_list(monkeypatch):
     assert mod.trusted_base_branches("my-org/my-repo") == {"main"}
 
 
+def test_a_default_branch_ending_in_unicode_whitespace_is_kept_whole(monkeypatch):
+    _fake_gh(monkeypatch, default_branch="main\u00a0\n")
+    monkeypatch.delenv("TRUSTED_BASE_BRANCHES", raising=False)
+    assert mod.trusted_base_branches("my-org/my-repo") == {"main\u00a0"}
+
+
 def test_an_unreadable_default_branch_fails_closed(monkeypatch):
     _fake_gh(monkeypatch, default_branch="\n")
     with pytest.raises(ValueError):

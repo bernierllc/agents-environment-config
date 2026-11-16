@@ -120,7 +120,7 @@ def trusted_base_branches(repo):
     """
     default = subprocess.run(
         ["gh", "api", f"repos/{repo}", "--jq", ".default_branch"], capture_output=True, text=True, check=True,
-    ).stdout.strip()
+    ).stdout.rstrip("\n")  # only gh's own newline: Unicode whitespace can be part of a ref name
     if not default:
         raise ValueError("could not read the default branch")
     listed = os.environ.get("TRUSTED_BASE_BRANCHES", "")
