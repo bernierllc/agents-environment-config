@@ -23,22 +23,31 @@ Two defects, both shipped since v2.48.7:
 
 ## Correct fix
 
-One helper, `env_data_reason`, owns the decision and fails closed:
+One helper, `env_data_reason`, owns the decision. The rule: anything not positively proven safe keeps the tree.
 
-- Capture `git ls-files` output first and check its exit status; on failure keep the tree and say why.
-- Iterate the captured list with a here-string. No `grep -q` at the end of a pipeline.
-- A `.env*` regular file is exempt only if byte-identical to the primary checkout's copy (unchanged, #141).
-- A `.env*` symlink is exempt only if it is dangling, resolves outside the worktree, or resolves to a tracked
-  file inside it. A symlink to an ignored or untracked file inside the worktree is unique data. A target that
-  cannot be resolved keeps the tree.
+- List with `git ls-files -z -o -i --exclude-standard` into a temp file (git quotes non-ASCII, backslash and
+  newline names without `-z`, which hid them from the `.env` match), check its exit status, and read it with
+  `read -r -d ''`. On failure keep the tree and say why. No `grep -q` at the end of a pipeline.
+- A path is a candidate when any component starts with `.env`.
+- A regular file is exempt only if byte-identical to a primary-checkout copy that is itself a regular,
+  non-symlink file and not the same inode (unchanged otherwise, #141).
+- A symlink is resolved with a pure Bash 3.2 resolver (`realpath` is absent and `readlink -f` unsupported on
+  older macOS); failure, a loop, or a target that does not exist (dangling or unreadable) keeps the tree.
+- A resolved target outside the worktree is exempt. Inside the worktree it is exempt only if it is a regular
+  file that git tracks, with no index flag (`ls-files -v` tag `H`; assume-unchanged and skip-worktree hide local
+  edits from `status` and `diff`) and no difference from the index. A directory, the worktree root, or an
+  ignored or untracked file keeps the tree.
 - Output wording for the data case is unchanged: `keep <path>  (<branch>: holds ignored .env files)`.
 
 ## Affected surfaces
 
 - `scripts/prune-merged-worktrees.sh` (the guard only; no other lines changed).
 - Callers: the scheduled prune (cron/launchd) and anyone running the script by hand.
-- Tests: `tests/test_prune_env_guard.py` (real git repo, stub `gh`, real script; covers 1, 2 and 50 unique files,
-  byte-identical copy, symlinks in/out of the worktree and dangling, and an injected `git ls-files` failure).
+- Tests: `tests/test_prune_env_guard.py` (real git repo, stub `gh`, real script; covers 1, 2 and 3000 unique
+  files (the 3000 case overfills the pipe, so defect A fails deterministically on the old script), odd file
+  names, byte-identical and symlinked primary copies, symlinks to files, directories, the root, unreadable and
+  looping targets, index-flagged targets, a bare PATH without `realpath`/`readlink -f`, and an injected
+  `git ls-files` failure).
 
 ## Out of scope
 
