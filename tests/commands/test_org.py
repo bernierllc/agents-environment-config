@@ -66,6 +66,23 @@ def test_org_remove_deletes_state_and_config(tmp_path: Path):
     assert not (tmp_path / ".aec" / "orgs" / "minimal.state.json").exists()
 
 
+def test_org_remove_revokes_approved_prompt_answers(tmp_path: Path):
+    """A removed org's approval must not come back when an org with the same id is enrolled."""
+    from aec.lib.org_config import OrgPaths
+    from aec.lib.org_config.apply import load_enrolled_prompt_answers
+
+    cfg = FIXTURES / "valid-minimal.yaml"
+    _run(["org", "enroll", str(cfg), "--allow-unsigned", "--yes"], tmp_path)
+    paths = OrgPaths(home_dir=tmp_path)
+    paths.approved_prompts.write_text('{"org_ids": ["minimal"], "answers": {"repo.git.license_kind": "proprietary"}}')
+
+    _run(["org", "remove", "minimal", "--yes"], tmp_path)
+    _run(["org", "enroll", str(cfg), "--allow-unsigned", "--yes"], tmp_path)  # same id, no applied answers
+
+    assert not paths.approved_prompts.exists()
+    assert load_enrolled_prompt_answers(paths) == 0
+
+
 def test_org_enroll_rejects_non_https_url(tmp_path: Path):
     # https URL enrollment is supported (see test_org_enroll_url.py); plaintext
     # http is refused before any network access.

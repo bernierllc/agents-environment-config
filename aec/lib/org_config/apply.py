@@ -83,6 +83,19 @@ def apply_prompts(policy: EffectivePolicy, paths: Optional[OrgPaths] = None) -> 
         atomic_write_text(paths.approved_prompts, json.dumps({"org_ids": org_ids, "answers": answers}, indent=2))
 
 
+def revoke_approved_prompts(paths: OrgPaths, org_id: str) -> None:
+    """Drop the approved answers when a contributing org is removed (`aec org remove`).
+
+    The snapshot merges every contributor's answers, so one org's share cannot be
+    subtracted: it is deleted and the next `aec org apply` approves what remains. This
+    stops a later org with the same id from inheriting the removed org's approval.
+    """
+    if not paths.approved_prompts.exists():
+        return
+    if org_id in json.loads(paths.approved_prompts.read_text())["org_ids"]:
+        paths.approved_prompts.unlink()
+
+
 def load_enrolled_prompt_answers(paths: OrgPaths) -> int:
     """Pre-answer prompts from the answers a person approved with ``aec org apply``.
 

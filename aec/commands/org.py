@@ -27,7 +27,7 @@ from ..lib.org_config import (
 )
 from ..lib.org_config import git_source
 from ..lib.atomic_write import atomic_write_text
-from ..lib.org_config.apply import apply_org_policy
+from ..lib.org_config.apply import apply_org_policy, revoke_approved_prompts
 from ..lib.org_config.errors import OrgApplyCommittedError
 from ..lib.org_config.crypto import decode_pubkey, fingerprint
 from ..lib.org_config.discovery import migrate_state
@@ -817,6 +817,7 @@ def remove_cmd(
         except OSError as exc:
             typer.echo(f"warning: could not remove {p}: {exc}", err=True)
     shutil.rmtree(paths.org_dir_for(org_id), ignore_errors=True)  # git clone + staged review
+    revoke_approved_prompts(paths, org_id)
 
     typer.echo(f"removed org '{org_id}'")
 
