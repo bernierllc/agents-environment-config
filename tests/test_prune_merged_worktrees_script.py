@@ -308,3 +308,18 @@ def test_git_checkout_under_nested_node_modules_blocks_removal(env, nested):
     out = run(env)
     assert wt.exists() and (dep / ".env").exists(), out
     assert "nested worktree, clone or submodule" in out
+
+
+def test_backslash_in_a_busy_worktree_path_is_not_read_as_an_escape(env):
+    # awk -v turns the `\t` in `busy\tree` into a tab, so the live process was not matched to its worktree.
+    wt = add_worktree(env["repo"], "busytree", push=True)
+    moved = env["repo"] / ".worktrees" / "busy\\tree"
+    git(env["repo"], "worktree", "move", str(wt), str(moved))
+    age(moved)
+    proc = subprocess.Popen(["sleep", "30"], cwd=moved)
+    try:
+        out = run(env)
+    finally:
+        proc.kill()
+    assert moved.exists() and (moved / "node_modules").exists(), out
+    assert "a process is running inside it" in out

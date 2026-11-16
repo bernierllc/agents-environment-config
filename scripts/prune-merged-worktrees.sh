@@ -58,7 +58,8 @@ fi
 if [ -z "$BUSY_CWDS" ]; then
   CAN_SEE_BUSY=0; echo "could not list process cwds (lsof or /proc): cannot tell which worktrees are in use, leaving all of them alone"
 fi
-is_busy() { [ "$CAN_SEE_BUSY" = 1 ] || return 0; awk -v p="$1" '$0==p || index($0, p"/")==1 {f=1; exit} END{exit !f}' <<<"$BUSY_CWDS"; }
+# the path goes in through ENVIRON: `awk -v` would process backslash escapes in it (`busy\tree` -> tab)
+is_busy() { [ "$CAN_SEE_BUSY" = 1 ] || return 0; BUSY_PATH="$1" awk 'BEGIN{p=ENVIRON["BUSY_PATH"]} $0==p || index($0, p"/")==1 {f=1; exit} END{exit !f}' <<<"$BUSY_CWDS"; }
 
 # Hours since git last touched the worktree (checkout, commit, add, status with a refresh).
 idle_hours() {
