@@ -1,15 +1,13 @@
-"""The ignored-.env guard in scripts/prune-merged-worktrees.sh must fail closed.
+"""scripts/prune-merged-worktrees.sh must never delete ignored `.env*` data, and must fail closed.
 
-Two shipped defects (see plans/2026-11-16-prune-env-guard-fail-open.md):
+The rule (see plans/2026-11-16-prune-env-guard-fail-open.md): a merged, clean worktree is kept if it holds ANY
+untracked or ignored `.env*` path (any case, any path component, anything inside a nested repo) or ANY `.env*`
+symlink. The one exemption is a regular file byte-identical to the same path in the primary checkout. Anything
+the script cannot scan, parse or list also keeps the worktree, with a printed reason.
 
-A. Fail-open. The guard was `ls-files | grep | while ... echo | grep -q .` under `pipefail`: `grep -q`
-   exits on the first hit, the loop takes SIGPIPE on its next echo, the pipeline reports failure and the
-   `if` read "no unique .env", so a worktree with two or more unique ignored .env files was removed.
-   A failing `git ls-files` also read as "nothing to keep".
-B. Symlink exemption. Every `.env*` symlink was exempt without looking at its target, so
-   `.env -> only-copy` (an ignored file that exists only in the worktree) was deleted with the worktree.
-
-These tests run the real script against a real git repo with a stub `gh`.
+Every test runs the real script under /bin/bash against a real git repo with a stub `gh`. Each refusal branch
+has its own test, and the controls at the top prove a worktree with nothing to protect is really removed (a
+script that never removes anything must not pass).
 """
 
 from __future__ import annotations
@@ -17,12 +15,23 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "prune-merged-worktrees.sh"
 BRANCH = "feat/x"
+IS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
+KEEP_ENV = "holds ignored .env files"
+GH_STUB = """#!/bin/bash
+state=""
+case "$*" in *"--state merged"*) state=merged ;; *"--state open"*) state=open ;; esac
+[ -n "$state" ] && [ "$state" = "$GH_FAIL" ] && { echo "gh: injected failure" >&2; exit 1; }
+[ "$state" = merged ] && printf '%s\\n' "$GH_MERGED"
+[ "$state" = open ] && printf '%s\\n' "$GH_OPEN"
+exit 0
+"""
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -38,30 +47,93 @@ def _git(cwd: Path, *args: str) -> str:
     ).stdout.strip()
 
 
+def _real(tool: str) -> str:
+    found = shutil.which(tool)
+    assert found
+    return found
+
+
 class Fixture:
     def __init__(self, root: Path, repo: Path, wt: Path, sha: str, bindir: Path) -> None:
-        self.root, self.repo, self.wt, self.sha, self.bindir = root, repo, wt, sha, bindir
+        self.root, self.repo, self.wt, self.bindir = root, repo, wt, bindir
+        self.merged = [f"{BRANCH} {sha}"]
+        self.open: list[str] = []
+        self.gh_fail = ""
 
-    def run(self, dry: bool = True, path: str | None = None) -> str:
-        env = {
+    # --- running the script -------------------------------------------------------------------------------
+    def run(self, dry: bool = True, env: dict[str, str] | None = None, timeout: int = 60) -> str:
+        full = {
             **os.environ,
-            "PATH": path or f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
+            "PATH": f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
             "PROJECTS_ROOT": str(self.root),
             "DRY_RUN": "1" if dry else "0",
-            "GH_MERGED": f"{BRANCH} {self.sha}",
+            "GH_MERGED": "\n".join(self.merged),
+            "GH_OPEN": "\n".join(self.open),
+            "GH_FAIL": self.gh_fail,
+            **(env or {}),
         }
         proc = subprocess.run(
-            ["/bin/bash", str(SCRIPT)], capture_output=True, text=True, env=env, timeout=120
+            ["/bin/bash", str(SCRIPT)], capture_output=True, text=True, env=full, timeout=timeout
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
-        return proc.stdout
+        return proc.stdout + proc.stderr
 
-    def verdict(self, dry: bool = True, path: str | None = None, wt: Path | None = None) -> str:
-        """The first word printed for the worktree: keep | would | removed."""
-        for line in self.run(dry, path).splitlines():
-            if f"{wt or self.wt}  (" in line:
-                return line.split()[0]
-        raise AssertionError("script printed nothing for the worktree")
+    @staticmethod
+    def line(out: str, wt: Path) -> str | None:
+        return next((ln for ln in out.splitlines() if f"{wt}  (" in ln), None)
+
+    def verdict(self, dry: bool = True, wt: Path | None = None, env: dict[str, str] | None = None) -> str:
+        """The first word printed for the worktree: keep | would | removed | FAILED."""
+        out = self.run(dry, env)
+        line = self.line(out, wt or self.wt)
+        assert line is not None, f"script printed nothing for the worktree:\n{out}"
+        return line.split()[0]
+
+    def keeps(self, reason: str = KEEP_ENV, env: dict[str, str] | None = None, real: bool = True) -> None:
+        """A dry run and (by default) a real run both keep the worktree, the dry one saying why."""
+        out = self.run(True, env)
+        line = self.line(out, self.wt)
+        assert line is not None and line.startswith("keep") and reason in line, out
+        if real:
+            out = self.run(False, env)
+            line = self.line(out, self.wt)
+            assert line is not None and line.startswith("keep"), out
+            assert self.wt.exists()
+
+    # --- setup helpers ------------------------------------------------------------------------------------
+    def commit(self, *files: str, message: str = "more") -> None:
+        """Commit files in the worktree and treat that commit as the merged one."""
+        _git(self.wt, "add", "-f", *files)
+        _git(self.wt, "commit", "-q", "-m", message)
+        self.merged = [f"{BRANCH} {_git(self.wt, 'rev-parse', 'HEAD')}"]
+
+    def exclude(self, pattern: str) -> None:
+        with (self.repo / ".git" / "info" / "exclude").open("a") as handle:
+            handle.write(pattern + "\n")
+
+    def nested_repo(self, rel: str, **files: str) -> Path:
+        """An ignored nested git repo: git lists it as the single entry `rel/` and never enumerates its files."""
+        self.exclude(rel.split("/")[0] + "/")
+        nested = self.wt / rel
+        nested.mkdir(parents=True)
+        _git(nested, "init", "-q")
+        for name, text in files.items():
+            (nested / name).write_text(text)
+        assert _git(self.wt, "status", "--porcelain") == ""
+        return nested
+
+    def shim(self, name: str, body: str) -> None:
+        path = self.bindir / name
+        path.write_text("#!/bin/bash\n" + body + "\n")
+        path.chmod(0o755)
+
+    def git_fails(self, args: str) -> None:
+        """git exits 128 for any call whose arguments contain `args`; every other call is the real git."""
+        self.shim(
+            "git",
+            f'case " $* " in *" {args} "*) echo "fatal: injected failure" >&2; exit 128 ;; esac\n'
+            f'exec "{_real("git")}" "$@"',
+        )
 
 
 @pytest.fixture
@@ -83,427 +155,518 @@ def fx(tmp_path: Path) -> Fixture:
     bindir = base / "bin"
     bindir.mkdir()
     gh = bindir / "gh"
-    gh.write_text('#!/bin/bash\ncase "$*" in *"--state merged"*) echo "$GH_MERGED";; esac\nexit 0\n')
+    gh.write_text(GH_STUB)
     gh.chmod(0o755)
     return Fixture(root, repo, wt, sha, bindir)
 
 
-def _unique_envs(wt: Path, n: int) -> None:
-    for i in range(n):
-        (wt / f".env.unique{i}").write_text(f"SECRET={i}\n")
+# --- controls: nothing to protect, so the worktree really goes ---------------------------------------------
 
 
-@pytest.mark.parametrize("n", [1, 2])
-def test_unique_ignored_envs_keep_the_worktree(fx: Fixture, n: int) -> None:
-    _unique_envs(fx.wt, n)
-    assert fx.verdict() == "keep"
-    assert "holds ignored .env files" in fx.run()
+def test_clean_worktree_is_removed_by_a_real_run(fx: Fixture) -> None:
+    assert fx.verdict(dry=False) == "removed"
+    assert not fx.wt.exists()
+    assert _git(fx.repo, "branch", "--list", BRANCH) == ""
+    assert fx.repo.exists()
 
 
-def test_many_unique_envs_keep_the_worktree_whatever_the_scheduling(fx: Fixture) -> None:
-    """Defect A, deterministically. The old guard ended in `grep -q .` under pipefail. Its writer only takes
-    SIGPIPE if it is still writing when grep exits, which a fast grep makes a matter of luck. Here the writer
-    emits ~125 KB (more than any pipe buffer), so it must block on a full pipe and is guaranteed to be writing
-    when `grep -q` exits on the first line; a grep that sleeps first (below) removes the race entirely."""
-    for i in range(3000):
-        (fx.wt / f".env.{i:05d}-{'x' * 30}").write_text("SECRET\n")
-    real_grep = shutil.which("grep")
-    assert real_grep
-    slow = fx.bindir / "grep"
-    slow.write_text(f'#!/bin/bash\nsleep 0.3\nexec "{real_grep}" "$@"\n')
-    slow.chmod(0o755)
-    assert fx.verdict() == "keep"
+def test_dry_run_only_says_would(fx: Fixture) -> None:
+    assert fx.verdict() == "would"
+    assert fx.wt.exists()
 
 
-def test_env_identical_to_primary_copy_is_removable(fx: Fixture) -> None:
+def test_env_byte_identical_to_the_primary_copy_is_removed(fx: Fixture) -> None:
     (fx.repo / ".env").write_text("SAME=1\n")
     (fx.wt / ".env").write_text("SAME=1\n")
+    assert fx.verdict(dry=False) == "removed"
+    assert (fx.repo / ".env").read_text() == "SAME=1\n"
+
+
+def test_worktree_inside_the_primary_checkout_is_removed(fx: Fixture) -> None:
+    topic = fx.repo / ".worktrees" / "topic"
+    _git(fx.repo, "worktree", "add", "-q", "-b", "feat/topic", str(topic))
+    fx.merged.append(f"feat/topic {_git(topic, 'rev-parse', 'HEAD')}")
+    assert fx.verdict(dry=False, wt=topic) == "removed"
+    assert not topic.exists()
+    assert fx.repo.exists()
+
+
+def test_ignored_files_that_are_not_env_files_do_not_keep_the_worktree(fx: Fixture) -> None:
+    (fx.wt / "only-copy").write_text("not an .env file\n")
     assert fx.verdict() == "would"
-
-
-def test_one_differing_env_among_identical_ones_keeps(fx: Fixture) -> None:
-    (fx.repo / ".env").write_text("SAME=1\n")
-    (fx.wt / ".env").write_text("SAME=1\n")
-    _unique_envs(fx.wt, 3)
-    assert fx.verdict() == "keep"
-
-
-def test_symlink_to_ignored_file_in_worktree_keeps_and_survives_a_real_run(fx: Fixture) -> None:
-    (fx.wt / "only-copy").write_text("PRECIOUS=1\n")
-    (fx.wt / ".env").symlink_to("only-copy")
-    assert fx.verdict() == "keep"
-    assert fx.verdict(dry=False) == "keep"
-    assert (fx.wt / "only-copy").read_text() == "PRECIOUS=1\n"
-
-
-def test_symlink_to_tracked_file_in_worktree_is_removable(fx: Fixture) -> None:
-    (fx.wt / ".env").symlink_to(".env.example")
-    assert fx.verdict() == "would"
-
-
-def test_symlink_to_target_outside_worktree_is_removable(fx: Fixture) -> None:
-    outside = fx.repo / ".env"
-    outside.write_text("PRIMARY=1\n")
-    (fx.wt / ".env").symlink_to(outside)
-    assert fx.verdict() == "would"
-
-
-def test_dangling_symlink_is_kept(fx: Fixture) -> None:
-    # a dangling link holds no data, but the guard keeps anything it cannot positively resolve
-    (fx.wt / ".env").symlink_to("does-not-exist")
-    assert fx.verdict() == "keep"
-
-
-@pytest.mark.parametrize("name", [".envé", ".env\\local", ".env\nlocal"], ids=["unicode", "backslash", "newline"])
-def test_odd_env_file_names_keep(fx: Fixture, name: str) -> None:
-    # without -z git quotes these names, the quoted form no longer matches .env and the tree was deleted
-    (fx.wt / name).write_text("unique\n")
-    assert fx.verdict() == "keep"
-
-
-def test_symlink_to_a_directory_keeps(fx: Fixture) -> None:
-    (fx.wt / "data").mkdir()
-    (fx.wt / "data" / "tracked").write_text("tracked\n")
-    _git(fx.wt, "add", "data/tracked")
-    _git(fx.wt, "commit", "-q", "-m", "tracked data")
-    fx.sha = _git(fx.wt, "rev-parse", "HEAD")
-    (fx.wt / "data" / "only-copy").write_text("unique\n")  # ignored, so status stays clean
-    (fx.wt / ".env").symlink_to("data")
-    assert fx.verdict() == "keep"
-
-
-def test_symlink_to_the_worktree_root_keeps(fx: Fixture) -> None:
-    (fx.wt / "only-copy").write_text("unique\n")
-    (fx.wt / ".env").symlink_to(".")
-    assert fx.verdict() == "keep"
-
-
-def test_primary_copy_that_is_a_symlink_into_the_worktree_keeps(fx: Fixture) -> None:
-    # cmp would compare the worktree file with itself and call it identical
-    (fx.wt / ".env").write_text("unique\n")
-    (fx.repo / ".env").symlink_to(fx.wt / ".env")
-    assert fx.verdict() == "keep"
-
-
-@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
-def test_symlink_whose_target_cannot_be_read_keeps(fx: Fixture) -> None:
-    ignore = fx.root.parent / "ignore"
-    ignore.write_text("vault/\n")
-    _git(fx.repo, "config", "core.excludesFile", str(ignore))
-    vault = fx.wt / "vault"
-    vault.mkdir()
-    (vault / "only-copy").write_text("unique\n")
-    (fx.wt / ".env").symlink_to("vault/only-copy")
-    vault.chmod(0)
-    try:
-        assert fx.verdict() == "keep"
-    finally:
-        vault.chmod(0o755)
-
-
-def test_failing_resolver_output_is_not_taken_as_an_external_target(fx: Fixture) -> None:
-    # the old guard ran realpath || readlink -f and took whatever they printed, even with a failing status
-    (fx.wt / "only-copy").write_text("unique\n")
-    (fx.wt / ".env").symlink_to("only-copy")
-    for tool in ("realpath", "readlink"):
-        stub = fx.bindir / tool
-        stub.write_text('#!/bin/bash\nprintf "unresolved\\n"\nexit 1\n')
-        stub.chmod(0o755)
-    assert fx.verdict() == "keep"
-
-
-@pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])
-def test_symlink_to_tracked_file_with_hidden_local_edits_keeps(fx: Fixture, flag: str) -> None:
-    # these index flags make `git status` and `git diff` report a modified tracked file as clean
-    (fx.wt / ".env").symlink_to(".env.example")
-    (fx.wt / ".env.example").write_text("LOCAL_ONLY_EDIT=1\n")
-    _git(fx.wt, "update-index", flag, ".env.example")
-    assert _git(fx.wt, "status", "--porcelain") == ""
-    assert fx.verdict() == "keep"
-
-
-def test_symlink_chain_to_an_external_target_is_removable(fx: Fixture) -> None:
-    outside = fx.repo / ".env"
-    outside.write_text("PRIMARY=1\n")
-    (fx.wt / ".env.hop").symlink_to(outside)
-    (fx.wt / ".env").symlink_to(".env.hop")
-    assert fx.verdict() == "would"
-
-
-def test_symlink_loop_keeps(fx: Fixture) -> None:
-    (fx.wt / ".env").symlink_to(".env.b")
-    (fx.wt / ".env.b").symlink_to(".env")
-    assert fx.verdict() == "keep"
-
-
-def _bare_path(fx: Fixture) -> str:
-    """A PATH holding only the tools the script needs, with no realpath and a readlink that rejects -f
-    (as on older macOS); every other call passes through to the real readlink."""
-    bare = fx.bindir.parent / "bare"
-    bare.mkdir()
-    for tool in ("git", "awk", "wc", "du", "cut", "df", "tail", "date", "mktemp", "rm", "cmp", "cat", "sed", "dirname", "basename", "find", "head"):
-        found = shutil.which(tool)
-        if found:
-            (bare / tool).symlink_to(found)
-    (bare / "gh").symlink_to(fx.bindir / "gh")
-    real_readlink = shutil.which("readlink")
-    assert real_readlink
-    stub = bare / "readlink"
-    stub.write_text(
-        '#!/bin/bash\nfor a in "$@"; do [ "$a" = -f ] && { echo "readlink: illegal option -- f" >&2; exit 1; }; done\n'
-        f'exec "{real_readlink}" "$@"\n'
-    )
-    stub.chmod(0o755)
-    assert shutil.which("realpath", path=str(bare)) is None
-    return str(bare)
-
-
-def test_symlinks_resolve_without_realpath_or_readlink_f(fx: Fixture) -> None:
-    path = _bare_path(fx)
-    outside = fx.repo / ".env"
-    outside.write_text("PRIMARY=1\n")
-    (fx.wt / ".env").symlink_to(outside)
-    assert fx.verdict(path=path) == "would"  # an external target is still exempt
-    (fx.wt / ".env").unlink()
-    (fx.wt / ".env").symlink_to(".env.example")
-    assert fx.verdict(path=path) == "would"  # a clean tracked target in the worktree too
-    (fx.wt / ".env").unlink()
-    (fx.wt / "only-copy").write_text("unique\n")
-    (fx.wt / ".env").symlink_to("only-copy")
-    assert fx.verdict(path=path) == "keep"  # an ignored target in the worktree still keeps
-
-
-def test_git_ls_files_failure_keeps_the_worktree(fx: Fixture) -> None:
-    real_git = shutil.which("git")
-    assert real_git
-    shim = fx.bindir / "git"
-    shim.write_text(
-        "#!/bin/bash\n"
-        'for a in "$@"; do [ "$a" = ls-files ] && { echo "fatal: injected ls-files failure" >&2; exit 128; }; done\n'
-        f'exec "{real_git}" "$@"\n'
-    )
-    shim.chmod(0o755)
-    out = fx.run()
-    line = next(ln for ln in out.splitlines() if str(fx.wt) in ln)
-    assert line.startswith("keep"), out
-    assert "ls-files" in line, line
-
-
-# Round 2: "outside this worktree" and "a copy exists" must be proven by filesystem identity and by the data
-# surviving the whole sweep, never by comparing path text or looking at one inode.
-
-
-def _second_worktree(fx: Fixture, at: Path) -> Path:
-    """A second merged linked worktree of the same repo, so the sweep may remove both."""
-    _git(fx.repo, "worktree", "add", "-q", "-b", "feat/y", str(at))
-    gh = fx.bindir / "gh"
-    gh.write_text(
-        '#!/bin/bash\ncase "$*" in *"--state merged"*) echo "$GH_MERGED"; '
-        f'echo "feat/y {fx.sha}";; esac\nexit 0\n'
-    )
-    return at
-
-
-def test_symlink_target_through_a_case_alias_of_the_worktree_keeps(fx: Fixture) -> None:
-    alias = fx.wt.parent / "WT"
-    if not alias.exists():
-        pytest.skip("case-sensitive filesystem: /WT does not alias /wt")
-    (fx.wt / "only-copy").write_text("unique\n")
-    (fx.wt / ".env").symlink_to(alias / "only-copy")
-    assert fx.verdict() == "keep"
-
-
-def test_symlink_target_through_a_firmlink_alias_of_the_worktree_keeps(fx: Fixture) -> None:
-    # /System/Volumes/Data/<path> and <path> are one directory with two spellings, on any macOS volume layout
-    alias = Path("/System/Volumes/Data") / str(fx.wt).lstrip("/")
-    if not alias.exists():
-        pytest.skip("no firmlink alias on this platform")
-    (fx.wt / "only-copy").write_text("unique\n")
-    (fx.wt / ".env").symlink_to(alias / "only-copy")
-    assert fx.verdict() == "keep"
-
-
-def test_symlink_into_another_removable_worktree_keeps_both(fx: Fixture) -> None:
-    other = _second_worktree(fx, fx.wt.parent / "other")
-    (fx.wt / "only-copy").write_text("one\n")
-    (other / "only-copy").write_text("two\n")
-    (fx.wt / ".env").symlink_to(other / "only-copy")
-    (other / ".env").symlink_to(fx.wt / "only-copy")
-    assert fx.verdict() == "keep"
-    assert fx.verdict(wt=other) == "keep"
-
-
-def test_other_worktree_registered_through_a_symlinked_path_still_keeps(fx: Fixture) -> None:
-    # git records the worktree under the spelling it was given; the target resolves to a different spelling
-    real = fx.wt.parent / "real"
-    real.mkdir()
-    (fx.wt.parent / "link").symlink_to(real, target_is_directory=True)
-    other = _second_worktree(fx, fx.wt.parent / "link" / "other")
-    (other / "only-copy").write_text("two\n")
-    (fx.wt / ".env").symlink_to(other / "only-copy")
-    assert fx.verdict() == "keep"
-
-
-@pytest.mark.parametrize("name", [".ENV", ".Env.local", "conf/.eNv"], ids=["upper", "mixed", "nested"])
-def test_env_names_match_in_any_case(fx: Fixture, name: str) -> None:
-    (fx.wt / name).parent.mkdir(exist_ok=True)
-    (fx.wt / name).write_text("unique\n")
-    assert fx.verdict() == "keep"
-
-
-def test_primary_copies_reached_through_parent_symlinks_keep(fx: Fixture) -> None:
-    # primary a -> wt/b and b -> wt/a: each "primary copy" resolves back into the worktree being removed
-    for d in ("a", "b"):
-        (fx.wt / d).mkdir()
-        (fx.wt / d / ".env").write_text("unique\n")  # equal bytes, so only the resolved location can tell
-    (fx.repo / "a").symlink_to(fx.wt / "b", target_is_directory=True)
-    (fx.repo / "b").symlink_to(fx.wt / "a", target_is_directory=True)
-    assert fx.verdict() == "keep"
-
-
-def test_primary_copy_reached_through_a_parent_symlink_to_a_safe_place_is_removable(fx: Fixture) -> None:
-    safe = fx.wt.parent / "elsewhere"
-    safe.mkdir()
-    (safe / ".env").write_text("SAME=1\n")
-    (fx.repo / "conf").symlink_to(safe, target_is_directory=True)
-    (fx.wt / "conf").mkdir()
-    (fx.wt / "conf" / ".env").write_text("SAME=1\n")
-    assert fx.verdict() == "would"
-
-
-def test_symlink_target_in_an_unrelated_directory_outside_the_projects_root_is_removable(fx: Fixture) -> None:
-    unrelated = fx.wt.parent / "unrelated"
-    unrelated.mkdir()
-    (unrelated / "data").write_text("shared\n")
-    (fx.wt / ".env").symlink_to(unrelated / "data")
-    assert fx.verdict() == "would"
-
-
-def test_symlink_target_in_the_primary_checkout_outside_every_worktree_is_removable(fx: Fixture) -> None:
-    (fx.repo / "conf").mkdir()
-    (fx.repo / "conf" / "shared").write_text("shared\n")
-    (fx.wt / ".env").symlink_to(fx.repo / "conf" / "shared")
-    assert fx.verdict() == "would"
-
-
-def test_symlink_target_in_another_repo_under_the_projects_root_keeps(fx: Fixture) -> None:
-    # the sweep walks the whole projects root and may remove that repo's worktrees too
-    sibling = fx.root / "sibling"
-    sibling.mkdir()
-    (sibling / "data").write_text("shared\n")
-    (fx.wt / ".env").symlink_to(sibling / "data")
-    assert fx.verdict() == "keep"
-
-
-def test_ignored_nested_repo_holding_an_env_file_keeps(fx: Fixture) -> None:
-    # git lists an ignored nested repo as one `vendor/lib/` entry and never enumerates its files
-    (fx.repo / ".git" / "info" / "exclude").write_text("vendor/\n")
-    nested = fx.wt / "vendor" / "lib"
-    nested.mkdir(parents=True)
-    _git(nested, "init", "-q")
-    (nested / ".env").write_text("unique\n")
-    assert _git(fx.wt, "status", "--porcelain") == ""
-    assert fx.verdict() == "keep"
 
 
 def test_ignored_nested_repo_without_env_files_is_removable(fx: Fixture) -> None:
-    (fx.repo / ".git" / "info" / "exclude").write_text("vendor/\n")
-    nested = fx.wt / "vendor" / "lib"
-    nested.mkdir(parents=True)
-    _git(nested, "init", "-q")
-    (nested / "readme").write_text("nothing secret\n")
+    fx.nested_repo("vendor/lib", readme="nothing secret\n")
     assert fx.verdict() == "would"
 
 
-# Round 3: the data a symlink points at is shared across worktrees and repos, and every component of a path
-# counts, so the decision is made over the whole sweep (pass 1 records the worktrees other worktrees point
-# into, pass 2 keeps them) and never from one worktree's view.
+def test_tracked_symlink_that_is_not_named_env_is_removable(fx: Fixture) -> None:
+    (fx.wt / "link").symlink_to(".env.example")
+    fx.commit("link")
+    assert fx.verdict() == "would"
+
+
+def test_fifo_named_env_in_the_worktree_does_not_hang_or_keep(fx: Fixture) -> None:
+    os.mkfifo(fx.wt / ".env")  # git never lists a FIFO, and nothing can be read from it
+    assert fx.verdict() == "would"
+
+
+# --- .env files that must keep the worktree ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("n", [1, 2, 3])
+def test_unique_ignored_envs_keep_the_worktree(fx: Fixture, n: int) -> None:
+    for i in range(n):
+        (fx.wt / f".env.unique{i}").write_text(f"SECRET={i}\n")
+    fx.keeps()
+
+
+def test_many_unique_envs_keep_the_worktree_whatever_the_scheduling(fx: Fixture) -> None:
+    """The shipped guard ended in `grep -q .` under pipefail: its writer took SIGPIPE when grep exited on the
+    first hit and the tree was deleted. ~125 KB of names fills any pipe buffer, and a slow grep makes the
+    race certain."""
+    for i in range(3000):
+        (fx.wt / f".env.{i:05d}-{'x' * 30}").write_text("SECRET\n")
+    fx.shim("grep", f'sleep 0.3\nexec "{_real("grep")}" "$@"')
+    fx.keeps(real=False)
+
+
+def test_primary_env_with_different_bytes_keeps(fx: Fixture) -> None:
+    (fx.repo / ".env").write_text("PRIMARY=1\n")
+    (fx.wt / ".env").write_text("WORKTREE_ONLY=2\n")
+    fx.keeps()
+    assert (fx.wt / ".env").read_text() == "WORKTREE_ONLY=2\n"
+
+
+def test_env_without_a_primary_copy_keeps(fx: Fixture) -> None:
+    (fx.wt / ".env").write_text("WORKTREE_ONLY=2\n")
+    fx.keeps()
+
+
+def test_one_differing_env_among_identical_ones_keeps(fx: Fixture) -> None:
+    for name in (".env", ".env.test"):
+        (fx.repo / name).write_text("SAME=1\n")
+        (fx.wt / name).write_text("SAME=1\n")
+    (fx.wt / ".env.local").write_text("UNIQUE=1\n")
+    fx.keeps()
+
+
+def test_a_failing_cmp_keeps_even_identical_files(fx: Fixture) -> None:
+    (fx.repo / ".env").write_text("SAME=1\n")
+    (fx.wt / ".env").write_text("SAME=1\n")
+    fx.shim("cmp", "exit 2")
+    fx.keeps()
+
+
+@pytest.mark.parametrize(
+    ("name", "reason"),
+    [
+        (".ENV", KEEP_ENV),
+        (".Env.local", KEEP_ENV),
+        ("conf/.eNv", KEEP_ENV),
+        (".env.d/secrets", KEEP_ENV),  # the name is on a parent directory, not on the file
+        ("a/.ENV.d/b/c", KEEP_ENV),
+        (".envé", KEEP_ENV),
+        (".env\\local", KEEP_ENV),
+        (".env\nlocal", "file name with a newline"),
+    ],
+    ids=["upper", "mixed", "nested", "parent-component", "deep-component", "unicode", "backslash", "newline"],
+)
+def test_env_names_match_in_any_case_and_any_path_component(fx: Fixture, name: str, reason: str) -> None:
+    (fx.wt / name).parent.mkdir(parents=True, exist_ok=True)
+    (fx.wt / name).write_text("unique\n")
+    fx.keeps(reason)
+
+
+def test_non_env_file_name_with_a_newline_keeps(fx: Fixture) -> None:
+    fx.exclude("nl*")
+    (fx.wt / "nl\nfile").write_text("unparseable name\n")
+    assert _git(fx.wt, "status", "--porcelain") == ""
+    fx.keeps("file name with a newline")
+
+
+def test_ignored_nested_repo_holding_an_env_file_keeps(fx: Fixture) -> None:
+    fx.nested_repo("vendor/lib", **{".env": "unique\n"})
+    fx.keeps()
+
+
+@pytest.mark.parametrize("name", [".ENV", ".eNv.local", "sub/.Env"])
+def test_ignored_nested_repo_holding_a_mixed_case_env_file_keeps(fx: Fixture, name: str) -> None:
+    nested = fx.nested_repo("vendor/lib")
+    (nested / name).parent.mkdir(parents=True, exist_ok=True)
+    (nested / name).write_text("unique\n")
+    fx.keeps()
 
 
 def test_env_named_parent_of_a_nested_repo_keeps(fx: Fixture) -> None:
-    # git lists `.env.d/secrets/` as one entry; the .env name is on the parent, not on anything find looks at
     nested = fx.wt / ".env.d" / "secrets"
     nested.mkdir(parents=True)
     _git(nested, "init", "-q")
     (nested / "credentials").write_text("unique\n")
     assert _git(fx.wt, "status", "--porcelain") == ""
-    assert fx.verdict() == "keep"
-    assert fx.verdict(dry=False) == "keep"
+    fx.keeps()
     assert (nested / "credentials").exists()
 
 
-def test_symlink_target_ending_in_a_newline_does_not_validate_a_tracked_file(fx: Fixture) -> None:
-    # `$(readlink ...)` strips trailing newlines: `.env -> "config\n"` was read as the tracked, clean `config`
-    (fx.wt / "config").write_text("template\n")
-    _git(fx.wt, "add", "config")
-    _git(fx.wt, "commit", "-q", "-m", "config")
-    fx.sha = _git(fx.wt, "rev-parse", "HEAD")
-    (fx.repo / ".git" / "info" / "exclude").write_text("config*\n")
-    (fx.wt / "config\n").write_text("unique\n")
-    (fx.wt / ".env").symlink_to("config\n")
-    assert _git(fx.wt, "status", "--porcelain") == ""
-    assert fx.verdict() == "keep"
+# --- .env symlinks keep, whatever they point at ------------------------------------------------------------
 
 
-def test_removable_worktree_that_another_worktrees_symlink_points_into_is_kept_too(fx: Fixture) -> None:
-    # keeping the worktree that holds the link does not stop the sweep removing the one that holds the data
-    other = _second_worktree(fx, fx.wt.parent / "other")
-    (other / "only-copy").write_text("unique\n")
-    (fx.wt / ".env").symlink_to(other / "only-copy")
-    assert fx.verdict() == "keep"
-    assert fx.verdict(wt=other) == "keep"
-    assert "an .env symlink in another worktree points at" in fx.run()
-    fx.run(dry=False)
-    assert (other / "only-copy").read_text() == "unique\n"
+def _outside(fx: Fixture) -> None:
+    (fx.repo / ".env").write_text("PRIMARY=1\n")
+    (fx.wt / ".env").symlink_to(fx.repo / ".env")
 
 
-def test_protection_comes_from_a_worktree_the_sweep_would_never_remove(fx: Fixture) -> None:
-    # the link lives in a dirty (never removed) worktree; the data's worktree is still protected
-    other = _second_worktree(fx, fx.wt.parent / "other")
-    (fx.wt / "only-copy").write_text("unique\n")
-    (other / ".env").symlink_to(fx.wt / "only-copy")
-    (other / "dirty").write_text("untracked\n")
-    assert fx.verdict() == "keep"
+def _ignored_target(fx: Fixture) -> None:
+    (fx.wt / "only-copy").write_text("PRECIOUS=1\n")
+    (fx.wt / ".env").symlink_to("only-copy")
 
 
-def test_worktree_of_another_repo_nested_in_the_primary_checkout_is_not_safe_storage(fx: Fixture) -> None:
-    sibling = fx.root / "sibling-repo"
+def _tracked_target(fx: Fixture) -> None:
+    (fx.wt / ".env").symlink_to(".env.example")
+
+
+def _unrelated_dir(fx: Fixture) -> None:
+    unrelated = fx.wt.parent / "unrelated"
+    unrelated.mkdir()
+    (unrelated / "data").write_text("shared\n")
+    (fx.wt / ".env").symlink_to(unrelated / "data")
+
+
+def _sibling_repo(fx: Fixture) -> None:
+    sibling = fx.root / "sibling"
     sibling.mkdir()
-    _git(sibling, "init", "-q", "-b", "main")
-    (sibling / ".gitignore").write_text("only-copy\n")
-    _git(sibling, "add", ".gitignore")
-    _git(sibling, "commit", "-q", "-m", "init")
-    nested = fx.repo / "vendor" / "sibling"
-    nested.parent.mkdir()
-    _git(sibling, "worktree", "add", "-q", "-b", "feat/y", str(nested))
-    sha = _git(nested, "rev-parse", "HEAD")
-    (nested / "only-copy").write_text("unique\n")
-    (fx.wt / ".env").symlink_to(nested / "only-copy")
-    (fx.bindir / "gh").write_text(
-        f'#!/bin/bash\ncase "$*" in *"--state merged"*) echo "$GH_MERGED"; echo "feat/y {sha}";; esac\nexit 0\n'
-    )
-    assert fx.verdict() == "keep"
-    assert fx.verdict(wt=nested) == "keep"
-    fx.run(dry=False)
-    assert (nested / "only-copy").read_text() == "unique\n"
+    (sibling / "data").write_text("shared\n")
+    (fx.wt / ".env").symlink_to(sibling / "data")
 
 
-def test_unscannable_worktree_keeps_everything_with_a_reason(fx: Fixture) -> None:
-    # pass 1 could not read one worktree's symlinks, so no worktree can be proven unreferenced
-    other = _second_worktree(fx, fx.wt.parent / "other")
-    (other / "dirty").write_text("untracked\n")
-    locked = other / "locked"
-    locked.mkdir()
-    locked.chmod(0)  # find cannot read it, so pass 1 cannot see that worktree's symlinks
+def _dangling(fx: Fixture) -> None:
+    (fx.wt / ".env").symlink_to("does-not-exist")
+
+
+def _loop(fx: Fixture) -> None:
+    (fx.wt / ".env").symlink_to(".env.b")
+    (fx.wt / ".env.b").symlink_to(".env")
+
+
+def _directory(fx: Fixture) -> None:
+    (fx.wt / "data").mkdir()
+    (fx.wt / "data" / "only-copy").write_text("unique\n")
+    (fx.wt / ".env").symlink_to("data")
+
+
+def _worktree_root(fx: Fixture) -> None:
+    (fx.wt / "only-copy").write_text("unique\n")
+    (fx.wt / ".env").symlink_to(".")
+
+
+def _chain(fx: Fixture) -> None:
+    (fx.repo / ".env").write_text("PRIMARY=1\n")
+    (fx.wt / ".env.hop").symlink_to(fx.repo / ".env")
+    (fx.wt / ".env").symlink_to(".env.hop")
+
+
+def _upper(fx: Fixture) -> None:
+    (fx.wt / "only-copy").write_text("unique\n")
+    (fx.wt / ".ENV").symlink_to("only-copy")
+
+
+def _component(fx: Fixture) -> None:
+    (fx.wt / "only-copy").write_text("unique\n")
+    (fx.wt / ".env.d").mkdir()
+    (fx.wt / ".env.d" / "link").symlink_to("../only-copy")
+
+
+def _admin_dir(fx: Fixture) -> None:
+    """The link points into the worktree's own git admin dir, which `git worktree remove` deletes with it."""
+    admin = Path(_git(fx.wt, "rev-parse", "--git-dir"))
+    (admin / "envdata").write_text("ADMIN_SECRET=1\n")
+    (fx.wt / ".env").symlink_to(admin / "envdata")
+
+
+LINKS: dict[str, Callable[[Fixture], None]] = {
+    "outside-target": _outside,
+    "ignored-target": _ignored_target,
+    "tracked-target": _tracked_target,
+    "unrelated-dir": _unrelated_dir,
+    "sibling-repo": _sibling_repo,
+    "dangling": _dangling,
+    "loop": _loop,
+    "directory": _directory,
+    "worktree-root": _worktree_root,
+    "chain": _chain,
+    "upper-case-name": _upper,
+    "env-named-parent": _component,
+    "admin-dir": _admin_dir,
+}
+
+
+@pytest.mark.parametrize("make", LINKS.values(), ids=LINKS.keys())
+def test_env_symlink_keeps_the_worktree_whatever_it_points_at(fx: Fixture, make: Callable[[Fixture], None]) -> None:
+    make(fx)
+    fx.keeps()
+
+
+def test_admin_dir_symlink_target_survives_a_real_run(fx: Fixture) -> None:
+    _admin_dir(fx)
+    fx.keeps()
+    assert (Path(_git(fx.wt, "rev-parse", "--git-dir")) / "envdata").read_text() == "ADMIN_SECRET=1\n"
+
+
+def test_ignored_symlink_target_survives_a_real_run(fx: Fixture) -> None:
+    _ignored_target(fx)
+    fx.keeps()
+    assert (fx.wt / "only-copy").read_text() == "PRECIOUS=1\n"
+
+
+@pytest.mark.parametrize("name", [".env", ".ENV", "conf/.env.d/link"])
+def test_tracked_env_symlink_keeps(fx: Fixture, name: str) -> None:
+    (fx.wt / name).parent.mkdir(parents=True, exist_ok=True)
+    (fx.wt / name).symlink_to("/etc/hosts")
+    fx.commit(name)
+    assert _git(fx.wt, "status", "--porcelain") == ""
+    fx.keeps("holds an .env symlink")
+
+
+# --- the primary copy has to be a plain file in a plain directory ------------------------------------------
+
+
+def test_primary_env_that_is_a_symlink_to_an_identical_file_keeps(fx: Fixture) -> None:
+    external = fx.wt.parent / "external.env"
+    external.write_text("SAME=1\n")
+    (fx.repo / ".env").symlink_to(external)
+    (fx.wt / ".env").write_text("SAME=1\n")
+    fx.keeps()
+
+
+def test_primary_env_that_is_a_symlink_into_the_worktree_keeps(fx: Fixture) -> None:
+    # cmp would compare the worktree file with itself and call it identical
+    (fx.wt / ".env").write_text("unique\n")
+    (fx.repo / ".env").symlink_to(fx.wt / ".env")
+    fx.keeps()
+
+
+def test_primary_env_that_is_a_fifo_keeps_without_hanging(fx: Fixture) -> None:
+    os.mkfifo(fx.repo / ".env")  # cmp would block forever opening it
+    (fx.wt / ".env").write_text("SAME=1\n")
+    assert fx.verdict(env=None) == "keep"
+
+
+@pytest.mark.parametrize("target", ["elsewhere", "worktree"])
+def test_primary_copy_behind_a_symlinked_parent_directory_keeps(fx: Fixture, target: str) -> None:
+    store = fx.wt.parent / "elsewhere" if target == "elsewhere" else fx.wt / "store"
+    store.mkdir(exist_ok=True)
+    (store / ".env").write_text("SAME=1\n")
+    (fx.repo / "conf").symlink_to(store, target_is_directory=True)
+    (fx.wt / "conf").mkdir(exist_ok=True)
+    (fx.wt / "conf" / ".env").write_text("SAME=1\n")
+    fx.keeps()
+
+
+# --- anything that cannot be scanned keeps the worktree, with a printed reason ------------------------------
+
+
+def test_git_ls_files_index_failure_keeps(fx: Fixture) -> None:
+    fx.git_fails("ls-files -z -s -v")
+    fx.keeps("could not read the index")
+
+
+def test_git_ls_files_untracked_failure_keeps(fx: Fixture) -> None:
+    fx.git_fails("ls-files -z -o")
+    fx.keeps("could not list ignored files")
+
+
+@pytest.mark.skipif(IS_ROOT, reason="root ignores directory permissions")
+def test_unreadable_ignored_directory_keeps(fx: Fixture) -> None:
+    # git warns "could not open directory" and still exits 0; the .env inside is invisible to it
+    vault = fx.wt / "only-copy"
+    vault.mkdir()
+    (vault / ".env").write_text("unique\n")
+    vault.chmod(0)
     try:
-        out = fx.run()
+        fx.keeps("could not list ignored files")
     finally:
-        locked.chmod(0o755)
-    line = next(ln for ln in out.splitlines() if f"{fx.wt}  (" in ln)
-    assert line.startswith("keep") and "could not scan" in line, out
+        vault.chmod(0o755)
 
 
-def test_stale_worktree_directory_does_not_block_the_sweep(fx: Fixture) -> None:
-    gone = _second_worktree(fx, fx.wt.parent / "gone")
-    shutil.rmtree(gone)
-    assert fx.verdict() == "would"
+def test_git_status_failure_keeps(fx: Fixture) -> None:
+    fx.git_fails("status --porcelain -uall")
+    fx.keeps("could not read git status")
+
+
+def test_git_rev_parse_head_failure_keeps(fx: Fixture) -> None:
+    fx.git_fails("rev-parse HEAD")
+    fx.keeps("HEAD is not the merged commit")
+
+
+def test_find_killed_in_a_nested_repo_scan_keeps(fx: Fixture) -> None:
+    fx.nested_repo("vendor/lib", **{".env": "unique\n"})
+    fx.shim("find", f'for a in "$@"; do [ "$a" = -iname ] && kill -9 $$; done\nexec "{_real("find")}" "$@"')
+    fx.keeps("could not scan vendor/lib/ (find exit 137)")
+
+
+def test_find_failing_quietly_in_a_nested_repo_scan_keeps(fx: Fixture) -> None:
+    fx.nested_repo("vendor/lib", readme="nothing\n")
+    fx.shim("find", "exit 1")
+    fx.keeps("could not scan vendor/lib/ (find exit 1)")
+
+
+def test_failing_head_does_not_change_the_nested_repo_verdict(fx: Fixture) -> None:
+    fx.nested_repo("vendor/lib", **{".env": "unique\n"})
+    fx.shim("head", "exit 1")
+    fx.keeps()
+
+
+def test_scan_killed_mid_way_keeps(fx: Fixture) -> None:
+    # `rm` runs directly inside the scan's subshell; killing its parent kills the whole scan with status 137
+    fx.shim("rm", 'kill -9 $PPID')
+    fx.keeps("scan failed, exit 137")
+
+
+def test_mktemp_failure_keeps(fx: Fixture) -> None:
+    fx.shim("mktemp", "exit 1")
+    fx.keeps("could not create a temp file")
+
+
+@pytest.mark.parametrize("kind", ["directory", "read-only-file"])
+def test_unwritable_temp_file_keeps(fx: Fixture, tmp_path: Path, kind: str) -> None:
+    """A temp file that cannot be written must not read as "nothing to protect"."""
+    if kind == "read-only-file" and IS_ROOT:
+        pytest.skip("root ignores file permissions")
+    target = tmp_path / "scratch"
+    if kind == "directory":
+        target.mkdir()
+    else:
+        target.write_text("")
+        target.chmod(0o444)
+    fx.shim("mktemp", f'echo "{target}"')
+    (fx.wt / ".env").write_text("unique\n")  # would be removed if the unwritable list were taken as empty
+    fx.keeps("could not read the index")
+
+
+def test_du_runs_before_the_scan_so_a_file_created_meanwhile_is_seen(fx: Fixture) -> None:
+    # du is slow on a big worktree; an .env created while it runs must not escape the scan that follows it
+    fx.shim("du", f'"{_real("du")}" "$@"\necho "RACE_SECRET=1" > "{fx.wt}/.env.local"')
+    fx.keeps()
+    assert (fx.wt / ".env.local").read_text() == "RACE_SECRET=1\n"
+
+
+# --- index flags hide local edits from `git status` --------------------------------------------------------
+
+
+@pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])
+@pytest.mark.parametrize("name", [".envrc", "README"])
+def test_hidden_local_edit_of_a_tracked_file_keeps(fx: Fixture, flag: str, name: str) -> None:
+    (fx.wt / name).write_text("TEMPLATE=1\n")
+    fx.commit(name)
+    _git(fx.wt, "update-index", flag, name)
+    (fx.wt / name).write_text("LOCAL_SECRET=9\n")
+    assert _git(fx.wt, "status", "--porcelain") == ""  # git itself calls this worktree clean
+    fx.keeps("assume-unchanged or skip-worktree")
+    assert (fx.wt / name).read_text() == "LOCAL_SECRET=9\n"
+
+
+@pytest.mark.parametrize("name", ["notes.txt", ".env"])
+def test_untracked_file_is_seen_even_when_status_hides_untracked_files(fx: Fixture, tmp_path: Path, name: str) -> None:
+    (fx.wt / ".gitignore").write_text("")  # an untracked, not ignored file
+    fx.commit(".gitignore")
+    config = tmp_path / "gitconfig"
+    config.write_text("[status]\n\tshowUntrackedFiles = no\n")
+    (fx.wt / name).write_text("UNIQUE=1\n")
+    env = {"GIT_CONFIG_GLOBAL": str(config)}
+    fx.keeps("PR merged but worktree dirty", env=env)
+    assert (fx.wt / name).read_text() == "UNIQUE=1\n"
+
+
+# --- the refusals that predate the .env guard --------------------------------------------------------------
+
+
+def test_worktree_with_an_untracked_file_is_kept(fx: Fixture) -> None:
+    (fx.wt / "notes.txt").write_text("not ignored, not committed\n")
+    fx.keeps("PR merged but worktree dirty")
+
+
+def test_worktree_with_a_modified_tracked_file_is_kept(fx: Fixture) -> None:
+    (fx.wt / ".env.example").write_text("EDITED=1\n")
+    fx.keeps("PR merged but worktree dirty")
+
+
+def test_worktree_whose_head_is_past_the_merged_commit_is_kept(fx: Fixture) -> None:
+    (fx.wt / "later.txt").write_text("unpushed\n")
+    _git(fx.wt, "add", "later.txt")
+    _git(fx.wt, "commit", "-q", "-m", "unpushed work")  # fx.merged still names the earlier commit
+    fx.keeps("HEAD is not the merged commit")
+    assert _git(fx.repo, "branch", "--list", BRANCH) != ""
+
+
+def test_branch_name_reused_by_an_open_pr_is_kept(fx: Fixture) -> None:
+    fx.open = [f"{BRANCH} 0123456789abcdef0123456789abcdef01234567"]
+    fx.keeps("name reused by an open PR")
+
+
+def test_primary_checkout_is_never_a_candidate_even_if_its_branch_has_a_merged_pr(fx: Fixture) -> None:
+    fx.merged.append(f"main {_git(fx.repo, 'rev-parse', 'HEAD')}")
+    out = fx.run(dry=False)
+    assert fx.line(out, fx.repo) is None, out
+    assert fx.repo.exists()
+
+
+def test_branch_without_a_merged_pr_is_left_alone(fx: Fixture) -> None:
+    fx.merged = []
+    assert fx.line(fx.run(dry=False), fx.wt) is None
+    assert fx.wt.exists()
+
+
+@pytest.mark.parametrize("state", ["merged", "open"])
+def test_gh_failure_skips_the_repo_and_removes_nothing(fx: Fixture, state: str) -> None:
+    fx.gh_fail = state
+    out = fx.run(dry=False)
+    assert f"skip {fx.repo}: gh pr list --state {state} failed" in out
+    assert fx.line(out, fx.wt) is None
+    assert fx.wt.exists()
+
+
+def test_failing_worktree_discovery_skips_the_repo_with_a_reason(fx: Fixture) -> None:
+    fx.git_fails("rev-parse --git-dir")
+    out = fx.run(dry=False)
+    assert f"skip {fx.repo}: git rev-parse failed" in out
+    assert fx.wt.exists()
+
+
+def test_failing_worktree_list_skips_the_repo_with_a_reason(fx: Fixture) -> None:
+    fx.git_fails("worktree list --porcelain")
+    out = fx.run(dry=False)
+    assert f"skip {fx.repo}: could not list worktrees" in out
+    assert fx.wt.exists()
+
+
+def test_a_refused_removal_is_reported_and_keeps_the_branch(fx: Fixture) -> None:
+    _git(fx.repo, "worktree", "lock", str(fx.wt))  # git refuses to remove a locked worktree
+    assert fx.verdict(dry=False) == "FAILED"
+    assert fx.wt.exists()
+    assert _git(fx.repo, "branch", "--list", BRANCH) != ""
+
+
+def test_worktree_with_an_initialized_submodule_is_left_to_gits_own_refusal(fx: Fixture) -> None:
+    """The scan does not look inside submodules; `git worktree remove` refuses them, which is all that
+    protects an ignored .env inside one. This pins that refusal."""
+    sub = fx.wt.parent / "subsrc"
+    sub.mkdir()
+    _git(sub, "init", "-q", "-b", "main")
+    (sub / "f").write_text("x\n")
+    (sub / ".gitignore").write_text(".env\n")
+    _git(sub, "add", "-A")
+    _git(sub, "commit", "-q", "-m", "init")
+    allow = ("-c", "protocol.file.allow=always")
+    _git(fx.repo, *allow, "submodule", "add", "-q", str(sub), "sub")
+    _git(fx.repo, "commit", "-q", "-m", "add submodule")
+    _git(fx.wt, "merge", "-q", "--ff-only", "main")
+    _git(fx.wt, *allow, "submodule", "update", "--init", "-q")
+    (fx.wt / "sub" / ".env").write_text("SUBSECRET=1\n")
+    fx.merged = [f"{BRANCH} {_git(fx.wt, 'rev-parse', 'HEAD')}"]
+    assert fx.verdict(dry=False) == "FAILED"
+    assert (fx.wt / "sub" / ".env").read_text() == "SUBSECRET=1\n"
+
+
+def test_script_parses_under_the_system_bash() -> None:
+    subprocess.run(["/bin/bash", "-n", str(SCRIPT)], check=True)
