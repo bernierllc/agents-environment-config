@@ -72,6 +72,21 @@ def _run_org_config_gate() -> None:
     for st in pending:
         Console.warning(pending_fix(st))
 
+def _load_org_prompt_answers() -> None:
+    """Make enrolled orgs' ``install.prompts`` answers apply to every command, not
+    only the ``aec org apply`` run that stored them. A broken org config is
+    reported, never fatal: the command still runs with its normal prompts."""
+    try:
+        from .lib.org_config import OrgPaths
+        from .lib.org_config.apply import load_enrolled_prompt_answers
+    except ImportError:
+        return  # org-configs extra not installed
+    try:
+        load_enrolled_prompt_answers(OrgPaths.default())
+    except Exception as exc:  # noqa: BLE001 - org config must never break other commands; reported below
+        Console.warning(f"Could not load org prompt answers ({type(exc).__name__}: {exc}); using normal prompts.")
+
+
 @app.callback(invoke_without_command=True)
 def _cli_callback(
     ctx: typer.Context,
@@ -108,6 +123,7 @@ def _cli_callback(
         from .lib.debug import enable_debug
         enable_debug()
     _apply_prompt_globals(answers, non_interactive, defaults)
+    _load_org_prompt_answers()
     if ctx.invoked_subcommand is None:
         return
     from .lib import feedback as _feedback

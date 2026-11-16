@@ -2,12 +2,14 @@
 
 Repo setup is the longest interactive flow in the CLI — Raycast scripts, lint
 hook mode, language selection, git essentials, commit strategy, discovery
-scan. None are org-overlay-eligible (they describe one repo's local state),
-but every one is catalogued so an agent can drive a full repo setup with
+scan. Only the LICENSE kind and holder are org-overlay-eligible (an org decides
+whose name its repos carry and whether they are open source); the rest describe
+one repo's local state. Every one is catalogued so an agent can drive a full repo setup with
 ``--answers``.
 """
 from __future__ import annotations
 
+from ..prompt_ids import REPO_GIT_LICENSE_HOLDER, REPO_GIT_LICENSE_KIND
 from .spec import DynamicPromptFamily, PromptSpec
 
 REPO_RAYCAST_GENERATE = "repo.raycast.generate"
@@ -19,7 +21,6 @@ REPO_GIT_USE_GITHUB = "repo.git.use_github"
 REPO_GIT_RUN_INIT = "repo.git.run_init"
 REPO_GIT_ESSENTIALS = "repo.git.essentials"
 REPO_GIT_COMMIT_STRATEGY = "repo.git.commit_strategy"
-REPO_GIT_LICENSE_HOLDER = "repo.git.license_holder"
 REPO_GIT_CODEOWNER = "repo.git.codeowner"
 REPO_SETUP_PROJECT_PATH = "repo.setup.project_path"
 REPO_SETUP_EXISTING_ACTION = "repo.setup.existing_action"
@@ -99,6 +100,17 @@ SPECS: tuple[PromptSpec, ...] = (
         ),
         type="string",
         default="all",
+    ),
+    PromptSpec(
+        REPO_GIT_LICENSE_KIND,
+        command="repo setup",
+        summary=(
+            "Kind of LICENSE to generate: 'mit' (open source) or 'proprietary' "
+            "(all rights reserved, no license granted)."
+        ),
+        type="enum[mit,proprietary]",
+        default="mit",
+        choices=("mit", "proprietary"),
     ),
     PromptSpec(
         REPO_GIT_LICENSE_HOLDER,

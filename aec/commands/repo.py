@@ -36,6 +36,7 @@ from ..lib.prompt_catalog.repo_area import (
     REPO_GIT_COMMIT_STRATEGY,
     REPO_GIT_ESSENTIALS,
     REPO_GIT_LICENSE_HOLDER,
+    REPO_GIT_LICENSE_KIND,
     REPO_GIT_RUN_INIT,
     REPO_GIT_USE_GITHUB,
     REPO_HOOKS_EXISTING_CONFIG_PREFIX,
@@ -56,6 +57,8 @@ from ..lib.confine import escapes
 from ..lib.git import clone_repo
 from ..lib.git_providers import detect_git_provider, scan_git_essentials, GIT_PROVIDERS
 from ..lib.git_setup import (
+    DEFAULT_LICENSE_KIND,
+    LICENSE_KINDS,
     build_composite_gitignore,
     ci_safe_commands,
     default_codeowner,
@@ -1105,12 +1108,21 @@ def _detect_gitignore_inputs(project_dir: Path) -> Tuple[List[str], List[str]]:
 def _git_essentials_context(project_dir: Path, items: List[str], test_commands: List[str]) -> dict:
     """Ask for the values only the user knows, then build the template context."""
     holder = codeowner = None
+    license_kind = DEFAULT_LICENSE_KIND
     if "license" in items:
+        license_kind = prompt(
+            REPO_GIT_LICENSE_KIND,
+            f"  LICENSE kind ({' or '.join(LICENSE_KINDS)}) [{DEFAULT_LICENSE_KIND}]: ",
+            type="enum",
+            default=DEFAULT_LICENSE_KIND,
+            choices=list(LICENSE_KINDS),
+        )
         guess = default_copyright_holder(project_dir)
         holder = prompt(
             REPO_GIT_LICENSE_HOLDER,
             f"  LICENSE copyright holder [{guess}]: ",
             default=guess,
+            validator=_validate_single_line,
         ).strip() or guess
     if "codeowners" in items:
         owner = default_codeowner(project_dir)
@@ -1128,9 +1140,18 @@ def _git_essentials_context(project_dir: Path, items: List[str], test_commands: 
         project_dir,
         test_commands=test_commands,
         copyright_holder=holder,
+        license_kind=license_kind,
         codeowner=codeowner,
         with_ci="ci_workflow" in items,
     )
+
+
+def _validate_single_line(value: str) -> str:
+    """The holder is written into LICENSE text, so it is one line of plain text."""
+    # splitlines() also breaks on U+0085/U+2028/U+2029, which the regex alone would let through.
+    if re.search(r"[\x00-\x1f\x7f]", value) or value != "".join(value.splitlines()):
+        raise ValueError("must be a single line without control characters")
+    return value
 
 
 def _validate_codeowner(value: str, org: str = "") -> str:

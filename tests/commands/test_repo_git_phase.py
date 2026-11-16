@@ -145,3 +145,67 @@ class TestDetectGitignoreInputs:
         _, frameworks = _detect_gitignore_inputs(tmp_path)
 
         assert "jest" in frameworks
+
+
+class TestLicenseKindPrompt:
+    """`aec repo setup` writes the LICENSE an org's overlay asks for, via the real generator."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate(self):
+        from aec.lib import prompts
+
+        prompts.clear_overlay_answers()
+        yield
+        prompts.clear_overlay_answers()
+
+    def _generate(self, project):
+        from aec.commands.repo import _git_essentials_context
+        from aec.lib.git_setup import get_templates_root, write_git_essential
+
+        with patch("aec.lib.git_setup._gh_api", return_value=""):
+            ctx = _git_essentials_context(project, ["license"], [])
+            write_git_essential(project, "license", "github", get_templates_root(), ctx)
+        return (project / "LICENSE").read_text()
+
+    def test_overlay_kind_and_holder_write_proprietary_license(self, tmp_path):
+        from aec.lib import prompts
+
+        project = _make_git_repo(tmp_path)
+        prompts.set_overlay_answers({
+            "repo.git.license_kind": "proprietary",
+            "repo.git.license_holder": "Acme Corp",
+        })
+        text = self._generate(project)
+        assert "Acme Corp. All rights reserved." in text
+        assert "Permission is hereby granted" not in text
+
+    def test_no_overlay_keeps_mit_default(self, tmp_path):
+        from aec.lib import prompts
+
+        project = _make_git_repo(tmp_path)
+        prompts.set_mode(non_interactive=True, use_defaults=True)
+        try:
+            text = self._generate(project)
+        finally:
+            prompts.reset_mode()
+        assert "Permission is hereby granted" in text
+
+    def test_unknown_kind_is_rejected_not_silently_mit(self, tmp_path):
+        from aec.lib import prompts
+
+        project = _make_git_repo(tmp_path)
+        prompts.set_overlay_answers({"repo.git.license_kind": "gpl"})
+        with pytest.raises(prompts.PromptInvalidAnswer):
+            self._generate(project)
+
+    @pytest.mark.parametrize("sep", ["\n", "\x85", " ", " "])
+    def test_multiline_holder_is_rejected(self, tmp_path, sep):
+        from aec.lib import prompts
+
+        project = _make_git_repo(tmp_path)
+        prompts.set_overlay_answers({
+            "repo.git.license_kind": "proprietary",
+            "repo.git.license_holder": f"Acme{sep}Permission is hereby granted",
+        })
+        with pytest.raises(prompts.PromptInvalidAnswer):
+            self._generate(project)

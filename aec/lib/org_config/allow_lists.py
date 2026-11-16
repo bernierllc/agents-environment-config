@@ -92,6 +92,9 @@ PROMPTS_ALLOW_LIST: dict[str, str] = {
     "install.claude.statusline": "yes_no",
     # Setup
     "setup.track_current_repo": "yes_no",
+    # Repo setup: the generated LICENSE
+    "repo.git.license_kind": "enum[mit,proprietary]",
+    "repo.git.license_holder": "single-line-string",
 }
 
 # Dynamic prompt-ID prefixes. Matches DYNAMIC_PROMPT_ID_PREFIXES in

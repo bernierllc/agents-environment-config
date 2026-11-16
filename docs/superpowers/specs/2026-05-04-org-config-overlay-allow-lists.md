@@ -209,6 +209,10 @@ install:
 
     # Setup
     setup.track_current_repo: yes|no
+
+    # Repo setup: the generated LICENSE (added later; machine-global, see docs/orgs/authoring-org-configs.md)
+    repo.git.license_kind: mit|proprietary
+    repo.git.license_holder: <single-line-name>
 ```
 
 **Explicitly excluded:**
