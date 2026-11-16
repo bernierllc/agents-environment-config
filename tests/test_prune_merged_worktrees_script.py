@@ -283,3 +283,15 @@ def test_failed_process_listing_touches_nothing(env, tmp_path):
     out = run(env)
     assert wt.exists() and (wt / "node_modules").exists(), out
     assert "cannot tell which worktrees are in use" in out
+
+
+def test_node_modules_holding_a_git_checkout_is_not_stripped(env):
+    wt = add_worktree(env["repo"], "gitdep", push=False)
+    dep = wt / "node_modules" / "dep"
+    dep.mkdir()
+    git(dep, "init", "-q")
+    (dep / ".env").write_text("TOKEN=1\n")
+    age(wt)
+    out = run(env)
+    assert (dep / ".env").exists(), out
+    assert "holds a git checkout" in out
