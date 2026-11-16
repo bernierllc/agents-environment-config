@@ -75,12 +75,31 @@ def load_enrolled_prompt_answers(paths: OrgPaths) -> int:
 
     ``apply_prompts`` only lives for the ``aec org apply`` process, so every other
     command (``aec repo setup``) calls this at startup. Returns the count loaded.
+
+    Only an org whose policy was applied (``last_applied_at``) and has no unreviewed
+    change pending contributes: enrolling or refreshing a config never activates
+    its answers before a person approved it with ``aec org apply``.
     """
+    from ..prompts import set_overlay_answers
+    from .discovery import discover_enrolled_orgs
+    from .state import read_state
+
     if not paths.orgs_dir.exists():
         return 0
-    policy = effective_policy(paths)
-    apply_prompts(policy)
-    return len(policy.prompts)
+    answers: dict[str, object] = {}
+    for enrolled in discover_enrolled_orgs(paths):
+        state = read_state(paths, enrolled.config.org_id)
+        if state is None or not state.last_applied_at:
+            continue
+        if state.pending and state.pending.get("kind") in _UNAPPROVED_PENDING:
+            continue
+        answers.update(enrolled.config.install_prompts)
+    set_overlay_answers(answers)
+    return len(answers)
+
+
+# A pending marker of these kinds means the on-disk config changed and has not been approved.
+_UNAPPROVED_PENDING = frozenset({"review", "verify_failed", "trust_change"})
 
 
 _INSTALL_STANCES = frozenset({"required", "recommended", "pinned"})

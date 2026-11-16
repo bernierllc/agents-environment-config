@@ -164,6 +164,8 @@ install:
 
 `proprietary` writes `Copyright (c) <year> <holder>. All rights reserved.` followed by a paragraph granting no license except by written agreement. Existing `LICENSE*` files are never replaced.
 
+Prompt answers take effect only after the user approves the org policy with `aec org apply`; an enrolled or refreshed config that has not been applied (or is waiting for review) pre-answers nothing.
+
 Overlay answers apply to every repo set up on the machine, not per owner, so use this only when every repo your users set up with AEC belongs to the org.
 
 ## install.agents

@@ -56,10 +56,10 @@ def test_clear_restores_input(monkeypatch):
     assert prompts.prompt("x", "Q? ") == "typed"
 
 
-def test_enrolled_org_prompt_answers_load_in_a_fresh_process(tmp_path):
-    """`aec org apply` stores policy; a later command must still see its prompt answers."""
+def _enroll(tmp_path, *, applied_at, pending=None):
+    """Enroll `my-org` (prompt answer repo.git.license_kind) with the given state."""
     from aec.lib.org_config import OrgPaths
-    from aec.lib.org_config.apply import load_enrolled_prompt_answers
+    from aec.lib.org_config.state import OrgState, write_state
 
     paths = OrgPaths(home_dir=tmp_path)
     paths.orgs_dir.mkdir(parents=True)
@@ -76,8 +76,40 @@ def test_enrolled_org_prompt_answers_load_in_a_fresh_process(tmp_path):
         "  prompts:\n"
         "    repo.git.license_kind: proprietary\n"
     )
+    write_state(paths, OrgState(
+        org_id="my-org", config_version="1.0.0", config_hash="h", trust_mode="unsigned",
+        pubkey_fingerprint=None, pubkey_source=None, last_verified_at="2026-11-15T00:00:00Z",
+        last_applied_at=applied_at, source_of_record="local",
+        unsigned_warning_acknowledged_at=None, key_rotation_pending=None, pending=pending,
+    ))
+    return paths
+
+
+def test_applied_org_prompt_answers_load_in_a_fresh_process(tmp_path):
+    """`aec org apply` stores policy; a later command must still see its prompt answers."""
+    from aec.lib.org_config.apply import load_enrolled_prompt_answers
+
+    paths = _enroll(tmp_path, applied_at="2026-11-15T00:00:00Z")
     assert load_enrolled_prompt_answers(paths) == 1
     assert prompts.prompt("repo.git.license_kind", "Q? ", type="enum", choices=["mit", "proprietary"]) == "proprietary"
+
+
+@pytest.mark.parametrize(
+    ("applied_at", "pending"),
+    [
+        (None, None),  # enrolled, never approved with `aec org apply`
+        ("2026-11-15T00:00:00Z", {"kind": "review"}),  # refreshed config awaiting review
+        ("2026-11-15T00:00:00Z", {"kind": "trust_change"}),
+        ("2026-11-15T00:00:00Z", {"kind": "verify_failed"}),
+    ],
+)
+def test_unapproved_org_prompt_answers_are_not_loaded(tmp_path, monkeypatch, applied_at, pending):
+    from aec.lib.org_config.apply import load_enrolled_prompt_answers
+
+    paths = _enroll(tmp_path, applied_at=applied_at, pending=pending)
+    assert load_enrolled_prompt_answers(paths) == 0
+    monkeypatch.setattr("builtins.input", lambda _t: "mit")
+    assert prompts.prompt("repo.git.license_kind", "Q? ", type="enum", choices=["mit", "proprietary"]) == "mit"
 
 
 def test_no_enrolled_orgs_loads_nothing(tmp_path):
