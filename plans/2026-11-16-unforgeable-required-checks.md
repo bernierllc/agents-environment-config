@@ -87,10 +87,15 @@ workflow both reach `staging` before the first `staging` to `main` promotion, th
 `PRs into main must come from staging` ("guard script missing on base"). Order the rollout so `main` has the
 scripts before any workflow that calls them runs:
 
+0. Remove any older, hand-rolled `main-via-staging.yml` first. A workflow whose **job** is named
+   `PRs into main must come from staging` publishes that name as an Actions job, not through the Checks API, so
+   the forged-gate scan flags it at the repo's first promotion. Delete it on `staging`, re-run the scan, then
+   continue.
 1. Scripts (`check-main-source.sh`, `check-forged-gate-names.py`) and their tests land on `staging`.
 2. A `staging` to `main` promotion carries the scripts to `main`.
 3. Only then the workflow (and its test) lands on `staging`.
-4. Promote again. Flip the required check to the guard name only after its first green run.
+4. Promote again.
+5. Flip the required check to the guard name only after its first green run.
 
 Input contract of the detector: it fails closed (exit 2) on empty, malformed or check-run-less input, because a head
 always has check runs by merge time; an empty set is not "no forgery". Callers should still use `set -o pipefail`.
