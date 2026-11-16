@@ -295,3 +295,16 @@ def test_node_modules_holding_a_git_checkout_is_not_stripped(env):
     out = run(env)
     assert (dep / ".env").exists(), out
     assert "holds a git checkout" in out
+
+
+@pytest.mark.parametrize("nested", ["packages/foo/node_modules/dep", "node_modules/pkg/node_modules/dep"])
+def test_git_checkout_under_nested_node_modules_blocks_removal(env, nested):
+    wt = add_worktree(env["repo"], "monorepo", push=True)
+    dep = wt / nested
+    dep.mkdir(parents=True)
+    git(dep, "init", "-q")
+    (dep / ".env").write_text("TOKEN=1\n")
+    age(wt)
+    out = run(env)
+    assert wt.exists() and (dep / ".env").exists(), out
+    assert "nested worktree, clone or submodule" in out

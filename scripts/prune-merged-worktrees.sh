@@ -76,9 +76,11 @@ idle_hours() {
 # An ignored .env that is a symlink to, or a byte-identical copy of, the primary checkout's holds no
 # data of its own: only a .env that differs keeps the tree.
 # Another worktree, clone or submodule inside this one: `git worktree remove` deletes ignored
-# content, which would take that nested checkout and its uncommitted work with it.
+# content, which would take that nested checkout and its uncommitted work with it. The scan descends
+# into every node_modules (monorepo packages/*/node_modules, nested node_modules) on purpose: a git
+# dependency or linked checkout there is exactly the work this must not delete.
 holds_nested_checkout() {
-  find "$1" -mindepth 2 -name node_modules -prune -o -name .git -print -quit 2>/dev/null | grep -q .
+  find "$1" -mindepth 2 -name .git -print -quit 2>/dev/null | grep -q .
 }
 
 holds_own_env() {
