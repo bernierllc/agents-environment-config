@@ -17,19 +17,24 @@ main checkout's and `_merge_gemini_entries` appends instead of replacing.
 
 ## Correct fix
 
-1. Decide the single owner of "which checkout holds installed hook state": the main checkout (the git common
-   directory's work tree). Hook wiring and `.aec/installed-hooks` resolve to it, whichever worktree the command
-   runs from; the worktree keeps its own skill files only when they are untracked there.
-2. Alternatively (or additionally) render gemini/cursor paths so they do not depend on the checkout location.
-   Choose one in review; both must satisfy the idempotence test below.
+1. The selected worktree stays its own install target (the documented contract of `find_tracked_repo`): hook
+   configuration and `.aec/installed-hooks` are written in that worktree and never redirected to another
+   checkout. Redirecting would dirty a different tree, and the git common directory is not a reliable pointer to
+   the main work tree for separate-git-dir layouts.
+2. Render gemini and cursor script paths so they do not depend on the checkout location (the repo-relative or
+   env-anchored form the claude and git renderers already use), so a worktree's files never carry its absolute
+   path.
 3. The merge identifies an entry by item and hook id, not by the rendered command, so a second install from any
    location replaces rather than appends.
 
 ## Tests
 
-- Run the installer from a linked worktree twice: `.gemini/settings.json` holds exactly one entry per hook,
-  and neither file contains the worktree's absolute path.
-- Install from the main checkout, then from a worktree: still one entry; state unchanged.
+- Run the installer from a linked worktree twice: `.gemini/settings.json` AND `.cursor/hooks.json` each hold
+  exactly one entry per hook, the recorded state in `.aec/installed-hooks` is unchanged by the second run, and
+  none of these files contains the worktree's absolute path. (`_merge_cursor_entries` and `_render_script_path`
+  share the gemini cause, so cursor is covered by the same tests.)
+- Install in the main checkout, then in a worktree, and compare: the rendered gemini and cursor entries are
+  identical.
 - Existing duplicate entries (already on disk) are collapsed on the next install.
 
 ## Affected surfaces
