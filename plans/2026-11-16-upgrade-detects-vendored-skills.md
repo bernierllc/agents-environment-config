@@ -48,12 +48,20 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
    that release (hidden paths included), and the destination's full tree (hidden entries included) must contain
    nothing outside that list. Any extra path is reported as "local additions: <paths>" and blocks the overwrite
    without explicit confirmation; the install never deletes a path that was not in the canonical tree.
-   **One gate, in the one writer.** The provenance gate lives in the function that writes a skill directory
-   (`_install_single_item` in `aec/commands/install_cmd.py`), not in each caller, so `aec upgrade`, `aec update` and the declarative `aec apply`
-   (`plan_apply` classifies a vendored skill with no manifest row as `install`, and `execute_apply` calls
-   `_install_single_item(..., yes=True)`, which today replaces the directory unchecked) all pass through it. `yes=True`
-   means "no prompt", never "skip provenance": a non-canonical, unknown, modified or forked destination is reported
-   and left untouched unless the caller passes an explicit overwrite/adopt confirmation.
+   **One gate, at the real chokepoint.** `_install_single_item` is not the one writer: the directory replacement
+   happens in `place_installed_item` (`aec/lib/filesystem.py`, "the one write chokepoint"), which is called from
+   `_install_single_item` (`install_cmd.py`), from `aec/commands/upgrade.py` directly (the main item, and the
+   dependency upgrade and install paths), and from `aec/lib/global_install_prompt.py`. The provenance gate therefore
+   lives in `place_installed_item`, so `aec upgrade` (including dependencies), `aec update`, the declarative
+   `aec apply` (`plan_apply` classifies a vendored skill with no manifest row as `install`, and `execute_apply`
+   calls `_install_single_item(..., yes=True)`, which today replaces the directory unchecked) and the global
+   migration all pass through it, and a new caller cannot bypass it. A dependency whose directory already exists as
+   a state-less vendored fork is classified `to_install` by `resolve_install_graph`; the gate sees that destination
+   too. `yes=True` means "no prompt", never "skip provenance": a non-canonical, unknown, modified or forked
+   destination is reported and left untouched unless the caller passes an explicit overwrite/adopt confirmation.
+   The gate only applies when the destination exists and is not already an AEC-tracked install (a normal
+   re-install over a tracked copy keeps its current behaviour); the first implementation step is to enumerate every
+   `place_installed_item` caller and state, per caller, whether its destination can be a vendored copy.
 4. Never say "(up to date)" for a scope it did not check: when vendored copies exist and the check cannot run,
    the summary names what was skipped and the command that fixes it (`aec doctor` fails loudly on the same
    condition).
@@ -78,13 +86,18 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
 - `aec apply` (declarative path), one test each for a vendored skill that is: canonical (upgraded), unknown version
   (reported, untouched), locally modified (reported, untouched), and a clean committed fork (reported, untouched,
   `yes=True` notwithstanding). A test also pins that `execute_apply` reaches the same gate as `aec upgrade`, so a
-  new caller of `_install_single_item` cannot bypass it.
+  new caller of `place_installed_item` cannot bypass it.
+- Dependency collision: upgrading a skill that introduces a dependency whose directory already exists as a
+  state-less vendored fork (classified `to_install`): the dependency write is gated, the fork is reported and
+  left untouched, and the same for a dependency upgrade path in `aec/commands/upgrade.py`. A test enumerates every
+  `place_installed_item` caller (including `global_install_prompt.py`) so a caller added later must pass it.
 - A repo with no vendored copies: unchanged output.
 - `doctor` exits non-zero and names the fix when a vendored copy is stale.
 
 ## Affected surfaces
 
 `aec/commands/update.py`, `aec/commands/outdated.py`, `aec/commands/upgrade.py`,
-`aec/commands/install_cmd.py` (`_install_single_item`, the gate), `aec/lib/apply_core.py`,
+`aec/lib/filesystem.py` (`place_installed_item`, the gate), `aec/commands/install_cmd.py` (`_install_single_item`),
+`aec/lib/global_install_prompt.py`, `aec/lib/apply_core.py`,
 `aec/lib/catalog_hashes.py`, `aec/lib/skills_manifest.py`, the release/catalog generation step, `aec/commands/run_doctor.py`
 (or its equivalent), docs for `outdated` / `upgrade`.
