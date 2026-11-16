@@ -41,6 +41,19 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
    and an older version is reported as "differs from <version>" and is never overwritten without explicit
    adoption/overwrite confirmation. Only a hash-matching, clean copy is upgraded in place (a dirty one is
    reported, never overwritten), and then the manifest row is written so the next run is a normal comparison.
+   **The hash alone is not the provenance test.** `hash_skill_directory` deliberately excludes every hidden path
+   (dotfiles and anything under a dot-directory), while a replacement deletes the whole destination directory, so a
+   fork whose only change is a hidden file would hash as canonical and lose that file. The provenance check is
+   therefore hash match AND a complete-tree check: the shipped history stores, per released hash, the file list of
+   that release (hidden paths included), and the destination's full tree (hidden entries included) must contain
+   nothing outside that list. Any extra path is reported as "local additions: <paths>" and blocks the overwrite
+   without explicit confirmation; the install never deletes a path that was not in the canonical tree.
+   **One gate, in the one writer.** The provenance gate lives in the function that writes a skill directory
+   (`_install_single_item` in `aec/commands/install_cmd.py`), not in each caller, so `aec upgrade`, `aec update` and the declarative `aec apply`
+   (`plan_apply` classifies a vendored skill with no manifest row as `install`, and `execute_apply` calls
+   `_install_single_item(..., yes=True)`, which today replaces the directory unchecked) all pass through it. `yes=True`
+   means "no prompt", never "skip provenance": a non-canonical, unknown, modified or forked destination is reported
+   and left untouched unless the caller passes an explicit overwrite/adopt confirmation.
 4. Never say "(up to date)" for a scope it did not check: when vendored copies exist and the check cannot run,
    the summary names what was skipped and the command that fixes it (`aec doctor` fails loudly on the same
    condition).
@@ -60,11 +73,18 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
   the shipped set, and a vendored copy matching either one is upgraded, not reported as a fork.
 - A clean, committed fork with the same name and an older version but a different content hash: reported, not
   overwritten without explicit confirmation.
+- Hidden-file fork: a copy whose only difference from the canonical release is an added dotfile, a modified dotfile
+  or a file under a dot-directory: reported as "local additions", not overwritten, and the file survives.
+- `aec apply` (declarative path), one test each for a vendored skill that is: canonical (upgraded), unknown version
+  (reported, untouched), locally modified (reported, untouched), and a clean committed fork (reported, untouched,
+  `yes=True` notwithstanding). A test also pins that `execute_apply` reaches the same gate as `aec upgrade`, so a
+  new caller of `_install_single_item` cannot bypass it.
 - A repo with no vendored copies: unchanged output.
 - `doctor` exits non-zero and names the fix when a vendored copy is stale.
 
 ## Affected surfaces
 
-`aec/commands/update.py`, `aec/commands/outdated.py`, `aec/commands/upgrade.py`, `aec/lib/apply_core.py`,
+`aec/commands/update.py`, `aec/commands/outdated.py`, `aec/commands/upgrade.py`,
+`aec/commands/install_cmd.py` (`_install_single_item`, the gate), `aec/lib/apply_core.py`,
 `aec/lib/catalog_hashes.py`, `aec/lib/skills_manifest.py`, the release/catalog generation step, `aec/commands/run_doctor.py`
 (or its equivalent), docs for `outdated` / `upgrade`.
