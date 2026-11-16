@@ -11,6 +11,15 @@
 #
 # Activation: advisory until the `main promotion gate` ruleset requires the
 # check "PRs into main must come from staging".
+#
+# Known limits (SEC-MVS-01). pull_request_target runs this file from the DEFAULT
+# branch, never from the PR. But a required check is matched by NAME and a
+# same-repo PR's own workflows can publish that name, so this workflow detects a
+# forged same-name job (scripts/check-forged-gate-names.py) and fails closed; it
+# cannot make the name unforgeable. That needs a required workflow (org ruleset)
+# or a distinct publisher app. Check runs are commit-scoped: a disallowed branch
+# at exactly staging's SHA would deliver the identical commit, so its own check
+# turns red but staging's success at that SHA is not a content risk.
 name: main via staging
 on:
   pull_request_target:
@@ -42,13 +51,38 @@ jobs:
           CHECK_NAME: PRs into main must come from staging
         run: |
           set -u
-          # A rejected source publishes nothing: the required check stays absent
-          # (which blocks the merge) and this job's own failure names the reason.
-          # Publishing a failure would overwrite the success a legitimate staging
-          # PR holds at the same SHA, since check runs are commit-scoped.
-          HEAD_REF="$HEAD_REF" HEAD_REPO="$HEAD_REPO" REPO="$REPO" bash scripts/check-main-source.sh
-          gh api -X POST "repos/$REPO/check-runs" \
+          # Fail closed: the named check exists (in_progress) before anything is
+          # evaluated, and a rejection completes it as `failure`. A rejected PR can
+          # never leave the required name absent or leave an older success standing
+          # as the latest result.
+          check_id=$(gh api -X POST "repos/$REPO/check-runs" \
             -f name="$CHECK_NAME" -f head_sha="$SHA" \
-            -f status="completed" -f conclusion="success" \
-            -f "output[title]=source branch ok" \
-            -f "output[summary]=This PR comes from staging."
+            -f status="in_progress" \
+            -f "output[title]=promotion guard running" \
+            -f "output[summary]=Checking the source branch…" --jq .id)
+          complete_check() {
+            gh api -X PATCH "repos/$REPO/check-runs/$check_id" \
+              -f status="completed" -f conclusion="$1" \
+              -f "output[title]=$2" -f "output[summary]=$3"
+          }
+          # A PR-controlled job can borrow a required check's name (see
+          # scripts/check-forged-gate-names.py). Detection only; the unforgeable
+          # fix is a required workflow or a distinct publisher app.
+          set +e
+          forged_out=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" --paginate \
+            | REPO="$REPO" python3 scripts/check-forged-gate-names.py 2>&1)
+          forged_rc=$?
+          source_out=$(HEAD_REF="$HEAD_REF" HEAD_REPO="$HEAD_REPO" REPO="$REPO" \
+            bash scripts/check-main-source.sh 2>&1)
+          source_rc=$?
+          set -e
+          printf '%s\n%s\n' "$forged_out" "$source_out"
+          if [ "$forged_rc" -ne 0 ]; then
+            complete_check failure "forged check name" "$forged_out"
+            exit 1
+          fi
+          if [ "$source_rc" -ne 0 ]; then
+            complete_check failure "source branch rejected" "$source_out"
+            exit 1
+          fi
+          complete_check success "source branch ok" "This PR comes from staging."

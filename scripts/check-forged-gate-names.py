@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""Detect a forged required check: a PR-controlled Actions job that borrows a protected check name.
+
+Required checks are matched by NAME (plus the GitHub Actions app id), and a same-repo PR runs the
+workflows in its own head. So a PR can add a job named exactly like a required check, with
+`run: true`, and Actions publishes a success under that name.
+
+A legitimate result for a protected name is either published through the Checks API (its
+details_url is `.../runs/<id>`, no `/actions/`) or comes from one pinned trusted workflow
+(path + event). Any other Actions-job check run bearing a protected name is forged.
+
+This is DETECTION, not prevention: the forged success still sits beside our result. The
+unforgeable fix is a required workflow or a distinct publisher app (see the SEC-MVS-01 plan).
+It exists so the guard, and the merge step of whoever merges, fail loudly instead of trusting a name.
+
+Usage:
+  gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" --paginate | \
+    REPO=$REPO python3 scripts/check-forged-gate-names.py
+Exit 0: none forged. Exit 1: forged names listed on stderr. Exit 2: could not evaluate (fails closed).
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+
+# name -> allowed (workflow path, event) pairs for an Actions-job check run bearing that name.
+# An empty set means no Actions job may use the name: only the Checks API publishes it.
+PROTECTED = {
+    "PRs into main must come from staging": set(),
+    "Review Gate": {(".github/workflows/review-gate.yml", "pull_request_target")},
+}
+_JOB_URL = re.compile(r"/actions/runs/(\d+)/job/")
+
+
+def job_run_id(check_run):
+    """Return the workflow run id when this check run was created by an Actions job, else None."""
+    for key in ("details_url", "html_url"):
+        match = _JOB_URL.search(check_run.get(key) or "")
+        if match:
+            return match.group(1)
+    return None
+
+
+def forged(check_runs, run_lookup, protected=None):
+    """Names/ids of check runs created by an untrusted Actions job under a protected name.
+
+    run_lookup(run_id) -> (workflow path, event); it may raise, which propagates (fail closed).
+    """
+    protected = PROTECTED if protected is None else protected
+    found = []
+    for check_run in check_runs:
+        name = check_run.get("name")
+        if name not in protected:
+            continue
+        run_id = job_run_id(check_run)
+        if run_id is None:
+            continue
+        if run_lookup(run_id) not in protected[name]:
+            found.append((name, check_run.get("html_url") or run_id))
+    return found
+
+
+def _gh_run_lookup(repo):
+    def lookup(run_id):
+        out = subprocess.run(
+            ["gh", "api", f"repos/{repo}/actions/runs/{run_id}", "--jq", "[.path,.event]|@tsv"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        path, event = out.split("\t")
+        return path, event
+
+    return lookup
+
+
+def _load_check_runs(text):
+    """`gh api --paginate` concatenates one JSON object per page."""
+    decoder, index, runs = json.JSONDecoder(), 0, []
+    while index < len(text):
+        while index < len(text) and text[index].isspace():
+            index += 1
+        if index >= len(text):
+            break
+        page, index = decoder.raw_decode(text, index)
+        runs.extend(page["check_runs"])
+    return runs
+
+
+def main():
+    repo = os.environ.get("REPO")
+    if not repo:
+        print("::error::REPO is required", file=sys.stderr)
+        return 2
+    try:
+        bad = forged(_load_check_runs(sys.stdin.read()), _gh_run_lookup(repo))
+    except (ValueError, KeyError, subprocess.CalledProcessError) as exc:
+        print(f"::error::could not evaluate check runs, failing closed: {exc}", file=sys.stderr)
+        return 2
+    for name, where in bad:
+        print(f"::error::forged check '{name}' from an untrusted Actions job: {where}", file=sys.stderr)
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
