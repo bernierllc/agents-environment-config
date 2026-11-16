@@ -77,8 +77,67 @@ Prefer A first when the plan offers it (smaller moving parts); B is the fallback
 ## Affected surfaces
 
 `main-via-staging.yml`, `review-gate.yml`, `check-main-source.sh`, `check-forged-gate-names.py`, every
-downstream repo that copies the guard, and every ruleset requiring the guard check or `Review Gate`. Scripts land
-on the default branch before the workflow that calls them.
+downstream repo that copies the guard, and every ruleset requiring the guard check or `Review Gate`.
+
+### Rollout order for a repo adopting the guard
+
+`main-via-staging.yml` runs under `pull_request_target`: GitHub loads the workflow from the default branch (`main`
+for a repo that promotes through `staging`), so it publishes nothing until it is on `main`; it also checks the
+validator scripts out from the PR base (`main`). If the workflow reaches `main` before the scripts, the first
+promotion after that publishes a failing `PRs into main must come from staging` ("guard script missing on
+base"). Order the rollout so `main` has the scripts before any workflow that calls them runs:
+
+0. Look at what `main` requires (`gh api repos/<repo>/rules/branches/main`, the `required_status_checks`
+   contexts) and at who publishes it today. A hand-rolled `main-via-staging.yml` whose **job** is named
+   `PRs into main must come from staging` publishes that name as an Actions job, so the forged-gate scan flags it.
+   - `main` does **not** require that context: delete the legacy workflow on `staging` first, re-run the scan,
+     then continue with step 1.
+   - `main` **already requires** it and the legacy job is its only publisher: do **not** delete it first and do
+     **not** drop the context from the ruleset. Deleting the publisher leaves no promotion able to satisfy the
+     required context, because the canonical workflow counts only once it is on `main`. Follow "Bootstrap for a
+     repo whose main ruleset already requires the context" below instead of steps 1 to 4.
+1. Scripts (`check-main-source.sh`, `check-forged-gate-names.py`) and their tests land on `staging`.
+2. A `staging` to `main` promotion carries the scripts to `main`.
+3. Only then the workflow (and its test) lands on `staging`.
+4. Promote again.
+5. Flip the required check to the guard name only after its first green run.
+
+### Bootstrap for a repo whose main ruleset already requires the context
+
+Not a free pass: the plan has no sanctioned bootstrap that avoids a scan waiver, because the legacy job is still in
+the head of the promotion that carries the canonical guard to `main`. Exactly one promotion is waived, and the
+waiver is the owner's to grant (a directive or a cop never waives a gate); record the approval on that PR.
+
+A same-path swap deadlocks: `pull_request` runs the head's `main-via-staging.yml` (the canonical file has no
+`pull_request` trigger) and `pull_request_target` runs `main`'s (still the legacy file), so the swap promotion has no
+publisher at all. So the canonical workflow arrives under a temporary second filename while the legacy file stays
+in place:
+
+1. `staging`: scripts, their tests and the canonical workflow at a temporary path (for example
+   `.github/workflows/main-via-staging-canonical.yml`). The legacy workflow stays untouched.
+2. Bootstrap promotion P1 to `main`. The legacy job still publishes the required context, so the merge-time scan
+   exits 1 with only that job flagged. The merger waives it only after hand-verifying, and writing on the PR:
+   head repo equals base repo, head ref is `staging`, every flagged run is the legacy workflow's job (path and event
+   both match, none from another workflow), and the promotion adds no other workflow.
+3. A normal PR into `staging` deletes the legacy workflow. Open no further promotion before it lands: with both
+   publishers present, the canonical scan flags the legacy job and fails the context.
+4. Promotion P2: its head has no legacy job, `main`'s canonical file publishes the context through the Checks API,
+   and the scan exits 0. This is the first promotion that needs no waiver.
+5. Move the canonical workflow to its standard path (`main-via-staging.yml`) in a `staging` PR and promote
+   (P3). Flip the required check only after P2 or P3 shows a green guard run.
+
+Status: derived from GitHub's event semantics, not yet run end to end. The first repo to adopt it records the
+result here.
+
+Two gotchas seen on the first end-to-end rollout (confirmed on a downstream repo's first green main-targeted run,
+check published by app 15368):
+
+- A PR into `main` needs the `review:high` label before `Review Gate` goes green; add it when opening a promotion.
+- A head can carry two `Review Gate` runs (the workflow job and a Checks-API run). Rerun the failed one, not only
+  the latest; a green latest run does not clear a failed earlier one.
+
+Input contract of the detector: it fails closed (exit 2) on empty, malformed or check-run-less input, because a head
+always has check runs by merge time; an empty set is not "no forgery". Callers should still use `set -o pipefail`.
 
 ## Steps
 
