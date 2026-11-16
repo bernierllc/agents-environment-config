@@ -199,6 +199,49 @@ start_pm_job() {
     clean_pm_cache "$@" >"$PM_LOG_DIR/$name.log" 2>&1 &
 }
 
+# Playwright browser builds: every Playwright upgrade downloads a new revision
+# (chromium-1217, chromium-1223, ...) and never removes the old one. Keeps the
+# newest revision of each browser; older ones untouched for 14d go. A project
+# still pinned to an old Playwright re-downloads it on its next install.
+# Usage: prune_playwright_browsers DIR
+prune_playwright_browsers() {
+    local PW_CACHE="$1" PW_DIRS family name old
+    if [ -d "$PW_CACHE" ]; then
+        # Browser dirs are <family>-<revision>, revision all digits (mcp-chrome-<hash> profiles never match).
+        PW_DIRS=$(find "$PW_CACHE" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sed 's#.*/##' | grep -E '^[a-z_]+-[0-9]+$')
+        for family in $(sed -E 's/-[0-9]+$//' <<<"$PW_DIRS" | sort -u); do
+            grep -E "^${family}-[0-9]+$" <<<"$PW_DIRS" | awk -F- '{print $NF "\t" $0}' | sort -rn | cut -f2 \
+                | tail -n +2 | while IFS= read -r name; do
+                    old="$PW_CACHE/$name"
+                    if find "$old" -maxdepth 0 -mtime +14 -print -quit 2>/dev/null | grep -q .; then
+                        echo "  Removing old Playwright browser $(basename "$old") ($(du -sh "$old" 2>/dev/null | awk '{print $1}'))"
+                        rm -rf "$old" || echo "    (could not remove $old)"
+                    fi
+                done
+        done
+    fi
+}
+
+# App updaters (Sparkle, Squirrel's ShipIt) leave staged updates behind; Codex's
+# Sparkle cache alone held 6.9GB. Each staged update is its own subdirectory; the
+# parent's mtime changes on every update check, so age each entry, not the parent,
+# and keep the newest one in case it is waiting to install on quit.
+# Usage: prune_updater_staging DIR...
+prune_updater_staging() {
+    local staging staged
+    for staging in "$@"; do
+        [ -d "$staging" ] || continue
+        # shellcheck disable=SC2012 # names are generated (update.XXXX), never contain newlines
+        ls -td "$staging"/*/ 2>/dev/null | tail -n +2 | while IFS= read -r staged; do
+            staged="${staged%/}"
+            if find "$staged" -maxdepth 0 -mtime +1 -print -quit 2>/dev/null | grep -q .; then
+                echo "  Removing stale app update $staged ($(du -sh "$staged" 2>/dev/null | awk '{print $1}'))"
+                rm -rf "$staged" || echo "    (could not remove $staged)"
+            fi
+        done
+    done
+}
+
 on_exit() {
     restart_colima || true
     [ -n "${PM_LOG_DIR:-}" ] && rm -rf "$PM_LOG_DIR"
@@ -347,6 +390,10 @@ else
     run_with_timeout "$DOCKER_TIMEOUT" docker image prune -a -f --filter "until=24h" 2>/dev/null || echo "  (Image prune timed out)"
 
     if [ "$DOCKER_RUNTIME" = "colima" ]; then
+        # Colima's VM disk is a sparse file that only grows: blocks Docker just freed stay
+        # allocated on the Mac until the guest discards them (13.5GB in one run).
+        echo "  Trimming Colima VM disk (fstrim)..."
+        run_with_timeout 120 colima ssh -- sudo fstrim -a 2>&1 | tail -n1 || echo "  (fstrim failed or timed out)"
         recycle_colima
     fi
 
@@ -485,6 +532,9 @@ for profile in "$HOME/Library/Caches/ms-playwright"/mcp-chrome-*; do
     fi
 done
 
+# 6. Old Playwright browser revisions
+prune_playwright_browsers "${PLAYWRIGHT_BROWSERS_PATH:-$HOME/Library/Caches/ms-playwright}"
+
 echo ""
 echo "  Claude cleanup: $CLAUDE_CLEANED items cleaned"
 
@@ -540,15 +590,7 @@ for name in "${PM_JOB_NAMES[@]}"; do
     cat "$PM_LOG_DIR/$name.log"
 done
 
-# App updaters (Sparkle, Squirrel's ShipIt) leave staged updates behind; Codex's
-# Sparkle cache alone held 6.9GB. Anything staged 7d+ ago is long installed.
-for staged in "$HOME"/Library/Caches/*/org.sparkle-project.Sparkle/Installation "$HOME"/Library/Caches/*.ShipIt; do
-    [ -d "$staged" ] || continue
-    if find "$staged" -maxdepth 0 -mtime +7 -print -quit 2>/dev/null | grep -q .; then
-        echo "  Removing stale app update $staged ($(du -sh "$staged" 2>/dev/null | awk '{print $1}'))"
-        rm -rf "$staged" 2>/dev/null || true
-    fi
-done
+prune_updater_staging "$HOME"/Library/Caches/*/org.sparkle-project.Sparkle/Installation "$HOME"/Library/Caches/*.ShipIt
 
 echo ""
 echo "Package manager cache cleanup complete"
