@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_cleanup_hung_processes_script import _helper_prelude
+from tests.test_cleanup_hung_processes_script import _fake_tool, _helper_prelude, _run_snippet
 
 OLD = time.time() - 30 * 86400
 
@@ -77,3 +77,17 @@ def test_updater_staging_is_left_alone_when_lsof_cannot_list_files(tmp_path):
     out = _call(f'PATH="{bindir}:$PATH"; prune_updater_staging "{staging}"')
     assert old.exists(), out
     assert "cannot list open files" in out
+
+
+def test_failed_fstrim_is_reported(tmp_path):
+    # `colima ssh -- sudo fstrim -a` fails: the step must say so, not report success from tail's status.
+    bindir = _fake_tool(tmp_path, "colima", 'echo "fstrim: /: FITRIM ioctl failed"\nexit 1\n')
+    result = _run_snippet(bindir, "trim_colima_disk\n")
+    assert "fstrim failed or timed out" in result.stdout, result.stdout
+    assert "FITRIM ioctl failed" in result.stdout, result.stdout
+
+
+def test_successful_fstrim_prints_only_its_last_line(tmp_path):
+    bindir = _fake_tool(tmp_path, "colima", 'echo "/mnt: 1 GiB trimmed"\necho "/: 2 GiB trimmed"\n')
+    result = _run_snippet(bindir, "trim_colima_disk\n")
+    assert result.stdout.strip() == "/: 2 GiB trimmed", result.stdout

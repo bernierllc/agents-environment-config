@@ -34,6 +34,17 @@ run_with_timeout() {
     ' -- "$seconds" "$@"
 }
 
+# Discard blocks the Colima guest no longer uses so the sparse VM disk shrinks on the Mac.
+# Prints fstrim's last output line, and a failure line when fstrim itself failed or timed out.
+trim_colima_disk() {
+    local out rc
+    # capture instead of piping: without pipefail a pipeline's status is tail's, which always succeeds
+    out="$(run_with_timeout 120 colima ssh -- sudo fstrim -a 2>&1)"
+    rc=$?
+    [ -z "$out" ] || printf '%s\n' "$out" | tail -n1
+    [ "$rc" -eq 0 ] || echo "  (fstrim failed or timed out)"
+}
+
 # Clean a package-manager cache without letting it hang the script.
 # Usage: clean_pm_cache SECONDS label command [args...]
 # - stdin from /dev/null: Corepack shims (node's bundled yarn/pnpm) prompt
@@ -378,7 +389,7 @@ else
         # Colima's VM disk is a sparse file that only grows: blocks Docker just freed stay
         # allocated on the Mac until the guest discards them (13.5GB in one run).
         echo "  Trimming Colima VM disk (fstrim)..."
-        run_with_timeout 120 colima ssh -- sudo fstrim -a 2>&1 | tail -n1 || echo "  (fstrim failed or timed out)"
+        trim_colima_disk
         recycle_colima
     fi
 
