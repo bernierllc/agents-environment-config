@@ -48,7 +48,9 @@ pr_heads() { # repo state -> "branch sha" lines; on failure prints why and retur
 # Every process cwd, once per run: a worktree with a shell, agent or dev server inside is in use.
 CAN_SEE_BUSY=1
 if command -v lsof >/dev/null; then
-  BUSY_CWDS="$(lsof -a -d cwd -u "$(id -u)" -Fn 2>/dev/null | sed -n 's/^n//p' | sort -u)"
+  # lsof -F prints a literal backslash as `\\`; undo that so the names are real paths
+  # shortcut: other control characters in a directory name stay escaped (`\t`), so such a worktree reads as idle; extend the decode if one ever matters
+  BUSY_CWDS="$(lsof -a -d cwd -u "$(id -u)" -Fn 2>/dev/null | sed -n 's/^n//p' | sed 's/\\\\/\\/g' | sort -u)"
 elif [ -d /proc/self ]; then
   BUSY_CWDS="$(for c in /proc/[0-9]*/cwd; do readlink "$c"; done 2>/dev/null | sort -u)"
 else
