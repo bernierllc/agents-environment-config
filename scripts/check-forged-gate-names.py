@@ -23,8 +23,9 @@ TIMING: the guard workflow runs this once. A PR job that publishes its forged na
 not seen by it, so whoever merges runs this again immediately before the merge.
 
 Usage (filter=all: the default lists only the latest run per name and can hide an earlier same-name one):
-  gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" --paginate | \
+  set -o pipefail; gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" --paginate | \
     REPO=$REPO python3 scripts/check-forged-gate-names.py
+`pipefail` is required: a failed or truncated listing must not reach this script as empty input.
 Exit 0: none forged. Exit 1: forged names listed on stderr. Exit 2: could not evaluate (fails closed).
 """
 import json

@@ -98,3 +98,9 @@ def test_workflow_run_path_with_a_ref_suffix_is_normalized(monkeypatch):
     path_event = mod._gh_run_lookup("my-org/my-repo")("890")
     assert path_event == TRUSTED_GATE
     assert mod.forged([job_run("Review Gate", "890")], lambda _: path_event) == []
+
+
+def test_documented_merge_time_scan_requires_pipefail():
+    plan = (SCRIPT.parent.parent / "plans" / "2026-11-16-unforgeable-required-checks.md").read_text()
+    assert "set -o pipefail; gh api" in plan
+    assert "set -o pipefail; gh api" in SCRIPT.read_text()
