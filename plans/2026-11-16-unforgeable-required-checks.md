@@ -24,7 +24,7 @@ publishing the same name. The name carries no provenance.
   workflow run is not the pinned trusted path + event.
 - Timing: the workflow checks once. A PR job that publishes its forged name after that check is not seen by it.
   Whoever merges must run the detector immediately before `gh pr merge`
-  (`set -o pipefail; gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" --paginate | REPO=$REPO TRUSTED_BASE_BRANCHES="main staging" python3 scripts/check-forged-gate-names.py`,
+  (`set -o pipefail; gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" --paginate | REPO=$REPO python3 scripts/check-forged-gate-names.py`,
   exit 0 required; `pipefail` is mandatory so a failed or truncated listing fails the command instead of reaching the
   detector as empty input), which is the point that cannot race.
 
@@ -250,21 +250,21 @@ always has check runs by merge time; an empty set is not "no forgery". Callers s
 - S5. `review-gate.yml` (owned by the claude-skills repo, a separate PR after its in-flight 1.4.0 change lands)
   invokes `scripts/check-forged-gate-names.py` for PRs into every protected branch, so `Review Gate` forgery is
   detected at PR time on `staging` as well, not only by the merge-time step.
-- S6. The trusted pair for `Review Gate` in `scripts/check-forged-gate-names.py`
-  (`.github/workflows/review-gate.yml`, `pull_request_target`) is unsafe for stacked PRs. Observed on a throwaway
-  stacked pair of PRs (2026-11-16): the child's run and its Actions job both attach to the child's own head, so the
-  commit is not the hole. The hole is the workflow FILE: a `pull_request_target` run executes the file from the PR's
-  base branch, and a stacked child's base is the outer PR's branch, which its author can rewrite. A pair names a
-  file, not the content that ran. Fix (done in the S6 PR): the trusted pair counts only when every PR the run
-  belongs to targets an owner-trusted base branch: the repo's default branch plus the comma-separated
-  `TRUSTED_BASE_BRANCHES` env var, space separated because git forbids spaces in branch names but allows commas
-  (aec's integration branch is `staging`, so its callers, `main-via-staging.yml` and the merge-time command above,
-  set it); a run with no PR
-  has no base and is flagged. GitHub's `protected` flag is not used (Codex P1): it aggregates wildcard rules that can
-  cover branches a collaborator may still create. Two rejected designs: excluding only the caller's own run id (one commit carries
-  several legitimate `Review Gate` jobs from reruns, so every merge-time scan would flag the others) and requiring
-  the run's `head_sha` to equal the check run's (empirically always true, so it pins nothing). Owned by the aec
-  thread; the claude-skills re-vendor follows as a separate PR. Note from the claude-skills
-  side: from claude-skills 3.2.0 the workflow job is named `review-gate-runner`, so their wrapper's
-  `{"Review Gate": set()}` flags only a legacy `Review Gate` Actions job on a repo whose main still carries the old
-  workflow, never the new job; the re-vendor must keep a test pinning exactly that.
+- S6. WITHDRAWN (2026-11-16): the `Review Gate` trusted pair in `scripts/check-forged-gate-names.py`
+  (`.github/workflows/review-gate.yml`, `pull_request_target`) stays as it is. S6 assumed a stacked PR could make that
+  pair vouch for something it did not judge, by either of two routes, and probes disproved both:
+  1. The job's result attaches to another PR's head. It does not: a stacked child's `Review Gate` job and its check
+     run attach to the child's OWN head sha (probe PRs #158 and #159, closed).
+  2. The workflow file comes from the PR's base branch, which for a stacked PR is a contributor-controlled branch.
+     It does not: `pull_request_target` runs the file from the repository's default branch, as GitHub documents ("runs
+     in the context of the default branch of the base repository"). Probe PR #160 (closed): the outer base branch
+     carried a modified `review-gate.yml` with an extra job, and the stacked child's run executed the default branch's
+     copy without it.
+  So (path, event) does identify a trusted file, and the pair cannot be supplied by a PR head. Designs that were built
+  and rejected on the way, so nobody rebuilds them: own-run exclusion, head-sha binding, GitHub's `protected` branch
+  flag as a trust test, and a `TRUSTED_BASE_BRANCHES` base-branch allowlist (each guarded a threat route 1 or 2 above
+  shows does not exist, and the allowlist added encoding and default-branch edge cases to every caller). The
+  claude-skills wrapper keeps its own `{"Review Gate": set()}` scoping, and from claude-skills 3.2.0 the workflow job
+  is named `review-gate-runner`, so that scoping flags only a legacy `Review Gate` Actions job on a repo whose main
+  still carries the old workflow. Re-vendoring this script into claude-skills therefore needs no S6 change. The
+  remaining forgery gap is the one A or B closes: a Checks-API POST under a protected name.

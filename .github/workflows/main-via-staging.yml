@@ -94,8 +94,7 @@ jobs:
           runs_json=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" --paginate)
           list_rc=$?
           if [ "$list_rc" -eq 0 ]; then
-            # Both integration branches, whichever is the default: staging PRs and the staging-to-main promotion run the legitimate Review Gate jobs.
-            forged_out=$(printf '%s' "$runs_json" | REPO="$REPO" TRUSTED_BASE_BRANCHES="main staging" python3 scripts/check-forged-gate-names.py 2>&1)
+            forged_out=$(printf '%s' "$runs_json" | REPO="$REPO" python3 scripts/check-forged-gate-names.py 2>&1)
             forged_rc=$?
           else
             forged_out="could not list check runs (gh api exit $list_rc); failing closed"
