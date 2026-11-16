@@ -12,7 +12,7 @@ contradicts it. Checked against the code at `973e583`:
 
 | # | Report | Verdict | Evidence |
 |---|---|---|---|
-| 1 | `aec setup` writes `AGENTS.md` as the facts file | **Partly wrong.** `_copy_agent_files` calls `_repo_layout`: the repo's detected layout first, else the `instructions_layout` setting, and the default is `agents-md`. In a repo with `AGENTINFO.md` it writes the AGENTINFO.md templates. A fresh repo with no setting gets the AGENTS.md layout. The real gap is that nothing pins a whole org to `agentinfo`: the org config key exists (`instructions_layout` is allow-listed) but is not set by the catalog. | `aec/commands/repo.py:_repo_layout`, `_copy_agent_files` |
+| 1 | `aec setup` writes `AGENTS.md` as the facts file | **Partly wrong.** `_copy_agent_files` calls `_repo_layout`: the repo's detected layout first, else the `instructions_layout` setting, and the default is `agents-md`. In a repo with `AGENTINFO.md` it writes the AGENTINFO.md templates. A fresh repo with no setting gets the AGENTS.md layout. The real gap is that nothing pins an org's repos to `agentinfo` without also pinning every other repo on the machine: `instructions_layout` is a machine-global preference. | `aec/commands/repo.py:_repo_layout`, `_copy_agent_files` |
 | 2 | `aec migrate agents-md` moves AGENTINFO.md into AGENTS.md | **True, and unguarded.** `run_migrate_agents_md` calls `plan_migration(repo)` for every target and never reads `instructions_layout`. `--all` runs it over every tracked repo, and the maintenance prompt `MIGRATE_AGENTS_MD_CONFIRM` offers that bulk run. A user who chose `agentinfo` is offered the opposite layout, and a bulk `yes` deletes their AGENTINFO.md (recorded and undoable with `aec rollback`, but still wrong). | `aec/commands/migrate_cmd.py:run_migrate_agents_md`, `aec/lib/prompt_catalog/maintenance_area.py` |
 | 3 | `aec generate files` writes into AEC's own `templates/` | **True.** `files.generate()` uses `require_repo_root()` and writes `templates/*.md` in the AEC checkout. It is a maintainer command that generates AEC's shipped templates, but its name and `aec generate` group read as "generate this project's agent files". Run in a user repo it fails or, in an AEC clone, rewrites AEC's templates. | `aec/commands/files.py:generate` |
 
@@ -40,9 +40,15 @@ pinned to agentinfo, never offer to migrate it".
    elsewhere); `aec generate files` and `aec files generate` stay as deprecated aliases
    for one release through the existing `deprecation_warning`. Nothing in a user repo
    is written by it.
-5. **Org pin.** Org configs already accept `instructions_layout`. Document it in
-   `docs/orgs/authoring-org-configs.md` as the way an org keeps every repo on one
-   layout. The org's own catalog owns the value; AEC carries nothing org-specific.
+5. **Org pin, scoped to the org's repos.** `instructions_layout` is a machine-global
+   preference: `apply_preferences` writes it to the user's preferences file and
+   `_repo_layout` reads it for every fresh repo, so enrolling one org would change the
+   layout of unrelated repos. Do not document it as an org pin yet. The pin becomes
+   an owner-scoped answer under `install.prompts_by_owner` (see
+   `2026-11-15-owner-scoped-overlay-answers.md`, which makes `instructions_layout` a
+   scope-only key); this plan's step 5 ships with or after that plan. Until then, an org
+   that wants every repo on `agentinfo` gets it per repo, because `detect_layout` already
+   returns `agentinfo` wherever `AGENTINFO.md` exists. Steps 1-4 do not depend on it.
 
 ## Affected surfaces
 
@@ -51,7 +57,7 @@ pinned to agentinfo, never offer to migrate it".
 - `aec/commands/migrate_cmd.py`: pinned skip, `--force-layout`, `--all` filtering.
 - `aec/lib/prompt_catalog/maintenance_area.py`: prompt summary for the bulk run.
 - `aec/commands/files.py`, `aec/commands/generate.py`, `aec/cli.py`: rename plus deprecated aliases.
-- Docs: `README.md` (layout section), `docs/orgs/authoring-org-configs.md`.
+- Docs: `README.md` (layout section); `docs/orgs/authoring-org-configs.md` once the owner-scoped plan lands.
 - Writers to sweep before changing the contract: `setup`, `repo setup`, `migrate agents-md` (single path, `--all`, maintenance prompt, `--tidy-with`), `generate files`, `rollback`.
 
 ## Tests (behavior, not bytes)
@@ -61,7 +67,7 @@ pinned to agentinfo, never offer to migrate it".
 - `--all` over one pinned and one unpinned repo: only the unpinned one is in the plan.
 - `aec setup` in a fresh repo with `instructions_layout=agentinfo`: facts file is `AGENTINFO.md`, and `CLAUDE.md`/`GEMINI.md`/`QWEN.md`/`AGENTS.md` are reference stubs that point at it.
 - `aec setup` in a fresh repo with no setting: AGENTS.md layout (the default is unchanged).
-- Org overlay `instructions_layout: agentinfo`, no local setting: all of the above hold (depends on the overlay loading at CLI startup, shipped in PR #148).
+- Owner-scoped org answer `instructions_layout: agentinfo` (after the owner-scoped plan): holds in a repo whose origin owner matches, and a repo of another owner keeps the default.
 - `aec generate templates` outside an AEC checkout exits non-zero with a message and writes nothing; the deprecated aliases warn and delegate.
 
 ## Not in scope
