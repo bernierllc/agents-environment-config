@@ -1,6 +1,6 @@
-Copyright (c) {{year}} {{copyright_holder}}. All rights reserved.
+Copyright (c) {{year}} {{copyright_holder}}{{holder_stop}} All rights reserved.
 
 This software and its source code are proprietary and confidential to
-{{copyright_holder}}. No license or other right to use, copy, modify, merge, publish,
+{{copyright_holder}}{{holder_stop}} No license or other right to use, copy, modify, merge, publish,
 distribute, sublicense or sell this software, in whole or in part, is
-granted except by prior written agreement with {{copyright_holder}}.
+granted except by prior written agreement with {{copyright_holder}}{{holder_stop}}

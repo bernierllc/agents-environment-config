@@ -54,3 +54,53 @@ def test_clear_restores_input(monkeypatch):
     prompts.clear_overlay_answers()
     monkeypatch.setattr("builtins.input", lambda _t: "typed")
     assert prompts.prompt("x", "Q? ") == "typed"
+
+
+def test_enrolled_org_prompt_answers_load_in_a_fresh_process(tmp_path):
+    """`aec org apply` stores policy; a later command must still see its prompt answers."""
+    from aec.lib.org_config import OrgPaths
+    from aec.lib.org_config.apply import load_enrolled_prompt_answers
+
+    paths = OrgPaths(home_dir=tmp_path)
+    paths.orgs_dir.mkdir(parents=True)
+    (paths.orgs_dir / "my-org.yaml").write_text(
+        "---\n"
+        'schema_version: "1.0"\n'
+        "org_id: my-org\n"
+        "org_name: my-org\n"
+        'config_version: "1.0.0"\n'
+        "trust:\n"
+        '  mode: "unsigned"\n'
+        "---\n\n"
+        "install:\n"
+        "  prompts:\n"
+        "    repo.git.license_kind: proprietary\n"
+    )
+    assert load_enrolled_prompt_answers(paths) == 1
+    assert prompts.prompt("repo.git.license_kind", "Q? ", type="enum", choices=["mit", "proprietary"]) == "proprietary"
+
+
+def test_no_enrolled_orgs_loads_nothing(tmp_path):
+    from aec.lib.org_config import OrgPaths
+    from aec.lib.org_config.apply import load_enrolled_prompt_answers
+
+    assert load_enrolled_prompt_answers(OrgPaths(home_dir=tmp_path)) == 0
+
+
+def test_cli_startup_loads_org_answers_and_survives_a_broken_org_config(monkeypatch):
+    from aec import cli
+    from aec.lib.org_config import apply
+
+    calls = []
+    monkeypatch.setattr(apply, "load_enrolled_prompt_answers", lambda paths: calls.append(paths) or 1)
+    cli._load_org_prompt_answers()
+    assert len(calls) == 1
+
+    def broken(_paths):
+        raise ValueError("bad org config")
+
+    warnings = []
+    monkeypatch.setattr(apply, "load_enrolled_prompt_answers", broken)
+    monkeypatch.setattr(cli.Console, "warning", lambda msg: warnings.append(msg))
+    cli._load_org_prompt_answers()  # must not raise
+    assert "bad org config" in warnings[0]

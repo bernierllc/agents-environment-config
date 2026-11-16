@@ -155,6 +155,14 @@ class TestRenderedGitEssentials:
             "granted except by prior written agreement with Acme Corp.\n"
         )
 
+    def test_proprietary_holder_ending_in_period_is_not_doubled(self, tmp_path):
+        from aec.lib.git_setup import default_git_context, write_git_essential
+        _git_repo(tmp_path)
+        ctx = default_git_context(tmp_path, copyright_holder="Acme, Inc.", license_kind="proprietary")
+        write_git_essential(tmp_path, "license", "github", TEMPLATES, ctx)
+        text = (tmp_path / "LICENSE").read_text()
+        assert "Acme, Inc. All rights reserved." in text and ".." not in text
+
     def test_license_kind_never_changes_where_license_is_written(self, tmp_path):
         from aec.lib.git_setup import default_git_context, write_git_essential
         _git_repo(tmp_path)

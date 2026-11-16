@@ -308,11 +308,14 @@ def default_git_context(
 ) -> dict:
     """Everything needed to render the git-essential templates for a project."""
     owner = default_codeowner(project_dir) if codeowner is None else codeowner.lstrip("@")
+    holder = copyright_holder or default_copyright_holder(project_dir)
     return {
         "year": str(date.today().year),
         "license_kind": license_kind,
         "project_name": project_dir.name,
-        "copyright_holder": copyright_holder or default_copyright_holder(project_dir),
+        "copyright_holder": holder,
+        # Ends the holder's sentence without doubling a period it already has ("Acme, Inc.").
+        "holder_stop": "" if holder.endswith(".") else ".",
         "codeowners_rule": f"* @{owner}" if owner else "# * @your-username",
         "generated": {
             "dependabot": render_dependabot(

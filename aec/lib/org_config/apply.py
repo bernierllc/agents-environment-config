@@ -19,6 +19,7 @@ from typing import Callable, Optional
 
 from .effective import EffectivePolicy, effective_policy
 from .errors import OrgApplyCommittedError, OrgConfigError
+from .paths import OrgPaths
 from .schema import RESERVED_SOURCE_IDS, source_identity
 
 _CI_PREFIX = "configurable_instructions."
@@ -67,6 +68,19 @@ def apply_prompts(policy: EffectivePolicy) -> None:
     from ..prompts import set_overlay_answers
 
     set_overlay_answers(dict(policy.prompts))
+
+
+def load_enrolled_prompt_answers(paths: OrgPaths) -> int:
+    """Pre-answer prompts from the enrolled orgs' policy in this process.
+
+    ``apply_prompts`` only lives for the ``aec org apply`` process, so every other
+    command (``aec repo setup``) calls this at startup. Returns the count loaded.
+    """
+    if not paths.orgs_dir.exists():
+        return 0
+    policy = effective_policy(paths)
+    apply_prompts(policy)
+    return len(policy.prompts)
 
 
 _INSTALL_STANCES = frozenset({"required", "recommended", "pinned"})
