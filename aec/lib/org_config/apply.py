@@ -12,6 +12,7 @@ module holds the category appliers.
 """
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -63,43 +64,42 @@ def apply_preferences(policy: EffectivePolicy) -> list[str]:
     return applied
 
 
-def apply_prompts(policy: EffectivePolicy) -> None:
-    """Register the policy's prompt answers so the prompt() seam pre-answers."""
-    from ..prompts import set_overlay_answers
+def apply_prompts(policy: EffectivePolicy, paths: Optional[OrgPaths] = None) -> None:
+    """Register the policy's prompt answers so the prompt() seam pre-answers.
 
-    set_overlay_answers(dict(policy.prompts))
+    With ``paths`` (the real ``aec org apply``), also persist exactly these answers as
+    the approved set that later commands load. Only this function writes that file, so
+    enrolling, refreshing or re-enrolling a config can never change what is trusted.
+    """
+    from ..atomic_write import atomic_write_text
+    from ..prompts import set_overlay_answers
+    from .discovery import discover_enrolled_orgs
+
+    answers = dict(policy.prompts)
+    set_overlay_answers(answers)
+    if paths is not None:
+        org_ids = sorted(e.config.org_id for e in discover_enrolled_orgs(paths))
+        atomic_write_text(paths.approved_prompts, json.dumps({"org_ids": org_ids, "answers": answers}, indent=2))
 
 
 def load_enrolled_prompt_answers(paths: OrgPaths) -> int:
-    """Pre-answer prompts from the enrolled orgs' policy in this process.
+    """Pre-answer prompts from the answers a person approved with ``aec org apply``.
 
-    ``apply_prompts`` only lives for the ``aec org apply`` process, so every other
-    command (``aec repo setup``) calls this at startup. Returns the count loaded.
+    ``set_overlay_answers`` only lives for one process, so every command other than
+    ``aec org apply`` (``aec repo setup``) calls this at startup. Returns the count loaded.
 
-    Only an org whose policy was applied (``last_applied_at``) and has no unreviewed
-    change pending contributes: enrolling or refreshing a config never activates
-    its answers before a person approved it with ``aec org apply``.
+    Reads only the approved-answers file, never the enrolled configs. The answers are
+    dropped when any org that contributed to them has since been unenrolled.
     """
     from ..prompts import set_overlay_answers
-    from .discovery import discover_enrolled_orgs
-    from .state import read_state
 
-    if not paths.orgs_dir.exists():
+    if not paths.approved_prompts.exists():
         return 0
-    answers: dict[str, object] = {}
-    for enrolled in discover_enrolled_orgs(paths):
-        state = read_state(paths, enrolled.config.org_id)
-        if state is None or not state.last_applied_at:
-            continue
-        if state.pending and state.pending.get("kind") in _UNAPPROVED_PENDING:
-            continue
-        answers.update(enrolled.config.install_prompts)
-    set_overlay_answers(answers)
-    return len(answers)
-
-
-# A pending marker of these kinds means the on-disk config changed and has not been approved.
-_UNAPPROVED_PENDING = frozenset({"review", "verify_failed", "trust_change"})
+    approved = json.loads(paths.approved_prompts.read_text())
+    if not all(paths.config_for(org_id).exists() for org_id in approved["org_ids"]):
+        return 0
+    set_overlay_answers(approved["answers"])
+    return len(approved["answers"])
 
 
 _INSTALL_STANCES = frozenset({"required", "recommended", "pinned"})
@@ -555,7 +555,7 @@ def _apply_committed(paths, policy: EffectivePolicy, scope: str, plan, synced: l
     prefs_applied: list[str] = []
     try:
         prefs_applied = apply_preferences(policy)
-        apply_prompts(policy)
+        apply_prompts(policy, paths)
     except (Exception, SystemExit) as exc:  # same per-item catch as uninstalls: recorded, never raised past the stamp
         errors.append(("preferences", _failure(exc)))
     result = execute_apply(
