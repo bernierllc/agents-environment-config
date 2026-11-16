@@ -225,3 +225,61 @@ def test_low_disk_runs_cleanup_only_when_opted_in(env, tmp_path):
         )
         assert r.returncode == 0, r.stderr
         assert marker.exists() is expect, r.stdout
+    (scripts / "cleanup-hung-processes.sh").write_text("#!/bin/bash\nexit 3\n")
+    r = subprocess.run(
+        ["bash", str(scripts / "prune-merged-worktrees.sh")],
+        env={**env["env"], "PATH": path, "LOW_DISK_GB": "999999999", "LOW_DISK_CLEANUP": "1"},
+        capture_output=True, text=True, timeout=60,
+    )
+    assert r.returncode == 3, r.stdout
+
+
+def test_tracked_files_inside_node_modules_are_never_stripped(env):
+    wt = add_worktree(env["repo"], "vendored", push=False)
+    (wt / "node_modules" / "patched.js").write_text("ours")
+    git(wt, "add", "-f", "node_modules/patched.js")
+    git(wt, "commit", "-qm", "vendor a patched module")
+    (wt / "node_modules" / "patched.js").write_text("uncommitted edit")
+    age(wt)
+    out = run(env)
+    assert (wt / "node_modules" / "patched.js").read_text() == "uncommitted edit", out
+
+
+def test_worktree_holding_a_nested_checkout_is_kept(env):
+    outer = add_worktree(env["repo"], "outer", push=True)
+    git(env["repo"], "worktree", "add", "-q", "-b", "inner", str(outer / "nested"), "main")
+    (outer / "nested" / "wip.txt").write_text("uncommitted")
+    (outer / ".gitignore").write_text("node_modules/\n.env\nnested/\n")
+    git(outer, "add", ".gitignore")
+    git(outer, "commit", "-qm", "ignore nested")
+    git(outer, "push", "-q", "origin", "HEAD:refs/heads/outer")
+    git(env["repo"], "fetch", "-q", "origin")
+    age(outer)
+    out = run(env)
+    assert (outer / "nested" / "wip.txt").read_text() == "uncommitted", out
+    assert "nested worktree" in out
+
+
+def test_main_checkout_is_never_stripped_through_a_symlinked_root(env, tmp_path):
+    (env["repo"] / "node_modules" / "pkg").mkdir(parents=True)
+    wt = add_worktree(env["repo"], "linked", push=False)
+    age(wt)
+    gd = env["repo"] / ".git"
+    for f in (gd / "index", gd / "HEAD", gd / "logs" / "HEAD"):
+        if f.exists():
+            os.utime(f, (OLD, OLD))
+    link = tmp_path / "projects-link"
+    link.symlink_to(env["repo"].parent)
+    out = run(env, PROJECTS_ROOT=str(link))
+    assert (env["repo"] / "node_modules" / "pkg").exists(), out
+
+
+def test_failed_process_listing_touches_nothing(env, tmp_path):
+    wt = add_worktree(env["repo"], "unseen", push=True)
+    age(wt)
+    bindir = Path(env["env"]["PATH"].split(":")[0])
+    (bindir / "lsof").write_text("#!/bin/bash\nexit 1\n")
+    (bindir / "lsof").chmod(0o755)
+    out = run(env)
+    assert wt.exists() and (wt / "node_modules").exists(), out
+    assert "cannot tell which worktrees are in use" in out

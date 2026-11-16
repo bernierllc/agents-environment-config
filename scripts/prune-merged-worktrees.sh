@@ -52,7 +52,11 @@ if command -v lsof >/dev/null; then
 elif [ -d /proc/self ]; then
   BUSY_CWDS="$(for c in /proc/[0-9]*/cwd; do readlink "$c"; done 2>/dev/null | sort -u)"
 else
-  CAN_SEE_BUSY=0; echo "neither lsof nor /proc available: cannot tell which worktrees are in use, leaving all of them alone"
+  BUSY_CWDS=""
+fi
+# this script's own process always has a cwd, so an empty list means collection failed
+if [ -z "$BUSY_CWDS" ]; then
+  CAN_SEE_BUSY=0; echo "could not list process cwds (lsof or /proc): cannot tell which worktrees are in use, leaving all of them alone"
 fi
 is_busy() { [ "$CAN_SEE_BUSY" = 1 ] || return 0; awk -v p="$1" '$0==p || index($0, p"/")==1 {f=1; exit} END{exit !f}' <<<"$BUSY_CWDS"; }
 
@@ -71,6 +75,12 @@ idle_hours() {
 
 # An ignored .env that is a symlink to, or a byte-identical copy of, the primary checkout's holds no
 # data of its own: only a .env that differs keeps the tree.
+# Another worktree, clone or submodule inside this one: `git worktree remove` deletes ignored
+# content, which would take that nested checkout and its uncommitted work with it.
+holds_nested_checkout() {
+  find "$1" -mindepth 2 -name node_modules -prune -o -name .git -print -quit 2>/dev/null | grep -q .
+}
+
 holds_own_env() {
   git -C "$1" ls-files -o -i --exclude-standard | grep -E '(^|/)\.env' \
     | while IFS= read -r f; do [ -L "$1/$f" ] || cmp -s "$1/$f" "$2/$f" || echo "$f"; done | grep -q .
@@ -90,6 +100,9 @@ remove_worktree() { # repo path branch reason
 strip_node_modules() { # path label
   local nm kb
   while IFS= read -r nm; do
+    # only an ignored directory with nothing tracked inside it is regenerable
+    git -C "$1" check-ignore -q "$nm" 2>/dev/null || continue
+    [ -z "$(git -C "$1" ls-files -- "$nm" 2>/dev/null | head -n1)" ] || continue
     kb="$(du -sk "$nm" 2>/dev/null | cut -f1)"
     if [ "$DRY_RUN" = 1 ]; then echo "would strip $nm  ($2, $(( ${kb:-0} / 1024 ))M)"; continue; fi
     rm -rf "$nm" && echo "stripped $nm  ($2, $(( ${kb:-0} / 1024 ))M)"
@@ -110,12 +123,12 @@ for gitdir in "$ROOT"/*/.git "$ROOT"/*/*/.git; do
     open="$(pr_heads "$repo" open)" || can_remove=0
   fi
 
-  # one "path<TAB>branch" line per linked worktree; branch is empty when HEAD is detached
+  # one "path<TAB>branch" line per linked worktree (the first record, the main checkout, is skipped:
+  # its path is the physical one and may not equal $repo when $ROOT is reached through a symlink); branch is empty when HEAD is detached
   git -C "$repo" worktree list --porcelain \
     | awk '/^worktree /{w=substr($0,10); b=""} /^branch /{b=substr($0,8); sub("^refs/heads/","",b)}
-           /^$/{if (w!="") print w "\t" b; w=""} END{if (w!="") print w "\t" b}' \
+           /^$/{if (w!="" && n++) print w "\t" b; w=""} END{if (w!="" && n) print w "\t" b}' \
     | while IFS=$'\t' read -r path branch; do
-        [ "$path" = "$repo" ] && continue
         [ -d "$path" ] || continue
         label="${branch:-detached}"
         if is_busy "$path"; then echo "keep    $path  ($label: a process is running inside it)"; continue; fi
@@ -136,6 +149,8 @@ for gitdir in "$ROOT"/*/.git "$ROOT"/*/*/.git; do
           if [ -n "$reason" ]; then
             if holds_own_env "$path" "$repo"; then
               echo "keep    $path  ($label: holds ignored .env files)"
+            elif holds_nested_checkout "$path"; then
+              echo "keep    $path  ($label: holds a nested worktree, clone or submodule)"
             else
               remove_worktree "$repo" "$path" "$branch" "$reason"; removed=1
             fi
@@ -149,11 +164,13 @@ for gitdir in "$ROOT"/*/.git "$ROOT"/*/*/.git; do
   git -C "$repo" worktree prune
 done
 
+rc=0
 if [ "$LOW" = 1 ] && [ "$DRY_RUN" != 1 ]; then
   cleanup="$(dirname "$0")/cleanup-hung-processes.sh"
-  if [ "$LOW_DISK_CLEANUP" = 1 ] && [ -x "$cleanup" ]; then echo "== low disk: running $cleanup"; "$cleanup"; fi
+  if [ "$LOW_DISK_CLEANUP" = 1 ] && [ -x "$cleanup" ]; then echo "== low disk: running $cleanup"; "$cleanup" || { rc=$?; echo "cleanup failed (exit $rc)"; }; fi
   msg="Free space was ${FREE_BEFORE}G (< ${LOW_DISK_GB}G); now $(free_gb)G after pruning worktrees"
   command -v osascript >/dev/null && osascript -e "display notification \"$msg\" with title \"Low disk space\"" 2>/dev/null
   echo "$msg"
 fi
 df -h "$HOME" | tail -1
+exit "$rc"

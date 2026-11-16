@@ -199,33 +199,11 @@ start_pm_job() {
     clean_pm_cache "$@" >"$PM_LOG_DIR/$name.log" 2>&1 &
 }
 
-# Playwright browser builds: every Playwright upgrade downloads a new revision
-# (chromium-1217, chromium-1223, ...) and never removes the old one. Keeps the
-# newest revision of each browser; older ones untouched for 14d go. A project
-# still pinned to an old Playwright re-downloads it on its next install.
-# Usage: prune_playwright_browsers DIR
-prune_playwright_browsers() {
-    local PW_CACHE="$1" PW_DIRS family name old
-    if [ -d "$PW_CACHE" ]; then
-        # Browser dirs are <family>-<revision>, revision all digits (mcp-chrome-<hash> profiles never match).
-        PW_DIRS=$(find "$PW_CACHE" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sed 's#.*/##' | grep -E '^[a-z_]+-[0-9]+$')
-        for family in $(sed -E 's/-[0-9]+$//' <<<"$PW_DIRS" | sort -u); do
-            grep -E "^${family}-[0-9]+$" <<<"$PW_DIRS" | awk -F- '{print $NF "\t" $0}' | sort -rn | cut -f2 \
-                | tail -n +2 | while IFS= read -r name; do
-                    old="$PW_CACHE/$name"
-                    if find "$old" -maxdepth 0 -mtime +14 -print -quit 2>/dev/null | grep -q .; then
-                        echo "  Removing old Playwright browser $(basename "$old") ($(du -sh "$old" 2>/dev/null | awk '{print $1}'))"
-                        rm -rf "$old" || echo "    (could not remove $old)"
-                    fi
-                done
-        done
-    fi
-}
-
 # App updaters (Sparkle, Squirrel's ShipIt) leave staged updates behind; Codex's
 # Sparkle cache alone held 6.9GB. Each staged update is its own subdirectory; the
 # parent's mtime changes on every update check, so age each entry, not the parent,
-# and keep the newest one in case it is waiting to install on quit.
+# and keep the newest one in case it is waiting to install on quit. Older entries go
+# after 7 days unless a process (the updater) has files open in them.
 # Usage: prune_updater_staging DIR...
 prune_updater_staging() {
     local staging staged
@@ -234,10 +212,13 @@ prune_updater_staging() {
         # shellcheck disable=SC2012 # names are generated (update.XXXX), never contain newlines
         ls -td "$staging"/*/ 2>/dev/null | tail -n +2 | while IFS= read -r staged; do
             staged="${staged%/}"
-            if find "$staged" -maxdepth 0 -mtime +1 -print -quit 2>/dev/null | grep -q .; then
-                echo "  Removing stale app update $staged ($(du -sh "$staged" 2>/dev/null | awk '{print $1}'))"
-                rm -rf "$staged" || echo "    (could not remove $staged)"
+            # an older entry untouched for a week with no process holding files in it is long installed
+            find "$staged" -maxdepth 0 -mtime +7 -print -quit 2>/dev/null | grep -q . || continue
+            if command -v lsof >/dev/null && lsof -t +D "$staged" 2>/dev/null | grep -q .; then  # exit code is unreliable on macOS
+                echo "  Keeping app update $staged (in use)"; continue
             fi
+            echo "  Removing stale app update $staged ($(du -sh "$staged" 2>/dev/null | awk '{print $1}'))"
+            rm -rf "$staged" || echo "    (could not remove $staged)"
         done
     done
 }
@@ -532,11 +513,6 @@ for profile in "$HOME/Library/Caches/ms-playwright"/mcp-chrome-*; do
     fi
 done
 
-# 6. Old Playwright browser revisions
-# Playwright's default cache: ~/Library/Caches on macOS, ~/.cache on Linux
-for pw in "${PLAYWRIGHT_BROWSERS_PATH:-}" "$HOME/Library/Caches/ms-playwright" "$HOME/.cache/ms-playwright"; do
-    [ -n "$pw" ] && prune_playwright_browsers "$pw"
-done
 
 echo ""
 echo "  Claude cleanup: $CLAUDE_CLEANED items cleaned"

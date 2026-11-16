@@ -1,5 +1,4 @@
-"""Disk-reclaim helpers in scripts/cleanup-hung-processes.sh: stale updater
-staging and old Playwright browser revisions, on real directories."""
+"""Updater-staging pruning in scripts/cleanup-hung-processes.sh, on real directories."""
 
 from __future__ import annotations
 
@@ -47,22 +46,16 @@ def test_updater_staging_keeps_recent_entries(tmp_path):
     assert a.exists() and b.exists()
 
 
-def test_playwright_keeps_newest_revision_per_browser(tmp_path):
-    pw = tmp_path / "ms-playwright"
-    old_chromium = _mkdir(pw / "chromium-1217", old=True)
-    new_chromium = _mkdir(pw / "chromium-1223", old=True)
-    old_shell = _mkdir(pw / "chromium_headless_shell-999", old=True)  # numeric, not lexical, order
-    new_shell = _mkdir(pw / "chromium_headless_shell-1223", old=True)
-    only_ffmpeg = _mkdir(pw / "ffmpeg-1011", old=True)
-    recent_old_rev = _mkdir(pw / "webkit-2000", old=False)
-    _mkdir(pw / "webkit-2287", old=False)
-    profile = _mkdir(pw / "mcp-chrome-1a2b3c", old=True)  # MCP profile: handled elsewhere
-    _call(f'prune_playwright_browsers "{pw}"')
-    assert not old_chromium.exists() and not old_shell.exists()
-    assert new_chromium.exists() and new_shell.exists() and only_ffmpeg.exists()
-    assert recent_old_rev.exists()  # used within 14 days
-    assert profile.exists()
-
-
-def test_playwright_missing_dir_is_a_noop(tmp_path):
-    _call(f'prune_playwright_browsers "{tmp_path / "nope"}"')
+def test_updater_staging_keeps_an_old_entry_a_process_has_open(tmp_path):
+    staging = tmp_path / "Installation"
+    held = _mkdir(staging / "a", old=True)
+    os.utime(held, (OLD, OLD))
+    newest = _mkdir(staging / "b", old=False)
+    proc = subprocess.Popen(["tail", "-f", str(held / "f")])
+    try:
+        time.sleep(0.5)
+        os.utime(held, (OLD, OLD))
+        out = _call(f'prune_updater_staging "{staging}"')
+    finally:
+        proc.kill()
+    assert held.exists() and newest.exists(), out
