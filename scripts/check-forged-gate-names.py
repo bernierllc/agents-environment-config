@@ -7,7 +7,7 @@ workflows in its own head. So a PR can add a job named exactly like a required c
 
 A legitimate result for a protected name is either published through the Checks API (its
 details_url is `.../runs/<id>`, no `/actions/`) or comes from one pinned trusted workflow
-(path + event). Any other Actions-job check run bearing a protected name is forged.
+(path + event) whose run judged the same commit the check run sits on. Any other Actions-job check run bearing a protected name is forged.
 
 This is DETECTION, not prevention: the forged success still sits beside our result. The
 unforgeable fix is a required workflow or a distinct publisher app (plan `plans/2026-11-16-unforgeable-required-checks.md` in the aec repo; copies of this
@@ -38,7 +38,8 @@ import re
 import subprocess
 import sys
 
-# name -> allowed (workflow path, event) pairs for an Actions-job check run bearing that name.
+# name -> allowed (workflow path, event) pairs for an Actions-job check run bearing that name. A run
+# from an allowed pair must also have judged the commit its check run sits on (see forged()).
 # An empty set means no Actions job may use the name: only the Checks API publishes it.
 PROTECTED = {
     "PRs into main must come from staging": set(),
@@ -59,7 +60,10 @@ def job_run_id(check_run):
 def forged(check_runs, run_lookup, protected=None):
     """Names/ids of check runs created by an untrusted Actions job under a protected name.
 
-    run_lookup(run_id) -> (workflow path, event); it may raise, which propagates (fail closed).
+    run_lookup(run_id) -> (workflow path, event, head sha the run judged); it may raise, which
+    propagates (fail closed). A trusted (path, event) pair identifies the workflow, not the commit it
+    judged: in a stacked PR a child's trusted run can attach a check run to the outer head. So a trusted
+    run also has to have judged the very commit the check run sits on.
     """
     protected = PROTECTED if protected is None else protected
     found = []
@@ -70,7 +74,8 @@ def forged(check_runs, run_lookup, protected=None):
         run_id = job_run_id(check_run)
         if run_id is None:
             continue
-        if run_lookup(run_id) not in protected[name]:
+        path, event, judged_sha = run_lookup(run_id)
+        if (path, event) not in protected[name] or judged_sha != check_run.get("head_sha"):
             found.append((name, check_run.get("html_url") or run_id))
     return found
 
@@ -78,12 +83,12 @@ def forged(check_runs, run_lookup, protected=None):
 def _gh_run_lookup(repo):
     def lookup(run_id):
         out = subprocess.run(
-            ["gh", "api", f"repos/{repo}/actions/runs/{run_id}", "--jq", "[.path,.event]|@tsv"],
+            ["gh", "api", f"repos/{repo}/actions/runs/{run_id}", "--jq", "[.path,.event,.head_sha]|@tsv"],
             capture_output=True, text=True, check=True,
         ).stdout.strip()
-        path, event = out.split("\t")
+        path, event, head_sha = out.split("\t")
         # Required/reusable workflow runs report `path@ref`; compare the file path only.
-        return path.split("@", 1)[0], event
+        return path.split("@", 1)[0], event, head_sha
 
     return lookup
 

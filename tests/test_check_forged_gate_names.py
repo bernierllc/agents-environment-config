@@ -16,6 +16,8 @@ spec.loader.exec_module(mod)
 REPO = "https://github.com/my-org/my-repo"
 GUARD = "PRs into main must come from staging"
 TRUSTED_GATE = (".github/workflows/review-gate.yml", "pull_request_target")
+HEAD = "a" * 40  # the commit the scan is about
+OTHER_HEAD = "b" * 40  # another PR's head (a stacked child or the outer PR)
 
 
 def api_run(name, run_id=1):
@@ -23,10 +25,10 @@ def api_run(name, run_id=1):
     return {"name": name, "details_url": f"{REPO}/runs/{run_id}", "html_url": f"{REPO}/runs/{run_id}"}
 
 
-def job_run(name, run_id, job_id=9):
-    """Created by an Actions job."""
+def job_run(name, run_id, job_id=9, head_sha=HEAD):
+    """Created by an Actions job; head_sha is the commit the check run sits on."""
     url = f"{REPO}/actions/runs/{run_id}/job/{job_id}"
-    return {"name": name, "details_url": url, "html_url": url}
+    return {"name": name, "details_url": url, "html_url": url, "head_sha": head_sha}
 
 
 def lookup_table(table):
@@ -42,24 +44,46 @@ def test_api_published_guard_check_is_not_forged_known_limit():
 def test_disallowed_pr_supplying_a_same_name_success_job_is_detected():
     # ci.yml in the PR head: `jobs: x: name: <guard name>, run: true`.
     runs = [api_run(GUARD), job_run(GUARD, "777")]
-    found = mod.forged(runs, lookup_table({"777": (".github/workflows/ci.yml", "pull_request")}))
+    found = mod.forged(runs, lookup_table({"777": (".github/workflows/ci.yml", "pull_request", HEAD)}))
     assert [name for name, _ in found] == [GUARD]
 
 
 def test_review_gate_forged_by_a_pr_head_workflow_is_detected():
     runs = [job_run("Review Gate", "888")]
-    assert mod.forged(runs, lookup_table({"888": (".github/workflows/ci.yml", "pull_request")}))
+    assert mod.forged(runs, lookup_table({"888": (".github/workflows/ci.yml", "pull_request", HEAD)}))
 
 
 def test_a_pr_head_copy_of_the_trusted_workflow_file_is_still_forged():
     # Same path, wrong event: the PR cannot change the pull_request_target file, only add a pull_request trigger.
     runs = [job_run("Review Gate", "889")]
-    assert mod.forged(runs, lookup_table({"889": (TRUSTED_GATE[0], "pull_request")}))
+    assert mod.forged(runs, lookup_table({"889": (TRUSTED_GATE[0], "pull_request", HEAD)}))
 
 
 def test_the_trusted_review_gate_job_is_not_forged():
     runs = [job_run("Review Gate", "890")]
-    assert mod.forged(runs, lookup_table({"890": TRUSTED_GATE})) == []
+    assert mod.forged(runs, lookup_table({"890": (*TRUSTED_GATE, HEAD)})) == []
+
+
+def test_earlier_trusted_review_gate_runs_on_the_same_head_are_not_forged():
+    # Reruns and earlier events leave several legitimate Review Gate jobs on one commit (different run ids).
+    # A rule that only exempted the caller's own run would flag every one of them at merge time.
+    runs = [job_run("Review Gate", "891"), job_run("Review Gate", "892"), job_run("Review Gate", "893")]
+    table = {run_id: (*TRUSTED_GATE, HEAD) for run_id in ("891", "892", "893")}
+    assert mod.forged(runs, lookup_table(table)) == []
+
+
+def test_a_trusted_run_for_another_prs_head_is_forged_in_a_stacked_pr():
+    # Stacked PRs: the child's trusted pull_request_target run judged the child's head but its check run
+    # sits on the outer head. The (path, event) pair is right; the commit it vouches for is not ours.
+    runs = [job_run("Review Gate", "894", head_sha=HEAD)]
+    found = mod.forged(runs, lookup_table({"894": (*TRUSTED_GATE, OTHER_HEAD)}))
+    assert [name for name, _ in found] == ["Review Gate"]
+
+
+def test_a_check_run_without_a_head_sha_cannot_vouch_for_a_trusted_run():
+    run = job_run("Review Gate", "895")
+    del run["head_sha"]
+    assert mod.forged([run], lookup_table({"895": (*TRUSTED_GATE, HEAD)}))
 
 
 def test_unprotected_names_are_ignored_and_never_looked_up():
@@ -115,12 +139,12 @@ def test_cli_passes_a_page_whose_protected_name_came_from_the_checks_api():
 
 def test_workflow_run_path_with_a_ref_suffix_is_normalized(monkeypatch):
     class Done:
-        stdout = ".github/workflows/review-gate.yml@refs/heads/main\tpull_request_target\n"
+        stdout = f".github/workflows/review-gate.yml@refs/heads/main\tpull_request_target\t{HEAD}\n"
 
     monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: Done())
-    path_event = mod._gh_run_lookup("my-org/my-repo")("890")
-    assert path_event == TRUSTED_GATE
-    assert mod.forged([job_run("Review Gate", "890")], lambda _: path_event) == []
+    looked_up = mod._gh_run_lookup("my-org/my-repo")("890")
+    assert looked_up == (*TRUSTED_GATE, HEAD)
+    assert mod.forged([job_run("Review Gate", "890")], lambda _: looked_up) == []
 
 
 # This file is copied byte-identically into downstream repos: it may read only
