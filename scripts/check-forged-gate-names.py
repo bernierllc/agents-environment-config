@@ -95,13 +95,14 @@ def _gh_run_lookup(repo, trusted_bases):
     def lookup(run_id):
         out = subprocess.run(
             ["gh", "api", f"repos/{repo}/actions/runs/{run_id}", "--jq",
-             '[.path,.event,([.pull_requests[].base.ref]|join(","))]|@tsv'],
+             '[.path,.event,[.pull_requests[].base.ref]]'],
             capture_output=True, text=True, check=True,
-        ).stdout.rstrip("\n")  # not strip(): an empty last field leaves a trailing tab that must stay
-        path, event, bases = out.split("\t")
+        ).stdout
+        # JSON, not a delimited string: git branch names may contain commas and tabs, so a joined
+        # `main,staging` would be indistinguishable from the two refs `main` and `staging`.
+        path, event, base_refs = json.loads(out)
         # Required/reusable workflow runs report `path@ref`; compare the file path only.
         # A run with no PR (empty list) has no base to vouch for it: not trusted.
-        base_refs = [ref for ref in bases.split(",") if ref]
         return path.split("@", 1)[0], event, bool(base_refs) and all(ref in trusted_bases() for ref in base_refs)
 
     return lookup

@@ -130,6 +130,10 @@ def test_cli_passes_a_page_whose_protected_name_came_from_the_checks_api():
     assert _cli(json.dumps({"check_runs": [api_run(GUARD)]})).returncode == 0
 
 
+def run_json(bases):
+    return json.dumps([TRUSTED_GATE[0], TRUSTED_GATE[1], bases])
+
+
 def _fake_gh(monkeypatch, run_tsv="", default_branch="main\n"):
     """Stand in for `gh api`: the workflow-run listing and the repo's default branch."""
 
@@ -146,25 +150,31 @@ TRUSTED = {"main", "staging"}
 
 
 def test_workflow_run_path_with_a_ref_suffix_is_normalized(monkeypatch):
-    _fake_gh(monkeypatch, ".github/workflows/review-gate.yml@refs/heads/main\tpull_request_target\tstaging\n")
+    _fake_gh(monkeypatch, '[".github/workflows/review-gate.yml@refs/heads/main", "pull_request_target", ["staging"]]')
     looked_up = mod._gh_run_lookup("my-org/my-repo", lambda: TRUSTED)("890")
     assert looked_up == (*TRUSTED_GATE, True)
     assert mod.forged([job_run("Review Gate", "890")], lambda _: looked_up) == []
 
 
 def test_a_stacked_run_whose_base_is_a_contributor_branch_is_untrusted(monkeypatch):
-    _fake_gh(monkeypatch, f"{TRUSTED_GATE[0]}\tpull_request_target\tfeat/outer\n")
+    _fake_gh(monkeypatch, run_json(["feat/outer"]))
     assert mod._gh_run_lookup("my-org/my-repo", lambda: TRUSTED)("894") == (*TRUSTED_GATE, False)
 
 
 def test_a_branch_is_trusted_only_when_listed_not_because_it_is_protected(monkeypatch):
     # No branch-protection lookup exists: a wildcard-protected contributor branch is still untrusted.
-    _fake_gh(monkeypatch, f"{TRUSTED_GATE[0]}\tpull_request_target\tstaging\n")
+    _fake_gh(monkeypatch, run_json(["staging"]))
     assert mod._gh_run_lookup("my-org/my-repo", lambda: {"main"})("896")[2] is False
 
 
+def test_a_comma_in_a_branch_name_cannot_pose_as_two_trusted_branches(monkeypatch):
+    # git allows commas in branch names: one contributor branch `main,staging` must not match `main` + `staging`.
+    _fake_gh(monkeypatch, run_json(["main,staging"]))
+    assert mod._gh_run_lookup("my-org/my-repo", lambda: TRUSTED)("897")[2] is False
+
+
 def test_a_run_without_a_pull_request_has_no_trusted_base(monkeypatch):
-    _fake_gh(monkeypatch, f"{TRUSTED_GATE[0]}\tpull_request_target\t\n")
+    _fake_gh(monkeypatch, run_json([]))
     assert mod._gh_run_lookup("my-org/my-repo", lambda: TRUSTED)("895") == (*TRUSTED_GATE, False)
 
 
