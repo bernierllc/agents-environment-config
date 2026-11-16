@@ -31,8 +31,12 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
    `{version, contentHash}` per item and `build_skill_manifest_item` (`aec/lib/skills_manifest.py`) builds
    `versionHashes` only from this machine's earlier installs, so a teammate's or fresh machine's vendored 1.3.0
    has no hash to match. Ship a version-indexed hash history per item in the catalog (each release appends its
-   `{version: contentHash}`, backfilled once from the tagged releases) and have the provenance check read it, not
-   the local manifest. A version absent from the shipped history is reported as unknown, never upgraded. A clean git tree proves
+   `{version: [contentHash, ...]}`, backfilled once from the tagged releases) and have the provenance check read it,
+   not the local manifest. The value is a set, not a single hash: contents can change without a frontmatter version
+   bump (`incremental_update` rewrites `contentHash` in that case), so several releases may legitimately carry
+   different hashes under one declared version, and a single-value map would drop all but one of them and reject a
+   genuine copy as a fork. A copy matches when its hash is any member of its version's set. A version absent from
+   the shipped history is reported as unknown, never upgraded. A clean git tree proves
    only that the copy matches the repo's HEAD, not that it came from AEC, so a committed fork with the same name
    and an older version is reported as "differs from <version>" and is never overwritten without explicit
    adoption/overwrite confirmation. Only a hash-matching, clean copy is upgraded in place (a dirty one is
@@ -50,8 +54,10 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
 - Fresh machine with no manifest history and a vendored copy that matches a shipped historical hash (for example
   the previous release): upgraded. The same copy with a version missing from the shipped history: reported as
   unknown, not upgraded.
-- The release/catalog generator appends each release's hash to the shipped history and never drops an earlier
+- The release/catalog generator appends each release's hash to the version's set and never drops an earlier
   entry (a test fails if a prior version's hash disappears).
+- Two released contents carrying the same declared version (no version bump between releases): both hashes are in
+  the shipped set, and a vendored copy matching either one is upgraded, not reported as a fork.
 - A clean, committed fork with the same name and an older version but a different content hash: reported, not
   overwritten without explicit confirmation.
 - A repo with no vendored copies: unchanged output.

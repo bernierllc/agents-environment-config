@@ -98,4 +98,7 @@ on the default branch before the workflow that calls them.
   `Review Gate` job that runs it (that job is an Actions job under the same name), so the step must say how the
   caller's own run is told apart (for example the caller excludes its own run id, or the check is evaluated only
   after publication moves to the Checks API) and a test must pin both the stacked-PR forgery and the caller's own
-  run. Owned by the aec thread; the claude-skills re-vendor follows as a separate PR.
+  run. Owned by the aec thread; the claude-skills re-vendor follows as a separate PR. Note from the claude-skills
+  side: from claude-skills 3.2.0 the workflow job is named `review-gate-runner`, so their wrapper's
+  `{"Review Gate": set()}` flags only a legacy `Review Gate` Actions job on a repo whose main still carries the old
+  workflow, never the new job; the re-vendor must keep a test pinning exactly that.

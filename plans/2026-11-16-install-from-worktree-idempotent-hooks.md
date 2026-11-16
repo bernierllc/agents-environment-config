@@ -49,6 +49,11 @@ main checkout's and `_merge_gemini_entries` appends instead of replacing.
 - Legacy entries without the marker (the shape already on disk today): adopted and reported once, then
   idempotent; a user-authored entry beside them is left untouched.
 - Existing duplicate entries (already on disk) are collapsed on the next install.
+- State refreshed without fingerprints: a downstream install whose recorded `content_fingerprint` (gemini
+  `/hooks/BeforeTool/N`, claude `/hooks/PreToolUse/N`) was left unchanged while `item_version` and
+  `hooks_file_hash` moved after a re-install from a linked worktree. Reproduce first by diffing the recorded
+  fingerprint against `fingerprint_hook` of the on-disk entry; if they differ, the state writer is stale. Test: after
+  any install or upgrade, every recorded `content_fingerprint` equals `fingerprint_hook` of the entry now on disk.
 
 ## Affected surfaces
 
