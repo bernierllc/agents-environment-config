@@ -100,14 +100,11 @@ def test_workflow_run_path_with_a_ref_suffix_is_normalized(monkeypatch):
     assert mod.forged([job_run("Review Gate", "890")], lambda _: path_event) == []
 
 
+# This file is copied byte-identically into downstream repos: it may read only
+# the copied script. Assertions about aec's own plan live in test_unforgeable_plan.py.
 def test_documented_merge_time_scan_requires_pipefail():
-    plan = (SCRIPT.parent.parent / "plans" / "2026-11-16-unforgeable-required-checks.md").read_text()
-    assert "set -o pipefail; gh api" in plan
     assert "set -o pipefail; gh api" in SCRIPT.read_text()
 
 
-def test_interim_scope_is_stated_in_the_plan_and_script():
-    plan = (SCRIPT.parent.parent / "plans" / "2026-11-16-unforgeable-required-checks.md").read_text()
-    assert "PRs into main only" in plan.replace("**into main only**", "PRs into main only") or "into main only" in plan
-    assert "- S5." in plan
+def test_interim_scope_is_stated_in_the_script():
     assert "plan step S5" in SCRIPT.read_text()
