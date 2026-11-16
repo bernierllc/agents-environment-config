@@ -533,7 +533,10 @@ for profile in "$HOME/Library/Caches/ms-playwright"/mcp-chrome-*; do
 done
 
 # 6. Old Playwright browser revisions
-prune_playwright_browsers "${PLAYWRIGHT_BROWSERS_PATH:-$HOME/Library/Caches/ms-playwright}"
+# Playwright's default cache: ~/Library/Caches on macOS, ~/.cache on Linux
+for pw in "${PLAYWRIGHT_BROWSERS_PATH:-}" "$HOME/Library/Caches/ms-playwright" "$HOME/.cache/ms-playwright"; do
+    [ -n "$pw" ] && prune_playwright_browsers "$pw"
+done
 
 echo ""
 echo "  Claude cleanup: $CLAUDE_CLEANED items cleaned"

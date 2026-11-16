@@ -10,8 +10,11 @@
 # Strips node_modules from any remaining worktree idle for STRIP_IDLE_DAYS (default 3) with no
 # process inside it; the next install (or an APFS clone from the primary checkout) restores it.
 #
-# Below LOW_DISK_GB free (default 30) it switches to aggressive thresholds (2h / 1 day), also runs
-# cleanup-hung-processes.sh from this directory, and posts a macOS notification.
+# Below LOW_DISK_GB free (default 30) it switches to aggressive thresholds (2h / 1 day) and posts a
+# notification on macOS. With LOW_DISK_CLEANUP=1 it also runs cleanup-hung-processes.sh from this
+# directory (kills hung processes and prunes Docker, including anonymous volumes), so that is opt-in.
+# Works on macOS and Linux. Needs gh to remove worktrees (without it, only node_modules is stripped)
+# and lsof or /proc to see busy worktrees (without either, nothing is touched).
 # Kept and reported: dirty worktrees, unpushed commits, open-PR branches, busy or recent worktrees.
 # DRY_RUN=1 only prints. Idempotent; schedule it hourly with launchd or cron.
 set -uo pipefail
@@ -20,9 +23,11 @@ DRY_RUN="${DRY_RUN:-0}"
 PRUNE_IDLE_HOURS="${PRUNE_IDLE_HOURS:-24}"
 STRIP_IDLE_DAYS="${STRIP_IDLE_DAYS:-3}"
 LOW_DISK_GB="${LOW_DISK_GB:-30}"
+LOW_DISK_CLEANUP="${LOW_DISK_CLEANUP:-0}"
 # git status must not rewrite the index: its mtime is how idleness is measured
 export GIT_OPTIONAL_LOCKS=0
-command -v gh >/dev/null || { echo "gh not found in PATH=$PATH"; exit 1; }
+HAVE_GH=1
+command -v gh >/dev/null || { HAVE_GH=0; echo "gh not found in PATH=$PATH: no worktree is removed, idle node_modules are still stripped"; }
 
 free_gb() { df -Pk "$HOME" | awk 'NR==2 {print int($4/1048576)}'; }
 FREE_BEFORE="$(free_gb)"
@@ -41,8 +46,15 @@ pr_heads() { # repo state -> "branch sha" lines; on failure prints why and retur
 }
 
 # Every process cwd, once per run: a worktree with a shell, agent or dev server inside is in use.
-BUSY_CWDS="$(lsof -a -d cwd -u "$(id -u)" -Fn 2>/dev/null | sed -n 's/^n//p' | sort -u)"
-is_busy() { awk -v p="$1" '$0==p || index($0, p"/")==1 {f=1; exit} END{exit !f}' <<<"$BUSY_CWDS"; }
+CAN_SEE_BUSY=1
+if command -v lsof >/dev/null; then
+  BUSY_CWDS="$(lsof -a -d cwd -u "$(id -u)" -Fn 2>/dev/null | sed -n 's/^n//p' | sort -u)"
+elif [ -d /proc/self ]; then
+  BUSY_CWDS="$(for c in /proc/[0-9]*/cwd; do readlink "$c"; done 2>/dev/null | sort -u)"
+else
+  CAN_SEE_BUSY=0; echo "neither lsof nor /proc available: cannot tell which worktrees are in use, leaving all of them alone"
+fi
+is_busy() { [ "$CAN_SEE_BUSY" = 1 ] || return 0; awk -v p="$1" '$0==p || index($0, p"/")==1 {f=1; exit} END{exit !f}' <<<"$BUSY_CWDS"; }
 
 # Hours since git last touched the worktree (checkout, commit, add, status with a refresh).
 idle_hours() {
@@ -50,7 +62,8 @@ idle_hours() {
   gd="$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null)" || { echo 0; return; }
   for f in "$gd/index" "$gd/HEAD" "$gd/logs/HEAD"; do
     [ -e "$f" ] || continue
-    m="$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f")"
+    # GNU stat first: on Linux `stat -f` means filesystem status and would not fail
+    m="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f")"
     [ "$m" -gt "$newest" ] && newest="$m"
   done
   echo $(( ($(date +%s) - newest) / 3600 ))
@@ -91,9 +104,11 @@ for gitdir in "$ROOT"/*/.git "$ROOT"/*/*/.git; do
   [ "$(git -C "$repo" rev-parse --git-dir)" = "$(git -C "$repo" rev-parse --git-common-dir)" ] || continue
   [ "$(git -C "$repo" worktree list | wc -l)" -gt 1 ] || continue
   # without PR state nothing is removed from this repo, but idle node_modules are still stripped
-  can_remove=1
-  merged="$(pr_heads "$repo" merged)" || can_remove=0
-  open="$(pr_heads "$repo" open)" || can_remove=0
+  can_remove="$HAVE_GH"; merged=""; open=""
+  if [ "$HAVE_GH" = 1 ]; then
+    merged="$(pr_heads "$repo" merged)" || can_remove=0
+    open="$(pr_heads "$repo" open)" || can_remove=0
+  fi
 
   # one "path<TAB>branch" line per linked worktree; branch is empty when HEAD is detached
   git -C "$repo" worktree list --porcelain \
@@ -136,7 +151,7 @@ done
 
 if [ "$LOW" = 1 ] && [ "$DRY_RUN" != 1 ]; then
   cleanup="$(dirname "$0")/cleanup-hung-processes.sh"
-  [ -x "$cleanup" ] && { echo "== low disk: running $cleanup"; "$cleanup"; }
+  if [ "$LOW_DISK_CLEANUP" = 1 ] && [ -x "$cleanup" ]; then echo "== low disk: running $cleanup"; "$cleanup"; fi
   msg="Free space was ${FREE_BEFORE}G (< ${LOW_DISK_GB}G); now $(free_gb)G after pruning worktrees"
   command -v osascript >/dev/null && osascript -e "display notification \"$msg\" with title \"Low disk space\"" 2>/dev/null
   echo "$msg"
