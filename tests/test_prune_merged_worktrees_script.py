@@ -295,3 +295,15 @@ def test_node_modules_holding_a_git_checkout_is_not_stripped(env):
     out = run(env)
     assert (dep / ".env").exists(), out
     assert "holds a git checkout" in out
+
+
+def test_git_checkout_in_nested_node_modules_keeps_the_worktree(env):
+    wt = add_worktree(env["repo"], "mono", push=True)
+    dep = wt / "packages" / "foo" / "node_modules" / "dep"
+    dep.mkdir(parents=True)
+    git(dep, "init", "-q")
+    (dep / "wip.txt").write_text("uncommitted")
+    (wt / ".gitignore").write_text("node_modules/\n.env\n")
+    age(wt)
+    out = run(env)
+    assert (dep / "wip.txt").exists(), out

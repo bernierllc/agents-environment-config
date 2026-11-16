@@ -78,7 +78,8 @@ idle_hours() {
 # Another worktree, clone or submodule inside this one: `git worktree remove` deletes ignored
 # content, which would take that nested checkout and its uncommitted work with it.
 holds_nested_checkout() {
-  find "$1" -mindepth 2 -name node_modules -prune -o -name .git -print -quit 2>/dev/null | grep -q .
+  # node_modules is searched too: a git dependency or linked checkout there can hold uncommitted work
+  find "$1" -mindepth 2 -name .git -print -quit 2>/dev/null | grep -q .
 }
 
 holds_own_env() {
