@@ -18,7 +18,9 @@
 # forged same-name Actions job (scripts/check-forged-gate-names.py) and fails closed;
 # it cannot see a same-name check POSTed straight to the Checks API (no provenance),
 # and cannot make the name unforgeable. That needs a required workflow (org ruleset)
-# or a distinct publisher app. Check runs are commit-scoped: a disallowed branch
+# or a distinct publisher app. The scan runs once, so a PR job that publishes its
+# forged name afterwards is missed here; whoever merges re-runs the detector right
+# before the merge (plans/2026-11-16-unforgeable-required-checks.md). Check runs are commit-scoped: a disallowed branch
 # at exactly staging's SHA would deliver the identical commit, so its own check
 # turns red but staging's success at that SHA is not a content risk.
 name: main via staging
@@ -79,10 +81,19 @@ jobs:
           # A PR-controlled job can borrow a required check's name (see
           # scripts/check-forged-gate-names.py). Detection only; the unforgeable
           # fix is a required workflow or a distinct publisher app.
+          # filter=all: the default (latest) can hide an earlier same-name run. The list
+          # is captured on its own so an API failure cannot reach the detector as empty
+          # input and read as "none forged".
           set +e
-          forged_out=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" --paginate \
-            | REPO="$REPO" python3 scripts/check-forged-gate-names.py 2>&1)
-          forged_rc=$?
+          runs_json=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" --paginate)
+          list_rc=$?
+          if [ "$list_rc" -eq 0 ]; then
+            forged_out=$(printf '%s' "$runs_json" | REPO="$REPO" python3 scripts/check-forged-gate-names.py 2>&1)
+            forged_rc=$?
+          else
+            forged_out="could not list check runs (gh api exit $list_rc); failing closed"
+            forged_rc=2
+          fi
           source_out=$(HEAD_REF="$HEAD_REF" HEAD_REPO="$HEAD_REPO" REPO="$REPO" \
             bash scripts/check-main-source.sh 2>&1)
           source_rc=$?

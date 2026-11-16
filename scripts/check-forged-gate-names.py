@@ -19,8 +19,11 @@ this script cannot tell them apart; reruns and `edited` events legitimately add 
 provenance (required workflow or a distinct publisher app) closes it. Pinned by
 test_api_published_guard_check_is_not_forged_known_limit.
 
-Usage:
-  gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" --paginate | \
+TIMING: the guard workflow runs this once. A PR job that publishes its forged name after that scan is
+not seen by it, so whoever merges runs this again immediately before the merge.
+
+Usage (filter=all: the default lists only the latest run per name and can hide an earlier same-name one):
+  gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" --paginate | \
     REPO=$REPO python3 scripts/check-forged-gate-names.py
 Exit 0: none forged. Exit 1: forged names listed on stderr. Exit 2: could not evaluate (fails closed).
 """
