@@ -33,7 +33,9 @@ def lookup_table(table):
     return lambda run_id: table[run_id]
 
 
-def test_api_published_guard_check_is_not_forged():
+def test_api_published_guard_check_is_not_forged_known_limit():
+    # Our own guard publishes through the Checks API, so an API-published run must pass. The cost: a PR
+    # workflow with `checks: write` can publish the same way undetected. Only A/B (see the plan) closes it.
     assert mod.forged([api_run(GUARD)], lookup_table({})) == []
 
 

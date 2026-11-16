@@ -15,8 +15,9 @@
 # Known limits (SEC-MVS-01). pull_request_target runs this file from the DEFAULT
 # branch, never from the PR. But a required check is matched by NAME and a
 # same-repo PR's own workflows can publish that name, so this workflow detects a
-# forged same-name job (scripts/check-forged-gate-names.py) and fails closed; it
-# cannot make the name unforgeable. That needs a required workflow (org ruleset)
+# forged same-name Actions job (scripts/check-forged-gate-names.py) and fails closed;
+# it cannot see a same-name check POSTed straight to the Checks API (no provenance),
+# and cannot make the name unforgeable. That needs a required workflow (org ruleset)
 # or a distinct publisher app. Check runs are commit-scoped: a disallowed branch
 # at exactly staging's SHA would deliver the identical commit, so its own check
 # turns red but staging's success at that SHA is not a content risk.

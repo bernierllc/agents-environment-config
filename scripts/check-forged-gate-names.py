@@ -10,8 +10,14 @@ details_url is `.../runs/<id>`, no `/actions/`) or comes from one pinned trusted
 (path + event). Any other Actions-job check run bearing a protected name is forged.
 
 This is DETECTION, not prevention: the forged success still sits beside our result. The
-unforgeable fix is a required workflow or a distinct publisher app (see the SEC-MVS-01 plan).
+unforgeable fix is a required workflow or a distinct publisher app (plans/2026-11-16-unforgeable-required-checks.md).
 It exists so the guard, and the merge step of whoever merges, fail loudly instead of trusting a name.
+
+KNOWN LIMIT: a PR workflow with `checks: write` can also POST the name straight to the Checks API. That
+check run has no job URL, so it looks exactly like our own guard's publication (same app, same name) and
+this script cannot tell them apart; reruns and `edited` events legitimately add same-name runs too. Only
+provenance (required workflow or a distinct publisher app) closes it. Pinned by
+test_api_published_guard_check_is_not_forged_known_limit.
 
 Usage:
   gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" --paginate | \

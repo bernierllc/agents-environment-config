@@ -17,6 +17,11 @@ unit of impact lives — not a contract.
 
 ## Review follow-ups awaiting prioritization
 
+- [Unforgeable required checks (SEC-MVS-01)](2026-11-16-unforgeable-required-checks.md): required checks
+  match name + Actions app id, so a PR workflow can publish a protected name (as a job or through the Checks
+  API). Interim detector covers the job case; the permanent fix is an org required workflow or our own App.
+  Awaiting the maintainer's A/B choice.
+
 - [Honor the AGENTINFO.md layout everywhere](2026-11-15-agentinfo-layout-honored.md): `aec migrate
   agents-md` (and its `--all` / maintenance-prompt path) ignores `instructions_layout=agentinfo`, and
   `aec generate files` writes AEC's own `templates/`. One owner for the layout decision. Scheduling pending.
