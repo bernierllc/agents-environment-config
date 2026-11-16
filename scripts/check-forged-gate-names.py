@@ -19,6 +19,9 @@ this script cannot tell them apart; reruns and `edited` events legitimately add 
 provenance (required workflow or a distinct publisher app) closes it. Pinned by
 test_api_published_guard_check_is_not_forged_known_limit.
 
+SCOPE: the only invoker in this repo is main-via-staging.yml, which runs for PRs into main. PRs into other
+branches are covered only by the merger's merge-time run of this script; review-gate.yml invoking it is plan step S5.
+
 TIMING: the guard workflow runs this once. A PR job that publishes its forged name after that scan is
 not seen by it, so whoever merges runs this again immediately before the merge.
 

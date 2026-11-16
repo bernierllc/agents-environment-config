@@ -28,6 +28,15 @@ publishing the same name. The name carries no provenance.
   exit 0 required; `pipefail` is mandatory so a failed or truncated listing fails the command instead of reaching the
   detector as empty input), which is the point that cannot race.
 
+## Scope of the interim (stated plainly)
+
+- The detector runs from `main-via-staging.yml`, which triggers on PRs **into main only**. A same-repo PR into
+  `staging` can still publish an Actions job named `Review Gate` and no detector sees it at PR time.
+- PRs into `staging` are covered only by the merger's pre-`gh pr merge` detector step (the `set -o pipefail` command
+  above, exit 0 required).
+- The Checks-API residual below is unchanged.
+- Proper coverage for PRs into any branch is S5.
+
 ## What it cannot cover (the residual risk)
 
 Case 2. A check run published through the Checks API is indistinguishable from our own guard's publication:
@@ -77,3 +86,6 @@ on the default branch before the workflow that calls them.
 - S2. Switch the guard (A: required workflow; B: App token) and re-pin the required checks.
 - S3. Probe PR: a branch that adds a same-name job AND a same-name Checks API call is blocked.
 - S4. Retire the detector or keep it as defence in depth.
+- S5. `review-gate.yml` (owned by the claude-skills repo, a separate PR after its in-flight 1.4.0 change lands)
+  invokes `scripts/check-forged-gate-names.py` for PRs into every protected branch, so `Review Gate` forgery is
+  detected at PR time on `staging` as well, not only by the merge-time step.

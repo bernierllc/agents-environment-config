@@ -19,7 +19,8 @@
 # it cannot see a same-name check POSTed straight to the Checks API (no provenance),
 # and cannot make the name unforgeable. That needs a required workflow (org ruleset)
 # or a distinct publisher app. The scan runs once, so a PR job that publishes its
-# forged name afterwards is missed here; whoever merges re-runs the detector right
+# forged name afterwards is missed here; this workflow runs for PRs into main only, so
+# PRs into staging rely on that same merge-time run (plan step S5 moves it into review-gate.yml); whoever merges re-runs the detector right
 # before the merge (plans/2026-11-16-unforgeable-required-checks.md). Check runs are commit-scoped: a disallowed branch
 # at exactly staging's SHA would deliver the identical commit, so its own check
 # turns red but staging's success at that SHA is not a content risk.

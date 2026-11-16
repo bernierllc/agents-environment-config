@@ -104,3 +104,10 @@ def test_documented_merge_time_scan_requires_pipefail():
     plan = (SCRIPT.parent.parent / "plans" / "2026-11-16-unforgeable-required-checks.md").read_text()
     assert "set -o pipefail; gh api" in plan
     assert "set -o pipefail; gh api" in SCRIPT.read_text()
+
+
+def test_interim_scope_is_stated_in_the_plan_and_script():
+    plan = (SCRIPT.parent.parent / "plans" / "2026-11-16-unforgeable-required-checks.md").read_text()
+    assert "PRs into main only" in plan.replace("**into main only**", "PRs into main only") or "into main only" in plan
+    assert "- S5." in plan
+    assert "plan step S5" in SCRIPT.read_text()
