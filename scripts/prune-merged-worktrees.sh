@@ -76,8 +76,6 @@ idle_hours() {
   echo $(( ($(date +%s) - newest) / 3600 ))
 }
 
-# An ignored .env that is a symlink to, or a byte-identical copy of, the primary checkout's holds no
-# data of its own: only a .env that differs keeps the tree.
 # Another worktree, clone or submodule inside this one: `git worktree remove` deletes ignored
 # content, which would take that nested checkout and its uncommitted work with it. The scan descends
 # into every node_modules (monorepo packages/*/node_modules, nested node_modules) on purpose: a git
@@ -86,6 +84,35 @@ holds_nested_checkout() {
   find "$1" -mindepth 2 -name .git -print -quit 2>/dev/null | grep -q .
 }
 
+# Final physical path of a symlink chain (the last component is not resolved when it is a plain file).
+resolve_link() {
+  local p="$1" n=0 t d
+  while [ -L "$p" ]; do
+    n=$((n + 1)); [ "$n" -le 40 ] || return 1
+    t="$(readlink "$p")" || return 1
+    case "$t" in /*) p="$t" ;; *) p="$(dirname "$p")/$t" ;; esac
+  done
+  d="$(cd -P "$(dirname "$p")" 2>/dev/null && pwd -P)" || return 1
+  printf '%s/%s\n' "$d" "$(basename "$p")"
+}
+
+# A symlink holds no data of its own only if its target outlives `git worktree remove`: the target is
+# outside the worktree, or inside it but tracked (the tree is clean, so git has the content). A target
+# that is ignored or untracked inside the worktree is deleted with it. Unresolvable links count as unique.
+symlink_survives_removal() { # worktree relative-path
+  local root target rel
+  root="$(cd -P "$1" 2>/dev/null && pwd -P)" || return 1
+  target="$(resolve_link "$1/$2")" || return 1
+  case "$target" in
+    "$root"/*)
+      rel="${target#"$root"/}"
+      git -C "$1" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# An ignored .env* holds no data of its own when it is a byte-identical copy of the primary checkout's
+# or a symlink whose target survives removal (symlink_survives_removal); any other one keeps the tree.
 # Returns 0 (keep the tree) when one is found or when the ignored files cannot be listed: not knowing
 # is not the same as finding none. Output goes to a file, not a `... | grep -q .` pipeline: grep -q
 # exits at the first hit, the writers then die of SIGPIPE, and under pipefail that failure read as "none".
@@ -97,7 +124,11 @@ holds_own_env() {
   fi
   while IFS= read -r -d '' f; do
     case "$f" in .env*|*/.env*) ;; *) continue ;; esac
-    [ -L "$1/$f" ] || cmp -s "$1/$f" "$2/$f" || { found=0; break; }
+    if [ -L "$1/$f" ]; then
+      symlink_survives_removal "$1" "$f" || { found=0; break; }
+    else
+      cmp -s "$1/$f" "$2/$f" || { found=0; break; }
+    fi
   done <"$list"
   rm -f "$list"
   return "$found"

@@ -356,3 +356,26 @@ def test_failed_ignored_file_listing_keeps_the_worktree(env, tmp_path):
     out = run(env)
     assert wt.exists(), out
     assert "cannot list ignored files" in out
+
+
+def test_env_symlink_to_an_ignored_file_inside_the_worktree_keeps_it(env):
+    # `.env -> only-copy`: the target is ignored and lives only in this worktree, so removal loses it.
+    exclude(env, "only-copy")
+    wt = add_worktree(env["repo"], "symin", push=True)
+    (wt / "only-copy").write_text("SECRET=1\n")
+    (wt / ".env").symlink_to("only-copy")
+    age(wt)
+    out = run(env)
+    assert wt.exists() and (wt / "only-copy").read_text() == "SECRET=1\n", out
+    assert "holds ignored .env files" in out
+
+
+def test_env_symlink_to_a_file_outside_the_worktree_does_not_keep_it(env, tmp_path):
+    shared = tmp_path / "shared.env"
+    shared.write_text("SECRET=1\n")
+    wt = add_worktree(env["repo"], "symout", push=True)
+    (wt / ".env").symlink_to(shared)
+    age(wt)
+    out = run(env)
+    assert not wt.exists(), out
+    assert shared.read_text() == "SECRET=1\n"
