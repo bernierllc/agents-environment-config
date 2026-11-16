@@ -323,3 +323,36 @@ def test_backslash_in_a_busy_worktree_path_is_not_read_as_an_escape(env):
         proc.kill()
     assert moved.exists() and (moved / "node_modules").exists(), out
     assert "a process is running inside it" in out
+
+
+def exclude(env: dict, *patterns: str) -> None:
+    """Ignore extra patterns without touching tracked files (the worktree must stay clean)."""
+    with (env["repo"] / ".git" / "info" / "exclude").open("a") as f:
+        f.write("\n".join(patterns) + "\n")
+
+
+def test_many_ignored_env_files_never_read_as_none(env):
+    # grep -q at the end of the pipeline closed it early; SIGPIPE under pipefail then read as "no .env found".
+    exclude(env, ".env.*")
+    wt = add_worktree(env["repo"], "manyenv", push=True)
+    for i in range(2000):
+        (wt / f".env.{i}").write_text(f"SECRET={i}\n")
+    age(wt)
+    out = run(env)
+    assert wt.exists() and (wt / ".env.0").exists(), out
+    assert "holds ignored .env files" in out
+
+
+def test_failed_ignored_file_listing_keeps_the_worktree(env, tmp_path):
+    # If git cannot list the ignored files, nothing is known about them: keep the tree and say why.
+    wt = add_worktree(env["repo"], "nolist", push=True)
+    age(wt)
+    real_git = subprocess.run(["which", "git"], capture_output=True, text=True, check=True).stdout.strip()
+    bindir = Path(env["env"]["PATH"].split(":")[0])
+    (bindir / "git").write_text(
+        f'#!/bin/bash\ncase "$*" in *"ls-files -o -i"*) echo "boom" >&2; exit 1;; esac\nexec {real_git} "$@"\n'
+    )
+    (bindir / "git").chmod(0o755)
+    out = run(env)
+    assert wt.exists(), out
+    assert "cannot list ignored files" in out

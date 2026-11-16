@@ -86,9 +86,21 @@ holds_nested_checkout() {
   find "$1" -mindepth 2 -name .git -print -quit 2>/dev/null | grep -q .
 }
 
+# Returns 0 (keep the tree) when one is found or when the ignored files cannot be listed: not knowing
+# is not the same as finding none. Output goes to a file, not a `... | grep -q .` pipeline: grep -q
+# exits at the first hit, the writers then die of SIGPIPE, and under pipefail that failure read as "none".
 holds_own_env() {
-  git -C "$1" ls-files -o -i --exclude-standard | grep -E '(^|/)\.env' \
-    | while IFS= read -r f; do [ -L "$1/$f" ] || cmp -s "$1/$f" "$2/$f" || echo "$f"; done | grep -q .
+  local list f found=1
+  list="$(mktemp)" || { echo "cannot list ignored files in $1: mktemp failed, keeping it"; return 0; }
+  if ! git -C "$1" ls-files -o -i --exclude-standard -z >"$list"; then
+    echo "cannot list ignored files in $1: git ls-files failed, keeping it"; rm -f "$list"; return 0
+  fi
+  while IFS= read -r -d '' f; do
+    case "$f" in .env*|*/.env*) ;; *) continue ;; esac
+    [ -L "$1/$f" ] || cmp -s "$1/$f" "$2/$f" || { found=0; break; }
+  done <"$list"
+  rm -f "$list"
+  return "$found"
 }
 
 remove_worktree() { # repo path branch reason
