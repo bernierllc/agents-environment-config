@@ -25,8 +25,12 @@ owner the command runs against is not part of the lookup.
 
 1. Let an org config scope prompt answers by repo owner: `install.prompts_by_owner:
    {<owner>: {<prompt-id>: <value>}}`. Owner is the `origin` remote's owner (GitHub org or user).
-2. `prompt()` receives the active repo context (set once per command by the repo-aware
-   commands) and resolves overlay answers as: owner-scoped match > unscoped answer.
+2. One lookup, `scoped_answer(key, repo)`, resolves an owner-scoped answer for a repo's
+   `origin` owner. The repo context is bound per repository, never per command: a
+   context manager (`with repo_context(repo):`) that `prompt()` reads, entered inside each
+   loop iteration of the bulk paths (`setup --all`, `migrate agents-md --all`, the
+   maintenance prompt), so one owner's answers cannot govern the next repo. Machine-global
+   keys resolve unscoped as before. Repo-shaped keys resolve only through `scoped_answer`.
 3. Machine-global keys (preferences, install behavior) stay unscoped. Repo-shaped keys
    (`repo.git.*`, and the `instructions_layout` pin from the AGENTINFO plan) are
    scope-only: the allow-list marks them, and an unscoped value for one under
@@ -34,7 +38,11 @@ owner the command runs against is not part of the lookup.
    The unscoped form PR #148 accepts is a stopgap for an org whose users only use AEC on its
    repos; it is removed when this ships, never kept as a fallback (a fallback would keep
    the cross-repo leakage this plan exists to stop).
-4. Conflict handling for two enrolled orgs scoping the same owner reuses the existing
+4. `instructions_layout` is not a prompt, so the context manager alone cannot reach it.
+   The shared layout resolver (`repo_layout` in `agents_md_layout.py`, from the AGENTINFO
+   plan) consumes `scoped_answer("instructions_layout", repo)`: detected layout first, then
+   the scoped answer, then the `instructions_layout` setting, then the default.
+5. Conflict handling for two enrolled orgs scoping the same owner reuses the existing
    `detect_conflicts` policy.
 
 ## Affected surfaces
@@ -47,4 +55,6 @@ command that must set the context (`setup`, `repo setup`, `migrate`).
 
 - Owner-scoped `repo.git.license_kind: proprietary` applies in a repo whose origin owner matches and not in one whose owner differs.
 - An unscoped `repo.git.license_kind` in `install.prompts` is rejected (validation error), not applied; machine-global unscoped keys keep working; two orgs scoping one owner is a reported conflict.
-- A repo with no `origin` falls back to unscoped answers only.
+- Bulk `setup --all` and `migrate agents-md --all` over two repos with different owners: each gets only its own owner's answers, in either order (mixed-owner test).
+- A scoped `instructions_layout: agentinfo` changes the layout `setup` and `migrate` choose for a matching-owner repo and not for another owner's repo.
+- A repo with no `origin` gets no scoped answers: repo-shaped keys use their defaults, machine-global unscoped keys still apply.
