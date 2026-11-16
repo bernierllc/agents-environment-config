@@ -81,11 +81,27 @@ downstream repo that copies the guard, and every ruleset requiring the guard che
 
 ### Rollout order for a repo adopting the guard
 
-`main-via-staging.yml` runs under `pull_request_target`: GitHub loads the workflow from the default branch (`main`
-for a repo that promotes through `staging`), so it publishes nothing until it is on `main`; it also checks the
-validator scripts out from the PR base (`main`). If the workflow reaches `main` before the scripts, the first
-promotion after that publishes a failing `PRs into main must come from staging` ("guard script missing on
-base"). Order the rollout so `main` has the scripts before any workflow that calls them runs:
+`main-via-staging.yml` runs under `pull_request_target`: GitHub loads the workflow from the repository's DEFAULT
+branch, and the workflow's own checkout then takes the validator scripts from the PR base (`main`). Which branch is
+the default decides the order, so check it first (`gh api repos/<repo> --jq .default_branch`):
+
+- **default=main**: the workflow publishes nothing until it is on `main`. If it reaches `main` before the scripts,
+  the first promotion after that publishes a failing `PRs into main must come from staging` ("guard script missing
+  on base"). Follow the order below.
+- **default=staging**: the workflow is live on every main-targeted PR the moment it merges to `staging`, while
+  `main` may still lack the scripts. Follow "Rollout order when the default branch is staging" further down.
+
+Which case a repo is in depends on two facts, both read-only to check:
+
+| Default branch | `main-via-staging.yml` on `main` and `staging` | Waiver needed |
+|---|---|---|
+| main | any | none: `main` gets the scripts first, so a legacy publisher is replaced before the guard runs |
+| staging | legacy (`pull_request`) | one, on the scripts promotion |
+| staging | canonical (`pull_request_target`) | none |
+
+Which downstream repo falls in which row is tracked outside this product repo.
+
+The default=main order, for a repo whose `main` has the scripts last:
 
 0. Look at what `main` requires (`gh api repos/<repo>/rules/branches/main`, the `required_status_checks`
    contexts) and at who publishes it today. A hand-rolled `main-via-staging.yml` whose **job** is named
@@ -128,6 +144,51 @@ in place:
 
 Status: derived from GitHub's event semantics, not yet run end to end. The first repo to adopt it records the
 result here.
+
+### Rollout order when the default branch is staging
+
+The waiver rule is about the legacy workflow, not the default branch. Whenever `staging` still carries a legacy
+`pull_request` `main-via-staging.yml` and `main` requires its context, every main-targeted PR head carries the legacy
+job, the detector exits 1 on it, and the scripts promotion needs exactly one owner waiver. Repos already on the
+canonical workflow need none.
+
+No order avoids that waiver:
+
+- Delete the legacy file in the scripts PR: `main` has no publisher, the required context never appears, and the
+  promotion is blocked.
+- Scripts, legacy deletion and the canonical workflow in one `staging` PR: `staging` is the default branch, so the
+  canonical workflow runs on main-targeted PRs at once and checks out `main`, which still lacks the scripts. It
+  publishes "guard script missing on base" and the legacy job is gone, so nothing can pass. Never combine them.
+
+The order:
+
+1. `staging`: scripts and their tests, no canonical workflow, legacy untouched.
+2. Scripts promotion, with one owner waiver (text below).
+3. ONE `staging` PR that deletes the legacy file and adds the canonical workflow and its test. `main` already has the
+   scripts, so the canonical run at once is correct.
+4. Promote again. The head has no legacy job and `main` has the scripts, so the detector exits 0: no waiver.
+5. Flip the required check to the guard name only after a green canonical run.
+
+A repo that already runs the canonical workflow starts at the promotion step and needs no waiver.
+
+The waiver is the owner's to grant; a directive or a cop never waives a gate. The merger re-runs the detector after
+the comment is posted and merges only when the flagged set is exactly the one legacy run. Waiver text (fill in the
+placeholders):
+
+> Owner waiver, one time, this PR only. I waive the main-via-staging forged-gate scan result for `<repo>` `#<pr>`
+> at head `<40-hex sha>`. The only flagged run is Actions run `<run id>` (job `<job id>`), the repo's own legacy
+> `.github/workflows/main-via-staging.yml` on event `pull_request`. Verified: head repo equals base repo, head ref
+> is `staging`, no other flagged run, the promotion adds no other workflow. The next promotion must pass the scan
+> with no waiver. - `<owner>`, `<date>`
+
+The flagged legacy job is the repo's own publisher, not an attacker's: its run path is the pinned path and only the
+event differs (`pull_request` against the trusted `pull_request_target`). The detector cannot tell the two apart by
+name, so the answer is an owner waiver, never a looser detector.
+
+First run (a staging-default repo on the legacy workflow): its scripts promotion merged with no scan run (the PR
+body said no scanner runs against that head) and no waiver recorded, so it did not show the one-PR order works: the
+detector exits 1 on that head after the fact. The owner ratifies it with the text above, recorded on that PR. Its
+swap then followed this order, and the next promotion head passes the scan with exit 0.
 
 Two gotchas seen on the first end-to-end rollout (confirmed on a downstream repo's first green main-targeted run,
 check published by app 15368):

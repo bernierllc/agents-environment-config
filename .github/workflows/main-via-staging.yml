@@ -1,13 +1,15 @@
 # Promotion guard for PRs into main: only a same-repo `staging` branch may open one.
 #
-# Uses pull_request_target so the workflow + validator load from the trusted
-# base branch (main), not the PR head. Only PR *metadata* (head ref / repo)
+# Uses pull_request_target so GitHub loads this workflow from the repository's
+# DEFAULT branch (main, or staging in a repo whose default is staging), never from
+# the PR head. The validator scripts come from the explicit checkout below, which
+# selects the PR's base sha (the tip of main). Only PR *metadata* (head ref / repo)
 # is read from the event; no PR code is checked out or executed.
 #
-# pull_request_target attaches the Actions job to the base SHA, not the PR head,
-# so a required status check named after the job would never appear on the PR
-# head. The result is therefore published as a Check Run on
-# pull_request.head.sha through the Checks API (same approach as review-gate.yml).
+# A pull_request_target job is not attached to the PR head, so a required status
+# check named after the job would never appear on the PR head. The result is
+# therefore published as a Check Run on pull_request.head.sha through the Checks
+# API (same approach as review-gate.yml).
 #
 # Activation: advisory until the `main promotion gate` ruleset requires the
 # check "PRs into main must come from staging".
