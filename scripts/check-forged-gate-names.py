@@ -96,7 +96,13 @@ def _load_check_runs(text):
         if index >= len(text):
             break
         page, index = decoder.raw_decode(text, index)
-        runs.extend(page["check_runs"])
+        page_runs = page["check_runs"]
+        # Every entry must look like a check run, or a nonempty but garbage listing would pass as "evaluated".
+        if not isinstance(page_runs, list) or not all(
+            isinstance(run, dict) and isinstance(run.get("name"), str) for run in page_runs
+        ):
+            raise ValueError("check_runs holds an entry that is not a named check run")
+        runs.extend(page_runs)
     # Fail closed: a head always has check runs by merge time (the guard's own, at least), so
     # empty input (a caller without pipefail, a silent `gh api`) or zero runs is not "no forgery".
     if not runs:

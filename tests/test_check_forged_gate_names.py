@@ -95,6 +95,10 @@ def _cli(stdin):
     " \n",
     '{"check_runs": []}',  # a head always has check runs by merge time; an empty page is suspicious
     '{"total_count": 0}',  # page without check_runs
+    '{"check_runs": [{}]}',  # nonempty but malformed entries must not count as an evaluated listing
+    '{"check_runs": [{"name": null}]}',
+    '{"check_runs": ["x"]}',
+    '{"check_runs": "abc"}',
     "[]",  # JSON of the wrong shape
     "5",
 ])
