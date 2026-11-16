@@ -9,7 +9,7 @@ A legitimate result for a protected name is either published through the Checks 
 details_url is `.../runs/<id>`, no `/actions/`) or comes from one pinned trusted workflow
 (path + event) whose PR targets a trusted base branch: `pull_request_target` runs the workflow file from
 the base branch, so a stacked PR whose base is the outer PR's (contributor-controlled) branch can run a
-rewritten copy of the trusted file. Trusted bases are the repo's default branch plus the comma-separated
+rewritten copy of the trusted file. Trusted bases are the repo's default branch plus the space-separated
 TRUSTED_BASE_BRANCHES env var (for example `staging`); GitHub's `protected` flag is not used, because a
 wildcard rule can cover branches a collaborator may still create. Any other Actions-job check run bearing
 a protected name is forged.
@@ -109,7 +109,10 @@ def _gh_run_lookup(repo, trusted_bases):
 
 
 def trusted_base_branches(repo):
-    """The default branch plus the owner-listed TRUSTED_BASE_BRANCHES (comma separated).
+    """The default branch plus the owner-listed TRUSTED_BASE_BRANCHES (space separated).
+
+    Space, not comma: git ref names may contain commas but never whitespace, so splitting on whitespace
+    cannot turn one configured branch (`release,1`) into two.
 
     Not GitHub's `protected` flag: a wildcard protection rule can cover branches a collaborator is
     still allowed to create, so it does not prove the branch content is owner-controlled.
@@ -120,7 +123,7 @@ def trusted_base_branches(repo):
     if not default:
         raise ValueError("could not read the default branch")
     listed = os.environ.get("TRUSTED_BASE_BRANCHES", "")
-    return {default, *(branch.strip() for branch in listed.split(",") if branch.strip())}
+    return {default, *listed.split()}
 
 
 def _load_check_runs(text):

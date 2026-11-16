@@ -49,6 +49,15 @@ def test_workflow_header_says_default_branch_not_main():
     assert "DEFAULT branch (main, or staging in a repo whose default is staging)" in workflow
 
 
+def test_every_aec_caller_of_the_detector_names_the_integration_base():
+    # Without TRUSTED_BASE_BRANCHES=staging a legitimate staging-based Review Gate run reads as forged.
+    root = Path(__file__).resolve().parent.parent
+    workflow = (root / ".github" / "workflows" / "main-via-staging.yml").read_text()
+    invocation = next(line for line in workflow.splitlines() if "python3 scripts/check-forged-gate-names.py" in line)
+    assert 'TRUSTED_BASE_BRANCHES="staging"' in invocation
+    assert "TRUSTED_BASE_BRANCHES=staging python3 scripts/check-forged-gate-names.py" in PLAN
+
+
 def test_plan_states_interim_scope_and_s5():
     assert "into main only" in PLAN
     assert "- S5." in PLAN

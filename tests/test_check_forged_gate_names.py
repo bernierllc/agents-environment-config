@@ -180,8 +180,11 @@ def test_a_run_without_a_pull_request_has_no_trusted_base(monkeypatch):
 
 def test_trusted_bases_are_the_default_branch_plus_the_env_list(monkeypatch):
     _fake_gh(monkeypatch, default_branch="main\n")
-    monkeypatch.setenv("TRUSTED_BASE_BRANCHES", " staging, release/1 ,,")
+    monkeypatch.setenv("TRUSTED_BASE_BRANCHES", " staging  release/1\n")
     assert mod.trusted_base_branches("my-org/my-repo") == {"main", "staging", "release/1"}
+    # A comma is part of a git branch name, never a separator: `release,1` is one branch, not `release` and `1`.
+    monkeypatch.setenv("TRUSTED_BASE_BRANCHES", "release,1")
+    assert mod.trusted_base_branches("my-org/my-repo") == {"main", "release,1"}
     monkeypatch.delenv("TRUSTED_BASE_BRANCHES")
     assert mod.trusted_base_branches("my-org/my-repo") == {"main"}
 

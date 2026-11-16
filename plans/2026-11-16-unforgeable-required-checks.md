@@ -24,7 +24,7 @@ publishing the same name. The name carries no provenance.
   workflow run is not the pinned trusted path + event.
 - Timing: the workflow checks once. A PR job that publishes its forged name after that check is not seen by it.
   Whoever merges must run the detector immediately before `gh pr merge`
-  (`set -o pipefail; gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" --paginate | REPO=$REPO python3 scripts/check-forged-gate-names.py`,
+  (`set -o pipefail; gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" --paginate | REPO=$REPO TRUSTED_BASE_BRANCHES=staging python3 scripts/check-forged-gate-names.py`,
   exit 0 required; `pipefail` is mandatory so a failed or truncated listing fails the command instead of reaching the
   detector as empty input), which is the point that cannot race.
 
@@ -257,7 +257,9 @@ always has check runs by merge time; an empty set is not "no forgery". Callers s
   base branch, and a stacked child's base is the outer PR's branch, which its author can rewrite. A pair names a
   file, not the content that ran. Fix (done in the S6 PR): the trusted pair counts only when every PR the run
   belongs to targets an owner-trusted base branch: the repo's default branch plus the comma-separated
-  `TRUSTED_BASE_BRANCHES` env var (aec's integration branch is `staging`, so its callers set it); a run with no PR
+  `TRUSTED_BASE_BRANCHES` env var, space separated because git forbids spaces in branch names but allows commas
+  (aec's integration branch is `staging`, so its callers, `main-via-staging.yml` and the merge-time command above,
+  set it); a run with no PR
   has no base and is flagged. GitHub's `protected` flag is not used (Codex P1): it aggregates wildcard rules that can
   cover branches a collaborator may still create. Two rejected designs: excluding only the caller's own run id (one commit carries
   several legitimate `Review Gate` jobs from reruns, so every merge-time scan would flag the others) and requiring
