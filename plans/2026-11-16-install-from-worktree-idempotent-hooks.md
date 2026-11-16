@@ -24,8 +24,16 @@ main checkout's and `_merge_gemini_entries` appends instead of replacing.
 2. Render gemini and cursor script paths so they do not depend on the checkout location (the repo-relative or
    env-anchored form the claude and git renderers already use), so a worktree's files never carry its absolute
    path.
-3. The merge identifies an entry by item and hook id, not by the rendered command, so a second install from any
-   location replaces rather than appends.
+3. With valid `.aec/installed-hooks` state, `install_item_hooks` already calls `_remove_recorded_hooks` before
+   merging, so a changed fingerprint is replaced, not appended. The duplicate therefore needs missing or stale
+   state, and the gemini and cursor payloads carry neither the item key nor the source hook id (those exist only
+   in the translated entries and the state file), so the merge cannot identify its own entries without state.
+   Give each entry a durable on-disk identity: an AEC-owned marker in the entry (for example a stable
+   `item:hook-id` key, if the agent's config schema tolerates the extra field; verify against each agent's
+   documented schema before coding, otherwise encode it in a comment-free, schema-valid place such as the
+   command's script name). Entries written before the marker existed are adopted explicitly: an entry whose
+   command targets an AEC-installed script path is claimed and rewritten with the marker, and the install reports
+   each adoption. Never claim a user-authored entry by guessing.
 
 ## Tests
 
@@ -35,6 +43,11 @@ main checkout's and `_merge_gemini_entries` appends instead of replacing.
   share the gemini cause, so cursor is covered by the same tests.)
 - Install in the main checkout, then in a worktree, and compare: the rendered gemini and cursor entries are
   identical.
+- Missing state: delete `.aec/installed-hooks`, install twice from a worktree: still one entry per hook in
+  `.gemini/settings.json` and `.cursor/hooks.json`.
+- Stale state (recorded fingerprint no longer matches the entry on disk): the next install replaces, not appends.
+- Legacy entries without the marker (the shape already on disk today): adopted and reported once, then
+  idempotent; a user-authored entry beside them is left untouched.
 - Existing duplicate entries (already on disk) are collapsed on the next install.
 
 ## Affected surfaces

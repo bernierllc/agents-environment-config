@@ -89,3 +89,13 @@ on the default branch before the workflow that calls them.
 - S5. `review-gate.yml` (owned by the claude-skills repo, a separate PR after its in-flight 1.4.0 change lands)
   invokes `scripts/check-forged-gate-names.py` for PRs into every protected branch, so `Review Gate` forgery is
   detected at PR time on `staging` as well, not only by the merge-time step.
+- S6. The trusted pair for `Review Gate` in `scripts/check-forged-gate-names.py`
+  (`.github/workflows/review-gate.yml`, `pull_request_target`) is unsafe for stacked PRs: a child PR's trusted-pair
+  job attaches to the outer head, so the pair vouches for a result computed for another PR. A pair identifies the
+  workflow, not the head it judged. Change it so the detector never trusts a workflow-run identity for this name
+  (the claude-skills wrapper already scopes `{"Review Gate": set()}` meanwhile), then re-vendor the script into
+  claude-skills. Design point to settle first: with an empty set the detector would also flag the legitimate
+  `Review Gate` job that runs it (that job is an Actions job under the same name), so the step must say how the
+  caller's own run is told apart (for example the caller excludes its own run id, or the check is evaluated only
+  after publication moves to the Checks API) and a test must pin both the stacked-PR forgery and the caller's own
+  run. Owned by the aec thread; the claude-skills re-vendor follows as a separate PR.

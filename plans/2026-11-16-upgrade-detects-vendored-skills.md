@@ -26,7 +26,13 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
 2. `aec outdated` (`_print_outdated`) and the `aec update` summary list them as their own scope ("vendored in
    <repo>") with installed vs available version.
 3. Provenance before any write: a vendored copy is treated as AEC-owned only when its content hash matches the
-   canonical hash of the release version it claims (the same hashing the catalog uses). A clean git tree proves
+   canonical hash of the release version it claims (the same hashing the catalog uses). That history must ship
+   with AEC: today `generate_catalog_hashes` (`aec/lib/catalog_hashes.py`) stores only the current
+   `{version, contentHash}` per item and `build_skill_manifest_item` (`aec/lib/skills_manifest.py`) builds
+   `versionHashes` only from this machine's earlier installs, so a teammate's or fresh machine's vendored 1.3.0
+   has no hash to match. Ship a version-indexed hash history per item in the catalog (each release appends its
+   `{version: contentHash}`, backfilled once from the tagged releases) and have the provenance check read it, not
+   the local manifest. A version absent from the shipped history is reported as unknown, never upgraded. A clean git tree proves
    only that the copy matches the repo's HEAD, not that it came from AEC, so a committed fork with the same name
    and an older version is reported as "differs from <version>" and is never overwritten without explicit
    adoption/overwrite confirmation. Only a hash-matching, clean copy is upgraded in place (a dirty one is
@@ -41,6 +47,11 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
   clean.
 - `aec outdated` itself (not only the `update` summary) lists the vendored copy.
 - A vendored copy with local edits: reported, not overwritten.
+- Fresh machine with no manifest history and a vendored copy that matches a shipped historical hash (for example
+  the previous release): upgraded. The same copy with a version missing from the shipped history: reported as
+  unknown, not upgraded.
+- The release/catalog generator appends each release's hash to the shipped history and never drops an earlier
+  entry (a test fails if a prior version's hash disappears).
 - A clean, committed fork with the same name and an older version but a different content hash: reported, not
   overwritten without explicit confirmation.
 - A repo with no vendored copies: unchanged output.
@@ -48,5 +59,6 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
 
 ## Affected surfaces
 
-`aec/commands/update.py`, `aec/commands/outdated.py`, `aec/commands/upgrade.py`, `aec/lib/apply_core.py`, `aec/commands/run_doctor.py`
+`aec/commands/update.py`, `aec/commands/outdated.py`, `aec/commands/upgrade.py`, `aec/lib/apply_core.py`,
+`aec/lib/catalog_hashes.py`, `aec/lib/skills_manifest.py`, the release/catalog generation step, `aec/commands/run_doctor.py`
 (or its equivalent), docs for `outdated` / `upgrade`.
