@@ -129,6 +129,13 @@ in place:
 Status: derived from GitHub's event semantics, not yet run end to end. The first repo to adopt it records the
 result here.
 
+Two gotchas seen on the first end-to-end rollout (confirmed on a downstream repo's first green main-targeted run,
+check published by app 15368):
+
+- A PR into `main` needs the `review:high` label before `Review Gate` goes green; add it when opening a promotion.
+- A head can carry two `Review Gate` runs (the workflow job and a Checks-API run). Rerun the failed one, not only
+  the latest; a green latest run does not clear a failed earlier one.
+
 Input contract of the detector: it fails closed (exit 2) on empty, malformed or check-run-less input, because a head
 always has check runs by merge time; an empty set is not "no forgery". Callers should still use `set -o pipefail`.
 
