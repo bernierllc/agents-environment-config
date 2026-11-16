@@ -136,3 +136,16 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
 `aec/lib/global_install_prompt.py`, `aec/lib/apply_core.py`,
 `aec/lib/catalog_hashes.py`, `aec/lib/skills_manifest.py`, the release/catalog generation step, `aec/commands/run_doctor.py`
 (or its equivalent), docs for `outdated` / `upgrade`.
+
+## Vendored guard files (VENDOR-DRIFT-01)
+
+The same silence applies to the guard files repos copy byte-identically (`main-via-staging.yml`,
+`scripts/check-main-source.sh`, `scripts/check-forged-gate-names.py` and its test): a Dependabot bump of
+`actions/checkout` in a downstream copy made it differ from aec while nothing said so. The canonical is now on
+`actions/checkout@v7` (v7 only blocks fork-PR checkouts under `pull_request_target`; the guard checks out the base
+sha, pinned by `tests/test_vendored_guard_drift.py`), and `scripts/check-vendored-drift.py` is the check: it compares
+each copy with the canonical repo's bytes and fails on any difference or when it cannot evaluate.
+
+Remaining: run it automatically. Wire it into each vendoring repo's CI (pull requests touching those paths plus a
+weekly run), and fold the guard files into `aec outdated` as a "vendored guard files" scope beside the vendored skills
+above, so the verdict does not depend on anyone running the script by hand.

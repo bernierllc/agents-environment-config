@@ -46,7 +46,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout trusted base (not PR head)
-        uses: actions/checkout@v4
+        # actions/checkout@v7 refuses to fetch fork PR code under pull_request_target. This step selects
+        # the base sha of the base repository, so it is unaffected. Never add allow-unsafe-pr-checkout.
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
