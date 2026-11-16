@@ -57,6 +57,7 @@ pinned to agentinfo, never offer to migrate it".
 - `aec/commands/migrate_cmd.py`: pinned skip, `--force-layout`, `--all` filtering.
 - `aec/lib/prompt_catalog/maintenance_area.py`: prompt summary for the bulk run.
 - `aec/commands/files.py`, `aec/commands/generate.py`, `aec/cli.py`: rename plus deprecated aliases.
+- Generated text that names the old command: `aec/lib/agent_files.py` (emits `aec files generate` into every generated instruction stub), `aec/lib/agents_md_layout.py` (treats that exact text as generated boilerplate: it must recognize both the old and the new command so existing stubs still migrate), `scripts/generate-agent-files.py`, `docs/users/cli-reference.md`, `docs/users/rules-architecture.md`.
 - Docs: `README.md` (layout section); `docs/orgs/authoring-org-configs.md` once the owner-scoped plan lands.
 - Writers to sweep before changing the contract: `setup`, `repo setup`, `migrate agents-md` (single path, `--all`, maintenance prompt, `--tidy-with`), `generate files`, `rollback`.
 
@@ -69,6 +70,7 @@ pinned to agentinfo, never offer to migrate it".
 - `aec setup` in a fresh repo with no setting: AGENTS.md layout (the default is unchanged).
 - Owner-scoped org answer `instructions_layout: agentinfo` (after the owner-scoped plan): holds in a repo whose origin owner matches, and a repo of another owner keeps the default.
 - `aec generate templates` outside an AEC checkout exits non-zero with a message and writes nothing; the deprecated aliases warn and delegate.
+- Newly generated instruction stubs name `aec generate templates`, not `aec files generate`; a stub generated before the rename is still recognized as boilerplate and migrates cleanly.
 
 ## Not in scope
 
@@ -76,9 +78,14 @@ pinned to agentinfo, never offer to migrate it".
 - Replacing AGENTINFO.md content with anything: the file is never rewritten by `setup`.
 - Owner-scoped overlay answers (separate plan: `2026-11-15-owner-scoped-overlay-answers.md`).
 
-## Open question
+## Decision: what counts as a pin
 
-Should `detect_layout` returning `agentinfo` pin the repo on its own, so repos that predate the
-setting are never migrated by a bulk run? Recommendation: yes for `--all` and the maintenance
-prompt (an existing AGENTINFO.md is a choice someone made), no for an explicit path argument,
-which already asks for a confirmation.
+A pin is an explicit setting only: the user's local `instructions_layout`, and later an
+owner-scoped answer. A detected `AGENTINFO.md` is never a pin. `plan_migration` returns a
+plan only for repos where `detect_layout(repo) == "agentinfo"`, so every candidate a bulk
+run could migrate is detected-`agentinfo`; treating detection as a pin would filter out
+all of them and make `--all` and the maintenance prompt dead. The pin check therefore reads
+the setting directly (never the detected layout), and a repo that merely has `AGENTINFO.md`
+and no setting stays migratable, which is what `aec migrate agents-md` is for. Test:
+`--all` over one repo with `AGENTINFO.md` and the pin set, one with `AGENTINFO.md` and no
+pin: only the second is planned (already listed above).
