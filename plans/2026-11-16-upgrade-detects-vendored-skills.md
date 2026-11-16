@@ -48,6 +48,12 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
    that release (hidden paths included), and the destination's full tree (hidden entries included) must contain
    nothing outside that list. Any extra path is reported as "local additions: <paths>" and blocks the overwrite
    without explicit confirmation; the install never deletes a path that was not in the canonical tree.
+   **The copy must also keep the release's own hidden files.** `place_installed_item` copies with
+   `shutil.ignore_patterns(".*")` (`aec/lib/filesystem.py`), which drops every hidden path from the source, so an
+   accepted upgrade of an unchanged copy would delete a dotfile or dot-directory that the release itself ships
+   (the file list above includes it, so the check passes). The fix changes the copy to carry the release's hidden
+   paths (copy the full source tree, excluding only VCS and cache entries such as `.git`, `.DS_Store`,
+   `__pycache__`, named explicitly), so replacing a destination never loses a file the canonical release contains.
    **One gate, at the real chokepoint.** `_install_single_item` is not the one writer: the directory replacement
    happens in `place_installed_item` (`aec/lib/filesystem.py`, "the one write chokepoint"), which is called from
    `_install_single_item` (`install_cmd.py`), from `aec/commands/upgrade.py` directly (the main item, and the
@@ -95,6 +101,9 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
   overwritten without explicit confirmation.
 - Hidden-file fork: a copy whose only difference from the canonical release is an added dotfile, a modified dotfile
   or a file under a dot-directory: reported as "local additions", not overwritten, and the file survives.
+- Canonical hidden file: a release that ships a dotfile or a file under a dot-directory, vendored unchanged one version
+  behind: the upgrade succeeds and the hidden file is still present afterwards (and a fresh install of that release
+  carries it too). Excluded VCS and cache entries are not copied.
 - `aec apply` (declarative path), one test each for a vendored skill that is: canonical (upgraded), unknown version
   (reported, untouched), locally modified (reported, untouched), and a clean committed fork (reported, untouched,
   `yes=True` notwithstanding). A test also pins that `execute_apply` reaches the same gate as `aec upgrade`, so a
@@ -112,7 +121,7 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
 ## Affected surfaces
 
 `aec/commands/update.py`, `aec/commands/outdated.py`, `aec/commands/upgrade.py` (including `_find_outdated_repos`),
-`aec/lib/filesystem.py` (`place_installed_item` and the `check_install_provenance` preflight, the gate), `aec/commands/install_cmd.py` (`_install_single_item`),
+`aec/lib/filesystem.py` (`place_installed_item`, its copy of hidden release files, and the `check_install_provenance` preflight, the gate), `aec/commands/install_cmd.py` (`_install_single_item`),
 `aec/lib/global_install_prompt.py`, `aec/lib/apply_core.py`,
 `aec/lib/catalog_hashes.py`, `aec/lib/skills_manifest.py`, the release/catalog generation step, `aec/commands/run_doctor.py`
 (or its equivalent), docs for `outdated` / `upgrade`.
