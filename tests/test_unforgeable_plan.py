@@ -16,6 +16,7 @@ def test_plan_covers_staging_default_order_and_one_waiver_per_legacy_repo():
     assert "### Rollout order when the default branch is staging" in PLAN
     assert "needs exactly one owner waiver" in PLAN
     assert "Never combine them." in PLAN
+    assert "`main` ruleset requires the context" in PLAN
 
 
 def test_workflow_header_says_default_branch_not_main():

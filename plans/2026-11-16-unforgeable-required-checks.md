@@ -91,13 +91,18 @@ the default decides the order, so check it first (`gh api repos/<repo> --jq .def
 - **default=staging**: the workflow is live on every main-targeted PR the moment it merges to `staging`, while
   `main` may still lack the scripts. Follow "Rollout order when the default branch is staging" further down.
 
-Which case a repo is in depends on two facts, both read-only to check:
+Which case a repo is in depends on three facts, all read-only to check: the default branch, the workflow type on
+`main` and `staging`, and whether the `main` ruleset already requires the guard context
+(`gh api repos/<repo>/rules/branches/main`). The waiver follows the legacy publisher plus the required context, not
+the default branch alone:
 
-| Default branch | `main-via-staging.yml` on `main` and `staging` | Waiver needed |
-|---|---|---|
-| main | any | none: `main` gets the scripts first, so a legacy publisher is replaced before the guard runs |
-| staging | legacy (`pull_request`) | one, on the scripts promotion |
-| staging | canonical (`pull_request_target`) | none |
+| Default branch | `main-via-staging.yml` | `main` ruleset requires the context | Waiver needed |
+|---|---|---|---|
+| main | not yet on `main` | no | none: follow the default=main order below |
+| main | legacy on `main` | yes | one, see "Bootstrap for a repo whose main ruleset already requires the context" |
+| staging | legacy (`pull_request`) | yes | one, on the scripts promotion |
+| staging | legacy (`pull_request`) | no | none: the legacy job is not required, so deleting it blocks nothing; still follow the staging-default order |
+| staging | canonical (`pull_request_target`) | either | none |
 
 Which downstream repo falls in which row is tracked outside this product repo.
 
