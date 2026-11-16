@@ -103,7 +103,7 @@ class Fixture:
     # --- setup helpers ------------------------------------------------------------------------------------
     def commit(self, *files: str, message: str = "more") -> None:
         """Commit files in the worktree and treat that commit as the merged one."""
-        _git(self.wt, "add", "-f", *files)
+        _git(self.wt, "add", "-f", "--", *files)
         _git(self.wt, "commit", "-q", "-m", message)
         self.merged = [f"{BRANCH} {_git(self.wt, 'rev-parse', 'HEAD')}"]
 
@@ -196,9 +196,9 @@ def test_ignored_files_that_are_not_env_files_do_not_keep_the_worktree(fx: Fixtu
     assert fx.verdict() == "would"
 
 
-def test_ignored_nested_repo_without_env_files_is_removable(fx: Fixture) -> None:
+def test_ignored_nested_repo_without_env_files_keeps_as_unproven_history(fx: Fixture) -> None:
     fx.nested_repo("vendor/lib", readme="nothing secret\n")
-    assert fx.verdict() == "would"
+    fx.keeps("holds a nested git repo")
 
 
 def test_tracked_symlink_that_is_not_named_env_is_removable(fx: Fixture) -> None:
@@ -647,9 +647,8 @@ def test_a_refused_removal_is_reported_and_keeps_the_branch(fx: Fixture) -> None
     assert _git(fx.repo, "branch", "--list", BRANCH) != ""
 
 
-def test_worktree_with_an_initialized_submodule_is_left_to_gits_own_refusal(fx: Fixture) -> None:
-    """The scan does not look inside submodules; `git worktree remove` refuses them, which is all that
-    protects an ignored .env inside one. This pins that refusal."""
+def _with_submodule(fx: Fixture) -> None:
+    """The worktree gets an initialized, tracked submodule at `sub`, and its HEAD becomes the merged commit."""
     sub = fx.wt.parent / "subsrc"
     sub.mkdir()
     _git(sub, "init", "-q", "-b", "main")
@@ -662,11 +661,530 @@ def test_worktree_with_an_initialized_submodule_is_left_to_gits_own_refusal(fx: 
     _git(fx.repo, "commit", "-q", "-m", "add submodule")
     _git(fx.wt, "merge", "-q", "--ff-only", "main")
     _git(fx.wt, *allow, "submodule", "update", "--init", "-q")
-    (fx.wt / "sub" / ".env").write_text("SUBSECRET=1\n")
     fx.merged = [f"{BRANCH} {_git(fx.wt, 'rev-parse', 'HEAD')}"]
+
+
+def test_worktree_with_an_initialized_submodule_is_left_to_gits_own_refusal(fx: Fixture) -> None:
+    """The scan does not look inside submodules; `git worktree remove` refuses them, which is all that
+    protects an ignored .env inside one. This pins that refusal, and that a tracked submodule's own `.git`
+    is not mistaken for a nested repo."""
+    _with_submodule(fx)
+    (fx.wt / "sub" / ".env").write_text("SUBSECRET=1\n")
     assert fx.verdict(dry=False) == "FAILED"
     assert (fx.wt / "sub" / ".env").read_text() == "SUBSECRET=1\n"
 
 
 def test_script_parses_under_the_system_bash() -> None:
     subprocess.run(["/bin/bash", "-n", str(SCRIPT)], check=True)
+
+
+# =============================================================================================================
+# Audit additions: each test below kills a mutant of the script that the suite above let survive.
+# =============================================================================================================
+
+LOGGING_GH_STUB = GH_STUB.replace(
+    '[ -n "$state" ] && [ "$state" = "$GH_FAIL" ]',
+    'echo "$PWD" >>"$GH_LOG"; printf \'%s\\0\' "$PWD" "$@" >"$GH_LOG.$state"\n'
+    '[ -n "$state" ] && [ "$state" = "$GH_FAIL" ]',
+    1,
+)
+
+
+def _second_repo(fx: Fixture, rel: str, branch: str, wt_name: str) -> tuple[Path, Path]:
+    """A second repo at PROJECTS_ROOT/<rel> with one linked worktree outside it, its branch marked merged."""
+    repo = fx.root / rel
+    repo.mkdir(parents=True)
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / ".gitignore").write_text(".env*\n")
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-q", "-m", "init")
+    wt = fx.wt.parent / wt_name
+    _git(repo, "worktree", "add", "-q", "-b", branch, str(wt))
+    fx.merged.append(f"{branch} {_git(wt, 'rev-parse', 'HEAD')}")
+    return repo, wt
+
+
+def _silent_git_failure(fx: Fixture, args: str, code: int = 1) -> None:
+    """git dies with no output at all (an OOM kill, a full disk) for any call whose arguments contain `args`."""
+    fx.shim("git", f'case " $* " in *" {args} "*) exit {code} ;; esac\nexec "{_real("git")}" "$@"')
+
+
+# --- records and names: the NUL-separated reads must not merge, trim or reinterpret names ---------------------
+
+
+def test_untracked_name_ending_in_a_backslash_cannot_swallow_the_next_env_file(fx: Fixture) -> None:
+    """`read -d ''` without -r treats `\\<NUL>` as an escaped delimiter and fuses two records (bash 3.2 and 5)."""
+    fx.exclude("-*")
+    (fx.wt / "-a\\").write_text("x\n")  # sorts directly before .env
+    (fx.wt / ".env").write_text("unique\n")
+    fx.keeps()
+
+
+def test_tracked_name_ending_in_a_backslash_cannot_swallow_an_env_symlink(fx: Fixture) -> None:
+    (fx.wt / "-a\\").write_text("x\n")
+    (fx.wt / "only-copy").write_text("PRECIOUS=1\n")
+    (fx.wt / ".env").symlink_to("only-copy")
+    fx.commit("-a\\", ".env")
+    assert _git(fx.wt, "status", "--porcelain") == ""
+    fx.keeps("holds an .env symlink")
+    assert (fx.wt / "only-copy").read_text() == "PRECIOUS=1\n"
+
+
+def test_tracked_name_ending_in_a_backslash_cannot_swallow_a_hidden_edit(fx: Fixture) -> None:
+    (fx.wt / "-a\\").write_text("x\n")
+    (fx.wt / "a.conf").write_text("TEMPLATE=1\n")
+    fx.commit("-a\\", "a.conf")
+    _git(fx.wt, "update-index", "--assume-unchanged", "a.conf")
+    (fx.wt / "a.conf").write_text("LOCAL_SECRET=9\n")
+    fx.keeps("assume-unchanged or skip-worktree")
+
+
+def test_env_file_with_a_trailing_space_is_not_mistaken_for_its_identical_trimmed_name(fx: Fixture) -> None:
+    """`read` without IFS= trims the space: `.env ` would be looked up as `.env`, which matches the primary copy."""
+    (fx.repo / ".env").write_text("SAME=1\n")
+    (fx.wt / ".env").write_text("SAME=1\n")
+    (fx.wt / ".env ").write_text("UNIQUE=1\n")
+    fx.keeps()
+    assert (fx.wt / ".env ").read_text() == "UNIQUE=1\n"
+
+
+def test_tracked_env_symlink_whose_name_contains_a_tab_keeps(fx: Fixture) -> None:
+    (fx.wt / "only-copy").write_text("PRECIOUS=1\n")
+    (fx.wt / ".env\tfoo").symlink_to("only-copy")
+    fx.commit(".env\tfoo")
+    assert _git(fx.wt, "status", "--porcelain") == ""
+    fx.keeps("holds an .env symlink")
+
+
+def test_both_index_flags_on_one_file_keep(fx: Fixture) -> None:
+    """assume-unchanged and skip-worktree both set make `ls-files -v` print the lowercase tag `s`, not `h` or `S`."""
+    (fx.wt / "a.conf").write_text("TEMPLATE=1\n")
+    fx.commit("a.conf")
+    # two calls: a single `--assume-unchanged --skip-worktree` call records only assume-unchanged (tag `h`)
+    _git(fx.wt, "update-index", "--skip-worktree", "a.conf")
+    _git(fx.wt, "update-index", "--assume-unchanged", "a.conf")
+    (fx.wt / "a.conf").write_text("LOCAL_SECRET=9\n")
+    assert _git(fx.wt, "status", "--porcelain") == ""
+    assert _git(fx.wt, "ls-files", "-v", "a.conf").startswith("s ")
+    fx.keeps("assume-unchanged or skip-worktree")
+    assert (fx.wt / "a.conf").read_text() == "LOCAL_SECRET=9\n"
+
+
+# --- the byte comparison -----------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("primary", "worktree"),
+    [
+        ("AAME=1\n", "BAME=1\n"),  # same length, first byte differs
+        ("SAME=1\n", "SAME=2\n"),  # same length, last byte differs
+        ("SAME=1\n", "SAME=1\nEXTRA=2\n"),  # the primary copy is a prefix
+        ("SAME=1\nEXTRA=2\n", "SAME=1\n"),  # the worktree copy is a prefix
+    ],
+    ids=["first-byte", "last-byte", "primary-is-prefix", "worktree-is-prefix"],
+)
+def test_env_that_differs_in_one_place_from_the_primary_copy_keeps(fx: Fixture, primary: str, worktree: str) -> None:
+    (fx.repo / ".env").write_text(primary)
+    (fx.wt / ".env").write_text(worktree)
+    fx.keeps()
+
+
+def test_symlinked_grandparent_of_the_primary_copy_keeps(fx: Fixture) -> None:
+    store = fx.wt.parent / "elsewhere"
+    (store / "b").mkdir(parents=True)
+    (store / "b" / ".env").write_text("SAME=1\n")
+    (fx.repo / "a").symlink_to(store, target_is_directory=True)  # a -> store, a/b is a plain dir inside it
+    (fx.wt / "a" / "b").mkdir(parents=True)
+    (fx.wt / "a" / "b" / ".env").write_text("SAME=1\n")
+    fx.keeps()
+
+
+# --- failures that print nothing -----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("args", "reason"),
+    [
+        ("ls-files -z -s -v", "could not read the index"),
+        ("ls-files -z -o", "could not list ignored files"),
+        ("status --porcelain -uall", "could not read git status"),
+    ],
+    ids=["index", "untracked", "status"],
+)
+def test_a_git_failure_with_no_output_keeps(fx: Fixture, args: str, reason: str) -> None:
+    """The stderr check alone cannot see a killed git; the exit status has to be tested too."""
+    _silent_git_failure(fx, args)
+    fx.keeps(reason)
+
+
+# --- discovery, quoting and the third-party contract --------------------------------------------------------
+
+
+def test_clean_sweep_prints_no_skip_lines(fx: Fixture) -> None:
+    """A glob that matches nothing (here the two-level one) must not be treated as a repo."""
+    out = fx.run(dry=False)
+    assert not [ln for ln in out.splitlines() if ln.startswith("skip")], out
+
+
+def test_repo_two_levels_below_the_root_is_swept(fx: Fixture) -> None:
+    _repo2, wt2 = _second_repo(fx, "group/proj2", "feat/y", "wt2")
+    assert fx.verdict(dry=False, wt=wt2) == "removed"
+    assert not wt2.exists()
+
+
+def test_linked_worktree_under_the_root_is_not_treated_as_a_repo(fx: Fixture) -> None:
+    linked = fx.root / "linked"  # PROJECTS_ROOT/linked/.git is a file: a linked worktree, not a main checkout
+    _git(fx.repo, "worktree", "add", "-q", "-b", "feat/linked", str(linked))
+    fx.merged.append(f"main {_git(fx.repo, 'rev-parse', 'HEAD')}")
+    out = fx.run(dry=True)
+    assert fx.line(out, fx.repo) is None, out
+    assert "FAILED" not in out, out
+
+
+def test_repo_without_linked_worktrees_costs_no_gh_calls(fx: Fixture, tmp_path: Path) -> None:
+    (fx.bindir / "gh").write_text(LOGGING_GH_STUB)
+    solo = fx.root / "solo"
+    solo.mkdir()
+    _git(solo, "init", "-q", "-b", "main")
+    (solo / "f").write_text("x\n")
+    _git(solo, "add", "f")
+    _git(solo, "commit", "-q", "-m", "init")
+    log = tmp_path / "gh.log"
+    fx.run(dry=True, env={"GH_LOG": str(log)})
+    calls = log.read_text().splitlines()
+    assert calls and set(calls) == {str(fx.repo)}, calls
+
+
+def test_gh_is_called_with_arguments_real_gh_accepts(fx: Fixture, tmp_path: Path) -> None:
+    """The stub ignores its arguments, so this pins what the script really sends: subcommand, state, limit, json
+    fields, and a -q expression that turns real `gh pr list --json` output into `branch sha` lines."""
+    (fx.bindir / "gh").write_text(LOGGING_GH_STUB)
+    log = tmp_path / "gh.log"
+    fx.run(dry=True, env={"GH_LOG": str(log)})
+    for state in ("merged", "open"):
+        args = Path(f"{log}.{state}").read_text().split("\0")[1:-1]
+        assert args[:2] == ["pr", "list"], args
+        assert args[args.index("--state") + 1] == state
+        assert int(args[args.index("--limit") + 1]) >= 1000  # gh's default of 30 would silently truncate
+        assert args[args.index("--json") + 1].split(",") == ["headRefName", "headRefOid"]
+        expr = args[args.index("-q") + 1]
+        if shutil.which("jq"):
+            sample = '[{"headRefName":"feat/x","headRefOid":"abc123","number":1},{"headRefName":"b","headRefOid":"def"}]'
+            got = subprocess.run(["jq", "-r", expr], input=sample, capture_output=True, text=True, check=True)
+            assert got.stdout.splitlines() == ["feat/x abc123", "b def"], got.stdout
+
+
+def test_missing_gh_stops_the_script_with_a_message() -> None:
+    bare = "/usr/bin:/bin"
+    if shutil.which("gh", path=bare):
+        pytest.skip("gh lives in a system directory here")
+    proc = subprocess.run(
+        ["/bin/bash", str(SCRIPT)], capture_output=True, text=True, env={"PATH": bare, "HOME": "/nonexistent"}
+    )
+    assert proc.returncode == 1 and "gh not found" in proc.stdout, proc.stdout + proc.stderr
+
+
+def test_dry_run_is_off_by_default(fx: Fixture) -> None:
+    env = {k: v for k, v in os.environ.items() if k != "DRY_RUN"}
+    env.update(PATH=f"{fx.bindir}{os.pathsep}{os.environ['PATH']}", PROJECTS_ROOT=str(fx.root))
+    env.update(GH_MERGED="\n".join(fx.merged), GH_OPEN="", GH_FAIL="")
+    proc = subprocess.run(["/bin/bash", str(SCRIPT)], capture_output=True, text=True, env=env, timeout=60)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert not fx.wt.exists(), proc.stdout
+
+
+def test_squash_merged_branch_with_its_own_commits_is_deleted(fx: Fixture) -> None:
+    """After a squash merge the branch is not an ancestor of main, so `branch -d` would refuse and leak it."""
+    (fx.wt / "feature.txt").write_text("work\n")
+    fx.commit("feature.txt")
+    assert fx.verdict(dry=False) == "removed"
+    assert _git(fx.repo, "branch", "--list", BRANCH) == ""
+
+
+def test_stale_worktree_entry_is_pruned(fx: Fixture) -> None:
+    shutil.rmtree(fx.wt)  # a worktree directory someone deleted by hand
+    out = fx.run(dry=False)
+    assert str(fx.wt) not in _git(fx.repo, "worktree", "list", "--porcelain"), out
+
+
+def test_open_pr_on_a_longer_branch_name_does_not_keep_this_one(fx: Fixture) -> None:
+    fx.open = [f"{BRANCH}-followup 0123456789abcdef0123456789abcdef01234567"]
+    assert fx.verdict() == "would"
+
+
+@pytest.fixture
+def spaced(fx: Fixture) -> Path:
+    """A second worktree whose own path contains a space (the repo path already does)."""
+    wt = fx.wt.parent / "my wt"
+    _git(fx.repo, "worktree", "add", "-q", "-b", "feat/sp", str(wt))
+    fx.merged.append(f"feat/sp {_git(wt, 'rev-parse', 'HEAD')}")
+    return wt
+
+
+def test_worktree_path_with_a_space_is_removed(fx: Fixture, spaced: Path) -> None:
+    assert fx.verdict(dry=False, wt=spaced) == "removed"
+    assert not spaced.exists()
+
+
+def test_worktree_path_with_a_space_still_matches_an_identical_primary_copy(fx: Fixture, spaced: Path) -> None:
+    (fx.repo / ".env").write_text("SAME=1\n")
+    (spaced / ".env").write_text("SAME=1\n")
+    assert fx.verdict(dry=False, wt=spaced) == "removed"
+
+
+def test_worktree_path_with_a_space_keeps_a_unique_env(fx: Fixture, spaced: Path) -> None:
+    (spaced / ".env").write_text("UNIQUE=1\n")
+    assert fx.verdict(dry=False, wt=spaced) == "keep"
+    assert spaced.exists()
+
+
+def test_worktree_path_with_a_space_keeps_an_env_in_a_nested_repo(fx: Fixture, spaced: Path) -> None:
+    fx.exclude("vendor/")
+    nested = spaced / "vendor" / "lib"
+    nested.mkdir(parents=True)
+    _git(nested, "init", "-q")
+    (nested / ".env").write_text("UNIQUE=1\n")
+    assert fx.verdict(dry=False, wt=spaced) == "keep"
+    assert (nested / ".env").exists()
+
+
+def test_worktree_path_with_a_space_keeps_a_nested_repo_without_env(fx: Fixture, spaced: Path) -> None:
+    """The nested-.git scan must run on a spaced path and name the nested repo, not fail on the quoting."""
+    fx.exclude("vendor/")
+    nested = spaced / "vendor" / "lib"
+    nested.mkdir(parents=True)
+    _git(nested, "init", "-q")
+    (nested / "readme").write_text("nothing secret\n")
+    out = fx.run(dry=False)
+    line = fx.line(out, spaced)
+    assert line is not None and line.startswith("keep") and "holds a nested git repo" in line, out
+    assert nested.exists()
+
+
+@pytest.mark.parametrize("verdict_run", ["dry", "real"])
+def test_scan_leaves_no_temp_file_behind(fx: Fixture, tmp_path: Path, verdict_run: str) -> None:
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    fx.run(dry=verdict_run == "dry", env={"TMPDIR": str(scratch)})
+    assert list(scratch.iterdir()) == []
+
+
+def test_merged_pr_on_a_longer_branch_name_does_not_make_this_branch_removable(fx: Fixture) -> None:
+    """Merged lookup must match the whole branch name: `feat/x-2` merged says nothing about `feat/x`."""
+    sha = fx.merged[0].split()[1]
+    fx.merged = [f"{BRANCH}-2 {sha}"]
+    out = fx.run(dry=True)
+    assert fx.line(out, fx.wt) is None, out
+
+
+def test_reported_size_is_right_for_a_path_with_a_space(fx: Fixture, spaced: Path) -> None:
+    (spaced / "blob.bin").write_bytes(b"\0" * 3 * 1024 * 1024)
+    _git(spaced, "add", "-f", "blob.bin")
+    _git(spaced, "commit", "-q", "-m", "blob")
+    fx.merged = [f"feat/sp {_git(spaced, 'rev-parse', 'HEAD')}"]
+    line = fx.line(fx.run(dry=True), spaced)
+    assert line is not None and line.startswith("would") and ", 3M)" in line, line
+
+
+# =============================================================================================================
+# Round 5: a symlinked root, nested .git, secret-named files, and the package-tree exemption.
+# =============================================================================================================
+
+KEEP_GIT = "holds a nested git repo"
+KEEP_SECRET = "holds secret-named files"
+
+
+def _ignored(fx: Fixture, rel: str, text: str = "x\n") -> None:
+    """An ignored (not untracked) file at `rel` in the worktree, parents created."""
+    fx.exclude(rel)
+    path = fx.wt / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    assert _git(fx.wt, "status", "--porcelain") == ""
+
+
+# --- a symlinked PROJECTS_ROOT -------------------------------------------------------------------------------
+
+
+def test_symlinked_projects_root_still_skips_the_primary_and_removes_the_worktree(fx: Fixture) -> None:
+    """`git worktree list` prints realpaths while the sweep reaches the primary through the link; comparing the
+    two as text would treat the primary as a linked worktree and try to remove it."""
+    link = fx.wt.parent / "root-link"
+    link.symlink_to(fx.root)
+    fx.merged.append(f"main {_git(fx.repo, 'rev-parse', 'HEAD')}")
+    out = fx.run(dry=False, env={"PROJECTS_ROOT": str(link)})
+    assert fx.line(out, fx.repo) is None, out
+    line = fx.line(out, fx.wt)
+    assert line is not None and line.startswith("removed"), out
+    assert fx.repo.exists() and (fx.repo / ".git").exists()
+    assert "FAILED" not in out and "skip" not in out, out
+
+
+# --- nested .git: unproven pushed history ------------------------------------------------------------------
+
+
+def test_nested_repo_under_node_modules_keeps(fx: Fixture) -> None:
+    """The package-tree exemption covers the secret NAME rule only, never a nested repo."""
+    fx.nested_repo("node_modules/pkg", readme="x\n")
+    fx.keeps(KEEP_GIT)
+
+
+def test_nested_repo_under_a_path_with_spaces_keeps(fx: Fixture) -> None:
+    fx.nested_repo("my vendor/lib dir", readme="x\n")
+    fx.keeps(KEEP_GIT)
+
+
+def test_nested_repo_with_an_empty_git_directory_keeps(fx: Fixture) -> None:
+    """git skips a broken nested repo silently, so only a scan for the name `.git` sees it."""
+    fx.exclude("vendor/")
+    (fx.wt / "vendor" / "lib" / ".git").mkdir(parents=True)
+    (fx.wt / "vendor" / "lib" / "a").write_text("x\n")
+    fx.keeps(KEEP_GIT)
+
+
+def test_nested_repo_with_a_dangling_gitfile_keeps(fx: Fixture) -> None:
+    fx.exclude("vendor/")
+    (fx.wt / "vendor" / "lib").mkdir(parents=True)
+    (fx.wt / "vendor" / "lib" / ".git").write_text("gitdir: /nonexistent/place\n")
+    fx.keeps(KEEP_GIT)
+
+
+def test_nested_linked_worktree_with_a_gitfile_keeps(fx: Fixture) -> None:
+    fx.exclude("inner/")
+    # --no-checkout: the checkout would carry the tracked .env.example, which the .env* scan reports first
+    _git(fx.repo, "worktree", "add", "-q", "--no-checkout", "-b", "feat/inner", str(fx.wt / "inner"))
+    fx.keeps(KEEP_GIT)
+
+
+def test_nested_repo_under_site_packages_keeps(fx: Fixture) -> None:
+    fx.nested_repo("lib/python3/site-packages/pkg", readme="x\n")
+    fx.keeps(KEEP_GIT)
+
+
+def test_nested_repo_next_to_a_tracked_submodule_still_keeps(fx: Fixture) -> None:
+    """Only the exact submodule path is left to git's refusal; a lookalike path is a nested repo."""
+    _with_submodule(fx)
+    fx.nested_repo("sub-extra/lib", readme="x\n")
+    fx.keeps(KEEP_GIT)
+
+
+def test_nested_repo_whose_path_is_a_prefix_of_a_submodule_path_keeps(fx: Fixture) -> None:
+    """`su` is a substring of the submodule path `sub`, but only the exact path is git's to refuse."""
+    _with_submodule(fx)
+    fx.nested_repo("su", readme="x\n")
+    fx.keeps(KEEP_GIT)
+
+
+def test_names_that_only_look_like_a_git_directory_do_not_keep(fx: Fixture) -> None:
+    for rel in ("dist/.github/ci.yml", "dist/pkg.git", "dist/.gitkeep", "dist/not.git/x"):
+        _ignored(fx, rel)
+    assert fx.verdict() == "would"
+
+
+def test_find_failing_in_the_nested_git_scan_keeps(fx: Fixture) -> None:
+    fx.shim("find", 'for a in "$@"; do [ "$a" = .git ] && exit 1; done\nexec "' + _real("find") + '" "$@"')
+    fx.keeps("could not scan for nested git repos (find exit 1)")
+
+
+def test_find_killed_in_the_nested_git_scan_keeps(fx: Fixture) -> None:
+    fx.shim("find", 'for a in "$@"; do [ "$a" = .git ] && kill -9 $$; done\nexec "' + _real("find") + '" "$@"')
+    fx.keeps("could not scan for nested git repos (find exit 137)")
+
+
+def test_find_warning_in_the_nested_git_scan_keeps_even_with_exit_zero(fx: Fixture) -> None:
+    fx.shim(
+        "find",
+        'for a in "$@"; do [ "$a" = .git ] && echo "find: warning" >&2; done\nexec "' + _real("find") + '" "$@"',
+    )
+    fx.keeps("could not scan for nested git repos (find exit 0)")
+
+
+# --- secret-named files --------------------------------------------------------------------------------------
+
+SECRET_NAMES = [
+    "prod.env", "PROD.ENV", "conf/Stage.eNv",
+    ".dev.vars", ".dev.vars.production", ".DEV.VARS", "apps/web/.Dev.Vars",
+    ".npmrc", ".NPMRC", "pkg/.npmrc",
+    ".netrc", ".NetRC",
+    ".pypirc", ".PyPiRC",
+    "server.pem", "SERVER.PEM", "certs/ca.Pem",
+    "tls.key", "TLS.KEY",
+    "cert.p12", "CERT.P12",
+    "cert.pfx", "CERT.PFX",
+    "id_rsa", "id_rsa.pub", "ID_RSA", ".ssh/id_rsa",
+    "id_ed25519", "id_ed25519.pub", "ID_ED25519", ".ssh/ID_Ed25519",
+]  # fmt: skip
+
+
+@pytest.mark.parametrize("rel", SECRET_NAMES)
+def test_ignored_secret_named_file_keeps_the_worktree(fx: Fixture, rel: str) -> None:
+    _ignored(fx, rel, "not a real secret\n")
+    fx.keeps(KEEP_SECRET)
+
+
+@pytest.mark.parametrize("rel", ["notes.txt", "monkey", "keyboard.js", "valid_rsa", "npmrc", "dev.vars", "pem", "src/key"])
+def test_names_that_only_resemble_a_secret_name_do_not_keep(fx: Fixture, rel: str) -> None:
+    _ignored(fx, rel)
+    assert fx.verdict() == "would"
+
+
+# --- the package-tree exemption: NAME rule only ---------------------------------------------------------------
+
+EXEMPT = [
+    "node_modules/pkg/test/server.pem",
+    "node_modules/.bin/.npmrc",
+    "node_modules/x/id_ed25519",
+    "node_modules/x/sample.env",
+    "a/node_modules/b/cert.pfx",
+    ".venv/lib/certs/ca.key",
+    "venv/lib/id_rsa",
+    "lib/python3.12/site-packages/certifi/cacert.pem",
+]
+
+
+@pytest.mark.parametrize("rel", EXEMPT)
+def test_secret_named_file_inside_a_package_tree_does_not_keep(fx: Fixture, rel: str) -> None:
+    _ignored(fx, rel)
+    assert fx.verdict() == "would"
+    assert fx.verdict(dry=False) == "removed"
+
+
+def test_worktree_with_only_package_trees_and_build_output_is_still_removed(fx: Fixture) -> None:
+    for rel in ("node_modules/pkg/index.js", ".venv/lib/x.pem", "build/out.js"):
+        _ignored(fx, rel)
+    assert fx.verdict(dry=False) == "removed"
+    assert not fx.wt.exists()
+
+
+@pytest.mark.parametrize("name", [".env", ".env.local", "sub/.ENV"])
+def test_env_file_inside_node_modules_still_keeps(fx: Fixture, name: str) -> None:
+    _ignored(fx, f"node_modules/pkg/{name}", "unique\n")
+    fx.keeps()
+
+
+def test_env_file_inside_a_nested_repo_under_node_modules_is_reported_as_env(fx: Fixture) -> None:
+    """The exemption must not skip the `.env*` scan of a nested repo (git lists it as one `dir/` entry)."""
+    fx.nested_repo("node_modules/pkg", **{".env": "unique\n"})
+    fx.keeps("holds ignored .env files")
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "my_node_modules/x.pem",
+        "node_modules.bak/x.pem",
+        "Node_Modules/x.pem",  # the component test is case-sensitive: a path it cannot classify is kept
+        "venv2/x.pem",
+        "not.venv/x.pem",
+        "site-packages-old/x.pem",
+    ],
+)
+def test_lookalike_of_a_package_tree_is_not_exempt(fx: Fixture, rel: str) -> None:
+    _ignored(fx, rel)
+    fx.keeps(KEEP_SECRET)
+
+
+def test_one_secret_outside_a_package_tree_keeps_even_with_exempt_ones_beside_it(fx: Fixture) -> None:
+    _ignored(fx, "node_modules/pkg/ok.pem")
+    _ignored(fx, "real.pem")
+    fx.keeps(KEEP_SECRET)

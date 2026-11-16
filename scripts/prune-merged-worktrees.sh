@@ -33,12 +33,13 @@ same_as_primary() { # worktree primary relpath -> 0 only for a regular file byte
 env_data_scan() { # worktree primary listfile -> returns 0 and prints why when the tree must be kept, 1 when it may go
   # Blunt on purpose: no target analysis. Every status is captured, never read through a pipe (`grep -q` or
   # `head` would hide a failure or SIGPIPE the writer under pipefail), and every failure keeps the tree.
-  local f out rc
+  local f out rc rel subs=""
   git -C "$1" ls-files -z -s -v >"$3"; rc=$?
   [ "$rc" -eq 0 ] || { echo "could not read the index (git ls-files exit $rc)"; return 0; }
   while IFS= read -r -d '' f; do # "<tag> <mode> <sha> <stage>TAB<path>"
     # assume-unchanged and skip-worktree make `git status` call a modified file clean
     case "$f" in [hSs]" "*) echo "has files marked assume-unchanged or skip-worktree"; return 0 ;; esac
+    case "$f" in ?" 160000 "*) subs="$subs$NL${f#*"$TAB"}" ;; esac # tracked submodules: git itself refuses to remove them
     case "$f" in ?" 120000 "*) case "/${f#*"$TAB"}" in */.[eE][nN][vV]*) echo "holds an .env symlink"; return 0 ;; esac ;; esac
   done <"$3"
   # untracked and ignored files; an ignored nested repo is one `dir/` entry. git warns and still exits 0 for a
@@ -52,7 +53,22 @@ env_data_scan() { # worktree primary listfile -> returns 0 and prints why when t
       */) out="$(find "$1/$f" -iname '.env*' 2>&1)"; rc=$?
           [ "$rc" -eq 0 ] || { echo "could not scan $f (find exit $rc)"; return 0; }
           [ -z "$out" ] || { echo "holds ignored .env files"; return 0; } ;;
+      # package fixtures (dependency trees, virtualenvs) are exempt from the secret NAME rule only
+      */node_modules/*|*/.venv/*|*/venv/*|*/site-packages/*) ;;
+      */.[dD][eE][vV].[vV][aA][rR][sS]*|*/.[nN][pP][mM][rR][cC]|*/.[nN][eE][tT][rR][cC]|*/.[pP][yY][pP][iI][rR][cC]) echo "holds secret-named files"; return 0 ;;
+      *.[eE][nN][vV]|*.[pP][eE][mM]|*.[kK][eE][yY]|*.[pP]12|*.[pP][fF][xX]) echo "holds secret-named files"; return 0 ;;
+      */[iI][dD]_[rR][sS][aA]*|*/[iI][dD]_[eE][dD]25519*) echo "holds secret-named files"; return 0 ;;
     esac
+  done <"$3"
+  # Any nested .git, file or directory, is unproven pushed history. git lists only a valid nested repo (as `dir/`)
+  # and skips a broken one, so find every .git name. A tracked submodule's own .git is left to git's refusal.
+  out="$(find "$1" -name .git -prune -print0 2>&1 >"$3")"; rc=$?
+  { [ "$rc" -eq 0 ] && [ -z "$out" ]; } || { echo "could not scan for nested git repos (find exit $rc)"; return 0; }
+  while IFS= read -r -d '' f; do
+    rel="${f#"$1"/}"
+    [ "$rel" != .git ] || continue # the worktree's own
+    case "$subs$NL" in *"$NL${rel%/.git}$NL"*) continue ;; esac
+    echo "holds a nested git repo"; return 0
   done <"$3"
   return 1
 }
@@ -82,14 +98,15 @@ for gitdir in "$ROOT"/*/.git "$ROOT"/*/*/.git; do
 
   awk '/^worktree /{w=substr($0,10)} /^branch /{b=substr($0,8); sub("^refs/heads/","",b); print w "\t" b}' <<<"$wl" \
     | while IFS=$'\t' read -r path branch; do
-        [ "$path" = "$repo" ] && continue
+        [ "$path" -ef "$repo" ] && continue # same directory, even when $ROOT reaches it through a symlink
         sha="$(awk -v b="$branch" '$1==b{print $2; exit}' <<<"$merged")"
         [ -n "$sha" ] || continue
         if awk -v b="$branch" '$1==b{f=1} END{exit !f}' <<<"$open"; then
           echo "keep    $path  ($branch: name reused by an open PR)"; continue
         fi
-        # du first, and nothing slow between the final scan and the removal. Nothing locks the worktree, so a
-        # file created in that last instant is still lost (plans/2026-11-16-prune-env-guard-fail-open.md).
+        # du first, so the scan is the last step before the removal. Nothing locks the worktree: `git worktree
+        # remove` makes its own status pass before it deletes (measured gap 1.19 s with 100k ignored files), and a
+        # file created in that gap is lost (plans/2026-11-16-prune-env-guard-fail-open.md).
         kb="$(du -sk "$path" 2>/dev/null | cut -f1)"; mb=$(( ${kb:-0} / 1024 ))
         why="$(keep_reason "$path" "$repo" "$sha")"; rc=$?
         # exactly 1 means "may go"; a scan that was killed or failed some other way keeps the tree
