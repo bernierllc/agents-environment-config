@@ -25,6 +25,11 @@ owner the command runs against is not part of the lookup.
 
 1. Let an org config scope prompt answers by repo owner: `install.prompts_by_owner:
    {<owner>: {<prompt-id>: <value>}}`. Owner is the `origin` remote's owner (GitHub org or user).
+   The owner comes from `github_owner()` in `aec/lib/git_setup.py`, which returns the URL capture
+   unchanged, and GitHub owner names are case-insensitive. Normalize both sides with
+   `.lower()` before lookup: the `prompts_by_owner` keys when the config loads, and the
+   detected owner at lookup. Validation rejects two keys that collide after normalization
+   (`Acme` and `acme`) naming both.
 2. One lookup, `scoped_answer(key, repo)`, resolves an owner-scoped answer for a repo's
    `origin` owner. The repo context is bound per repository, never per command: a
    context manager (`with repo_context(repo):`) that `prompt()` reads, entered inside each
@@ -62,6 +67,7 @@ command that must set the context (`setup`, `repo setup`, `migrate`).
 ## Tests
 
 - Owner-scoped `repo.git.license_kind: proprietary` applies in a repo whose origin owner matches and not in one whose owner differs.
+- Mixed case: key `acme` matches origin `git@github.com:Acme/repo.git` (and the reverse); keys `Acme` and `acme` in one config are rejected as a collision.
 - `install.preferences.instructions_layout` in an org config is rejected by validation and never reaches `apply_preferences`; a user's own local setting still works.
 - Two enrolled orgs giving different scoped answers for one `(owner, prompt-id)`: reported as a conflict and neither applied.
 - An unscoped `repo.git.license_kind` in `install.prompts` is rejected (validation error), not applied; machine-global unscoped keys keep working.
