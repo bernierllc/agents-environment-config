@@ -77,7 +77,8 @@ def _gh_run_lookup(repo):
             capture_output=True, text=True, check=True,
         ).stdout.strip()
         path, event = out.split("\t")
-        return path, event
+        # Required/reusable workflow runs report `path@ref`; compare the file path only.
+        return path.split("@", 1)[0], event
 
     return lookup
 

@@ -102,3 +102,8 @@ def test_an_empty_listing_from_staging_passes(tmp_path):
     code, patches = _run_workflow_step(tmp_path, "staging", list_fails=False)
     assert code == 0
     assert "conclusion=success" in patches
+
+
+def test_workflow_grants_actions_read_for_the_run_lookup():
+    # Setting `permissions:` zeroes every omitted scope; GET /actions/runs/{id} needs actions: read in private repos.
+    assert "\n  actions: read\n" in WORKFLOW.split("jobs:")[0]

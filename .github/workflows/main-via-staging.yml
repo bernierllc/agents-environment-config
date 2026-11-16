@@ -31,6 +31,8 @@ on:
 permissions:
   contents: read
   checks: write
+  # the forged-name scan reads GET /actions/runs/{id}; private repos need this scope
+  actions: read
 concurrency:
   group: main-via-staging-${{ github.event.pull_request.number }}
   cancel-in-progress: true

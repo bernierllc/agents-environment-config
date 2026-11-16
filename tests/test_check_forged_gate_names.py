@@ -88,3 +88,13 @@ def test_cli_fails_closed_on_garbage_input():
         env={**os.environ, "REPO": "my-org/my-repo"},
     )
     assert proc.returncode == 2
+
+
+def test_workflow_run_path_with_a_ref_suffix_is_normalized(monkeypatch):
+    class Done:
+        stdout = ".github/workflows/review-gate.yml@refs/heads/main\tpull_request_target\n"
+
+    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: Done())
+    path_event = mod._gh_run_lookup("my-org/my-repo")("890")
+    assert path_event == TRUSTED_GATE
+    assert mod.forged([job_run("Review Gate", "890")], lambda _: path_event) == []
