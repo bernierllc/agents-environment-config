@@ -176,7 +176,7 @@ def test_status_check_does_not_reset_idleness(env):
 
 # Tools the script needs; a PATH holding only these simulates a machine without gh, lsof or osascript.
 BASE_TOOLS = (
-    "bash git awk sed sort df date stat du cut find rm wc id grep cmp dirname readlink tail cat ls"
+    "bash git awk sed sort df date stat du cut find rm wc id grep cmp dirname basename readlink mktemp tail cat ls"
 ).split()
 
 
@@ -379,3 +379,21 @@ def test_env_symlink_to_a_file_outside_the_worktree_does_not_keep_it(env, tmp_pa
     out = run(env)
     assert not wt.exists(), out
     assert shared.read_text() == "SECRET=1\n"
+
+
+@pytest.mark.parametrize("push", [True, False])
+def test_unique_env_inside_node_modules_is_not_stripped(env, push):
+    # The tree is kept for its .env, but the strip step then deleted node_modules (and the .env) anyway.
+    wt = add_worktree(env["repo"], "nmenv", push=push)
+    (wt / "node_modules" / "pkg" / ".env").write_text("SECRET=1\n")
+    age(wt)
+    out = run(env)
+    assert (wt / "node_modules" / "pkg" / ".env").read_text() == "SECRET=1\n", out
+    assert "holds ignored .env files" in out
+
+
+def test_node_modules_without_a_unique_env_is_still_stripped(env):
+    wt = add_worktree(env["repo"], "nmplain", push=False)
+    age(wt)
+    out = run(env)
+    assert not (wt / "node_modules").exists(), out

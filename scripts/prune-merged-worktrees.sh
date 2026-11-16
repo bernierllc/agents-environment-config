@@ -116,10 +116,10 @@ symlink_survives_removal() { # worktree relative-path
 # Returns 0 (keep the tree) when one is found or when the ignored files cannot be listed: not knowing
 # is not the same as finding none. Output goes to a file, not a `... | grep -q .` pipeline: grep -q
 # exits at the first hit, the writers then die of SIGPIPE, and under pipefail that failure read as "none".
-holds_own_env() {
+holds_own_env() { # worktree primary-checkout [pathspec within the worktree]
   local list f found=1
   list="$(mktemp)" || { echo "cannot list ignored files in $1: mktemp failed, keeping it"; return 0; }
-  if ! git -C "$1" ls-files -o -i --exclude-standard -z >"$list"; then
+  if ! git -C "$1" ls-files -o -i --exclude-standard -z ${3:+-- "$3"} >"$list"; then
     echo "cannot list ignored files in $1: git ls-files failed, keeping it"; rm -f "$list"; return 0
   fi
   while IFS= read -r -d '' f; do
@@ -145,7 +145,7 @@ remove_worktree() { # repo path branch reason
   fi
 }
 
-strip_node_modules() { # path label
+strip_node_modules() { # path label primary-checkout
   local nm kb
   while IFS= read -r nm; do
     # only an ignored directory with nothing tracked inside it is regenerable
@@ -153,6 +153,8 @@ strip_node_modules() { # path label
     [ -z "$(git -C "$1" ls-files -- "$nm" 2>/dev/null | head -n1)" ] || continue
     # a repo cloned or linked inside (git dependency, local checkout) can hold uncommitted work or its own .env
     if find "$nm" -name .git -print -quit 2>/dev/null | grep -q .; then echo "keep    $nm  ($2: holds a git checkout)"; continue; fi
+    # same guard as removal: an ignored .env* that exists only here is data, wherever it sits
+    if holds_own_env "$1" "$3" "${nm#"$1"/}"; then echo "keep    $nm  ($2: holds ignored .env files)"; continue; fi
     kb="$(du -sk "$nm" 2>/dev/null | cut -f1)"
     if [ "$DRY_RUN" = 1 ]; then echo "would strip $nm  ($2, $(( ${kb:-0} / 1024 ))M)"; continue; fi
     rm -rf "$nm" && echo "stripped $nm  ($2, $(( ${kb:-0} / 1024 ))M)"
@@ -208,7 +210,7 @@ for gitdir in "$ROOT"/*/.git "$ROOT"/*/*/.git; do
         fi
         [ "$removed" = 1 ] && continue
         if [ "$idle" -ge $(( STRIP_IDLE_DAYS * 24 )) ]; then
-          strip_node_modules "$path" "$label, idle ${idle}h"
+          strip_node_modules "$path" "$label, idle ${idle}h" "$repo"
         fi
       done
   git -C "$repo" worktree prune
