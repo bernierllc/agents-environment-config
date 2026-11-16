@@ -18,30 +18,67 @@ pr_heads() { # repo state -> "branch sha" lines; on failure prints why and retur
   printf '%s\n' "$out"
 }
 
-env_data_reason() { # worktree primary -> returns 0 and prints why when the tree must be kept, 1 when it holds no .env data
-  # Fails closed: anything that cannot be verified keeps the tree. A .env that is a byte-identical copy of the
-  # primary checkout's, a symlink out of the worktree, a symlink to a tracked file or a dangling symlink holds no
-  # data of its own; a symlink to an ignored file inside the worktree does (deleting the tree deletes the target).
-  # No `grep -q` at the end of a pipeline: under pipefail its early exit SIGPIPEs the writer and reads as "none".
-  local path="$1" repo="$2" ign rc wt f tgt
-  ign="$(git -C "$path" ls-files -o -i --exclude-standard)"; rc=$?
-  [ "$rc" -eq 0 ] || { echo "could not list ignored files (git ls-files exit $rc)"; return 0; }
+resolve_physical() { # path -> prints it with every symlink followed; non-zero on any failure
+  # Pure Bash 3.2: `realpath` is missing and `readlink -f` unsupported on older macOS, so neither is relied on.
+  local p="$1" n=0 dir base t
+  while :; do
+    n=$((n + 1)); [ "$n" -le 40 ] || return 1 # symlink loop or absurd depth
+    dir="${p%/*}"; base="${p##*/}"; [ -n "$dir" ] || dir=/
+    case "$base" in
+      ""|.|..) p="$(cd -P -- "$p" 2>/dev/null && pwd -P)" || return 1; break ;;
+    esac
+    dir="$(cd -P -- "$dir" 2>/dev/null && pwd -P)" || return 1
+    p="${dir%/}/$base"
+    [ -L "$p" ] || break
+    t="$(readlink -- "$p")" && [ -n "$t" ] || return 1
+    while [ "${#t}" -gt 1 ] && [ "${t%/}" != "$t" ]; do t="${t%/}"; done
+    case "$t" in /*) p="$t" ;; *) p="$dir/$t" ;; esac
+  done
+  printf '%s\n' "$p"
+}
+
+env_data_scan() { # worktree primary listfile -> returns 0 and prints why when the tree must be kept, 1 when it holds no .env data
+  # Fails closed: only a .env that is positively proven to hold no data of its own is skipped; anything else keeps
+  # the tree. Proven safe: a regular file byte-identical to a regular (non-symlink) copy in the primary checkout;
+  # a symlink that resolves outside the worktree; a symlink that resolves to a regular tracked file inside it.
+  # Everything else (a symlink to an ignored file, a directory or the root of the worktree; a symlink that cannot
+  # be resolved, dangling or unreadable included) is kept: deleting the worktree would delete the target.
+  # The list is NUL-separated (git quotes odd names otherwise) and read from a file: no `grep -q` at the end of a
+  # pipeline, whose early exit SIGPIPEs the writer under pipefail and reads as "none".
+  local path="$1" repo="$2" list="$3" wt f tgt r rel tag
+  git -C "$path" ls-files -z -o -i --exclude-standard >"$list"
+  r=$?
+  [ "$r" -eq 0 ] || { echo "could not list ignored files (git ls-files exit $r)"; return 0; }
   wt="$(cd -P "$path" 2>/dev/null && pwd -P)" || { echo "could not resolve the worktree path"; return 0; }
-  while IFS= read -r f; do
+  while IFS= read -r -d '' f; do
     case "/$f" in */.env*) ;; *) continue ;; esac
     if [ -L "$path/$f" ]; then
-      [ -e "$path/$f" ] || continue
-      tgt="$(realpath "$path/$f" 2>/dev/null || readlink -f "$path/$f" 2>/dev/null)"
+      tgt="$(resolve_physical "$path/$f")" && [ -n "$tgt" ] && [ -e "$tgt" ] \
+        || { echo "could not resolve a .env symlink target"; return 0; }
       case "$tgt" in
-        "") echo "holds ignored .env files"; return 0 ;;
-        "$wt"/*) git -C "$path" ls-files --error-unmatch -- "${tgt#"$wt"/}" >/dev/null 2>&1 \
+        "$wt"/*) # a tracked file is safe only while it matches the index: assume-unchanged and skip-worktree
+                 # hide local edits from `git status` and `git diff`, so any flag keeps the tree
+                 rel="${tgt#"$wt"/}"
+                 [ -f "$tgt" ] && tag="$(git --literal-pathspecs -C "$path" ls-files -v -- "$rel")" \
+                   && case "$tag" in "H "*) true ;; *) false ;; esac \
+                   && git --literal-pathspecs -C "$path" diff --quiet -- "$rel" \
                    || { echo "holds ignored .env files"; return 0; } ;;
+        "$wt") echo "holds ignored .env files"; return 0 ;;
       esac
     else
-      cmp -s "$path/$f" "$repo/$f" || { echo "holds ignored .env files"; return 0; }
+      { [ -f "$repo/$f" ] && [ ! -L "$repo/$f" ] && [ ! "$path/$f" -ef "$repo/$f" ] && cmp -s "$path/$f" "$repo/$f"; } \
+        || { echo "holds ignored .env files"; return 0; }
     fi
-  done <<<"$ign"
+  done <"$list"
   return 1
+}
+
+env_data_reason() { # worktree primary -> returns 0 and prints why when the tree must be kept, 1 when it holds no .env data
+  local list rc
+  list="$(mktemp)" || { echo "could not create a temp file to list ignored files"; return 0; }
+  env_data_scan "$1" "$2" "$list"; rc=$?
+  rm -f "$list"
+  return "$rc"
 }
 
 for gitdir in "$ROOT"/*/.git "$ROOT"/*/*/.git; do

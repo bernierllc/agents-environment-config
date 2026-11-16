@@ -42,10 +42,10 @@ class Fixture:
     def __init__(self, root: Path, repo: Path, wt: Path, sha: str, bindir: Path) -> None:
         self.root, self.repo, self.wt, self.sha, self.bindir = root, repo, wt, sha, bindir
 
-    def run(self, dry: bool = True) -> str:
+    def run(self, dry: bool = True, path: str | None = None) -> str:
         env = {
             **os.environ,
-            "PATH": f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
+            "PATH": path or f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
             "PROJECTS_ROOT": str(self.root),
             "DRY_RUN": "1" if dry else "0",
             "GH_MERGED": f"{BRANCH} {self.sha}",
@@ -56,9 +56,9 @@ class Fixture:
         assert proc.returncode == 0, proc.stdout + proc.stderr
         return proc.stdout
 
-    def verdict(self, dry: bool = True) -> str:
+    def verdict(self, dry: bool = True, path: str | None = None) -> str:
         """The first word printed for the worktree: keep | would | removed."""
-        for line in self.run(dry).splitlines():
+        for line in self.run(dry, path).splitlines():
             if str(self.wt) in line:
                 return line.split()[0]
         raise AssertionError("script printed nothing for the worktree")
@@ -93,12 +93,26 @@ def _unique_envs(wt: Path, n: int) -> None:
         (wt / f".env.unique{i}").write_text(f"SECRET={i}\n")
 
 
-@pytest.mark.parametrize("n", [1, 2, 50])
+@pytest.mark.parametrize("n", [1, 2])
 def test_unique_ignored_envs_keep_the_worktree(fx: Fixture, n: int) -> None:
-    # n >= 2 hit the SIGPIPE race: grep -q closed the pipe early and the guard read "nothing unique"
     _unique_envs(fx.wt, n)
     assert fx.verdict() == "keep"
     assert "holds ignored .env files" in fx.run()
+
+
+def test_many_unique_envs_keep_the_worktree_whatever_the_scheduling(fx: Fixture) -> None:
+    """Defect A, deterministically. The old guard ended in `grep -q .` under pipefail. Its writer only takes
+    SIGPIPE if it is still writing when grep exits, which a fast grep makes a matter of luck. Here the writer
+    emits ~125 KB (more than any pipe buffer), so it must block on a full pipe and is guaranteed to be writing
+    when `grep -q` exits on the first line; a grep that sleeps first (below) removes the race entirely."""
+    for i in range(3000):
+        (fx.wt / f".env.{i:05d}-{'x' * 30}").write_text("SECRET\n")
+    real_grep = shutil.which("grep")
+    assert real_grep
+    slow = fx.bindir / "grep"
+    slow.write_text(f'#!/bin/bash\nsleep 0.3\nexec "{real_grep}" "$@"\n')
+    slow.chmod(0o755)
+    assert fx.verdict() == "keep"
 
 
 def test_env_identical_to_primary_copy_is_removable(fx: Fixture) -> None:
@@ -134,9 +148,129 @@ def test_symlink_to_target_outside_worktree_is_removable(fx: Fixture) -> None:
     assert fx.verdict() == "would"
 
 
-def test_dangling_symlink_is_removable(fx: Fixture) -> None:
+def test_dangling_symlink_is_kept(fx: Fixture) -> None:
+    # a dangling link holds no data, but the guard keeps anything it cannot positively resolve
     (fx.wt / ".env").symlink_to("does-not-exist")
+    assert fx.verdict() == "keep"
+
+
+@pytest.mark.parametrize("name", [".envé", ".env\\local", ".env\nlocal"], ids=["unicode", "backslash", "newline"])
+def test_odd_env_file_names_keep(fx: Fixture, name: str) -> None:
+    # without -z git quotes these names, the quoted form no longer matches .env and the tree was deleted
+    (fx.wt / name).write_text("unique\n")
+    assert fx.verdict() == "keep"
+
+
+def test_symlink_to_a_directory_keeps(fx: Fixture) -> None:
+    (fx.wt / "data").mkdir()
+    (fx.wt / "data" / "tracked").write_text("tracked\n")
+    _git(fx.wt, "add", "data/tracked")
+    _git(fx.wt, "commit", "-q", "-m", "tracked data")
+    fx.sha = _git(fx.wt, "rev-parse", "HEAD")
+    (fx.wt / "data" / "only-copy").write_text("unique\n")  # ignored, so status stays clean
+    (fx.wt / ".env").symlink_to("data")
+    assert fx.verdict() == "keep"
+
+
+def test_symlink_to_the_worktree_root_keeps(fx: Fixture) -> None:
+    (fx.wt / "only-copy").write_text("unique\n")
+    (fx.wt / ".env").symlink_to(".")
+    assert fx.verdict() == "keep"
+
+
+def test_primary_copy_that_is_a_symlink_into_the_worktree_keeps(fx: Fixture) -> None:
+    # cmp would compare the worktree file with itself and call it identical
+    (fx.wt / ".env").write_text("unique\n")
+    (fx.repo / ".env").symlink_to(fx.wt / ".env")
+    assert fx.verdict() == "keep"
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+def test_symlink_whose_target_cannot_be_read_keeps(fx: Fixture) -> None:
+    ignore = fx.root.parent / "ignore"
+    ignore.write_text("vault/\n")
+    _git(fx.repo, "config", "core.excludesFile", str(ignore))
+    vault = fx.wt / "vault"
+    vault.mkdir()
+    (vault / "only-copy").write_text("unique\n")
+    (fx.wt / ".env").symlink_to("vault/only-copy")
+    vault.chmod(0)
+    try:
+        assert fx.verdict() == "keep"
+    finally:
+        vault.chmod(0o755)
+
+
+def test_failing_resolver_output_is_not_taken_as_an_external_target(fx: Fixture) -> None:
+    # the old guard ran realpath || readlink -f and took whatever they printed, even with a failing status
+    (fx.wt / "only-copy").write_text("unique\n")
+    (fx.wt / ".env").symlink_to("only-copy")
+    for tool in ("realpath", "readlink"):
+        stub = fx.bindir / tool
+        stub.write_text('#!/bin/bash\nprintf "unresolved\\n"\nexit 1\n')
+        stub.chmod(0o755)
+    assert fx.verdict() == "keep"
+
+
+@pytest.mark.parametrize("flag", ["--assume-unchanged", "--skip-worktree"])
+def test_symlink_to_tracked_file_with_hidden_local_edits_keeps(fx: Fixture, flag: str) -> None:
+    # these index flags make `git status` and `git diff` report a modified tracked file as clean
+    (fx.wt / ".env").symlink_to(".env.example")
+    (fx.wt / ".env.example").write_text("LOCAL_ONLY_EDIT=1\n")
+    _git(fx.wt, "update-index", flag, ".env.example")
+    assert _git(fx.wt, "status", "--porcelain") == ""
+    assert fx.verdict() == "keep"
+
+
+def test_symlink_chain_to_an_external_target_is_removable(fx: Fixture) -> None:
+    outside = fx.repo / ".env"
+    outside.write_text("PRIMARY=1\n")
+    (fx.wt / ".env.hop").symlink_to(outside)
+    (fx.wt / ".env").symlink_to(".env.hop")
     assert fx.verdict() == "would"
+
+
+def test_symlink_loop_keeps(fx: Fixture) -> None:
+    (fx.wt / ".env").symlink_to(".env.b")
+    (fx.wt / ".env.b").symlink_to(".env")
+    assert fx.verdict() == "keep"
+
+
+def _bare_path(fx: Fixture) -> str:
+    """A PATH holding only the tools the script needs, with no realpath and a readlink that rejects -f
+    (as on older macOS); every other call passes through to the real readlink."""
+    bare = fx.bindir.parent / "bare"
+    bare.mkdir()
+    for tool in ("git", "awk", "wc", "du", "cut", "df", "tail", "date", "mktemp", "rm", "cmp", "cat", "sed", "dirname", "basename"):
+        found = shutil.which(tool)
+        if found:
+            (bare / tool).symlink_to(found)
+    (bare / "gh").symlink_to(fx.bindir / "gh")
+    real_readlink = shutil.which("readlink")
+    assert real_readlink
+    stub = bare / "readlink"
+    stub.write_text(
+        '#!/bin/bash\nfor a in "$@"; do [ "$a" = -f ] && { echo "readlink: illegal option -- f" >&2; exit 1; }; done\n'
+        f'exec "{real_readlink}" "$@"\n'
+    )
+    stub.chmod(0o755)
+    assert shutil.which("realpath", path=str(bare)) is None
+    return str(bare)
+
+
+def test_symlinks_resolve_without_realpath_or_readlink_f(fx: Fixture) -> None:
+    path = _bare_path(fx)
+    outside = fx.repo / ".env"
+    outside.write_text("PRIMARY=1\n")
+    (fx.wt / ".env").symlink_to(outside)
+    assert fx.verdict(path=path) == "would"  # an external target is still exempt
+    (fx.wt / ".env").unlink()
+    (fx.wt / ".env").symlink_to(".env.example")
+    assert fx.verdict(path=path) == "would"  # a clean tracked target in the worktree too
+    (fx.wt / ".env").unlink()
+    (fx.wt / "only-copy").write_text("unique\n")
+    (fx.wt / ".env").symlink_to("only-copy")
+    assert fx.verdict(path=path) == "keep"  # an ignored target in the worktree still keeps
 
 
 def test_git_ls_files_failure_keeps_the_worktree(fx: Fixture) -> None:
