@@ -82,12 +82,31 @@ def test_paginated_gh_output_is_parsed():
     assert [r["name"] for r in mod._load_check_runs(text)] == ["a", "b"]
 
 
-def test_cli_fails_closed_on_garbage_input():
-    proc = subprocess.run(
-        [sys.executable, str(SCRIPT)], input="not json", capture_output=True, text=True,
+def _cli(stdin):
+    return subprocess.run(
+        [sys.executable, str(SCRIPT)], input=stdin, capture_output=True, text=True,
         env={**os.environ, "REPO": "my-org/my-repo"},
     )
+
+
+@pytest.mark.parametrize("stdin", [
+    "not json",
+    "",  # empty stdin: no pipefail, or a silent `gh api`
+    " \n",
+    '{"check_runs": []}',  # a head always has check runs by merge time; an empty page is suspicious
+    '{"total_count": 0}',  # page without check_runs
+    "[]",  # JSON of the wrong shape
+    "5",
+])
+def test_cli_fails_closed_on_empty_malformed_or_runless_input(stdin):
+    proc = _cli(stdin)
     assert proc.returncode == 2
+    assert "failing closed" in proc.stderr
+
+
+def test_cli_passes_a_page_whose_protected_name_came_from_the_checks_api():
+    # No Actions job involved, so no workflow-run lookup (no gh call) is needed.
+    assert _cli(json.dumps({"check_runs": [api_run(GUARD)]})).returncode == 0
 
 
 def test_workflow_run_path_with_a_ref_suffix_is_normalized(monkeypatch):

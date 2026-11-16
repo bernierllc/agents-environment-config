@@ -97,6 +97,10 @@ def _load_check_runs(text):
             break
         page, index = decoder.raw_decode(text, index)
         runs.extend(page["check_runs"])
+    # Fail closed: a head always has check runs by merge time (the guard's own, at least), so
+    # empty input (a caller without pipefail, a silent `gh api`) or zero runs is not "no forgery".
+    if not runs:
+        raise ValueError("input contains no check runs")
     return runs
 
 
@@ -107,7 +111,7 @@ def main():
         return 2
     try:
         bad = forged(_load_check_runs(sys.stdin.read()), _gh_run_lookup(repo))
-    except (ValueError, KeyError, subprocess.CalledProcessError) as exc:
+    except (ValueError, KeyError, TypeError, subprocess.CalledProcessError) as exc:
         print(f"::error::could not evaluate check runs, failing closed: {exc}", file=sys.stderr)
         return 2
     for name, where in bad:

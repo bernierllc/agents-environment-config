@@ -77,8 +77,23 @@ Prefer A first when the plan offers it (smaller moving parts); B is the fallback
 ## Affected surfaces
 
 `main-via-staging.yml`, `review-gate.yml`, `check-main-source.sh`, `check-forged-gate-names.py`, every
-downstream repo that copies the guard, and every ruleset requiring the guard check or `Review Gate`. Scripts land
-on the default branch before the workflow that calls them.
+downstream repo that copies the guard, and every ruleset requiring the guard check or `Review Gate`.
+
+### Rollout order for a repo adopting the guard
+
+`main-via-staging.yml` runs under `pull_request_target`: GitHub loads the workflow from the default branch (here
+`staging`), but the workflow checks the validator scripts out from the PR base (`main`). If the scripts and the
+workflow both reach `staging` before the first `staging` to `main` promotion, that promotion publishes a failing
+`PRs into main must come from staging` ("guard script missing on base"). Order the rollout so `main` has the
+scripts before any workflow that calls them runs:
+
+1. Scripts (`check-main-source.sh`, `check-forged-gate-names.py`) and their tests land on `staging`.
+2. A `staging` to `main` promotion carries the scripts to `main`.
+3. Only then the workflow (and its test) lands on `staging`.
+4. Promote again. Flip the required check to the guard name only after its first green run.
+
+Input contract of the detector: it fails closed (exit 2) on empty, malformed or check-run-less input, because a head
+always has check runs by merge time; an empty set is not "no forgery". Callers should still use `set -o pipefail`.
 
 ## Steps
 

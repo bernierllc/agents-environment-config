@@ -1,4 +1,5 @@
 """The promotion guard: only a same-repo `staging` branch may open a PR into main."""
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -55,7 +56,14 @@ def test_check_run_listing_uses_filter_all_so_an_earlier_same_name_run_is_not_hi
     assert "check-runs?per_page=100&filter=all" in WORKFLOW
 
 
-def _run_workflow_step(tmp_path, head_ref, list_fails):
+# What the real listing holds at that point: the guard's own in_progress check, created via the Checks API.
+OWN_CHECK_ONLY = json.dumps({"check_runs": [{
+    "name": "PRs into main must come from staging",
+    "details_url": "https://github.com/my-org/my-repo/runs/42",
+}]})
+
+
+def _run_workflow_step(tmp_path, head_ref, list_fails, list_json=OWN_CHECK_ONLY):
     """Run the publish step's shell body with a fake `gh` and return the PATCH conclusions/titles it sent."""
     body = WORKFLOW.split("run: |\n", 1)[1]
     script = "\n".join(line[10:] for line in body.splitlines())
@@ -68,7 +76,7 @@ def _run_workflow_step(tmp_path, head_ref, list_fails):
         'case "$*" in\n'
         '  *"-X POST"*) echo 42 ;;\n'
         '  *"-X PATCH"*) echo "$*" >> "$PATCH_LOG" ;;\n'
-        '  *) [ -n "$LIST_FAILS" ] && exit 7; echo \'{"check_runs":[]}\' ;;\n'
+        '  *) [ -n "$LIST_FAILS" ] && exit 7; echo "$LIST_JSON" ;;\n'
         "esac\n"
     )
     gh.chmod(0o755)
@@ -77,6 +85,7 @@ def _run_workflow_step(tmp_path, head_ref, list_fails):
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "PATCH_LOG": str(log),
         "LIST_FAILS": "1" if list_fails else "",
+        "LIST_JSON": list_json,
         "HEAD_REF": head_ref,
         "HEAD_REPO": "my-org/my-repo",
         "REPO": "my-org/my-repo",
@@ -98,10 +107,17 @@ def test_a_failed_check_run_listing_fails_the_check_closed(tmp_path):
     assert "conclusion=success" not in patches
 
 
-def test_an_empty_listing_from_staging_passes(tmp_path):
+def test_a_listing_with_only_the_guards_own_check_from_staging_passes(tmp_path):
     code, patches = _run_workflow_step(tmp_path, "staging", list_fails=False)
     assert code == 0
     assert "conclusion=success" in patches
+
+
+def test_an_empty_listing_fails_the_check_closed(tmp_path):
+    # The guard's own check is always in the listing, so an empty one means the listing is wrong.
+    code, patches = _run_workflow_step(tmp_path, "staging", list_fails=False, list_json='{"check_runs":[]}')
+    assert code == 1
+    assert "conclusion=failure" in patches and "conclusion=success" not in patches
 
 
 def test_workflow_grants_actions_read_for_the_run_lookup():
