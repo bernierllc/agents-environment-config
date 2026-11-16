@@ -149,3 +149,12 @@ each copy with the canonical repo's bytes and fails on any difference or when it
 Remaining: run it automatically. Wire it into each vendoring repo's CI (pull requests touching those paths plus a
 weekly run), and fold the guard files into `aec outdated` as a "vendored guard files" scope beside the vendored skills
 above, so the verdict does not depend on anyone running the script by hand.
+
+### One byte source for the detector (VENDOR-DRIFT-03)
+
+`scripts/check-forged-gate-names.py` is copied byte-identically into the review-gate skill
+(`review-gate/scripts/check-forged-gate-names.py`) and into every repo that vendors it. aec's canonical had drifted two
+comment lines ahead of the skill's copy, so a repo that followed the skill failed `check-vendored-drift.py`, and a repo
+that followed aec failed the skill's installed-copies test. aec's file is now byte-identical to the skill's. Rule: a change
+to this file lands in the skill first and is then re-synced here and in the vendoring repos; never edit one copy alone.
+The drift check should also run over the skill's own copy (it is a vendoring repo), which is part of the CI wiring above.
