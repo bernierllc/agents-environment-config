@@ -79,6 +79,10 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
 - A repo with a vendored skill one version behind: `outdated` lists it, `upgrade` updates it, a second run is
   clean.
 - `aec outdated` itself (not only the `update` summary) lists the vendored copy.
+- Cross-repo: the stale vendored-only skill sits in a tracked repo other than the current one, with no manifest row
+  for it. `aec upgrade` from the current repo reaches that repo: `_find_outdated_repos` (`aec/commands/upgrade.py`)
+  currently examines manifest entries only, so it must also return a repo whose only stale item is a vendored copy
+  before `_upgrade_scope` runs on it. The test fails if `outdated --all` lists it and `upgrade` skips it.
 - A vendored copy with local edits: reported, not overwritten.
 - Fresh machine with no manifest history and a vendored copy that matches a shipped historical hash (for example
   the previous release): upgraded. The same copy with a version missing from the shipped history: reported as
@@ -107,7 +111,7 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
 
 ## Affected surfaces
 
-`aec/commands/update.py`, `aec/commands/outdated.py`, `aec/commands/upgrade.py`,
+`aec/commands/update.py`, `aec/commands/outdated.py`, `aec/commands/upgrade.py` (including `_find_outdated_repos`),
 `aec/lib/filesystem.py` (`place_installed_item` and the `check_install_provenance` preflight, the gate), `aec/commands/install_cmd.py` (`_install_single_item`),
 `aec/lib/global_install_prompt.py`, `aec/lib/apply_core.py`,
 `aec/lib/catalog_hashes.py`, `aec/lib/skills_manifest.py`, the release/catalog generation step, `aec/commands/run_doctor.py`
