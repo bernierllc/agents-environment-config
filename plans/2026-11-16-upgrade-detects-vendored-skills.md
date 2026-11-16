@@ -25,6 +25,13 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
    exact version source before coding; do not guess a layout.
 2. `aec outdated` (`_print_outdated`) and the `aec update` summary list them as their own scope ("vendored in
    <repo>") with installed vs available version.
+   **The verdict is version AND content, not version alone.** Contents can change without a frontmatter version
+   bump (the same case the hash set in step 3 allows), so a vendored copy whose version equals the available
+   version is still stale when its content hash differs from the current catalog `contentHash`. `_find_outdated_repos`,
+   `_report_scope_outdated`, `_print_outdated` and the `aec apply` classification therefore compare the vendored
+   copy's hash with the current catalog hash as well as its version. A copy whose hash is a member of that version's
+   shipped set but is not the current hash is reported as "older content at <version>" and upgraded through the same
+   provenance gate; a hash outside the set is "differs from <version>" (fork), never upgraded.
 3. Provenance before any write: a vendored copy is treated as AEC-owned only when its content hash matches the
    canonical hash of the release version it claims (the same hashing the catalog uses). That history must ship
    with AEC: today `generate_catalog_hashes` (`aec/lib/catalog_hashes.py`) stores only the current
@@ -97,6 +104,10 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
   entry (a test fails if a prior version's hash disappears).
 - Two released contents carrying the same declared version (no version bump between releases): both hashes are in
   the shipped set, and a vendored copy matching either one is upgraded, not reported as a fork.
+- Same-version stale copy: a vendored copy whose declared version equals the available version but whose content hash
+  is an older member of that version's shipped set: `outdated` lists it ("older content at <version>"), `upgrade`
+  updates it, a second run is clean. The same copy with a hash outside the set is reported as a fork, not upgraded.
+  A copy that matches the current hash is reported current.
 - A clean, committed fork with the same name and an older version but a different content hash: reported, not
   overwritten without explicit confirmation.
 - Hidden-file fork: a copy whose only difference from the canonical release is an added dotfile, a modified dotfile
