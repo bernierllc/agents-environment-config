@@ -17,6 +17,13 @@ unit of impact lives — not a contract.
 
 ## Review follow-ups awaiting prioritization
 
+- [Honor the AGENTINFO.md layout everywhere](2026-11-15-agentinfo-layout-honored.md): `aec migrate
+  agents-md` (and its `--all` / maintenance-prompt path) ignores `instructions_layout=agentinfo`, and
+  `aec generate files` writes AEC's own `templates/`. One owner for the layout decision. Scheduling pending.
+
+- [Owner-scoped overlay answers](2026-11-15-owner-scoped-overlay-answers.md): org overlay answers
+  are machine-global, so a repo-shaped answer (license kind) reaches repos outside the org. Scheduling pending.
+
 - [Catalog support for per-repo records](2026-11-14-catalog-repo-records.md): catalogs can already
   carry per-repo data; AEC should validate, expose and check it. Scheduling pending.
 
