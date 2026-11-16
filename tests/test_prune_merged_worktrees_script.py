@@ -172,3 +172,56 @@ def test_status_check_does_not_reset_idleness(env):
     gd = Path(git(wt, "rev-parse", "--absolute-git-dir"))
     run(env, STRIP_IDLE_DAYS="99")
     assert (gd / "index").stat().st_mtime == pytest.approx(OLD, abs=2)
+
+
+# Tools the script needs; a PATH holding only these simulates a machine without gh, lsof or osascript.
+BASE_TOOLS = (
+    "bash git awk sed sort df date stat du cut find rm wc id grep cmp dirname readlink tail cat ls"
+).split()
+
+
+def minimal_path(tmp: Path, *extra: str) -> str:
+    import shutil
+
+    d = tmp / "minbin"
+    d.mkdir(exist_ok=True)
+    for tool in (*BASE_TOOLS, *extra):
+        src = shutil.which(tool)
+        if src and not (d / tool).exists():
+            (d / tool).symlink_to(src)
+    return str(d)
+
+
+def test_without_gh_nothing_is_removed_but_idle_node_modules_are_stripped(env, tmp_path):
+    wt = add_worktree(env["repo"], "nogh", push=True)
+    age(wt)
+    out = run(env, PATH=minimal_path(tmp_path, "lsof"))
+    assert wt.exists() and not (wt / "node_modules").exists(), out
+    assert "gh not found" in out
+
+
+@pytest.mark.skipif(Path("/proc/self").exists(), reason="/proc is the fallback when lsof is missing")
+def test_without_lsof_or_proc_nothing_is_touched(env, tmp_path):
+    wt = add_worktree(env["repo"], "blind", push=True)
+    age(wt)
+    out = run(env, PATH=f"{env['env']['PATH'].split(':')[0]}:{minimal_path(tmp_path)}")
+    assert wt.exists() and (wt / "node_modules").exists(), out
+    assert "cannot tell which worktrees are in use" in out
+
+
+def test_low_disk_runs_cleanup_only_when_opted_in(env, tmp_path):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "prune-merged-worktrees.sh").write_text(SCRIPT.read_text())
+    marker = tmp_path / "cleanup-ran"
+    (scripts / "cleanup-hung-processes.sh").write_text(f"#!/bin/bash\n: > {marker}\n")
+    (scripts / "cleanup-hung-processes.sh").chmod(0o755)
+    path = f"{env['env']['PATH'].split(':')[0]}:{minimal_path(tmp_path, 'lsof')}"  # fake gh, no osascript
+    for opt_in, expect in (("0", False), ("1", True)):
+        r = subprocess.run(
+            ["bash", str(scripts / "prune-merged-worktrees.sh")],
+            env={**env["env"], "PATH": path, "LOW_DISK_GB": "999999999", "LOW_DISK_CLEANUP": opt_in},
+            capture_output=True, text=True, timeout=60,
+        )
+        assert r.returncode == 0, r.stderr
+        assert marker.exists() is expect, r.stdout
