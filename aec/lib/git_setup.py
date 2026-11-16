@@ -14,6 +14,9 @@ AEC_GITIGNORE_PATTERNS = [
     ".aec-local/",
 ]
 
+LICENSE_KINDS = ("mit", "proprietary")
+DEFAULT_LICENSE_KIND = "mit"
+
 _TEMPLATES_ROOT: Optional[Path] = None
 
 
@@ -299,6 +302,7 @@ def default_git_context(
     *,
     test_commands: Optional[List[str]] = None,
     copyright_holder: Optional[str] = None,
+    license_kind: str = DEFAULT_LICENSE_KIND,
     codeowner: Optional[str] = None,
     with_ci: bool = False,
 ) -> dict:
@@ -306,6 +310,7 @@ def default_git_context(
     owner = default_codeowner(project_dir) if codeowner is None else codeowner.lstrip("@")
     return {
         "year": str(date.today().year),
+        "license_kind": license_kind,
         "project_name": project_dir.name,
         "copyright_holder": copyright_holder or default_copyright_holder(project_dir),
         "codeowners_rule": f"* @{owner}" if owner else "# * @your-username",
@@ -371,8 +376,10 @@ def write_git_essential(
                 _write_rendered(src_file, dest_file, context)
         return True
     else:
-        src = templates_dir / "git" / template_rel
         dest = _resolve_dest(project_dir, provider_key, essential_key)
+        # A variant changes which template is read, never where it is written.
+        variant = essential.get("variants", {}).get(context.get("license_kind"), template_rel)
+        src = templates_dir / "git" / variant
         if dest.exists():
             return False
         generated = context.get("generated", {}).get(essential_key)
