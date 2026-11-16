@@ -12,6 +12,43 @@ def test_plan_documents_merge_time_scan_with_pipefail():
     assert "set -o pipefail; gh api" in PLAN
 
 
+def test_plan_covers_staging_default_order_and_one_waiver_per_legacy_repo():
+    assert "### Rollout order when the default branch is staging" in PLAN
+    assert "needs exactly one owner waiver" in PLAN
+    assert "Never combine them." in PLAN
+    assert "`main` ruleset requires the context" in PLAN
+
+
+def test_plan_gives_waiver_free_order_when_context_not_required():
+    assert "#### Waiver-free variant when `main` does not require the context" in PLAN
+    assert 'follow "Waiver-free variant when `main` does not require the context"' in PLAN
+    assert "delete the legacy `main-via-staging.yml` alone" in PLAN
+
+
+def test_plan_covers_canonical_on_staging_with_scripts_missing_on_main():
+    assert "#### Canonical workflow already on staging, scripts missing on main" in PLAN
+    assert "`main` lacks the scripts" in PLAN
+    assert "the owner waives the guard check once" in PLAN
+
+
+def test_canonical_no_waiver_claims_are_qualified_by_main_having_the_scripts():
+    assert "need no scan waiver, provided `main` already has the guard scripts" in PLAN
+    assert "needs no scan waiver, but only when\n`main` already has the scripts" in PLAN
+    assert "A repo that already runs the canonical workflow starts at the promotion step and needs no waiver." not in PLAN
+
+
+def test_copied_files_qualify_the_plan_path_as_an_aec_repo_path():
+    root = Path(__file__).resolve().parent.parent
+    for rel in ("scripts/check-forged-gate-names.py", ".github/workflows/main-via-staging.yml"):
+        text = " ".join((root / rel).read_text().replace("#", " ").split())
+        assert "`plans/2026-11-16-unforgeable-required-checks.md` in the aec repo" in text, rel
+
+
+def test_workflow_header_says_default_branch_not_main():
+    workflow = (Path(__file__).resolve().parent.parent / ".github" / "workflows" / "main-via-staging.yml").read_text()
+    assert "DEFAULT branch (main, or staging in a repo whose default is staging)" in workflow
+
+
 def test_plan_states_interim_scope_and_s5():
     assert "into main only" in PLAN
     assert "- S5." in PLAN
