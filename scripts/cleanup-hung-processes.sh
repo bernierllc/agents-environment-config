@@ -207,6 +207,10 @@ start_pm_job() {
 # Usage: prune_updater_staging DIR...
 prune_updater_staging() {
     local staging staged
+    # lsof must be present and able to see this shell, or "nothing open" would be a guess
+    if ! lsof -t -p $$ 2>/dev/null | grep -qx "$$"; then
+        echo "  Skipping app update staging: lsof is missing or cannot list open files"; return 0
+    fi
     for staging in "$@"; do
         [ -d "$staging" ] || continue
         # shellcheck disable=SC2012 # names are generated (update.XXXX), never contain newlines
@@ -214,7 +218,7 @@ prune_updater_staging() {
             staged="${staged%/}"
             # an older entry untouched for a week with no process holding files in it is long installed
             find "$staged" -maxdepth 0 -mtime +7 -print -quit 2>/dev/null | grep -q . || continue
-            if command -v lsof >/dev/null && lsof -t +D "$staged" 2>/dev/null | grep -q .; then  # exit code is unreliable on macOS
+            if lsof -t +D "$staged" 2>/dev/null | grep -q .; then  # exit code is unreliable on macOS
                 echo "  Keeping app update $staged (in use)"; continue
             fi
             echo "  Removing stale app update $staged ($(du -sh "$staged" 2>/dev/null | awk '{print $1}'))"

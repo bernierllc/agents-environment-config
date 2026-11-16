@@ -103,6 +103,8 @@ strip_node_modules() { # path label
     # only an ignored directory with nothing tracked inside it is regenerable
     git -C "$1" check-ignore -q "$nm" 2>/dev/null || continue
     [ -z "$(git -C "$1" ls-files -- "$nm" 2>/dev/null | head -n1)" ] || continue
+    # a repo cloned or linked inside (git dependency, local checkout) can hold uncommitted work or its own .env
+    if find "$nm" -name .git -print -quit 2>/dev/null | grep -q .; then echo "keep    $nm  ($2: holds a git checkout)"; continue; fi
     kb="$(du -sk "$nm" 2>/dev/null | cut -f1)"
     if [ "$DRY_RUN" = 1 ]; then echo "would strip $nm  ($2, $(( ${kb:-0} / 1024 ))M)"; continue; fi
     rm -rf "$nm" && echo "stripped $nm  ($2, $(( ${kb:-0} / 1024 ))M)"

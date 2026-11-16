@@ -59,3 +59,16 @@ def test_updater_staging_keeps_an_old_entry_a_process_has_open(tmp_path):
     finally:
         proc.kill()
     assert held.exists() and newest.exists(), out
+
+
+def test_updater_staging_is_left_alone_when_lsof_cannot_list_files(tmp_path):
+    staging = tmp_path / "Installation"
+    old = _mkdir(staging / "a", old=True)
+    _mkdir(staging / "b", old=False)
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "lsof").write_text("#!/bin/bash\nexit 1\n")
+    (bindir / "lsof").chmod(0o755)
+    out = _call(f'PATH="{bindir}:$PATH"; prune_updater_staging "{staging}"')
+    assert old.exists(), out
+    assert "cannot list open files" in out
