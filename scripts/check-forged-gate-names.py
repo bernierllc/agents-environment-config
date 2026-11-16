@@ -111,8 +111,9 @@ def _gh_run_lookup(repo, trusted_bases):
 def trusted_base_branches(repo):
     """The default branch plus the owner-listed TRUSTED_BASE_BRANCHES (space separated).
 
-    Space, not comma: git ref names may contain commas but never whitespace, so splitting on whitespace
-    cannot turn one configured branch (`release,1`) into two.
+    Separated by ASCII whitespace only: git ref names may contain commas and Unicode whitespace (a
+    non-breaking space) but never ASCII space, tab or newline, so this split cannot turn one configured
+    branch (`release,1`, `release<NBSP>1`) into two. `str.split()` would, so it is not used.
 
     Not GitHub's `protected` flag: a wildcard protection rule can cover branches a collaborator is
     still allowed to create, so it does not prove the branch content is owner-controlled.
@@ -123,7 +124,7 @@ def trusted_base_branches(repo):
     if not default:
         raise ValueError("could not read the default branch")
     listed = os.environ.get("TRUSTED_BASE_BRANCHES", "")
-    return {default, *listed.split()}
+    return {default, *(branch for branch in re.split(r"[ \t\r\n]+", listed) if branch)}
 
 
 def _load_check_runs(text):

@@ -185,6 +185,9 @@ def test_trusted_bases_are_the_default_branch_plus_the_env_list(monkeypatch):
     # A comma is part of a git branch name, never a separator: `release,1` is one branch, not `release` and `1`.
     monkeypatch.setenv("TRUSTED_BASE_BRANCHES", "release,1")
     assert mod.trusted_base_branches("my-org/my-repo") == {"main", "release,1"}
+    # Git allows Unicode whitespace in ref names (U+00A0): only ASCII whitespace separates.
+    monkeypatch.setenv("TRUSTED_BASE_BRANCHES", "release\u00a01 staging")
+    assert mod.trusted_base_branches("my-org/my-repo") == {"main", "release\u00a01", "staging"}
     monkeypatch.delenv("TRUSTED_BASE_BRANCHES")
     assert mod.trusted_base_branches("my-org/my-repo") == {"main"}
 
