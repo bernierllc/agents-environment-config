@@ -54,8 +54,9 @@ def test_every_aec_caller_of_the_detector_names_the_integration_base():
     root = Path(__file__).resolve().parent.parent
     workflow = (root / ".github" / "workflows" / "main-via-staging.yml").read_text()
     invocation = next(line for line in workflow.splitlines() if "python3 scripts/check-forged-gate-names.py" in line)
-    assert 'TRUSTED_BASE_BRANCHES="staging"' in invocation
-    assert "TRUSTED_BASE_BRANCHES=staging python3 scripts/check-forged-gate-names.py" in PLAN
+    # Both integration branches: with staging as the default branch, the staging-to-main promotion's Review Gate has base main.
+    assert 'TRUSTED_BASE_BRANCHES="main staging"' in invocation
+    assert 'TRUSTED_BASE_BRANCHES="main staging" python3 scripts/check-forged-gate-names.py' in PLAN
 
 
 def test_plan_states_interim_scope_and_s5():

@@ -24,7 +24,7 @@ publishing the same name. The name carries no provenance.
   workflow run is not the pinned trusted path + event.
 - Timing: the workflow checks once. A PR job that publishes its forged name after that check is not seen by it.
   Whoever merges must run the detector immediately before `gh pr merge`
-  (`set -o pipefail; gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" --paginate | REPO=$REPO TRUSTED_BASE_BRANCHES=staging python3 scripts/check-forged-gate-names.py`,
+  (`set -o pipefail; gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" --paginate | REPO=$REPO TRUSTED_BASE_BRANCHES="main staging" python3 scripts/check-forged-gate-names.py`,
   exit 0 required; `pipefail` is mandatory so a failed or truncated listing fails the command instead of reaching the
   detector as empty input), which is the point that cannot race.
 

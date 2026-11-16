@@ -10,7 +10,7 @@ details_url is `.../runs/<id>`, no `/actions/`) or comes from one pinned trusted
 (path + event) whose PR targets a trusted base branch: `pull_request_target` runs the workflow file from
 the base branch, so a stacked PR whose base is the outer PR's (contributor-controlled) branch can run a
 rewritten copy of the trusted file. Trusted bases are the repo's default branch plus the space-separated
-TRUSTED_BASE_BRANCHES env var (for example `staging`); GitHub's `protected` flag is not used, because a
+TRUSTED_BASE_BRANCHES env var (for example `main staging`; list every integration branch); GitHub's `protected` flag is not used, because a
 wildcard rule can cover branches a collaborator may still create. Any other Actions-job check run bearing
 a protected name is forged.
 
@@ -33,8 +33,9 @@ not seen by it, so whoever merges runs this again immediately before the merge.
 
 Usage (filter=all: the default lists only the latest run per name and can hide an earlier same-name one):
   set -o pipefail; gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" --paginate | \
-    REPO=$REPO TRUSTED_BASE_BRANCHES=staging python3 scripts/check-forged-gate-names.py
-(TRUSTED_BASE_BRANCHES lists the owner-controlled integration branches besides the default branch.)
+    REPO=$REPO TRUSTED_BASE_BRANCHES="main staging" python3 scripts/check-forged-gate-names.py
+(TRUSTED_BASE_BRANCHES lists the owner-controlled integration branches besides the default branch; list both `main` and
+`staging` so it holds whichever of them is the default.)
 `pipefail` is required: a failed or truncated listing must not reach this script as empty input.
 Exit 0: none forged. Exit 1: forged names listed on stderr. Exit 2: could not evaluate (fails closed).
 """
