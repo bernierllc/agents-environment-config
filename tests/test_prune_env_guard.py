@@ -67,7 +67,7 @@ class Fixture:
 @pytest.fixture
 def fx(tmp_path: Path) -> Fixture:
     base = tmp_path.resolve()  # git prints realpaths; /var is a symlink to /private/var on macOS
-    root = base / "projects"
+    root = base / "pro jects"  # a space in the root: every path below must survive being quoted
     repo = root / "proj"
     repo.mkdir(parents=True)
     _git(repo, "init", "-q", "-b", "main")
@@ -241,7 +241,7 @@ def _bare_path(fx: Fixture) -> str:
     (as on older macOS); every other call passes through to the real readlink."""
     bare = fx.bindir.parent / "bare"
     bare.mkdir()
-    for tool in ("git", "awk", "wc", "du", "cut", "df", "tail", "date", "mktemp", "rm", "cmp", "cat", "sed", "dirname", "basename"):
+    for tool in ("git", "awk", "wc", "du", "cut", "df", "tail", "date", "mktemp", "rm", "cmp", "cat", "sed", "dirname", "basename", "find", "head"):
         found = shutil.which(tool)
         if found:
             (bare / tool).symlink_to(found)
@@ -412,4 +412,98 @@ def test_ignored_nested_repo_without_env_files_is_removable(fx: Fixture) -> None
     nested.mkdir(parents=True)
     _git(nested, "init", "-q")
     (nested / "readme").write_text("nothing secret\n")
+    assert fx.verdict() == "would"
+
+
+# Round 3: the data a symlink points at is shared across worktrees and repos, and every component of a path
+# counts, so the decision is made over the whole sweep (pass 1 records the worktrees other worktrees point
+# into, pass 2 keeps them) and never from one worktree's view.
+
+
+def test_env_named_parent_of_a_nested_repo_keeps(fx: Fixture) -> None:
+    # git lists `.env.d/secrets/` as one entry; the .env name is on the parent, not on anything find looks at
+    nested = fx.wt / ".env.d" / "secrets"
+    nested.mkdir(parents=True)
+    _git(nested, "init", "-q")
+    (nested / "credentials").write_text("unique\n")
+    assert _git(fx.wt, "status", "--porcelain") == ""
+    assert fx.verdict() == "keep"
+    assert fx.verdict(dry=False) == "keep"
+    assert (nested / "credentials").exists()
+
+
+def test_symlink_target_ending_in_a_newline_does_not_validate_a_tracked_file(fx: Fixture) -> None:
+    # `$(readlink ...)` strips trailing newlines: `.env -> "config\n"` was read as the tracked, clean `config`
+    (fx.wt / "config").write_text("template\n")
+    _git(fx.wt, "add", "config")
+    _git(fx.wt, "commit", "-q", "-m", "config")
+    fx.sha = _git(fx.wt, "rev-parse", "HEAD")
+    (fx.repo / ".git" / "info" / "exclude").write_text("config*\n")
+    (fx.wt / "config\n").write_text("unique\n")
+    (fx.wt / ".env").symlink_to("config\n")
+    assert _git(fx.wt, "status", "--porcelain") == ""
+    assert fx.verdict() == "keep"
+
+
+def test_removable_worktree_that_another_worktrees_symlink_points_into_is_kept_too(fx: Fixture) -> None:
+    # keeping the worktree that holds the link does not stop the sweep removing the one that holds the data
+    other = _second_worktree(fx, fx.wt.parent / "other")
+    (other / "only-copy").write_text("unique\n")
+    (fx.wt / ".env").symlink_to(other / "only-copy")
+    assert fx.verdict() == "keep"
+    assert fx.verdict(wt=other) == "keep"
+    assert "an .env symlink in another worktree points at" in fx.run()
+    fx.run(dry=False)
+    assert (other / "only-copy").read_text() == "unique\n"
+
+
+def test_protection_comes_from_a_worktree_the_sweep_would_never_remove(fx: Fixture) -> None:
+    # the link lives in a dirty (never removed) worktree; the data's worktree is still protected
+    other = _second_worktree(fx, fx.wt.parent / "other")
+    (fx.wt / "only-copy").write_text("unique\n")
+    (other / ".env").symlink_to(fx.wt / "only-copy")
+    (other / "dirty").write_text("untracked\n")
+    assert fx.verdict() == "keep"
+
+
+def test_worktree_of_another_repo_nested_in_the_primary_checkout_is_not_safe_storage(fx: Fixture) -> None:
+    sibling = fx.root / "sibling-repo"
+    sibling.mkdir()
+    _git(sibling, "init", "-q", "-b", "main")
+    (sibling / ".gitignore").write_text("only-copy\n")
+    _git(sibling, "add", ".gitignore")
+    _git(sibling, "commit", "-q", "-m", "init")
+    nested = fx.repo / "vendor" / "sibling"
+    nested.parent.mkdir()
+    _git(sibling, "worktree", "add", "-q", "-b", "feat/y", str(nested))
+    sha = _git(nested, "rev-parse", "HEAD")
+    (nested / "only-copy").write_text("unique\n")
+    (fx.wt / ".env").symlink_to(nested / "only-copy")
+    (fx.bindir / "gh").write_text(
+        f'#!/bin/bash\ncase "$*" in *"--state merged"*) echo "$GH_MERGED"; echo "feat/y {sha}";; esac\nexit 0\n'
+    )
+    assert fx.verdict() == "keep"
+    assert fx.verdict(wt=nested) == "keep"
+    fx.run(dry=False)
+    assert (nested / "only-copy").read_text() == "unique\n"
+
+
+def test_unscannable_worktree_keeps_everything_with_a_reason(fx: Fixture) -> None:
+    # pass 1 could not read one worktree's symlinks, so no worktree can be proven unreferenced
+    other = _second_worktree(fx, fx.wt.parent / "other")
+    (other / "dirty").write_text("untracked\n")
+    locked = other / "locked"
+    locked.mkdir()
+    locked.chmod(0)  # find cannot read it, so pass 1 cannot see that worktree's symlinks
+    try:
+        out = fx.run()
+    finally:
+        locked.chmod(0o755)
+    line = next(ln for ln in out.splitlines() if f"{fx.wt}  (" in ln)
+    assert line.startswith("keep") and "could not scan" in line, out
+
+
+def test_stale_worktree_directory_does_not_block_the_sweep(fx: Fixture) -> None:
+    gone = _second_worktree(fx, fx.wt.parent / "gone")
+    shutil.rmtree(gone)
     assert fx.verdict() == "would"

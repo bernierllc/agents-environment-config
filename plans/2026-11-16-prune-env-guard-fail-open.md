@@ -28,14 +28,28 @@ One helper, `env_data_reason`, owns the decision. The rule: anything not positiv
 - List with `git ls-files -z -o -i --exclude-standard` into a temp file (git quotes non-ASCII, backslash and
   newline names without `-z`, which hid them from the `.env` match), check its exit status, and read it with
   `read -r -d ''`. On failure keep the tree and say why. No `grep -q` at the end of a pipeline.
-- A path is a candidate when any component starts with `.env`, in any case (`.ENV`, `.Env.local`; APFS is
-  case-insensitive).
+- A path is a candidate when ANY component of it starts with `.env`, in any case (`.ENV`, `.Env.local`; APFS is
+  case-insensitive). This name test runs first on every listed path. A collapsed `dir/` entry (git lists an
+  ignored nested repo or worktree as one entry and never enumerates its files) whose own path carries the name
+  keeps the tree; any other `dir/` entry keeps it when `find -iname '.env*'` finds anything inside (or fails).
+- Paths keep their bytes: `$(...)` strips trailing newlines (a link to `config` + newline read as a link to the
+  tracked `config`), so the resolver returns its result in a global, reads `pwd -P` and `readlink -n` with a
+  sentinel character, and a resolved path that contains a newline is "not proven": keep.
+- Data is shared across worktrees and repos, so the sweep has two passes. Pass 1 walks every repo under
+  `$PROJECTS_ROOT` and records every linked worktree of each (`git worktree list --porcelain`, the primary
+  checkout excluded, a registered worktree whose directory is gone skipped). It then finds the `.env*` symlinks in
+  each of those worktrees (candidates or not, merged or not), resolves them, and records every worktree a link
+  in a *different* worktree points into: the protect list. Pass 2 is the per-worktree decision below, and it keeps
+  a worktree on the protect list (`holds data an .env symlink in another worktree points at`). Keeping the
+  holder of the link therefore never lets the sweep remove the worktree that holds the data, in either direction.
+  Pass 1 failing to read anything (listing worktrees, scanning one for symlinks), or either list file being
+  missing, keeps every worktree with the reason printed (an empty protect list is the normal case).
 - "Outside this worktree" and "a copy exists" are proven by the data surviving the whole sweep, by one helper,
-  `survives_removal <physical path>`. It walks the resolved path's ancestors and compares each with `-ef`
-  (filesystem identity, never path text, so case aliases, firmlinks and symlinked ancestors are caught) against
-  every linked worktree of the repo (`git worktree list --porcelain`, primary excluded, the candidate always
-  included). Inside any of them: not proven. Under `$PROJECTS_ROOT` but outside the repo's primary checkout:
-  not proven (the sweep may remove other repos' worktrees). Otherwise proven.
+  `survives_removal <physical path> <repo>`. It walks the resolved path's ancestors and compares each with `-ef`
+  (filesystem identity, never path text, so case aliases, firmlinks and symlinked ancestors are caught). Inside
+  any linked worktree of any repo pass 1 found (the primary checkout of a repo included, nested or not): not
+  proven. Under `$PROJECTS_ROOT` but outside this repo's primary checkout: not proven. Otherwise proven, e.g. a
+  shared env file outside every worktree.
 - A regular file is exempt only if byte-identical to a primary-checkout copy that is itself a regular,
   non-symlink file, whose resolved physical path (parents included) is not the same inode and survives the sweep
   (unchanged otherwise, #141).
@@ -45,8 +59,6 @@ One helper, `env_data_reason`, owns the decision. The rule: anything not positiv
   file that git tracks, with no index flag (`ls-files -v` tag `H`; assume-unchanged and skip-worktree hide local
   edits from `status` and `diff`) and no difference from the index. A directory, the worktree root, a target
   in another worktree, or an ignored or untracked file keeps the tree.
-- git lists an ignored nested repo or worktree as one `dir/` entry and never enumerates its files; the tree is
-  kept if `find -iname '.env*'` finds anything in it (or fails to read it).
 - Output wording for the data case is unchanged: `keep <path>  (<branch>: holds ignored .env files)`.
 
 ## Affected surfaces
@@ -59,15 +71,18 @@ One helper, `env_data_reason`, owns the decision. The rule: anything not positiv
   looping targets, index-flagged targets, a bare PATH without `realpath`/`readlink -f`, an injected
   `git ls-files` failure, case and firmlink aliases of the worktree, targets in another removable worktree
   (also registered through a symlinked path), another repo under the projects root, primary copies reached
-  through parent symlinks, `.env` names in other cases, and ignored nested repos; plus the cases that must stay
+  through parent symlinks, `.env` names in other cases, ignored nested repos, an `.env*`-named parent of a nested
+  repo, a link target ending in a newline, protection both ways between two worktrees (also when the link's holder
+  is never removed), a worktree of another repo nested in the primary checkout, an unscannable worktree and a
+  stale worktree directory; plus the cases that must stay
   exempt: a target in an unrelated directory outside the projects root or in the primary checkout).
 
 ## Known limit
 
-A target inside a linked worktree of a different repo that lives outside `$PROJECTS_ROOT` is treated as safe
-(the rule above covers this repo's worktrees and everything under the projects root). Closing it would need
-`git rev-parse --git-dir` vs `--git-common-dir` on the target's directory. Reachable when that repo sits under
-the projects root (so it is swept) with its worktrees elsewhere; deferred.
+Pass 1 only sees `.env*` symlinks held in linked worktrees of repos the sweep walks. A link held in a primary
+checkout, or in a worktree of a repo outside `$PROJECTS_ROOT`, that points into a worktree the sweep removes is not
+seen. Pass 1 also lists symlinks with `find`, so it walks ignored trees such as `node_modules` in every worktree:
+slower than before, still one pass. Deferred.
 
 ## Out of scope
 
