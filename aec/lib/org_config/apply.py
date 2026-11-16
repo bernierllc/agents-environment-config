@@ -78,7 +78,8 @@ def apply_prompts(policy: EffectivePolicy, paths: Optional[OrgPaths] = None) -> 
     answers = dict(policy.prompts)
     set_overlay_answers(answers)
     if paths is not None:
-        org_ids = sorted(e.config.org_id for e in discover_enrolled_orgs(paths))
+        # Only orgs that supplied answers: unenrolling an org with none must not drop the rest.
+        org_ids = sorted(e.config.org_id for e in discover_enrolled_orgs(paths) if e.config.install_prompts)
         atomic_write_text(paths.approved_prompts, json.dumps({"org_ids": org_ids, "answers": answers}, indent=2))
 
 
