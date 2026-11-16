@@ -157,7 +157,9 @@ result here.
 The waiver rule is about the legacy workflow, not the default branch. Whenever `staging` still carries a legacy
 `pull_request` `main-via-staging.yml` and `main` requires its context, every main-targeted PR head carries the legacy
 job, the detector exits 1 on it, and the scripts promotion needs exactly one owner waiver. Repos already on the
-canonical workflow need none.
+canonical workflow need no scan waiver, provided `main` already has the guard scripts; if it lacks them and requires
+the context, the guard check itself needs one waiver (see "Canonical workflow already on staging, scripts missing on
+main").
 
 No order avoids that waiver:
 
@@ -176,7 +178,8 @@ The order:
 4. Promote again. The head has no legacy job and `main` has the scripts, so the detector exits 0: no waiver.
 5. Flip the required check to the guard name only after a green canonical run.
 
-A repo that already runs the canonical workflow starts at the promotion step and needs no waiver.
+A repo that already runs the canonical workflow starts at the promotion step and needs no scan waiver, but only when
+`main` already has the scripts; otherwise see "Canonical workflow already on staging, scripts missing on main".
 
 #### Canonical workflow already on staging, scripts missing on main
 
