@@ -7,7 +7,10 @@ workflows in its own head. So a PR can add a job named exactly like a required c
 
 A legitimate result for a protected name is either published through the Checks API (its
 details_url is `.../runs/<id>`, no `/actions/`) or comes from one pinned trusted workflow
-(path + event) whose run judged the same commit the check run sits on. Any other Actions-job check run bearing a protected name is forged.
+(path + event) whose PR targets a protected base branch: `pull_request_target` runs the workflow file from
+the base branch, so a stacked PR whose base is the outer PR's (unprotected, contributor-controlled)
+branch can run a rewritten copy of the trusted file. Any other Actions-job check run bearing a protected
+name is forged.
 
 This is DETECTION, not prevention: the forged success still sits beside our result. The
 unforgeable fix is a required workflow or a distinct publisher app (plan `plans/2026-11-16-unforgeable-required-checks.md` in the aec repo; copies of this
@@ -37,9 +40,10 @@ import os
 import re
 import subprocess
 import sys
+import urllib.parse
 
 # name -> allowed (workflow path, event) pairs for an Actions-job check run bearing that name. A run
-# from an allowed pair must also have judged the commit its check run sits on (see forged()).
+# from an allowed pair must also target a protected base branch (see forged()).
 # An empty set means no Actions job may use the name: only the Checks API publishes it.
 PROTECTED = {
     "PRs into main must come from staging": set(),
@@ -60,10 +64,11 @@ def job_run_id(check_run):
 def forged(check_runs, run_lookup, protected=None):
     """Names/ids of check runs created by an untrusted Actions job under a protected name.
 
-    run_lookup(run_id) -> (workflow path, event, head sha the run judged); it may raise, which
-    propagates (fail closed). A trusted (path, event) pair identifies the workflow, not the commit it
-    judged: in a stacked PR a child's trusted run can attach a check run to the outer head. So a trusted
-    run also has to have judged the very commit the check run sits on.
+    run_lookup(run_id) -> (workflow path, event, base_protected); it may raise, which propagates
+    (fail closed). A trusted (path, event) pair names a workflow file, but a `pull_request_target` run
+    executes the file from the PR's BASE branch. When that base is not protected (a stacked PR whose
+    base is the outer PR's branch) the file is contributor-controlled, so the pair proves nothing:
+    base_protected must also be true.
     """
     protected = PROTECTED if protected is None else protected
     found = []
@@ -74,8 +79,8 @@ def forged(check_runs, run_lookup, protected=None):
         run_id = job_run_id(check_run)
         if run_id is None:
             continue
-        path, event, judged_sha = run_lookup(run_id)
-        if (path, event) not in protected[name] or judged_sha != check_run.get("head_sha"):
+        path, event, base_protected = run_lookup(run_id)
+        if (path, event) not in protected[name] or not base_protected:
             found.append((name, check_run.get("html_url") or run_id))
     return found
 
@@ -83,14 +88,25 @@ def forged(check_runs, run_lookup, protected=None):
 def _gh_run_lookup(repo):
     def lookup(run_id):
         out = subprocess.run(
-            ["gh", "api", f"repos/{repo}/actions/runs/{run_id}", "--jq", "[.path,.event,.head_sha]|@tsv"],
+            ["gh", "api", f"repos/{repo}/actions/runs/{run_id}", "--jq",
+             '[.path,.event,([.pull_requests[].base.ref]|join(","))]|@tsv'],
             capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        path, event, head_sha = out.split("\t")
+        ).stdout.rstrip("\n")  # not strip(): an empty last field leaves a trailing tab that must stay
+        path, event, bases = out.split("\t")
         # Required/reusable workflow runs report `path@ref`; compare the file path only.
-        return path.split("@", 1)[0], event, head_sha
+        # A run with no PR (empty list) has no base to vouch for it: not protected.
+        base_refs = [ref for ref in bases.split(",") if ref]
+        return path.split("@", 1)[0], event, bool(base_refs) and all(_branch_protected(repo, ref) for ref in base_refs)
 
     return lookup
+
+
+def _branch_protected(repo, branch):
+    out = subprocess.run(
+        ["gh", "api", f"repos/{repo}/branches/{urllib.parse.quote(branch, safe='')}", "--jq", ".protected"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    return out == "true"
 
 
 def _load_check_runs(text):

@@ -251,15 +251,16 @@ always has check runs by merge time; an empty set is not "no forgery". Callers s
   invokes `scripts/check-forged-gate-names.py` for PRs into every protected branch, so `Review Gate` forgery is
   detected at PR time on `staging` as well, not only by the merge-time step.
 - S6. The trusted pair for `Review Gate` in `scripts/check-forged-gate-names.py`
-  (`.github/workflows/review-gate.yml`, `pull_request_target`) is unsafe for stacked PRs: a child PR's trusted-pair
-  job attaches to the outer head, so the pair vouches for a result computed for another PR. A pair identifies the
-  workflow, not the head it judged. Change it so the detector never trusts a workflow-run identity for this name
-  (the claude-skills wrapper already scopes `{"Review Gate": set()}` meanwhile), then re-vendor the script into
-  claude-skills. Design point to settle first: with an empty set the detector would also flag the legitimate
-  `Review Gate` job that runs it (that job is an Actions job under the same name), so the step must say how the
-  caller's own run is told apart (for example the caller excludes its own run id, or the check is evaluated only
-  after publication moves to the Checks API) and a test must pin both the stacked-PR forgery and the caller's own
-  run. Owned by the aec thread; the claude-skills re-vendor follows as a separate PR. Note from the claude-skills
+  (`.github/workflows/review-gate.yml`, `pull_request_target`) is unsafe for stacked PRs. Observed on a throwaway
+  stacked pair of PRs (2026-11-16): the child's run and its Actions job both attach to the child's own head, so the
+  commit is not the hole. The hole is the workflow FILE: a `pull_request_target` run executes the file from the PR's
+  base branch, and a stacked child's base is the outer PR's branch, which its author can rewrite. A pair names a
+  file, not the content that ran. Fix (done in the S6 PR): the trusted pair counts only when every PR the run
+  belongs to targets a protected base branch (`gh api repos/<repo>/branches/<name>` `.protected`); a run with no PR
+  has no base and is flagged. Two rejected designs: excluding only the caller's own run id (one commit carries
+  several legitimate `Review Gate` jobs from reruns, so every merge-time scan would flag the others) and requiring
+  the run's `head_sha` to equal the check run's (empirically always true, so it pins nothing). Owned by the aec
+  thread; the claude-skills re-vendor follows as a separate PR. Note from the claude-skills
   side: from claude-skills 3.2.0 the workflow job is named `review-gate-runner`, so their wrapper's
   `{"Review Gate": set()}` flags only a legacy `Review Gate` Actions job on a repo whose main still carries the old
   workflow, never the new job; the re-vendor must keep a test pinning exactly that.
