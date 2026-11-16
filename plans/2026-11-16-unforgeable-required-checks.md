@@ -101,7 +101,7 @@ the default branch alone:
 | main | not yet on `main` | no | none: follow the default=main order below |
 | main | legacy on `main` | yes | one, see "Bootstrap for a repo whose main ruleset already requires the context" |
 | staging | legacy (`pull_request`) | yes | one, on the scripts promotion |
-| staging | legacy (`pull_request`) | no | none: the legacy job is not required, so deleting it blocks nothing; still follow the staging-default order |
+| staging | legacy (`pull_request`) | no | none: follow "Waiver-free variant when `main` does not require the context" (delete the legacy file first), not the waiver order |
 | staging | canonical (`pull_request_target`) | either | none |
 
 Which downstream repo falls in which row is tracked outside this product repo.
@@ -175,6 +175,22 @@ The order:
 5. Flip the required check to the guard name only after a green canonical run.
 
 A repo that already runs the canonical workflow starts at the promotion step and needs no waiver.
+
+#### Waiver-free variant when `main` does not require the context
+
+The detector flags the legacy job whether or not its context is required, so the waiver order above is only for a
+repo whose `main` requires the context. When `main` does **not** require it, nothing needs the legacy publisher, so
+remove it before any promotion carries it:
+
+1. `staging`: delete the legacy `main-via-staging.yml` alone (no scripts, no canonical workflow yet; with no
+   workflow there is nothing to publish and nothing required to be missing).
+2. `staging`: scripts and their tests.
+3. Scripts promotion. The head has no legacy job, so the detector exits 0: no waiver.
+4. ONE `staging` PR that adds the canonical workflow and its test (`main` has the scripts, so its first run is
+   correct).
+5. Promote again, then flip the required check to the guard name after a green canonical run.
+
+Steps 1 and 2 may be one PR; the canonical workflow must never share a PR with the scripts, for the reason above.
 
 The waiver is the owner's to grant; a directive or a cop never waives a gate. The merger re-runs the detector after
 the comment is posted and merges only when the flagged set is exactly the one legacy run. Waiver text (fill in the

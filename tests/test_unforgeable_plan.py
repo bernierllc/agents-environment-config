@@ -19,6 +19,12 @@ def test_plan_covers_staging_default_order_and_one_waiver_per_legacy_repo():
     assert "`main` ruleset requires the context" in PLAN
 
 
+def test_plan_gives_waiver_free_order_when_context_not_required():
+    assert "#### Waiver-free variant when `main` does not require the context" in PLAN
+    assert 'follow "Waiver-free variant when `main` does not require the context"' in PLAN
+    assert "delete the legacy `main-via-staging.yml` alone" in PLAN
+
+
 def test_workflow_header_says_default_branch_not_main():
     workflow = (Path(__file__).resolve().parent.parent / ".github" / "workflows" / "main-via-staging.yml").read_text()
     assert "DEFAULT branch (main, or staging in a repo whose default is staging)" in workflow
