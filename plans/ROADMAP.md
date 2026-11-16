@@ -22,6 +22,14 @@ unit of impact lives — not a contract.
   API). Interim detector covers the job case; the permanent fix is an org required workflow or our own App.
   Awaiting the maintainer's A/B choice.
 
+- [`aec upgrade` detects vendored skill copies](2026-11-16-upgrade-detects-vendored-skills.md): "(up to date)"
+  is computed from the manifest only, so stale vendored skill copies in a repo are never reported or upgraded.
+  Scheduling pending.
+
+- [Idempotent hook install from a git worktree](2026-11-16-install-from-worktree-idempotent-hooks.md):
+  installing from a linked worktree appends a duplicate gemini hook with the worktree's absolute path and
+  repoints `.aec/installed-hooks`. Scheduling pending.
+
 - [Honor the AGENTINFO.md layout everywhere](2026-11-15-agentinfo-layout-honored.md): `aec migrate
   agents-md` (and its `--all` / maintenance-prompt path) ignores `instructions_layout=agentinfo`, and
   `aec generate files` writes AEC's own `templates/`. One owner for the layout decision. Scheduling pending.
