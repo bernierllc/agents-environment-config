@@ -97,6 +97,45 @@ a worktree that ran `npm install` of a package that vendors a git checkout, or t
 kept), any secret-named file outside a package tree, or when any part of it cannot be scanned. Those worktrees stay
 until a person removes them. That is deliberate: disk reclaim is worth less than one lost secret or one lost commit.
 
+## Round 6 (two P1s, five P2s)
+
+Every fix is in the script, each has a test that fails on `3d0d7d78` and passes now.
+
+- **P1-1, `git worktree prune` deleted.** The script ran it unconditionally after every repo, so `DRY_RUN=1` still
+  mutated, and it deleted the admin dir of any worktree whose directory is missing. A moved folder or an unmounted
+  volume looks the same as a deleted one, and a detached worktree's commit then dangles. `worktree remove` cleans up
+  its own admin dir; git's gc prunes stale entries after `gc.worktreePruneExpire` (3 months). The stale-entry test is
+  renamed `test_stale_worktree_entry_is_left_for_gits_own_gc` and asserts the entry stays.
+- **P1-2, uninitialized submodule data.** `git status`, `ls-files -o` and `worktree remove` cannot see files under a
+  gitlink (index mode `160000`) directory that has no `.git`, so a file there is lost silently. KEEP when such a
+  directory is non-empty. An initialized submodule (has `.git`) stays protected by git's own refusal. A deleted
+  gitlink directory is dirty, which `status` already keeps. A `find` failure there keeps (`could not scan the
+  submodule directory`). A newline in a gitlink path keeps, because the path list is newline-joined.
+  "Initialized" means `$dir/.git` EXISTS (`-e`, which follows links). The first cut exempted a `.git` that was a
+  symlink (`-L`), found by a mutation survivor: a dangling `.git` symlink makes `git status` clean (rc 0) and
+  `git worktree remove` succeed, so the files beside it were lost. Now a dangling link counts as uninitialized and
+  keeps. A `.git` symlink to a real non-repo directory makes `status` fail (128) and `remove` refuse, so it stays
+  with git's own refusal (control test).
+- **P2-a, nested repo spelling.** `-iname .git` (`.Git`, `.GIT`), plus a bare layout: a directory `objects` beside a
+  file `HEAD` and a directory `refs`, with the same (no) exemptions as the `.git` rule. Blunt: it also fires on a
+  tracked folder with that layout.
+- **P2-b, per-worktree refs.** KEEP when `for-each-ref refs/worktree refs/bisect refs/rewritten` is non-empty.
+  `refs/rewritten` goes beyond the review's list because it is per-worktree too.
+- **P2-c, stale fsmonitor.** Every git call on a worktree runs through `wgit`, which passes `-c core.fsmonitor=false`.
+  A stale hook (`printf 'tok\0'` after one priming `status`) hid tracked edits. `core.untrackedCache` was tried and
+  not added: git checks directory mtime, ctime, inode and size, and no way to make it hide a file was found.
+- **P2-d, DRY_RUN fails closed.** Live only when unset or exactly `0`; `1`, `true`, `yes`, empty all print only.
+  Header comment updated.
+- **P2-e, newline in a worktree path.** `worktree list --porcelain` prints such a path verbatim over two lines. A
+  line that is not a known key (`worktree`, `HEAD`, `branch`, `detached`, `bare`, `locked`, `prunable`, blank) makes
+  the script keep every worktree of that repo and say why. An `awk` failure keeps too.
+
+Tests: 53 new or changed. Against the old script `3d0d7d78` 39 fail and 14 pass (the 14 are controls: removal still
+happens, an initialized submodule still fails as before, a `.git` symlink to a real directory is left to git, a
+primary marked bare is accepted). All 53 pass now. Full suite (`test_prune_env_guard.py` 242 tests plus
+`test_no_maintainer_specifics.py`): 245 passed, no skips. The old-script run of the final test file: 39 failed, 203
+passed.
+
 ## Residual limits (documented, not solved)
 
 1. **A link held elsewhere.** An `.env*` symlink held in the primary checkout, in another repo, or in a kept
@@ -112,11 +151,18 @@ until a person removes them. That is deliberate: disk reclaim is worth less than
    "one `git` invocation"; that was wrong.
 3. **Submodules.** The scan does not look inside initialized submodules. `git worktree remove` refuses a worktree
    with one, which is all that protects an ignored `.env` in a submodule (pinned by a test that expects `FAILED`).
+   (Round 6: files under an UNinitialized gitlink directory are now kept.)
 4. **Other ignored data without a secret name.** Ignored `.otto/` run-state and sqlite files under ignored caches,
    and any other ignored file whose name is not on the secret list, are still lost with the worktree. Follow-up item
    PRUNE-NONENV-NAMES; not fixed here.
 5. **Temp-list read-back.** A failure to read the temp list after it was written successfully is not handled
    separately; it cannot happen short of the file being deleted under the script.
+6. **P1-3, ignored data and secret names: awaiting Matt's decision.** The ignored-data and secret-name rules are
+   unchanged in round 6 (item 4 above is the same gap). Not touched until the decision is made.
+7. **A forged worktree-list record.** A worktree path that contains a complete fake record (a blank line followed by
+   valid keys) passes the round-6 line check. Telling it apart needs `git worktree list -z` (git 2.36+).
+8. **Bare-layout breadth.** The bare-repo rule fires on any `objects/` directory beside a `HEAD` file and a `refs/`
+   directory, tracked or not. Fail-closed by design.
 
 ## Affected surfaces
 
@@ -177,6 +223,30 @@ None of the 8 survivors changes whether a tree is kept or removed:
 
 The 8 are the only statements a test cannot tell from their removal. Everything else in the script that decides a
 keep or a removal is pinned by at least one test that fails when it is changed.
+
+**Round-6 head, the whole script** (242 prune tests; harness `/tmp/mut6.py`, the 124 earlier patches re-targeted where
+round 6 changed their text, plus mutants for every new branch: `wgit`, the gitlink loop, the bare-layout `find` and
+`case` arm, the per-worktree `for-each-ref`, the `awk` porcelain check, `DRY_RUN`, the removed `worktree prune`). 196
+entries, m98 the no-op control: **195 real mutants, 175 killed, 20 survived**, and the control survived as it must.
+Three survivors of the first run exposed gaps and got work: the case-folded `objects` spelling and the `bare` porcelain
+line each got a test, and one (the `-L` exemption) was a **real data-loss hole**, the dangling `.git` symlink under a
+gitlink directory, fixed in the script (P1-2 above) with two tests. All three are killed now. The 20 survivors; none
+changes whether a tree is kept or removed:
+
+| id | why it survives |
+|---|---|
+| m29, m46, m58, m63, m66, m83, m94 | as in the tables above: equivalent or display only |
+| m52 | as above: only the printed reason differs |
+| n03, n04, n06 | `ls-files -s`, `ls-files -o` and `for-each-ref` bypass `wgit`: `core.fsmonitor` only changes the index-versus-worktree comparison (`status`), and a stale hook was measured not to hide anything from these three. `status` bypassing `wgit` (n05) is killed. `wgit` stays on all of them for uniformity |
+| n10 | gitlink loop loses its empty-line guard: an empty `rel` is the worktree root, whose `.git` exists, so the next line already skips it |
+| n11 | gitlink `-d` check dropped: a deleted gitlink directory is dirty (`status` keeps), and a gitlink that is a file lists nothing |
+| n15 | gitlink `find` loses `-maxdepth 1`: only the first entry decides "non-empty", deeper entries add nothing |
+| n16 | gitlink `find -print0` becomes `-print`: the result is tested with `[ -s file ]`, never parsed |
+| n20 | gitlink `find` failure loses its `return 0`: the nested-repo `find` that runs later walks the same unreadable directory and fails the same way, so the tree is still kept (only the printed reason differs) |
+| n38 | nested-repo `find` loses `-mindepth 1`: matches only a worktree whose own directory is named `.git` (or `objects` with a bare layout). A false KEEP, fail-closed, contrived |
+| n39 | `-prune` dropped: as the round-5 survivor above, a `.git` directory holds no entry named `.git` |
+| n49 | per-worktree `for-each-ref` stderr not merged: a failure is caught by the exit code, a warning is not a ref |
+| n66 | `awk` prints every unrecognised line instead of the first: `bad` is non-empty in both cases |
 
 ## Out of scope
 
