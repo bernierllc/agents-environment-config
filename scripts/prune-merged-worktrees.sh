@@ -57,7 +57,8 @@ env_data_scan() { # worktree primary listfile -> returns 0 and prints why when t
   # in that directory is unproven data.
   while IFS= read -r rel; do
     [ -n "$rel" ] || continue
-    { [ -d "$1/$rel" ] && [ ! -e "$1/$rel/.git" ] && [ ! -L "$1/$rel/.git" ]; } || continue
+    # -e, not -L: a dangling `.git` symlink makes status clean and `worktree remove` succeed, so it is not "initialized"
+    { [ -d "$1/$rel" ] && [ ! -e "$1/$rel/.git" ]; } || continue
     out="$(find "$1/$rel" -mindepth 1 -maxdepth 1 -print0 2>&1 >"$3")"; rc=$?
     { [ "$rc" -eq 0 ] && [ -z "$out" ]; } || { echo "could not scan the submodule directory $rel (find exit $rc)"; return 0; }
     [ ! -s "$3" ] || { echo "holds files under an uninitialized submodule"; return 0; }

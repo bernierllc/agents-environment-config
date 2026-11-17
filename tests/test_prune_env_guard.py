@@ -1261,6 +1261,26 @@ def test_an_initialized_submodule_is_still_left_to_gits_own_refusal(fx: Fixture)
     assert (fx.wt / "sub" / ".env").read_text() == "SUBSECRET=1\n"
 
 
+def test_a_dangling_git_symlink_does_not_make_a_gitlink_directory_look_initialized(fx: Fixture) -> None:
+    """git sees nothing wrong (status clean, `worktree remove` succeeds), so only the scan protects the file."""
+    _with_submodule(fx, init=False)
+    (fx.wt / "sub" / ".git").symlink_to("/nonexistent-gitdir-for-test")
+    (fx.wt / "sub" / "data.txt").write_text("only copy\n")
+    assert _git(fx.wt, "status", "--porcelain", "-uall") == ""
+    fx.keeps(KEEP_SUB)
+    assert (fx.wt / "sub" / "data.txt").read_text() == "only copy\n"
+
+
+def test_a_git_symlink_to_a_real_directory_that_is_not_a_repo_is_left_to_gits_refusal(fx: Fixture) -> None:
+    """Control: `-e` is true, so the loop skips it; git itself fails the status and the tree is kept."""
+    _with_submodule(fx, init=False)
+    target = fx.wt.parent / "not-a-repo"
+    target.mkdir()
+    (fx.wt / "sub" / ".git").symlink_to(target)
+    (fx.wt / "sub" / "data.txt").write_text("only copy\n")
+    fx.keeps("could not read git status")
+
+
 def test_find_failing_in_the_submodule_directory_scan_keeps(fx: Fixture) -> None:
     _with_submodule(fx, init=False)
     fx.shim("find", 'for a in "$@"; do [ "$a" = -mindepth ] && exit 1; done\nexec "' + _real("find") + '" "$@"')
@@ -1304,6 +1324,17 @@ def test_a_minimal_bare_layout_keeps(fx: Fixture) -> None:
     fx.exclude("vendor/")
     bare = fx.wt / "vendor" / "lib"
     (bare / "objects").mkdir(parents=True)
+    (bare / "refs").mkdir()
+    (bare / "HEAD").write_text("ref: refs/heads/main\n")
+    fx.keeps(KEEP_GIT)
+
+
+@pytest.mark.parametrize("spelling", ["OBJECTS", "Objects"])
+def test_a_bare_layout_with_objects_spelled_in_another_case_keeps(fx: Fixture, spelling: str) -> None:
+    """APFS is case-insensitive: git opens `OBJECTS` as `objects`, so the name match must not be exact."""
+    fx.exclude("vendor/")
+    bare = fx.wt / "vendor" / "lib"
+    (bare / spelling).mkdir(parents=True)
     (bare / "refs").mkdir()
     (bare / "HEAD").write_text("ref: refs/heads/main\n")
     fx.keeps(KEEP_GIT)
@@ -1467,6 +1498,12 @@ def test_every_known_porcelain_key_is_accepted(fx: Fixture) -> None:
     _git(fx.repo, "worktree", "lock", "--reason", "on a usb stick", str(det))
     porcelain = _git(fx.repo, "worktree", "list", "--porcelain")
     assert "detached" in porcelain and "locked on a usb stick" in porcelain
+    assert fx.verdict(dry=False) == "removed"
+
+
+def test_a_primary_marked_bare_prints_a_bare_line_that_is_accepted(fx: Fixture) -> None:
+    _git(fx.repo, "config", "core.bare", "true")
+    assert "\nbare\n" in _git(fx.repo, "worktree", "list", "--porcelain")
     assert fx.verdict(dry=False) == "removed"
 
 
