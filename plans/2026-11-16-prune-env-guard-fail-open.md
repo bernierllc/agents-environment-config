@@ -123,8 +123,8 @@ until a person removes them. That is deliberate: disk reclaim is worth less than
 - `scripts/prune-merged-worktrees.sh`: the guard and the discovery loop's failure reporting. Nothing else changed.
 - Callers: the scheduled prune (cron/launchd) and anyone running the script by hand. It now prints `keep` where
   it used to print `would`/`removed` for the cases above.
-- Tests: `tests/test_prune_env_guard.py` (real git repo, stub `gh`, real script under `/bin/bash`). One test per
-  refusal branch, including each round-5 branch (nested `.git` under `node_modules`, in a path with spaces, empty
+- Tests: `tests/test_prune_env_guard.py` (real git repo, stub `gh`, real script under `/bin/bash`). A test, or a parametrized set, per
+  refusal branch (the mutation check below names the 8 statements no test can tell from their removal), including each round-5 branch (nested `.git` under `node_modules`, in a path with spaces, empty
   `.git` directory, dangling gitfile, nested linked worktree, `find` failing three ways; each of the 11 secret
   name patterns in mixed case), and one control per exemption (package trees removed, lookalike directory names
   not exempt, `.env` still kept under `node_modules`, a symlinked `$PROJECTS_ROOT` still skips the primary). Controls
@@ -163,7 +163,20 @@ survives**: dropping `-prune` from the nested-`.git` `find`. It is equivalent fo
 no entry named `.git`, so the walk finds nothing extra); `-prune` only stops `find` walking the object store of each
 nested repo. Full suite on this head: 190 passed, no skips.
 
-The pass-(b) mutants were not re-run against the round-5 script as a whole; only the new branches were.
+**Round-5 head `aab6599`, the full pass-(b) list re-run against the whole script** (190 tests; five patches, m30, m31,
+m123, m69 and m133, re-targeted because round 5 changed their text: a second `ls-files` check line and the `-ef`
+primary skip; all 124 patches apply exactly once). 124 entries, m98 the no-op control: **123 real mutants, 115 killed,
+8 survived**, and the control survived as it must. Against `c9d5fa47` the differences are m47 and m102, both now
+killed (round 5 added arms and a test for the reported size of a path with a space), and one new survivor, m52.
+None of the 8 survivors changes whether a tree is kept or removed:
+
+| id | why it survives |
+|---|---|
+| m29, m46, m58, m63, m66, m83, m94 | as in the table above: equivalent or display only |
+| m52 | the dir-arm `find` failure message loses its `return 0`; control falls to the next line, where `find`'s merged stderr is non-empty (m46 shows the same), and the nested-`.git` `find` that runs after it fails the same way and keeps the tree. Only the printed reason differs: equivalent for the verdict |
+
+The 8 are the only statements a test cannot tell from their removal. Everything else in the script that decides a
+keep or a removal is pinned by at least one test that fails when it is changed.
 
 ## Out of scope
 
