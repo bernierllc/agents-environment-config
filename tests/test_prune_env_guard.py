@@ -647,8 +647,9 @@ def test_a_refused_removal_is_reported_and_keeps_the_branch(fx: Fixture) -> None
     assert _git(fx.repo, "branch", "--list", BRANCH) != ""
 
 
-def _with_submodule(fx: Fixture) -> None:
-    """The worktree gets an initialized, tracked submodule at `sub`, and its HEAD becomes the merged commit."""
+def _with_submodule(fx: Fixture, init: bool = True) -> None:
+    """The worktree gets a tracked submodule at `sub` (initialized unless `init` is false: then `sub/` is an
+    empty directory, as after a plain checkout), and its HEAD becomes the merged commit."""
     sub = fx.wt.parent / "subsrc"
     sub.mkdir()
     _git(sub, "init", "-q", "-b", "main")
@@ -660,7 +661,8 @@ def _with_submodule(fx: Fixture) -> None:
     _git(fx.repo, *allow, "submodule", "add", "-q", str(sub), "sub")
     _git(fx.repo, "commit", "-q", "-m", "add submodule")
     _git(fx.wt, "merge", "-q", "--ff-only", "main")
-    _git(fx.wt, *allow, "submodule", "update", "--init", "-q")
+    if init:
+        _git(fx.wt, *allow, "submodule", "update", "--init", "-q")
     fx.merged = [f"{BRANCH} {_git(fx.wt, 'rev-parse', 'HEAD')}"]
 
 
@@ -901,10 +903,12 @@ def test_squash_merged_branch_with_its_own_commits_is_deleted(fx: Fixture) -> No
     assert _git(fx.repo, "branch", "--list", BRANCH) == ""
 
 
-def test_stale_worktree_entry_is_pruned(fx: Fixture) -> None:
+def test_stale_worktree_entry_is_left_for_gits_own_gc(fx: Fixture) -> None:
+    """Round 6 (P1-1): the script no longer runs `git worktree prune`. A missing directory is also what a moved
+    folder or an unmounted volume looks like, and pruning it dangles that worktree's unpushed commits."""
     shutil.rmtree(fx.wt)  # a worktree directory someone deleted by hand
     out = fx.run(dry=False)
-    assert str(fx.wt) not in _git(fx.repo, "worktree", "list", "--porcelain"), out
+    assert str(fx.wt) in _git(fx.repo, "worktree", "list", "--porcelain"), out
 
 
 def test_open_pr_on_a_longer_branch_name_does_not_keep_this_one(fx: Fixture) -> None:
@@ -1188,3 +1192,286 @@ def test_one_secret_outside_a_package_tree_keeps_even_with_exempt_ones_beside_it
     _ignored(fx, "node_modules/pkg/ok.pem")
     _ignored(fx, "real.pem")
     fx.keeps(KEEP_SECRET)
+
+
+# =============================================================================================================
+# Round 6: git worktree prune, uninitialized submodules, bare/.Git nested repos, per-worktree refs, a stale
+# fsmonitor, a fail-closed DRY_RUN, and a worktree list that cannot be parsed. Each test fails on 3d0d7d7.
+# =============================================================================================================
+
+KEEP_SUB = "holds files under an uninitialized submodule"
+KEEP_REFS = "holds per-worktree refs"
+KEEP_DIRTY = "PR merged but worktree dirty"
+
+
+# --- P1-1: no `git worktree prune` ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("dry", [True, False], ids=["dry-run", "live"])
+def test_a_moved_detached_worktree_keeps_its_admin_dir_and_unpushed_commit(fx: Fixture, dry: bool) -> None:
+    """A folder moved aside (or on an unmounted volume) looks exactly like a deleted worktree to git. Pruning it
+    deletes its admin dir, and the detached HEAD's unpushed commit then dangles. Even a dry run must not."""
+    det = fx.wt.parent / "det"
+    _git(fx.repo, "worktree", "add", "-q", "--detach", str(det))
+    (det / "work.txt").write_text("unpushed\n")
+    _git(det, "add", "work.txt")
+    _git(det, "commit", "-q", "-m", "unpushed")
+    sha = _git(det, "rev-parse", "HEAD")
+    moved = det.with_name("det-moved")
+    det.rename(moved)
+    out = fx.run(dry=dry)
+    admin = fx.repo / ".git" / "worktrees" / "det"
+    assert admin.is_dir(), out
+    assert (admin / "HEAD").read_text().strip() == sha
+    assert _git(moved, "rev-parse", "HEAD") == sha  # still reachable through the moved folder's gitfile
+    assert fx.line(out, fx.wt) is not None and (dry or not fx.wt.exists()), out  # the merged one still goes
+
+
+# --- P1-2: files under a gitlink path that is not initialized here -------------------------------------------
+
+
+def test_the_blind_spot_is_real_git_status_cannot_see_files_under_an_uninitialized_submodule(fx: Fixture) -> None:
+    _with_submodule(fx, init=False)
+    (fx.wt / "sub" / ".env").write_text("API_KEY=abc\n")
+    assert _git(fx.wt, "status", "--porcelain", "-uall") == ""
+    assert _git(fx.wt, "ls-files", "-o") == ""
+
+
+@pytest.mark.parametrize("name", [".env", "notes.txt", "dir/deep.txt"])
+def test_a_file_under_an_uninitialized_submodule_keeps(fx: Fixture, name: str) -> None:
+    _with_submodule(fx, init=False)
+    target = fx.wt / "sub" / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("API_KEY=abc\n")
+    fx.keeps(KEEP_SUB)
+    assert target.read_text() == "API_KEY=abc\n"
+
+
+def test_an_empty_uninitialized_submodule_directory_is_removable(fx: Fixture) -> None:
+    _with_submodule(fx, init=False)
+    assert (fx.wt / "sub").is_dir() and not any((fx.wt / "sub").iterdir())
+    assert fx.verdict(dry=False) == "removed"
+    assert not fx.wt.exists()
+
+
+def test_an_initialized_submodule_is_still_left_to_gits_own_refusal(fx: Fixture) -> None:
+    _with_submodule(fx, init=True)
+    (fx.wt / "sub" / ".env").write_text("SUBSECRET=1\n")
+    assert fx.verdict(dry=False) == "FAILED"
+    assert (fx.wt / "sub" / ".env").read_text() == "SUBSECRET=1\n"
+
+
+def test_find_failing_in_the_submodule_directory_scan_keeps(fx: Fixture) -> None:
+    _with_submodule(fx, init=False)
+    fx.shim("find", 'for a in "$@"; do [ "$a" = -mindepth ] && exit 1; done\nexec "' + _real("find") + '" "$@"')
+    fx.keeps("could not scan the submodule directory sub (find exit 1)")
+
+
+def test_find_warning_in_the_submodule_directory_scan_keeps_even_with_exit_zero(fx: Fixture) -> None:
+    _with_submodule(fx, init=False)
+    fx.shim(
+        "find",
+        'for a in "$@"; do [ "$a" = -mindepth ] && echo "find: warning" >&2; done\nexec "' + _real("find") + '" "$@"',
+    )
+    fx.keeps("could not scan the submodule directory sub (find exit 0)")
+
+
+def test_a_tracked_submodule_path_with_a_newline_keeps(fx: Fixture) -> None:
+    """The submodule list is newline-joined elsewhere, so a name with a newline cannot be trusted to split."""
+    # `git submodule add` refuses such a path, but a gitlink index entry can still carry it
+    head = _git(fx.repo, "rev-parse", "HEAD")
+    _git(fx.repo, "update-index", "--add", "--cacheinfo", f"160000,{head},a\nb")
+    _git(fx.repo, "commit", "-q", "-m", "add gitlink")
+    _git(fx.wt, "merge", "-q", "--ff-only", "main")
+    fx.merged = [f"{BRANCH} {_git(fx.wt, 'rev-parse', 'HEAD')}"]
+    fx.keeps("has a file name with a newline")
+
+
+# --- P2-a: bare repos and `.Git` spellings --------------------------------------------------------------------
+
+
+def test_a_bare_repo_inside_an_ignored_directory_keeps(fx: Fixture) -> None:
+    """A bare repo has no `.git` entry at all, so only its layout (HEAD, objects/, refs/) gives it away."""
+    fx.exclude("vendor/")
+    (fx.wt / "vendor").mkdir()
+    _git(fx.wt / "vendor", "init", "-q", "--bare", "lib.git")
+    assert not (fx.wt / "vendor" / "lib.git" / ".git").exists()
+    assert _git(fx.wt, "status", "--porcelain") == ""
+    fx.keeps(KEEP_GIT)
+
+
+def test_a_minimal_bare_layout_keeps(fx: Fixture) -> None:
+    fx.exclude("vendor/")
+    bare = fx.wt / "vendor" / "lib"
+    (bare / "objects").mkdir(parents=True)
+    (bare / "refs").mkdir()
+    (bare / "HEAD").write_text("ref: refs/heads/main\n")
+    fx.keeps(KEEP_GIT)
+
+
+@pytest.mark.parametrize(
+    "missing",
+    ["HEAD", "refs", "objects-as-file"],
+    ids=["no-HEAD", "no-refs", "objects-is-a-file"],
+)
+def test_a_directory_that_only_partly_looks_like_a_bare_repo_does_not_keep(fx: Fixture, missing: str) -> None:
+    fx.exclude("vendor/")
+    bare = fx.wt / "vendor" / "lib"
+    bare.mkdir(parents=True)
+    if missing == "objects-as-file":
+        (bare / "objects").write_text("not a directory\n")
+    else:
+        (bare / "objects").mkdir()
+    if missing != "refs":
+        (bare / "refs").mkdir()
+    if missing != "HEAD":
+        (bare / "HEAD").write_text("ref: refs/heads/main\n")
+    assert fx.verdict() == "would"
+
+
+@pytest.mark.parametrize("spelling", [".Git", ".GIT", ".gIt"])
+@pytest.mark.parametrize("kind", ["dir", "gitfile"])
+def test_a_nested_repo_whose_git_entry_is_spelled_in_another_case_keeps(
+    fx: Fixture, spelling: str, kind: str
+) -> None:
+    """APFS is case-insensitive: git opens `.Git` as `.git`, so a name match on the exact spelling misses it."""
+    fx.exclude("vendor/")
+    entry = fx.wt / "vendor" / "lib" / spelling
+    entry.parent.mkdir(parents=True)
+    if kind == "dir":
+        entry.mkdir()
+    else:
+        entry.write_text("gitdir: /nonexistent/place\n")
+    fx.keeps(KEEP_GIT)
+
+
+# --- P2-b: per-worktree refs ---------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("ref", ["refs/worktree/save", "refs/bisect/bad", "refs/rewritten/x"])
+def test_a_per_worktree_ref_to_an_unmerged_commit_keeps(fx: Fixture, ref: str) -> None:
+    """`git worktree remove` deletes the worktree's private refs, which can be the only pointer to a commit."""
+    merged = fx.merged[0].split()[1]
+    (fx.wt / "work.txt").write_text("unpushed\n")
+    _git(fx.wt, "add", "work.txt")
+    _git(fx.wt, "commit", "-q", "-m", "unpushed")
+    _git(fx.wt, "update-ref", ref, "HEAD")
+    _git(fx.wt, "reset", "-q", "--hard", merged)
+    assert _git(fx.wt, "status", "--porcelain") == ""
+    fx.keeps(KEEP_REFS)
+    assert _git(fx.wt, "rev-parse", ref)
+
+
+def test_a_per_worktree_ref_of_another_worktree_does_not_keep_this_one(fx: Fixture) -> None:
+    _git(fx.repo, "update-ref", "refs/worktree/primary-only", "HEAD")
+    assert _git(fx.wt, "for-each-ref", "refs/worktree") == ""
+    assert fx.verdict() == "would"
+
+
+def test_a_shared_branch_ref_does_not_keep(fx: Fixture) -> None:
+    _git(fx.wt, "branch", "other")
+    assert fx.verdict() == "would"
+
+
+def test_a_git_failure_reading_per_worktree_refs_keeps(fx: Fixture) -> None:
+    _silent_git_failure(fx, "for-each-ref refs/worktree refs/bisect refs/rewritten")
+    fx.keeps("could not read per-worktree refs")
+
+
+# --- P2-c: a stale core.fsmonitor ----------------------------------------------------------------------------
+
+
+def test_a_stale_fsmonitor_cannot_hide_a_tracked_edit(fx: Fixture, tmp_path: Path) -> None:
+    """A hook that answers "nothing changed" makes plain `git status` call an edited tracked file clean."""
+    (fx.wt / "notes.txt").write_text("v1\n")
+    fx.commit("notes.txt")
+    hook = tmp_path / "fsmonitor-hook.sh"
+    hook.write_text("#!/bin/bash\nprintf 'tok\\0'\n")
+    hook.chmod(0o755)
+    _git(fx.repo, "config", "core.fsmonitor", str(hook))
+    _git(fx.wt, "status", "--porcelain")  # records the token and marks every file as unchanged
+    (fx.wt / "notes.txt").write_text("v2 unsaved edit\n")
+    assert _git(fx.wt, "status", "--porcelain") == "", "precondition: the stale hook hides the edit"
+    fx.keeps(KEEP_DIRTY)
+    assert (fx.wt / "notes.txt").read_text() == "v2 unsaved edit\n"
+
+
+# --- P2-d: DRY_RUN fails closed ------------------------------------------------------------------------------
+
+
+def _run_with_dry_run(fx: Fixture, value: str | None) -> str:
+    """The real script with DRY_RUN set to `value` exactly (None: not set at all)."""
+    env = {k: v for k, v in os.environ.items() if k != "DRY_RUN"}
+    env.update(PATH=f"{fx.bindir}{os.pathsep}{os.environ['PATH']}", PROJECTS_ROOT=str(fx.root))
+    env.update(GH_MERGED="\n".join(fx.merged), GH_OPEN="", GH_FAIL="")
+    if value is not None:
+        env["DRY_RUN"] = value
+    proc = subprocess.run(["/bin/bash", str(SCRIPT)], capture_output=True, text=True, env=env, timeout=60)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    return proc.stdout + proc.stderr
+
+
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on", "dry", "", " 0", "00", "false", "no"])
+def test_any_dry_run_value_other_than_exactly_zero_only_prints(fx: Fixture, value: str) -> None:
+    out = _run_with_dry_run(fx, value)
+    line = fx.line(out, fx.wt)
+    assert line is not None and line.startswith("would"), out
+    assert fx.wt.exists()
+
+
+@pytest.mark.parametrize("value", [None, "0"], ids=["unset", "zero"])
+def test_dry_run_unset_or_exactly_zero_removes_for_real(fx: Fixture, value: str | None) -> None:
+    out = _run_with_dry_run(fx, value)
+    line = fx.line(out, fx.wt)
+    assert line is not None and line.startswith("removed"), out
+    assert not fx.wt.exists()
+
+
+def test_dry_run_is_documented_as_fail_closed_in_the_header() -> None:
+    header = "\n".join(SCRIPT.read_text().splitlines()[:10])
+    assert "DRY_RUN=0" in header and "unset" in header, header
+
+
+# --- P2-e: a worktree list that cannot be parsed -------------------------------------------------------------
+
+
+def _worktree_with_newline_in_its_path(fx: Fixture) -> Path:
+    """A real worktree whose directory name is `<fx.wt name>\\nx`: porcelain prints that path across two lines,
+    so a line-based parser reads the first line as the path of `fx.wt` itself."""
+    odd = fx.wt.parent / (fx.wt.name + "\nx")
+    _git(fx.repo, "worktree", "add", "-q", "-b", "feat/nl", str(odd))
+    fx.merged = [f"feat/nl {_git(odd, 'rev-parse', 'HEAD')}"]  # only the odd one is merged; fx.wt is on feat/x
+    return odd
+
+
+def test_a_newline_in_a_worktree_path_cannot_make_another_worktree_go_under_the_wrong_label(fx: Fixture) -> None:
+    _worktree_with_newline_in_its_path(fx)
+    out = fx.run(dry=False)
+    assert fx.wt.exists(), out  # feat/x was never merged: nothing may remove it, whatever label is printed
+    assert _git(fx.repo, "branch", "--list", BRANCH) != ""
+    assert "removed" not in out, out
+    assert f"keep    {fx.repo}  (" in out and "unrecognised line" in out, out
+
+
+def test_an_unparseable_worktree_list_skips_the_whole_repo_not_just_the_odd_worktree(fx: Fixture) -> None:
+    _worktree_with_newline_in_its_path(fx)
+    fx.merged.append(f"{BRANCH} {_git(fx.wt, 'rev-parse', 'HEAD')}")  # now a clean, merged, removable fx.wt too
+    out = fx.run(dry=False)
+    assert fx.wt.exists(), out
+
+
+def test_every_known_porcelain_key_is_accepted(fx: Fixture) -> None:
+    """A locked worktree prints `locked`, a bare repo `bare`, a detached one `detached`: none is junk."""
+    det = fx.wt.parent / "det"
+    _git(fx.repo, "worktree", "add", "-q", "--detach", str(det))
+    _git(fx.repo, "worktree", "lock", "--reason", "on a usb stick", str(det))
+    porcelain = _git(fx.repo, "worktree", "list", "--porcelain")
+    assert "detached" in porcelain and "locked on a usb stick" in porcelain
+    assert fx.verdict(dry=False) == "removed"
+
+
+def test_awk_failing_in_the_worktree_list_check_skips_the_repo(fx: Fixture) -> None:
+    fx.shim("awk", 'case "$*" in *prunable*) exit 2 ;; esac\nexec "' + _real("awk") + '" "$@"')
+    out = fx.run(dry=False)
+    assert fx.wt.exists(), out
+    assert f"keep    {fx.repo}  (" in out and "could not check the worktree list" in out, out
