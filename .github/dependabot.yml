@@ -2,6 +2,9 @@ version: 2
 updates:
   - package-ecosystem: "pip"
     directory: "/"
+    # Bumps open against the integration branch: main accepts pull requests
+    # only from staging, so a bump opened against main can never merge.
+    target-branch: "staging"
     # AEC is a library installed on Python 3.9+: keep ">=" floors as low as
     # they work. Only raise a range when it excludes the latest release.
     versioning-strategy: increase-if-necessary
@@ -9,5 +12,6 @@ updates:
       interval: "weekly"
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "staging"
     schedule:
       interval: "weekly"
