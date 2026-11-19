@@ -301,9 +301,26 @@ logs every `rm`/`rmdir`/`unlink`/`mv`/`find`/`git worktree` call of a quarantine
 `rm -rf` after the remove is killed (118 mutants: 111 killed, 7 equivalent). Decisions (1) and (2) below: strict and
 same-run purge stay as built, per the cop's recommendation.
 
-**Open decisions for Matt.** (1) `dist`/`build`/`.next`/`.turbo`/`coverage`: stay strict (keep until marked or cleared),
-or add a per-repo opt-in list of directory names the user vouches for. (2) Purge in the same scheduled run (current;
-the existing LaunchAgent reclaims after the hold) or behind an explicit `--purge`.
+**Decisions (Program Cop, 2026-11-19 01:29Z; binding for round 8).**
+
+1. **Strict.** A `dist`, `build`, `.next`, `.turbo` or `coverage` directory with no marker keeps its worktree. There is no per-repo
+   opt-in list: a list a PR can change is a trust input, so nothing vouches for a directory by name. Reclaiming build output
+   is a separate piece of work and is not part of #165.
+2. **Purge in the same scheduled run, after the hold.** `PRUNE_QUARANTINE_DAYS` defaults to 7 and must be a whole number of at
+   least 1; anything else is a fault and purges nothing.
+
+**Conditions.**
+
+- **(a) The purge re-runs the FULL guard on every quarantined entry at purge time, and fails closed.** `purge_one` calls
+  `keep_reason` on the held path, then again on the `.purge` path after the rename, and a fault at either keeps the tree
+  (`test_the_purge_runs_the_full_guard_again_on_the_held_tree`, `test_a_dry_run_purge_runs_the_whole_guard_before_it_says_would_purge`,
+  and the refused-rename and rescan-hit tests). The guard result from the quarantine run is never reused.
+- **(b) The pruner LaunchAgent stays booted out until Matt pulls this change; re-enabling it is Matt's.** Nothing in this
+  branch loads, boots or edits a LaunchAgent, and no run of the script may start before Matt has this version.
+- **(c) "Recoverable" means "noticed within N days", and the purge still deletes.** A quarantined worktree can be restored with
+  `git worktree move` for `PRUNE_QUARANTINE_DAYS` days (7 by default). Nobody is told when something is quarantined, so a
+  file nobody notices missing in that window is deleted by the purge, for good, once the guard passes. Quarantine narrows
+  the window in which a wrong verdict costs data; it does not make a wrong verdict free.
 
 ## Residual limits (documented, not solved)
 
