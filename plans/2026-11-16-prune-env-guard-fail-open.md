@@ -454,6 +454,34 @@ root check, logical (non-`pwd -P`) paths for the path and for the root, the disc
 the stamp-directory check), 18 killed; the 37 round-9 mutants re-run on this script: 55 of 55 killed.** The first run had two survivors, both real test gaps: an unreadable remote-HEAD
 list (the guard fell open) and a stamp-directory symlink; both got tests and are killed.
 
+### Round 9 addendum 2 (Program Cop mutation audit on `5a8f894`: 276 mutants, 52 survived, tests only)
+
+No script change. The audit's 43 gap tests (`tests/test_prune_mutation_gaps.py`, now 45 with two of ours) kill 41 of the 52
+survivors; the other 11 are equivalent or P3. They pass on the `502c06e` script (run in a temp copy with the date-only
+directory name) and on round 9.
+
+- **Systemic gap closed.** `Fixture.run` asserted exit 1 only when the fault line was printed, so a dropped `note_fault`
+  (exit 0, no fault line) passed. `run(..., expect_fault=True)` now asserts exit 1 and the fault line together, `False`
+  asserts exit 0 and no fault line; `purge_run` and `_purged` pass it through. Every fault-pinning gap test uses it. The
+  older fault tests already asserted `last_rc == 1` themselves and are unchanged.
+- **Drop-every-`note_fault` audit (ours).** One mutant per call site (25): two survived and got tests, so all 25 are killed.
+  `mkdir -p "$dir"` failing (the stamp directory cannot be made) and a held tree whose move-back fails (a holder is a policy
+  keep, so only the failed move can raise the fault; the first version used a failing lsof, which raised it at an earlier
+  line and left the mutant alive).
+- **Adapted, not copied** (intent kept, premise updated to round 9): `test_unproven_file_after_a_marked_directory_still_keeps`
+  (`_marked` is a cache marker, the one kind that proves a whole directory, so only the prefix test can keep `zz/`);
+  `test_glob_characters_in_the_cached_prefix_are_literal` (a venv marker proves only recorded files, so a mis-matched
+  `ab/data.db` kept the tree either way and the mutant lived; a cache marker makes the literal match the only thing that
+  keeps it); `test_a_file_written_just_before_the_remove_is_not_deleted` (the P0-2 window: pins git's refusal of a
+  non-ignored late file; an ignored late file is the strict xfail in `test_p2_2_*`). `test_purge_guard_failure_keeps_and_faults`
+  also moved from the `2000-01-01` directory to the stamp.
+- **Kept as the audit wrote them:** the ORIG_HEAD removal in the no-reflogs test, the private-directory `mktemp` shim, the
+  `' M injected'` policy keep with a failing move-back.
+- **Results.** Prune tests: **610 passed, 1 xfailed** (full `tests/`: 4062 passed, the two signal tests in
+  `test_cleanup_hung_processes_script.py` fail under load and pass alone, 22/22). Mutants: the 55 round-9 and addendum-1
+  mutants plus two for the adapted tests, **57 of 57 killed** on the combined suite, plus the 25 `note_fault` mutants,
+  25 of 25 killed.
+
 ## Residual limits (documented, not solved)
 
 1. **A link held elsewhere.** An `.env*` symlink held in the primary checkout, in another repo, or in a kept

@@ -66,7 +66,16 @@ class Fixture:
         self.last_out = ""
 
     # --- running the script -------------------------------------------------------------------------------
-    def run(self, dry: bool = True, env: dict[str, str | None] | None = None, timeout: int = 60) -> str:
+    def run(
+        self,
+        dry: bool = True,
+        env: dict[str, str | None] | None = None,
+        timeout: int = 60,
+        expect_fault: bool | None = None,
+    ) -> str:
+        """Run the script. `expect_fault=True` asserts exit 1 AND the fault line together; `False` asserts exit 0 and
+        no fault line. Left as None only the two are checked against each other, which a dropped `note_fault` passes
+        (exit 0, no fault line), so every test that pins a fault passes True."""
         full: dict[str, str | None] = {
             **os.environ,
             "PATH": f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
@@ -85,6 +94,11 @@ class Fixture:
         # exit status 1 exactly when the script says a check could not complete; every policy keep exits 0
         faulted = FAULT_LINE in proc.stdout
         assert proc.returncode == (1 if faulted else 0), proc.stdout + proc.stderr
+        if expect_fault is not None:
+            assert (proc.returncode == 1 and faulted) == expect_fault, (
+                f"expected {'a fault (exit 1 and the fault line)' if expect_fault else 'no fault (exit 0)'}, "
+                f"got exit {proc.returncode}, fault line {'present' if faulted else 'absent'}:\n{proc.stdout}{proc.stderr}"
+            )
         self.last_rc = proc.returncode
         self.last_out = proc.stdout + proc.stderr
         return self.last_out
@@ -109,14 +123,16 @@ class Fixture:
         _git(entry, "worktree", "move", str(entry), str(dest))
         return dest
 
-    def purge_run(self, wt: Path, env: dict[str, str] | None = None) -> tuple[str, Path]:
+    def purge_run(
+        self, wt: Path, env: dict[str, str] | None = None, expect_fault: bool | None = None
+    ) -> tuple[str, Path]:
         """Age every held worktree past the cutoff and do a real run: (its output, `wt`'s aged entry)."""
         entries = self.held()
         assert entries, self.last_out
         aged = [self.age(entry) for entry in entries]
         mine = [p for p in aged if p.name.endswith(f"--{wt.name}")]
         assert len(mine) == 1, (aged, self.last_out)
-        return self.run(False, env), mine[0]
+        return self.run(False, env, expect_fault=expect_fault), mine[0]
 
     def verdict(self, dry: bool = True, wt: Path | None = None, env: dict[str, str] | None = None) -> str:
         """The first word printed for the worktree: keep | would | quarantined | removed | FAILED.
@@ -1139,11 +1155,14 @@ def _marked(fx: Fixture, top: str = "tree") -> None:
     (fx.wt / top / "CACHEDIR.TAG").write_text(CACHEDIR_TAG)
 
 
-def _purged(fx: Fixture, env: dict[str, str] | None = None) -> tuple[str, Path]:
-    """A real run that quarantines the worktree, then the aged purge run: (the purge run's output, the aged entry)."""
+def _purged(
+    fx: Fixture, env: dict[str, str] | None = None, expect_fault: bool | None = None
+) -> tuple[str, Path]:
+    """A real run that quarantines the worktree, then the aged purge run: (the purge run's output, the aged entry).
+    `expect_fault` applies to the purge run."""
     out = fx.run(False, env)
     assert (fx.line(out, fx.wt) or "").startswith("quarantined"), out
-    return fx.purge_run(fx.wt, env)
+    return fx.purge_run(fx.wt, env, expect_fault)
 
 
 def _ignored(fx: Fixture, rel: str, text: str = "x\n") -> None:
