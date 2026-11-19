@@ -322,6 +322,49 @@ same-run purge stay as built, per the cop's recommendation.
   file nobody notices missing in that window is deleted by the purge, for good, once the guard passes. Quarantine narrows
   the window in which a wrong verdict costs data; it does not make a wrong verdict free.
 
+## Coverage audit (b) of `c5d4663` (aec cop; folded into round 8, no extra round)
+
+The aec cop mutated `c5d4663` (115 single-line mutants, one full suite each): 16 survived, 13 safety-weakening. Each
+pattern is pinned below against the round-8 design; every new test fails on the `c5d4663` script or on the mutant
+(old = `git show c5d4663:scripts/prune-merged-worktrees.sh`, run against the new tests). Tests are `test_audit<n>_*` in
+`tests/test_prune_round8_cases.py`.
+
+| # | audit item | test(s) | on `c5d4663` | mutant of the new script |
+|---|---|---|---|---|
+| 1 | listed path swapped file→dir, dir→file, dir→symlink (first, middle, last component) after git listed it | `test_audit1_*` (a stale-listing `git` shim over an already-swapped tree: the quarantine rescan would rescue a real swap, so the swap is simulated deterministically) | fail | `reg-no-dir-part`, `reg-dir-symlink`, and `! -L "$1/$acc"` with a trailing slash: killed |
+| 2 | cached-prefix boundary (`dist/` vs `dist2/`) for venv, node_modules and CACHEDIR kinds | `test_audit2_*` | pass (the cached prefix keeps its slash there) | `regen_ok="${acc%/}"`: killed |
+| 3 | secret names inside regenerable directories (3 kinds x 21 names) | `test_audit3_*` | pass | one mutant per alternative of every secret case arm: 19 of 19 killed |
+| 4 | nested `.git` that is a symlink (to another repo's `.git`, or dangling) or a gitfile, inside a regenerable tree | `test_audit4_*` | fail | `-type d -iname .git`: killed |
+| 5 | reflog check whose enclosing subshell is killed (137), for the HEAD log, ORIG_HEAD and the branch log, killing the ids subshell or the function's own | `test_audit5_*` (a `sort` shim kills the process) | fail | `-ge`, `-ne 2`, the ids status check dropped, and each of the three log sources dropped: killed |
+| 6 | tracked gitlink whose name ends in whitespace (`sub\n`, `sub `, `sub<TAB>`) | `test_audit6_*` | pass | `read` without `IFS=`: killed |
+| 7 | discovery: real `rev-parse --git-dir` / `worktree list --porcelain` prints a valid answer, then exits 137 | `test_audit7_*` | fail | each `|| { skip; note_fault; continue; }` dropped: killed |
+| 8 | vacuous tests | see below | n/a | n/a |
+| 9 | fsmonitor | `test_audit9_*` | fail on the call count only (`c5d4663` already used the flag on every call but has no rescan or purge scans); the flag itself is pinned by the mutants | `=true` and the flag dropped: killed |
+
+**Item 8, vacuous tests fixed** (in `tests/test_prune_env_guard.py`): the two discovery-failure tests now also assert the
+fault line, exit 1 and nothing held; `test_clean_sweep_prints_no_skip_lines` and `test_scan_leaves_no_temp_file_behind`
+now carry a real-removal control (the worktree line is `quarantined`; the scratch-dir test also runs the purge and sees
+`removed`); the symlink-leaf and below-symlink allowlist tests now reach the symlink predicate (git never lists a path
+through a link, so they use the stale listing, and the link points at a marked directory holding unique data, so only
+the symlink test stops the marker from vouching); the blind-spot test now ends in `fx.keeps(KEEP_SUB)`, so it invokes
+the script.
+
+**Item 9, fsmonitor.** A native fsmonitor daemon cannot be made to miss an event on demand, so a stale-state test would
+be non-deterministic. The substitute is deterministic: a logging `git` shim over a full quarantine-and-purge run asserts
+that every `status`, `ls-files` and `diff` call carries `-c core.fsmonitor=false`. The hook-based staleness test from
+round 8 still covers the hook form.
+
+**Surviving mutants of the new tests, with equivalence arguments.**
+
+| mutant | why it survives |
+|---|---|
+| `-d` half of the directory test in `regenerable()` dropped | every marker (`pyvenv.cfg`, `CACHEDIR.TAG`, `.package-lock.json`, `.pnpm`) is a file or directory *inside* that directory, so a non-directory cannot hold one, and the `__pycache__` tail needs a sibling `.py` under the same path: behaviour-equivalent |
+| the `regen_ok` cache lookup dropped | the cache only skips re-running the same checks for a path under an already-proven directory; the verdict is identical, only slower (the audit's `regen-cache-remove`, P3 safety-preserving) |
+| `-prune` dropped from the nested-`.git` `find` | the nested `.git` entry itself is printed first and keeps the tree; descending into it only adds later hits for the same verdict (the worktree's own `.git` is skipped by name either way) |
+
+The audit's other verdicts stand: `gh-merged` is a redundant guard (P3, the quarantine rescan and the purge guard hold the
+same line), and the control mutants are equivalent.
+
 ## Residual limits (documented, not solved)
 
 1. **A link held elsewhere.** An `.env*` symlink held in the primary checkout, in another repo, or in a kept
@@ -462,12 +505,10 @@ marker, a symlinked `.pnpm`, `.pyo` and other extensions, a `.pyc` outside `__py
 submodule-directory read-back, `logs/*` beyond `logs/HEAD`, a leftover `AUTO_MERGE`, `ORIG_HEAD` and each column of a
 reflog line as the only source, a reftable repository, a failed move back, a dangling symlink at the quarantine name,
 the full guard on a dry-run purge, a refused rename-aside, and an uncomputable cutoff. Re-run of those 19: all killed.
-**Final: 117 mutants, 110 killed, 7 survived.** The 7, none changes whether a tree is kept or removed:
+**Final: 117 mutants, 112 killed, 5 survived** (`reg-no-dir-part` and `reg-dir-symlink` were survivors here and are now killed by the coverage-audit (b) tests below). The 5, none changes whether a tree is kept or removed:
 
 | id | why it survives |
 |---|---|
-| reg-no-dir-part | `[ "$rest" != "$2" ] \|\| return 1` removed: a root-level file has no directory part, `-d "$1/$2/"` is false for a file, so the loop returns 1 anyway: equivalent |
-| reg-dir-symlink | the `! -L` test on a directory dropped: `ls-files -o` never lists a path through a symlinked directory (it lists the link once, with no directory part); only a race that swaps a directory for a link between the list and the check could differ |
 | rl-max-count | `--max-count=1` dropped from `rev-list`: only the volume of the output changes, the `-z` test is the same |
 | rl-ids-empty | the early `return 1` on an empty id list dropped: `rev-list --stdin --not --all` with no positive revisions prints nothing: equivalent |
 | q-mkdir-fault | a failed `mkdir -p` of the quarantine date directory no longer prints/faults itself: the next `move_wt` into that directory fails with `FAILED` and `note_fault` anyway, same verdict and exit status |

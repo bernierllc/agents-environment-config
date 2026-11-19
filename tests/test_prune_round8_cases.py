@@ -20,7 +20,11 @@ from tests.test_prune_env_guard import (
     BRANCH,
     FAULT_LINE,
     KEEP_ENV,
+    KEEP_GIT,
+    KEEP_SECRET,
+    KEEP_SUB,
     KEEP_UNPROVEN,
+    CACHEDIR_TAG,
     SCRIPT,
     Fixture,
     _git,
@@ -681,3 +685,254 @@ def test_the_unattended_purge_deletes_only_through_git_worktree_remove_on_a_regi
     moves = [c for c in calls if " worktree move " in c]
     assert len(removes) == 1 and removes[0].endswith(f"{aged}.purge"), removes
     assert any(m.endswith(f"{aged}.purge") for m in moves), moves  # the target was registered by git's own move
+
+
+# =============================================================================================================
+# Coverage audit (b) of c5d4663: 115 single-line mutants, 16 survived. Each test below pins one survivor's
+# pattern against the round-8 design and fails on the mutant (see plans/2026-11-16-prune-env-guard-fail-open.md,
+# "Coverage audit (b)", for the mutant behind each test).
+# =============================================================================================================
+
+
+def _stale_listing(fx: Fixture, *paths: str) -> None:
+    """git reports `paths` as the ignored files whatever the tree holds now: the tree changed after git listed it.
+
+    The quarantine rescan would otherwise rescue a swap, so this is the deterministic form of "swapped after the
+    listing". Every other git call is the real git."""
+    printed = " ".join(f"'{p}'" for p in paths)
+    fx.shim(
+        "git",
+        'case " $* " in *" ls-files -z -o "*) printf \'%s\\0\' ' + printed + '; exit 0 ;; esac\n'
+        'exec "' + _real("git") + '" "$@"',
+    )
+
+
+def _status_is_clean(fx: Fixture) -> None:
+    assert _git(fx.wt, "status", "--porcelain", "-uall") == "", "the case needs a clean status"
+
+
+# --- 1. a path swapped between git's listing and the check --------------------------------------------------
+
+
+@pytest.mark.parametrize("marked", [False, True], ids=["unmarked", "marked"])
+def test_audit1_a_file_git_listed_that_is_now_a_directory_with_data_keeps(fx: Fixture, marked: bool) -> None:
+    """git listed the ignored FILE `dist`; it is a directory now. A path with no directory part has nothing to be
+    proven by: a marker inside what it became (the marked case) must not vouch for it."""
+    fx.exclude("dist")
+    (fx.wt / "dist").mkdir()
+    (fx.wt / "dist" / "unique.txt").write_text("UNIQUE DATA\n")
+    if marked:
+        (fx.wt / "dist" / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    _status_is_clean(fx)
+    _stale_listing(fx, "dist")
+    fx.keeps(KEEP_UNPROVEN)
+    assert (fx.wt / "dist" / "unique.txt").read_text() == "UNIQUE DATA\n"
+
+
+def test_audit1_a_directory_git_listed_files_under_that_is_now_a_regular_file_keeps(fx: Fixture) -> None:
+    fx.exclude("dist")
+    (fx.wt / "dist").write_text("not a directory any more\n")
+    _status_is_clean(fx)
+    _stale_listing(fx, "dist/a")
+    fx.keeps(KEEP_UNPROVEN)
+
+
+@pytest.mark.parametrize("link", ["dist", "tree/lib", "a/b/c"])
+def test_audit1_a_directory_swapped_for_a_symlink_to_ignored_data_after_the_listing_keeps(fx: Fixture, link: str) -> None:
+    """The symlinked directory (the first, a middle or the last component) leads to ignored data that carries a
+    marker, so only the symlink test stops the marker from vouching for it. Removal would not follow the link;
+    this pins the keep POLICY: nothing reached through a symlink is proven regenerable."""
+    fx.exclude("local-data/")
+    data = fx.wt / "local-data"
+    data.mkdir()
+    (data / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    (data / "notes.txt").write_text("UNIQUE NOTES\n")
+    fx.exclude(link.split("/")[0] + ("/" if "/" in link else ""))
+    (fx.wt / link).parent.mkdir(parents=True, exist_ok=True)
+    (fx.wt / link).symlink_to(data)
+    _status_is_clean(fx)
+    _stale_listing(fx, f"{link}/x.py")
+    fx.keeps(KEEP_UNPROVEN)
+    assert (data / "notes.txt").read_text() == "UNIQUE NOTES\n"
+
+
+def test_audit1_control_the_same_listing_over_a_real_marked_directory_goes(fx: Fixture) -> None:
+    _ignored(fx, "dist/pyvenv.cfg", "home = /usr/bin\n")
+    _ignored(fx, "dist/a")
+    assert fx.verdict() == "would"
+
+
+# --- 2. the cached regenerable prefix stops at a directory boundary ---------------------------------------------
+
+REGEN_KINDS = ["venv", "node_modules", "cachedir"]
+
+
+def _regen_dir(fx: Fixture, kind: str) -> str:
+    """An ignored directory a marker proves regenerable, with a file under it; returns its top directory."""
+    if kind == "venv":
+        _ignored(fx, ".venv/pyvenv.cfg", "home = /usr/bin\n")
+        _ignored(fx, ".venv/lib/x.py")
+        return ".venv"
+    if kind == "node_modules":
+        _ignored(fx, "node_modules/.package-lock.json", "{}\n")
+        _ignored(fx, "node_modules/pkg/index.js")
+        return "node_modules"
+    _ignored(fx, "dist/CACHEDIR.TAG", CACHEDIR_TAG)
+    _ignored(fx, "dist/a.txt")
+    return "dist"
+
+
+@pytest.mark.parametrize("kind", REGEN_KINDS)
+def test_audit2_a_proven_directory_does_not_vouch_for_a_sibling_that_shares_its_name_as_a_prefix(fx: Fixture, kind: str) -> None:
+    """ls-files sorts, so `<top>/...` is checked (and its verdict cached) right before `<top>2/...`."""
+    top = _regen_dir(fx, kind)
+    assert fx.verdict() == "would"
+    _ignored(fx, f"{top}2/unique.txt", "UNIQUE\n")
+    out = fx.run(True)
+    line = fx.line(out, fx.wt)
+    assert line is not None and line.startswith("keep") and f"{top}2/unique.txt" in line, out
+
+
+# --- 3. secret names keep wherever they sit, regenerable directories included -------------------------------------
+
+SECRETS_ONE_PER_ARM_PATTERN = [
+    ".dev.vars", ".dev.vars.production", ".npmrc", ".netrc", ".pypirc", ".git-credentials",
+    "credentials", "credentials.json", "id_rsa", "id_ed25519.pub",
+    "prod.env", "app.env.local", "a.pem", "a.key", "a.p12", "a.pfx", "a.p8",
+    "a.jks", "a.keystore", "a.tfvars", "a.tfstate",
+]  # fmt: skip
+
+
+@pytest.mark.parametrize("kind", REGEN_KINDS)
+def test_audit3_control_a_regenerable_directory_without_a_secret_goes(fx: Fixture, kind: str) -> None:
+    top = _regen_dir(fx, kind)
+    _ignored(fx, f"{top}/lib/plain.txt")
+    assert fx.verdict() == "would"
+
+
+@pytest.mark.parametrize("kind", REGEN_KINDS)
+@pytest.mark.parametrize("name", SECRETS_ONE_PER_ARM_PATTERN)
+def test_audit3_a_secret_named_file_inside_a_regenerable_directory_keeps(fx: Fixture, kind: str, name: str) -> None:
+    top = _regen_dir(fx, kind)
+    _ignored(fx, f"{top}/lib/{name}", "not a real secret\n")
+    fx.keeps(KEEP_SECRET, real=False)
+
+
+# --- 4. a nested .git that is a symlink or a file, inside a regenerable directory ----------------------------------
+
+
+@pytest.mark.parametrize("kind", ["symlink-to-another-repo", "dangling-symlink", "gitfile"])
+def test_audit4_a_nested_dot_git_that_is_not_a_directory_inside_a_regenerable_tree_keeps(fx: Fixture, kind: str) -> None:
+    _marked(fx)
+    lib = fx.wt / "tree" / "lib"
+    lib.mkdir()
+    (lib / "notes.txt").write_text("UNIQUE NOTES\n")
+    assert fx.verdict() == "would", "control: the marked tree alone goes"
+    other = fx.root.parent / "other-repo"
+    other.mkdir()
+    _git(other, "init", "-q")
+    if kind == "symlink-to-another-repo":
+        (lib / ".git").symlink_to(other / ".git")
+    elif kind == "dangling-symlink":
+        (lib / ".git").symlink_to("/nonexistent-gitdir-for-test")
+    else:
+        (lib / ".git").write_text(f"gitdir: {other / '.git'}\n")
+    _status_is_clean(fx)
+    fx.keeps(KEEP_GIT)
+    assert (lib / "notes.txt").read_text() == "UNIQUE NOTES\n"
+
+
+# --- 5. the reflog check, whichever log names the commit, when its own subshell is killed -------------------------
+
+
+def _kills(target: str) -> str:
+    """A `sort` that kills its enclosing subshell (the one that captures the ids) or the function's own subshell."""
+    if target == "ids":
+        return 'kill -9 "$PPID"\nexit 0'
+    return 'kill -9 "$(ps -o ppid= -p "$PPID" | tr -d " ")"\nexit 0'
+
+
+def _orphan_in(fx: Fixture, log: str) -> None:
+    if log == "branch":
+        _commit_only_the_branch_reflog_remembers(fx)
+        return
+    orphan = _orphan_commit(fx)
+    if log == "orig_head":
+        _git(fx.wt, "update-ref", "ORIG_HEAD", orphan)
+        return
+    head = _git(fx.wt, "rev-parse", "HEAD")
+    with (_admin_dir(fx) / "logs" / "HEAD").open("a") as handle:
+        handle.write(f"{head} {orphan} t <t@example.com> 1700000000 +0000\treset: moving\n")
+
+
+@pytest.mark.parametrize("target", ["ids", "function"])
+@pytest.mark.parametrize("log", ["head", "orig_head", "branch"])
+def test_audit5_a_reflog_check_killed_part_way_keeps_and_faults(fx: Fixture, log: str, target: str) -> None:
+    _orphan_in(fx, log)
+    fx.keeps(KEEP_REFLOG, real=False)  # control: without the kill the orphan keeps it by policy
+    fx.shim("sort", _kills(target))
+    out = fx.run(False)
+    line = fx.line(out, fx.wt)
+    assert line is not None and line.startswith("keep") and "exit 137" in line, out
+    assert fx.last_rc == 1 and FAULT_LINE in out and fx.wt.exists() and fx.held() == []
+
+
+# --- 6. a gitlink name whose edge is whitespace: `read` must not trim it ----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "name, reason",
+    [("sub\n", "has a file name with a newline"), ("sub ", KEEP_SUB), ("sub\t", KEEP_SUB)],
+    ids=["trailing-newline", "trailing-space", "trailing-tab"],
+)
+def test_audit6_a_tracked_gitlink_whose_name_ends_in_whitespace_is_not_trimmed(fx: Fixture, name: str, reason: str) -> None:
+    head = _git(fx.repo, "rev-parse", "HEAD")
+    _git(fx.repo, "update-index", "--add", "--cacheinfo", f"160000,{head},{name}")
+    _git(fx.repo, "commit", "-q", "-m", "add gitlink")
+    _git(fx.wt, "merge", "-q", "--ff-only", "main")
+    fx.merged = [f"{BRANCH} {_git(fx.wt, 'rev-parse', 'HEAD')}"]
+    directory = fx.wt / name
+    assert directory.is_dir() and not any(directory.iterdir()), "an uninitialized gitlink checks out as an empty directory"
+    (directory / "unique.txt").write_text("UNIQUE\n")
+    _status_is_clean(fx)
+    fx.keeps(reason)
+    assert (directory / "unique.txt").read_text() == "UNIQUE\n"
+
+
+# --- 7. discovery: git prints the right answer and then dies ------------------------------------------------------
+
+
+def _git_prints_then_dies(fx: Fixture, args: str, code: int = 137) -> None:
+    """For a call containing `args`, the real git runs, its output is kept, and the call then exits `code`."""
+    fx.shim("git", f'case " $* " in *" {args} "*) "{_real("git")}" "$@"; exit {code} ;; esac\nexec "{_real("git")}" "$@"')
+
+
+@pytest.mark.parametrize(
+    "args, message",
+    [("rev-parse --git-dir", "git rev-parse failed"), ("worktree list --porcelain", "could not list worktrees")],
+    ids=["rev-parse", "worktree-list"],
+)
+def test_audit7_discovery_that_printed_valid_output_and_then_died_skips_the_repo(fx: Fixture, args: str, message: str) -> None:
+    _git_prints_then_dies(fx, args)
+    out = fx.run(False)
+    assert f"skip {fx.repo}: {message}" in out
+    assert fx.last_rc == 1 and FAULT_LINE in out
+    assert fx.line(out, fx.wt) is None and fx.wt.exists() and fx.held() == [], out
+
+
+# --- 9. no git call that reads the index or the tree runs with the fsmonitor on ----------------------------------
+
+
+def test_audit9_every_git_call_that_reads_the_index_or_the_tree_disables_the_fsmonitor(fx: Fixture, tmp_path: Path) -> None:
+    """A native fsmonitor daemon cannot be made to miss an event on demand, so this cannot be a stale-state test;
+    it pins the flag itself over the whole life of a worktree (scan, quarantine rescan, purge scans)."""
+    log = tmp_path / "git-calls.log"
+    fx.shim("git", f'printf "%s\\n" "$*" >>"{log}"\nexec "{_real("git")}" "$@"')
+    assert fx.verdict(dry=False) == "removed"
+    reads = [
+        ln
+        for ln in log.read_text().splitlines()
+        if re.match(r"-C .+? (-c core\.fsmonitor=false )?(status|ls-files|diff)\b", ln)
+    ]
+    assert len(reads) >= 6, reads  # status + ls-files -s + ls-files -o, for the scan, the rescan and the purge
+    assert all(" -c core.fsmonitor=false " in ln for ln in reads), [ln for ln in reads if " -c core.fsmonitor=false " not in ln]

@@ -699,14 +699,18 @@ def test_failing_worktree_discovery_skips_the_repo_with_a_reason(fx: Fixture) ->
     fx.git_fails("rev-parse --git-dir")
     out = fx.run(dry=False)
     assert f"skip {fx.repo}: git rev-parse failed" in out
+    assert fx.last_rc == 1 and FAULT_LINE in out and fx.held() == []  # a skipped repo is a fault, not a clean run
     assert fx.wt.exists()
+    # the variant where git prints the right answer and THEN dies: test_audit7 in test_prune_round8_cases.py
 
 
 def test_failing_worktree_list_skips_the_repo_with_a_reason(fx: Fixture) -> None:
     fx.git_fails("worktree list --porcelain")
     out = fx.run(dry=False)
     assert f"skip {fx.repo}: could not list worktrees" in out
+    assert fx.last_rc == 1 and FAULT_LINE in out and fx.held() == []
     assert fx.wt.exists()
+    # the variant where git prints the right answer and THEN dies: test_audit7 in test_prune_round8_cases.py
 
 
 def test_a_locked_worktree_is_kept_by_policy(fx: Fixture) -> None:
@@ -918,6 +922,8 @@ def test_clean_sweep_prints_no_skip_lines(fx: Fixture) -> None:
     """A glob that matches nothing (here the two-level one) must not be treated as a repo."""
     out = fx.run(dry=False)
     assert not [ln for ln in out.splitlines() if ln.startswith("skip")], out
+    line = fx.line(out, fx.wt)  # control: the sweep really ran and acted on the worktree
+    assert line is not None and line.startswith("quarantined"), out
 
 
 def test_repo_two_levels_below_the_root_is_swept(fx: Fixture) -> None:
@@ -1061,7 +1067,12 @@ def test_worktree_path_with_a_space_keeps_a_nested_repo_without_env(fx: Fixture,
 def test_scan_leaves_no_temp_file_behind(fx: Fixture, tmp_path: Path, verdict_run: str) -> None:
     scratch = tmp_path / "scratch"
     scratch.mkdir()
-    fx.run(dry=verdict_run == "dry", env={"TMPDIR": str(scratch)})
+    env = {"TMPDIR": str(scratch)}
+    if verdict_run == "dry":
+        assert fx.verdict(env=env) == "would"
+    else:  # control: the scan, the rescan and the purge scan all ran and the tree really went
+        assert fx.verdict(dry=False, env=env) == "removed"
+        assert not fx.wt.exists()
     assert list(scratch.iterdir()) == []
 
 
@@ -1367,19 +1378,29 @@ def test_worktree_with_only_marked_package_trees_is_still_removed(fx: Fixture) -
 
 
 def test_an_allowlisted_name_that_is_a_symlink_is_not_allowlisted(fx: Fixture) -> None:
-    """`tree` -> a directory holding unique data: git lists the link as one entry and never enumerates the target."""
+    """`tree` -> a marked directory holding unique data. git lists a link as one entry (no directory part) and
+    never enumerates the target, so reaching the symlink predicate needs a listing through the link: a stale one."""
     fx.exclude("tree")
     (fx.wt.parent / "elsewhere").mkdir()
+    (fx.wt.parent / "elsewhere" / "pyvenv.cfg").write_text("home = /usr/bin\n")
     (fx.wt.parent / "elsewhere" / "data").write_text("unique\n")
     (fx.wt / "tree").symlink_to(fx.wt.parent / "elsewhere")
+    fx.shim("git", 'case " $* " in *" ls-files -z -o "*) printf \'%s\\0\' "tree/data"; exit 0 ;; esac\nexec "' + _real("git") + '" "$@"')
     fx.keeps(KEEP_UNPROVEN)
+    assert (fx.wt.parent / "elsewhere" / "data").read_text() == "unique\n"
 
 
 def test_an_allowlisted_directory_below_a_symlinked_one_is_not_allowlisted(fx: Fixture) -> None:
+    """`link/node_modules` where `link` is a symlink to a directory that holds a real, marked node_modules."""
     fx.exclude("link")
-    (fx.wt.parent / "elsewhere").mkdir()
-    (fx.wt / "link").symlink_to(fx.wt.parent / "elsewhere")
+    other = fx.wt.parent / "elsewhere"
+    (other / "node_modules").mkdir(parents=True)
+    (other / "node_modules" / ".package-lock.json").write_text("{}\n")
+    (other / "node_modules" / "x.js").write_text("unique\n")
+    (fx.wt / "link").symlink_to(other)
+    fx.shim("git", 'case " $* " in *" ls-files -z -o "*) printf \'%s\\0\' "link/node_modules/x.js"; exit 0 ;; esac\nexec "' + _real("git") + '" "$@"')
     fx.keeps(KEEP_UNPROVEN)
+    assert (other / "node_modules" / "x.js").read_text() == "unique\n"
 
 
 @pytest.mark.parametrize("name", ["Node_Modules", "NODE_MODULES", "Dist", "BUILD", "Venv"])
@@ -1464,6 +1485,7 @@ def test_the_blind_spot_is_real_git_status_cannot_see_files_under_an_uninitializ
     (fx.wt / "sub" / ".env").write_text("API_KEY=abc\n")
     assert _git(fx.wt, "status", "--porcelain", "-uall") == ""
     assert _git(fx.wt, "ls-files", "-o") == ""
+    fx.keeps(KEEP_SUB)  # and the script still keeps it: the blind spot is covered, not just real
 
 
 @pytest.mark.parametrize("name", [".env", "notes.txt", "dir/deep.txt"])
