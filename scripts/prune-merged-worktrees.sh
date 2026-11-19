@@ -18,6 +18,32 @@ pr_heads() { # repo state -> "branch sha" lines; on failure prints why and retur
   printf '%s\n' "$out"
 }
 
+env_data_reason() { # worktree primary -> returns 0 and prints why when the tree must be kept, 1 when it holds no .env data
+  # Fails closed: anything that cannot be verified keeps the tree. A .env that is a byte-identical copy of the
+  # primary checkout's, a symlink out of the worktree, a symlink to a tracked file or a dangling symlink holds no
+  # data of its own; a symlink to an ignored file inside the worktree does (deleting the tree deletes the target).
+  # No `grep -q` at the end of a pipeline: under pipefail its early exit SIGPIPEs the writer and reads as "none".
+  local path="$1" repo="$2" ign rc wt f tgt
+  ign="$(git -C "$path" ls-files -o -i --exclude-standard)"; rc=$?
+  [ "$rc" -eq 0 ] || { echo "could not list ignored files (git ls-files exit $rc)"; return 0; }
+  wt="$(cd -P "$path" 2>/dev/null && pwd -P)" || { echo "could not resolve the worktree path"; return 0; }
+  while IFS= read -r f; do
+    case "/$f" in */.env*) ;; *) continue ;; esac
+    if [ -L "$path/$f" ]; then
+      [ -e "$path/$f" ] || continue
+      tgt="$(realpath "$path/$f" 2>/dev/null || readlink -f "$path/$f" 2>/dev/null)"
+      case "$tgt" in
+        "") echo "holds ignored .env files"; return 0 ;;
+        "$wt"/*) git -C "$path" ls-files --error-unmatch -- "${tgt#"$wt"/}" >/dev/null 2>&1 \
+                   || { echo "holds ignored .env files"; return 0; } ;;
+      esac
+    else
+      cmp -s "$path/$f" "$repo/$f" || { echo "holds ignored .env files"; return 0; }
+    fi
+  done <<<"$ign"
+  return 1
+}
+
 for gitdir in "$ROOT"/*/.git "$ROOT"/*/*/.git; do
   [ -e "$gitdir" ] || continue
   repo="${gitdir%/.git}"
@@ -42,11 +68,8 @@ for gitdir in "$ROOT"/*/.git "$ROOT"/*/*/.git; do
         if [ "$(git -C "$path" rev-parse HEAD)" != "$sha" ]; then
           echo "keep    $path  ($branch: HEAD is not the merged commit, may hold unpushed commits)"; continue
         fi
-        # a .env that is a symlink to, or a byte-identical copy of, the primary checkout's (worktree tools
-        # that copy .env files in) holds no data of its own: only a .env that differs keeps the tree
-        if git -C "$path" ls-files -o -i --exclude-standard | grep -E '(^|/)\.env' \
-             | while IFS= read -r f; do [ -L "$path/$f" ] || cmp -s "$path/$f" "$repo/$f" || echo "$f"; done | grep -q .; then
-          echo "keep    $path  ($branch: holds ignored .env files)"; continue
+        if why="$(env_data_reason "$path" "$repo")"; then
+          echo "keep    $path  ($branch: $why)"; continue
         fi
         kb="$(du -sk "$path" 2>/dev/null | cut -f1)"; mb=$(( ${kb:-0} / 1024 ))
         if [ "$DRY_RUN" = 1 ]; then echo "would   $path  ($branch, ${mb}M)"; continue; fi
