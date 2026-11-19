@@ -11,7 +11,9 @@ Every test runs the real script under /bin/bash against a real git repo with a s
 
 from __future__ import annotations
 
+import base64
 import datetime
+import hashlib
 import json
 import os
 import shutil
@@ -127,6 +129,12 @@ def test_p0_1_a_file_the_venv_tool_never_wrote_keeps_wherever_it_sits(fx: Fixtur
     assert KEEP_UNPROVEN in (_line(fx, out)), out
 
 
+def _rec(path: str, data: bytes) -> str:
+    """A RECORD line with the file's real sha256 and size."""
+    digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).decode().rstrip("=")
+    return f"{path},sha256={digest},{len(data)}"
+
+
 def test_p0_1_an_unlisted_file_in_site_packages_keeps_but_a_listed_one_goes(fx: Fixture) -> None:
     venv = _make_venv(fx)
     site = _site_packages(venv)
@@ -135,7 +143,10 @@ def test_p0_1_an_unlisted_file_in_site_packages_keeps_but_a_listed_one_goes(fx: 
     dist = site / "foo-1.0.dist-info"
     dist.mkdir()
     (dist / "METADATA").write_text("Name: foo\n")
-    (dist / "RECORD").write_text("foo/__init__.py,,\nfoo-1.0.dist-info/METADATA,,\nfoo-1.0.dist-info/RECORD,,\n")
+    (dist / "RECORD").write_text(
+        _rec("foo/__init__.py", b"X = 1\n") + "\n" + _rec("foo-1.0.dist-info/METADATA", b"Name: foo\n")
+        + "\nfoo-1.0.dist-info/RECORD,,\n"
+    )
     assert fx.verdict(dry=True) == "would"  # everything is listed: removable
     stray = site / "foo" / "customers.sqlite"
     _database(stray)
@@ -169,13 +180,15 @@ def _npm_tree(fx: Fixture, packages: list[str]) -> Path:
     return nm
 
 
-def test_p0_1_an_npm_tree_goes_but_a_file_beside_its_packages_keeps(fx: Fixture) -> None:
+def test_p0_1_an_npm_tree_keeps_because_the_lock_file_proves_no_file(fx: Fixture) -> None:
+    """Round 10: `.package-lock.json` lists packages, never files, so nothing under node_modules is proven; a file beside
+    the packages and one inside a package both survive."""
     nm = _npm_tree(fx, ["left-pad", "@scope/name"])
-    assert fx.verdict(dry=True) == "would"
     _database(nm / "customers.sqlite")
+    _database(nm / "left-pad" / "customers.sqlite")
     out = _to_the_end(fx)
-    assert (nm / "customers.sqlite").exists(), out
-    assert "node_modules/customers.sqlite" in (_line(fx, out)), out
+    assert (nm / "customers.sqlite").exists() and (nm / "left-pad/customers.sqlite").exists(), out
+    assert KEEP_UNPROVEN in _line(fx, out), out
 
 
 def test_p0_1_a_directory_npm_never_installed_keeps(fx: Fixture) -> None:
@@ -184,7 +197,7 @@ def test_p0_1_a_directory_npm_never_installed_keeps(fx: Fixture) -> None:
     (nm / "not-a-package/data.json").write_text("{}\n")
     out = _to_the_end(fx)
     assert (nm / "not-a-package/data.json").exists(), out
-    assert "not-a-package/data.json" in (_line(fx, out)), out
+    assert KEEP_UNPROVEN in _line(fx, out), out
 
 
 @pytest.mark.parametrize("marker", [".yarn-integrity", ".modules.yaml"])
@@ -259,7 +272,7 @@ def test_p0_1_a_pycache_file_with_no_source_and_no_record_entry_keeps(fx: Fixtur
 
 
 def test_p0_1_a_pycache_file_with_its_source_listed_in_the_record_goes(fx: Fixture) -> None:
-    venv, _ = _venv_with_record(fx, "foo/__init__.py,,")
+    venv, _ = _venv_with_record(fx, _rec("foo/__init__.py", b"X = 1\n"))
     site = _site_packages(venv)
     (site / "foo/__pycache__").mkdir(parents=True)
     (site / "foo/__init__.py").write_text("X = 1\n")

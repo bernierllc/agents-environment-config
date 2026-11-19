@@ -484,6 +484,97 @@ directory name) and on round 9.
   mutants plus two for the adapted tests, **57 of 57 killed** on the combined suite, plus the 25 `note_fault` mutants,
   25 of 25 killed.
 
+## Round 10 (two independent reviews of `ef1e812`: 1 P0, 3 P1, four P2s; every one reproduced, no gate waived)
+
+Inputs: a Codex-high review (1 P0, 2 P1) and a Sonnet review (the fourth P1 and the P2s). Each item below has a
+failing-first test in `tests/test_prune_round10_cases.py` that fails on `ef1e812` and passes on the fix. Round 10, so
+the direction is to delete less and prove more: where a proof cannot be made file by file, the reclaim is dropped.
+
+### P0: a marker proved a tool, never a file
+
+`ef1e812` let an installation record authorize deletion of everything it named, or (npm) everything beneath a named
+package directory. A record identifies where a file was installed, not what is in it now.
+
+- **(a) venv, fixed per file.** `VENV_VERIFIER` (`python3 -I`, one run over every `site-packages/*.dist-info/RECORD`)
+  prints a file only when it is a regular file, not a symlink (`O_NOFOLLOW`), whose **sha256 and size both equal** the
+  RECORD entry. A missing or non-sha256 hash, a missing size, a mismatch, an unreadable file, or a path leaving the
+  worktree proves nothing and the file keeps the tree. The RECORD itself has no hash by design (pip) and is printed as
+  read. A `.pyc` is proven only when its `.py` source is itself a claim. The venv scaffold files (`pyvenv.cfg`,
+  `bin/activate*`, `bin/python*`, `lib64`, `.gitignore`, `CACHEDIR.TAG`) stay allowlisted by name: venv creation writes
+  them and nothing hashes them. The reviewer's repro B (a real, non-matching hash) is the test; it uses real hashes, not
+  the empty ones the round-9 control used.
+- **(b) npm, reclaim removed.** `node_modules/.package-lock.json` lists packages, not files: no per-file hash exists, so
+  nothing under a package directory is provably an installed file (reproduced: `node_modules/pkg/customers.sqlite`).
+  Decision: an npm tree is kept. **The npm reclaim is now a no-op; a worktree with a `node_modules` tree is quarantined
+  never, until a tool that records file hashes exists to prove it.** This costs the disk reclaim the script used to get
+  from `node_modules`; that reclaim was the unsound part, and deleting less is the trade the brief names.
+- **(c) CACHEDIR.TAG, same decision.** The tag says "a tool calls this a cache" and nothing about any file in it
+  (reproduced: a dataset in a directory somebody tagged). Per marker the rule is: **keep unless there is file-level
+  proof.** `.pytest_cache`, `.mypy_cache` and `target` trees are therefore kept too. Only the venv marker has file-level
+  proof, so only it remains.
+- Everything unproven fails closed. `PRUNE_ALLOW_DELETE` is untouched: default off, exactly `1` enables.
+- Dependency: the venv proof needs `python3`. If it cannot run, or a RECORD cannot be read, the result is a fault keep
+  (exit 1, "could not read the venv RECORD files"), never a pass.
+
+### P1: staged-only work behind a clean fresh index
+
+The throwaway index built from HEAD (round 9) correctly ignores stat caches but replaces the real index, so staged
+content with the working copy restored to HEAD's read as clean (`MM` in real git). `keep_reason_scan` now also runs
+`git diff-index --cached --quiet HEAD` against the real index (exit 1 keeps: "the index holds staged changes"; any
+other failure is a fault keep). It reads no file, so no stat cache is trusted. It runs in the pre-move and post-move
+guards, which both go through `keep_reason`.
+
+### P1: the first move ran no holder check
+
+`quarantine_one` now runs `holder_scan` before it creates the quarantine directory or moves anything. A holder keeps
+the tree in place ("nothing was moved"); a failed or missing `lsof` is a fault keep. **Honest residual race:** a process
+that starts, or chdirs into the tree, after this scan and before the rename is not seen, and the post-move rescan only
+sees one that has already written. The rename is atomic and reversible (the tree is moved back on any later hit), so
+the worst case is a live process finding its cwd renamed to a path in the quarantine, not data lost.
+
+### P1: `delete_branch` could unborn another worktree
+
+`checked_out_at` (a `git worktree list --porcelain -z` read) now gates `delete_branch`: a branch some other worktree has
+checked out is kept and reported; a list failure keeps the branch and records a fault. The sha compare-and-swap
+(`update-ref -d <ref> <sha>`) stays. Residual race: a checkout made between the list and the `update-ref` is not
+closed, `update-ref` has no check to lean on.
+
+### P2s
+
+- **`-z` worktree parsing.** The main loop and `checked_out_at` read `git worktree list --porcelain -z` with NUL-delimited
+  reads into arrays, so a newline in a path can never forge a `branch` field and a TAB path is a worktree like any other
+  (it produces a keep or quarantine line, it does not vanish). This replaces the round-6 line heuristic and closes
+  residual limits 7 and 11 below.
+- **Quarantine collision test.** The same-name-same-day collision test is deterministic: it freezes the stamp it
+  collides with instead of racing the clock.
+- **Relative `PROJECTS_ROOT`.** Refused once at startup with one message ("PROJECTS_ROOT must be an absolute path");
+  it changed meaning with the working directory.
+- **Nested-repo scan order.** The whole-worktree scan for nested `.git` entries and bare layouts now runs before the
+  ignored-file loop, so a nested repo reports as a nested repo (not as an `.env` or an unproven file). The `dir/` case
+  inside the loop is kept as a fail-closed branch; it is unreachable in practice because the scan above keeps first.
+
+### Kept as a residual (not fixed)
+
+`long_lived` reads `refs/remotes/*/HEAD` to learn each remote's default branch; a clone with that ref missing is not
+protected by it. The branch is still protected by name (`main`, `master`, `staging`, ...) and by `delete_branch`'s
+other checks. Left as a one-line residual: fixing it means a network call or a heuristic, neither of which the guard
+should make.
+
+### Round 10 results
+
+- `tests/test_prune_round10_cases.py`: 33 tests; against `ef1e812` 28 fail and 5 pass. The 5 are the two positive
+  controls (a fully matching RECORD still goes; a branch with no other checkout still goes), the stamp test (its fix is
+  in the test), and the two neighbouring-venv tests added after the mutation run (they guard mutants, not a review finding).
+- Round-8 and round-9 tests that treated npm or `CACHEDIR.TAG` trees as removable were flipped to expect a keep, or
+  moved to a venv whose RECORD proves the file; none was weakened to pass.
+- Mutation run on the Round 10 script: 23 new mutants over the per-file proof, the index check, the first-move holder
+  scan, the checkout refusal, `-z` parsing, the absolute-root check and the scan order, plus every still-applicable
+  mutant from earlier rounds: 81 patterns, 12 no longer apply (the code they mutated is gone), **67 of 69 killed**.
+  The two survivors: `r10-unreachable-dir-entry` (the unreachable fail-closed branch above: equivalent by design) and
+  `p01-dir-symlink-below-marker` (a symlinked directory below a marker is also not followed by `find`, so no RECORD is
+  ever found through it: the symlink test is a second line of defence, not the only one). Two earlier survivors were
+  killed by the neighbouring-venv tests.
+
 ## Residual limits (documented, not solved)
 
 1. **A link held elsewhere.** An `.env*` symlink held in the primary checkout, in another repo, or in a kept
@@ -511,7 +602,7 @@ directory name) and on round 9.
    a failed read-back is a fault keep (exit 1, logged), never "nothing found". Pinned by shim fault injection for the
    four lists (index, ignored, nested, admin), without `lsof`.
 6. ~~**P1-3, ignored data and secret names: awaiting the operator's decision.**~~ DECIDED and implemented in round 7 (option B).
-7. **A forged worktree-list record.** A worktree path that contains a complete fake record (a blank line followed by
+7. ~~**A forged worktree-list record.**~~ CLOSED in round 10 (`git worktree list --porcelain -z`). Original: **A forged worktree-list record.** A worktree path that contains a complete fake record (a blank line followed by
    valid keys) passes the round-6 line check. Telling it apart needs `git worktree list -z` (git 2.36+).
 8. **Bare-layout breadth.** The bare-repo rule fires on any `objects/` directory beside a `HEAD` file and a `refs/`
    directory, tracked or not. Fail-closed by design.
@@ -519,7 +610,7 @@ directory name) and on round 9.
    `git status` read a modified file as clean; the content check compares what the filter produces.
 10. **Numeric-looking branch names in awk** (Review B, no repro of harm). Branch names are compared in awk and a name
     such as `1e3` could be compared as a number rather than a string; no failing input found.
-11. **Newline in a path forging a branch line** (Review B, no repro of harm). A worktree path containing a newline can
+11. ~~**Newline in a path forging a branch line**~~ CLOSED in round 10 (same fix as item 7). Original: **Newline in a path forging a branch line** (Review B, no repro of harm). A worktree path containing a newline can
     print a line that looks like a `branch` record; the same cause as item 7, fixed by `git worktree list -z`.
 12. **`baseRefName` ignored** (Review B, no repro of harm). A PR merged into a branch other than the default still
     counts as merged; the script checks the head commit, not where it landed.

@@ -32,6 +32,7 @@ from tests.test_prune_env_guard import (
     _first_mktemp_is_real,
     _ignored,
     _marked,
+    _proven,
     _purged,
     _real,
     _with_submodule,
@@ -95,12 +96,12 @@ def test_case1_a_marked_tree_does_not_vouch_for_its_unmarked_neighbour(fx: Fixtu
     fx.keeps(KEEP_UNPROVEN)
 
 
-def test_case1_a_cache_tree_is_regenerable_but_a_secret_name_still_keeps(fx: Fixture) -> None:
-    # round 9 replaces the round 8 test that pinned "any file under any marker is regenerable": only a cache marker
-    # (CACHEDIR.TAG) still vouches for a whole directory; a venv or npm marker vouches for what its tool recorded
+def test_case1_a_cache_tree_is_not_regenerable_and_a_secret_name_keeps_with_its_own_reason(fx: Fixture) -> None:
+    # round 10: a cache marker (CACHEDIR.TAG) proves nothing per file, so the tree is kept as unproven; a secret name inside
+    # it is still reported as a secret
     _marked(fx)
     _ignored(fx, "tree/lib/x.py")
-    assert fx.verdict() == "would"
+    fx.keeps(KEEP_UNPROVEN)
     _ignored(fx, "tree/lib/server.pem")
     fx.keeps("holds secret-named files")
 
@@ -474,6 +475,11 @@ def test_an_aside_name_that_is_already_taken_fails_the_purge_and_keeps_the_entry
 
 
 def test_two_quarantines_of_the_same_name_on_one_day_do_not_collide(fx: Fixture) -> None:
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")  # frozen: a clock tick between runs cannot split them
+    fx.shim(
+        "date",
+        f'case "$*" in "-u +%Y-%m-%dT%H%M%SZ") echo {stamp}; exit 0 ;; esac\nexec "{_real("date")}" "$@"',
+    )
     fx.run(dry=False)
     (first,) = fx.held()
     other = fx.wt.parent / fx.wt.name  # the same directory name, a new branch
@@ -497,10 +503,10 @@ def test_a_quarantined_entry_is_not_mistaken_for_a_repository(fx: Fixture) -> No
 SIG = "Signature: 8a477f597d28d172789f06886806bc55"
 
 
-def test_a_cachedir_tag_whose_first_line_continues_after_the_signature_still_proves_the_directory(fx: Fixture) -> None:
+def test_a_cachedir_tag_whose_first_line_continues_after_the_signature_proves_nothing(fx: Fixture) -> None:
     _ignored(fx, "cache/CACHEDIR.TAG", f"{SIG} (written by a tool that appends text)\n")
     _ignored(fx, "cache/x.bin")
-    assert fx.verdict() == "would"
+    fx.keeps(KEEP_UNPROVEN)
 
 
 def test_a_package_lock_marker_proves_only_node_modules_not_any_directory(fx: Fixture) -> None:
@@ -766,15 +772,14 @@ def test_audit1_a_directory_swapped_for_a_symlink_to_ignored_data_after_the_list
     assert (data / "notes.txt").read_text() == "UNIQUE NOTES\n"
 
 
-def test_audit1_control_the_same_listing_over_a_real_marked_directory_goes(fx: Fixture) -> None:
-    _ignored(fx, "dist/CACHEDIR.TAG", CACHEDIR_TAG)
-    _ignored(fx, "dist/a")
+def test_audit1_control_the_same_listing_over_a_real_proven_directory_goes(fx: Fixture) -> None:
+    _proven(fx, "a")
     assert fx.verdict() == "would"
 
 
 # --- 2. the cached regenerable prefix stops at a directory boundary ---------------------------------------------
 
-REGEN_KINDS = ["venv", "node_modules", "cachedir"]
+REGEN_KINDS = ["venv"]  # round 10: npm and cache markers prove nothing per file, so only a venv is regenerable
 
 
 def _regen_dir(fx: Fixture, kind: str) -> str:
@@ -783,13 +788,7 @@ def _regen_dir(fx: Fixture, kind: str) -> str:
         _ignored(fx, ".venv/pyvenv.cfg", "home = /usr/bin\n")
         _ignored(fx, ".venv/bin/activate")  # a file the venv scaffold proves
         return ".venv"
-    if kind == "node_modules":
-        _ignored(fx, "node_modules/.package-lock.json", _npm_lock("node_modules/pkg"))
-        _ignored(fx, "node_modules/pkg/index.js")
-        return "node_modules"
-    _ignored(fx, "dist/CACHEDIR.TAG", CACHEDIR_TAG)
-    _ignored(fx, "dist/a.txt")
-    return "dist"
+    raise AssertionError(kind)
 
 
 @pytest.mark.parametrize("kind", REGEN_KINDS)
@@ -815,9 +814,7 @@ SECRETS_ONE_PER_ARM_PATTERN = [
 
 @pytest.mark.parametrize("kind", REGEN_KINDS)
 def test_audit3_control_a_regenerable_directory_without_a_secret_goes(fx: Fixture, kind: str) -> None:
-    top = _regen_dir(fx, kind)
-    if kind == "cachedir":  # only a cache marker proves a file that no tool recorded
-        _ignored(fx, f"{top}/lib/plain.txt")
+    _regen_dir(fx, kind)
     assert fx.verdict() == "would"
 
 
@@ -834,11 +831,8 @@ def test_audit3_a_secret_named_file_inside_a_regenerable_directory_keeps(fx: Fix
 
 @pytest.mark.parametrize("kind", ["symlink-to-another-repo", "dangling-symlink", "gitfile"])
 def test_audit4_a_nested_dot_git_that_is_not_a_directory_inside_a_regenerable_tree_keeps(fx: Fixture, kind: str) -> None:
-    _marked(fx)
-    lib = fx.wt / "tree" / "lib"
-    lib.mkdir()
-    (lib / "notes.txt").write_text("UNIQUE NOTES\n")
-    assert fx.verdict() == "would", "control: the marked tree alone goes"
+    lib = _proven(fx, "sub/notes.txt", b"UNIQUE NOTES\n").parent
+    assert fx.verdict() == "would", "control: the proven tree alone goes"
     other = fx.root.parent / "other-repo"
     other.mkdir()
     _git(other, "init", "-q")

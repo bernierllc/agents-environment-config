@@ -8,15 +8,17 @@
 # `git worktree prune`. Kept and reported: dirty worktrees, a HEAD past the merged commit, commits in the HEAD, branch
 # or ORIG_HEAD reflogs that no ref reaches, anything in the worktree's git directory that git does not create for a
 # clean worktree (config.worktree, MERGE_AUTOSTASH, ...), a branch name with a newer open PR, and any ignored or
-# untracked path not PROVEN regenerable: a marker proves the tool that wrote it, never every file beneath it. Under a
-# pyvenv.cfg only the venv scaffold and the files an installed package's RECORD lists; under an npm node_modules (with
-# .package-lock.json) only the packages that lockfile lists; under a valid CACHEDIR.TAG the whole directory (the spec
-# calls it a cache); a __pycache__ .pyc beside its .py. yarn and pnpm trees prove nothing and keep. A process that has
-# its cwd or a file open inside a tree about to be removed keeps it (lsof). Secret names (.env*, keys, credentials, ...)
-# keep the worktree everywhere. Anything that cannot be read or scanned keeps the worktree, is logged, and makes the
-# run exit 1.
+# untracked path not PROVEN regenerable: a marker proves the tool that wrote it, never every file beneath it. Only two
+# things are proven, file by file: under a pyvenv.cfg the venv scaffold and each file an installed package's RECORD lists
+# whose sha256 AND size still match the file on disk; a __pycache__ .pyc beside its proven .py. Everything else keeps the
+# worktree: an npm lockfile lists packages, not file hashes, and a CACHEDIR.TAG names a tool, not the files a person put
+# beside it, so node_modules, caches, yarn and pnpm trees all keep. The index must equal HEAD (staged work keeps). A
+# process that has its cwd or a file open inside a tree keeps it, before the first move and again before a removal
+# (lsof). Secret names (.env*, keys, credentials, ...) keep the worktree everywhere. Anything that cannot be read or
+# scanned keeps the worktree, is logged, and makes the run exit 1.
 # A worktree whose real path is not strictly under $PROJECTS_ROOT is reported and never touched. The branch is deleted only
-# when it is not main, master, staging, develop or a remote's HEAD branch. An open-PR list that reaches the limit
+# when it is not main, master, staging, develop or a remote's HEAD branch, and no other worktree has it checked out.
+# Worktrees are read with `git worktree list --porcelain -z`, so no path can forge another record. An open-PR list that reaches the limit
 # (1000) skips the repo with exit 1: a PR reusing a branch name could be missing from it.
 # Idempotent; schedule it daily with cron or another scheduler.
 set -uo pipefail
@@ -33,6 +35,7 @@ NL=$'\n'
 TAB=$'\t'
 command -v gh >/dev/null || { echo "gh not found in PATH=$PATH"; exit 1; }
 case "$DAYS" in ''|*[!0-9]*|0|0[0-9]*) echo "PRUNE_QUARANTINE_DAYS must be a whole number of days, 1 or more (got '$DAYS')"; exit 1 ;; esac
+case "$ROOT" in /*) ;; *) echo "PROJECTS_ROOT must be an absolute path (got '$ROOT')"; exit 1 ;; esac # a relative root changes meaning with the cwd
 FAULTS="$(mktemp)" || { echo "could not create a temp file"; exit 1; } # a fault in a subshell cannot set a variable
 trap 'rm -f "$FAULTS"' EXIT
 note_fault() { echo x >>"$FAULTS" || echo "note    could not record a fault, the exit status may be wrong"; }
@@ -76,33 +79,26 @@ same_as_primary() { # worktree primary relpath -> 0 only for a regular file byte
   cmp -s "$1/$3" "$2/$3"
 }
 
-# A marker proves WHICH tool made a directory, never that every file beneath it is that tool's. node_modules with a
-# .package-lock.json is npm's; a directory with pyvenv.cfg is a venv; one with a CACHEDIR.TAG carrying the standard
-# first line is a cache (pytest, mypy, ruff and cargo write it). marker_of finds the outermost marked directory above a
-# file; env_data_scan collects every file under each one and unproven() keeps the tree for any file that tool cannot
-# account for. A directory NAME proves nothing, so dist, build, coverage, .next, .turbo and the like keep the worktree,
-# and so do yarn and pnpm trees (.yarn-integrity, .modules.yaml and .pnpm list no package files). Marker files and every
-# directory on the way must be real, not symlinks.
-m_root="" # the last marked directory prefix ("dir/") and its kind (venv | npm | cache): ls-files sorts, so most paths hit it
-m_kind=""
-CACHEDIR_SIG="Signature: 8a477f597d28d172789f06886806bc55"
-marker_of() { # worktree relpath -> 0 when the path lies under a marked directory (sets m_root, m_kind)
+# A marker proves WHICH tool made a directory, never that every file beneath it is that tool's, so only a marker that
+# comes with a per-file proof is used. pyvenv.cfg marks a venv, whose installed files carry a sha256 and a size in the
+# RECORD of the package that installed them (checked against the disk by proof_venv). Two markers are NOT used, because
+# neither can say which files are the tool's: node_modules/.package-lock.json lists packages, not file hashes (a
+# database or a hand-patched file inside a listed package looks the same); a CACHEDIR.TAG proves the tool that wrote the
+# tag, and any person can put one in any directory. A directory NAME proves nothing either, so dist, build, coverage,
+# .next, .turbo, node_modules, caches, yarn and pnpm trees all keep the worktree. marker_of finds the outermost venv
+# above a file; env_data_scan collects every file under it and unproven() keeps the tree for any file the RECORDs do not
+# prove. Marker files and every directory on the way must be real, not symlinks.
+m_root="" # the last venv directory prefix ("dir/"): ls-files sorts, so most paths hit it
+marker_of() { # worktree relpath -> 0 when the path lies under a venv (sets m_root)
   [ -z "$m_root" ] || case "$2" in "$m_root"*) return 0 ;; esac
-  m_root=""; m_kind=""
-  local rest="${2%/*}" acc="" comp line
+  m_root=""
+  local rest="${2%/*}" acc="" comp
   [ "$rest" != "$2" ] || return 1 # no directory part
   rest="$rest/"
   while [ -n "$rest" ]; do
     comp="${rest%%/*}"; rest="${rest#*/}"; acc="$acc$comp/"
     [ ! -L "$1/${acc%/}" ] || return 1 # a marker below a non-directory cannot exist, so no -d test is needed
-    if [ -f "$1/${acc}pyvenv.cfg" ] && [ ! -L "$1/${acc}pyvenv.cfg" ]; then m_root="$acc"; m_kind=venv; return 0; fi
-    if [ -f "$1/${acc}CACHEDIR.TAG" ] && [ ! -L "$1/${acc}CACHEDIR.TAG" ]; then
-      line=""; read -r line <"$1/${acc}CACHEDIR.TAG" 2>/dev/null
-      case "$line" in "$CACHEDIR_SIG"*) m_root="$acc"; m_kind=cache; return 0 ;; esac
-    fi
-    if [ "$comp" = node_modules ] && [ -f "$1/${acc}.package-lock.json" ] && [ ! -L "$1/${acc}.package-lock.json" ]; then
-      m_root="$acc"; m_kind=npm; return 0
-    fi
+    if [ -f "$1/${acc}pyvenv.cfg" ] && [ ! -L "$1/${acc}pyvenv.cfg" ]; then m_root="$acc"; return 0; fi
   done
   return 1
 }
@@ -115,48 +111,50 @@ pyc_has_source() { # worktree relpath -> 0 for <dir>/__pycache__/<module>.<tag>.
   [ -f "$1/$src${b%%.*}.py" ]
 }
 
-proof_venv() { # worktree root outfile -> the paths the venv's installed packages list in their RECORD files, under root
-  # RECORD lines are `path,hash,size`, the path relative to site-packages (`../../../bin/tool` reaches bin/); a path
-  # that leaves the worktree proves nothing (`bad`), and the claims it is matched against all lie under root, so a
-  # RECORD cannot vouch for a file outside its own venv.
-  ( cd "$1" && find "${2%/}" -path '*/site-packages/*.dist-info/RECORD' -type f -exec awk '
-      /^\// { next }
-      { line = $0; sub(/,[^,]*,[^,]*$/, "", line)
-        if (line ~ /^".*"$/) { line = substr(line, 2, length(line) - 2); gsub(/""/, "\"", line) }
-        site = FILENAME; sub(/\/[^\/]*\/RECORD$/, "", site)
-        n = split(site "/" line, parts, "/"); m = 0; bad = 0
-        for (i = 1; i <= n; i++) {
-          x = parts[i]
-          if (x == "" || x == ".") continue
-          if (x == "..") { if (m == 0) { bad = 1; break } m--; continue }
-          stack[++m] = x
-        }
-        if (bad || m == 0) next
-        p = stack[1]; for (i = 2; i <= m; i++) p = p "/" stack[i]
-        print p
-      }' {} + ) >"$3" 2>&1
+# Runs under `python3 -I` for every RECORD file. RECORD lines are `path,sha256=<urlsafe base64, no padding>,size`, the path
+# relative to site-packages (`../../../bin/tool` reaches bin/). A file is printed (relative to the worktree) only when it
+# is a regular file, not a symlink, whose sha256 AND size both equal the RECORD's: a missing or other-algorithm hash, a
+# missing size, a mismatch or an unreadable file proves nothing, so the file is never printed and the tree is kept. A
+# path that leaves the worktree is skipped. The RECORD itself is listed with no hash by design (pip), so it is printed
+# as read: a forged RECORD can only vouch for files whose content really matches what it claims.
+read -r -d '' VENV_VERIFIER <<'PYEOF'
+import base64, csv, hashlib, os, stat, sys
+for rec in sys.argv[1:]:
+    print(rec)
+    site = os.path.dirname(os.path.dirname(rec))
+    with open(rec, newline="", encoding="utf-8") as fh:
+        for row in csv.reader(fh):
+            if len(row) != 3 or row[0].startswith("/") or "\n" in row[0]:
+                continue
+            name, digest, size = row
+            rel = os.path.normpath(os.path.join(site, name))
+            if rel == ".." or rel.startswith("../") or not (digest.startswith("sha256=") and size.isascii() and size.isdigit()):
+                continue
+            b64 = digest[7:]
+            try:
+                want = base64.b64decode(b64.replace("-", "+").replace("_", "/") + "=" * (-len(b64) % 4), validate=True)
+                fd = os.open(rel, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            except (ValueError, OSError):
+                continue
+            with os.fdopen(fd, "rb") as f:
+                st = os.fstat(f.fileno())
+                if not stat.S_ISREG(st.st_mode) or st.st_size != int(size):
+                    continue
+                h = hashlib.sha256()
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+            if len(want) == 32 and h.digest() == want:
+                print(rel)
+PYEOF
+
+proof_venv() { # worktree root outfile -> the files under root whose RECORD hash and size match the disk, one per line
+  ( cd "$1" && find "${2%/}" -path '*/site-packages/*.dist-info/RECORD' -type f -exec python3 -I -c "$VENV_VERIFIER" {} + ) >"$3" 2>"$3.e"
 }
 
-proof_npm() { # worktree root outfile -> one "<root><package dir>/" line per package .package-lock.json lists
-  # keys are relative to the project (node_modules/<name>, node_modules/<a>/node_modules/<b>); everything under a
-  # listed package directory is that package's, and nothing else in node_modules is npm's to vouch for
-  local rc
-  sed -n 's/^ *"node_modules\/\(.*\)": *{.*$/\1/p' "$1/${2}.package-lock.json" >"$3"; rc=$?
-  [ "$rc" -eq 0 ] || return "$rc"
-  awk -v r="$2" '{ print r $0 "/" }' "$3" >"$3.n" && mv "$3.n" "$3"
-}
-
-unproven() { # worktree root kind claims proof -> prints the first claimed file the marker does not prove (none: all are)
-  local rx=""
-  case "$3" in
-    cache) return 0 ;; # shortcut: CACHEDIR.TAG is the spec's own statement that the whole directory is a cache
-    venv) rx='^(pyvenv\.cfg|\.gitignore|CACHEDIR\.TAG|lib64|bin/((python|𝜋thon)[0-9.]*t?|[Aa]ctivate([.]csh|[.]fish|[.]nu|[.]bat|[.]ps1)?|deactivate[.]bat|pydoc[.]bat))$'
-          proof_venv "$1" "$2" "$5" || { echo "could not read the venv RECORD files under $2"; return 2; } ;;
-    npm) rx='^([.]package-lock[.]json|[.]bin/.*)$'
-         proof_npm "$1" "$2" "$5" || { echo "could not read $2.package-lock.json"; return 2; } ;;
-    *) echo "unknown marker kind $3"; return 2 ;;
-  esac
-  awk -v root="$2" -v rx="$rx" -v proof="$5" '
+unproven() { # worktree root claims proof -> prints the first claimed file the venv's RECORDs do not prove (none: all are)
+  local rx='^(pyvenv\.cfg|\.gitignore|CACHEDIR\.TAG|lib64|bin/((python|𝜋thon)[0-9.]*t?|[Aa]ctivate([.]csh|[.]fish|[.]nu|[.]bat|[.]ps1)?|deactivate[.]bat|pydoc[.]bat))$'
+  proof_venv "$1" "$2" "$4" || { echo "could not read the venv RECORD files under $2 ($(head -c 200 "$4.e" 2>/dev/null | tr '\n' ' '))"; return 2; }
+  awk -v root="$2" -v rx="$rx" -v proof="$4" '
     BEGIN { while ((r = getline line < proof) > 0) p[line] = 1
             if (r < 0) { print "could not read " proof; exit 2 }
             close(proof) }
@@ -165,10 +163,7 @@ unproven() { # worktree root kind claims proof -> prints the first claimed file 
       for (i = 1; i <= n; i++) {
         f = c[i]
         if (f in p || substr(f, length(root) + 1) ~ rx) continue
-        s = f; ok = 0
-        while ((k = match(s, /\/[^\/]*$/)) > 0) { s = substr(s, 1, k - 1); if ((s "/") in p) { ok = 1; break } }
-        if (ok) continue
-        # <dir>/__pycache__/<module>.<tag>.pyc is rebuilt from <dir>/<module>.py, itself one of the claims
+        # <dir>/__pycache__/<module>.<tag>.pyc is rebuilt from <dir>/<module>.py, itself one of the claims (so proven itself)
         d = f; sub(/\/[^\/]*$/, "", d); b = f; sub(/^.*\//, "", b)
         if (d ~ /(^|\/)__pycache__$/ && b ~ /\.py[co]$/) {
           sd = d; sub(/__pycache__$/, "", sd); m = b; sub(/\..*$/, "", m)
@@ -176,7 +171,7 @@ unproven() { # worktree root kind claims proof -> prints the first claimed file 
         }
         print f; exit 0
       }
-    }' "$4"
+    }' "$3"
 }
 
 gitlink_data() { # worktree list subs -> 0 + why when a gitlink directory not initialized here holds files, 1, 2
@@ -197,10 +192,10 @@ gitlink_data() { # worktree list subs -> 0 + why when a gitlink directory not in
   return 1
 }
 
-flush_claims() { # worktree root kind claimsfile prooffile -> 0 + why when a claimed file is not proven, 1 when all are, 2 on failure
+flush_claims() { # worktree root claimsfile prooffile -> 0 + why when a claimed file is not proven, 1 when all are, 2 on failure
   local bad rc
   [ -n "$2" ] || return 1
-  bad="$(unproven "$1" "$2" "$3" "$4" "$5")"; rc=$?
+  bad="$(unproven "$1" "$2" "$3" "$4")"; rc=$?
   [ "$rc" -eq 0 ] || { echo "$bad"; return 2; }
   [ -z "$bad" ] || { echo "holds ignored files that are not proven regenerable ($bad)"; return 0; }
   return 1
@@ -211,7 +206,7 @@ env_data_scan() { # worktree primary listfile -> 0 + why when the tree must be k
   # `head` would hide a failure or SIGPIPE the writer under pipefail), and every failure keeps the tree. Every list is
   # written to $3 and then opened on fd 3 with the open's status checked: a `done <"$3"` that fails to open reads as an
   # empty list, which would be "nothing found".
-  local f out rc rel subs="" cur_root="" cur_kind="" claims="$3.c" proof="$3.p"
+  local f out rc rel subs="" cur_root="" claims="$3.c" proof="$3.p"
   wgit "$1" ls-files -z -s -v >"$3"; rc=$?
   [ "$rc" -eq 0 ] || { echo "could not read the index (git ls-files exit $rc)"; return 2; }
   exec 3<"$3" || { echo "could not read back the index list"; return 2; }
@@ -226,43 +221,6 @@ env_data_scan() { # worktree primary listfile -> 0 + why when the tree must be k
   done
   exec 3<&-
   out="$(gitlink_data "$1" "$3" "$subs")"; rc=$?
-  [ "$rc" -eq 1 ] || { echo "$out"; return "$rc"; }
-  # untracked and ignored files; an ignored nested repo is one `dir/` entry. git warns and still exits 0 for a
-  # directory it cannot read, so any stderr output counts as a failure too.
-  out="$(wgit "$1" ls-files -z -o 2>&1 >"$3")"; rc=$?
-  { [ "$rc" -eq 0 ] && [ -z "$out" ]; } || { echo "could not list ignored files (git ls-files exit $rc)"; return 2; }
-  exec 3<"$3" || { echo "could not read back the list of ignored files"; return 2; }
-  : >"$claims" || { echo "could not create the claims list"; return 2; }
-  while IFS= read -r -d '' -u 3 f; do
-    case "$f" in *"$NL"*) echo "has a file name with a newline"; return 0 ;; esac
-    case "/$f" in # any path component may carry the name, in any case (APFS is case-insensitive)
-      # the one exemption: a regular file byte-identical to the primary's copy
-      */.[eE][nN][vV]*) same_as_primary "$1" "$2" "$f" || { echo "holds ignored .env files"; return 0; }; continue ;;
-      */) out="$(find "$1/$f" -iname '.env*' 2>&1)"; rc=$? # a nested repo: the scan below keeps it
-          [ "$rc" -eq 0 ] || { echo "could not scan $f (find exit $rc)"; return 2; }
-          [ -z "$out" ] || { echo "holds ignored .env files"; return 0; }
-          continue ;;
-      # secret names keep the tree everywhere, node_modules and virtualenvs included
-      */.[dD][eE][vV].[vV][aA][rR][sS]*|*/.[nN][pP][mM][rR][cC]|*/.[nN][eE][tT][rR][cC]|*/.[pP][yY][pP][iI][rR][cC]|*/.[gG][iI][tT]-[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL][sS]) echo "holds secret-named files"; return 0 ;;
-      */[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL][sS]|*/[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL][sS].*|*/[iI][dD]_*) echo "holds secret-named files"; return 0 ;;
-      *.[eE][nN][vV]|*.[eE][nN][vV].*|*.[pP][eE][mM]|*.[kK][eE][yY]|*.[pP]12|*.[pP][fF][xX]|*.[pP]8) echo "holds secret-named files"; return 0 ;;
-      *.[jJ][kK][sS]|*.[kK][eE][yY][sS][tT][oO][rR][eE]|*.[tT][fF][vV][aA][rR][sS]|*.[tT][fF][sS][tT][aA][tT][eE]) echo "holds secret-named files"; return 0 ;;
-    esac
-    # No name list is complete, so anything not proven regenerable is unproven data. A marker only says which tool owns
-    # the directory: its files are collected per marked root and each is proven by that tool's own records below.
-    if marker_of "$1" "$f"; then
-      if [ "$m_root" != "$cur_root" ]; then # ls-files sorts, so a root's files are contiguous
-        out="$(flush_claims "$1" "$cur_root" "$cur_kind" "$claims" "$proof")"; rc=$?
-        [ "$rc" -eq 1 ] || { echo "$out"; return "$rc"; }
-        cur_root="$m_root"; cur_kind="$m_kind"; : >"$claims" || { echo "could not reset the claims list"; return 2; }
-      fi
-      printf '%s\n' "$f" >>"$claims" || { echo "could not record a marked file"; return 2; }
-      continue
-    fi
-    pyc_has_source "$1" "$f" || { echo "holds ignored files that are not proven regenerable ($f)"; return 0; }
-  done
-  exec 3<&-
-  out="$(flush_claims "$1" "$cur_root" "$cur_kind" "$claims" "$proof")"; rc=$?
   [ "$rc" -eq 1 ] || { echo "$out"; return "$rc"; }
   # Any nested .git, file or directory, in any case (APFS), is unproven pushed history. So is a bare repo, which has
   # no .git at all: a directory `objects` beside a file `HEAD` and a directory `refs`. git lists only a valid nested
@@ -281,6 +239,40 @@ env_data_scan() { # worktree primary listfile -> 0 + why when the tree must be k
     echo "holds a nested git repo"; return 0
   done
   exec 3<&-
+  # untracked and ignored files; an ignored nested repo is one `dir/` entry. git warns and still exits 0 for a
+  # directory it cannot read, so any stderr output counts as a failure too.
+  out="$(wgit "$1" ls-files -z -o 2>&1 >"$3")"; rc=$?
+  { [ "$rc" -eq 0 ] && [ -z "$out" ]; } || { echo "could not list ignored files (git ls-files exit $rc)"; return 2; }
+  exec 3<"$3" || { echo "could not read back the list of ignored files"; return 2; }
+  : >"$claims" || { echo "could not create the claims list"; return 2; }
+  while IFS= read -r -d '' -u 3 f; do
+    case "$f" in *"$NL"*) echo "has a file name with a newline"; return 0 ;; esac
+    case "/$f" in # any path component may carry the name, in any case (APFS is case-insensitive)
+      # the one exemption: a regular file byte-identical to the primary's copy
+      */.[eE][nN][vV]*) same_as_primary "$1" "$2" "$f" || { echo "holds ignored .env files"; return 0; }; continue ;;
+      */) echo "holds a nested git repo"; return 0 ;; # git lists a valid nested repo as `dir/`; the scan above already keeps it
+      # secret names keep the tree everywhere, node_modules and virtualenvs included
+      */.[dD][eE][vV].[vV][aA][rR][sS]*|*/.[nN][pP][mM][rR][cC]|*/.[nN][eE][tT][rR][cC]|*/.[pP][yY][pP][iI][rR][cC]|*/.[gG][iI][tT]-[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL][sS]) echo "holds secret-named files"; return 0 ;;
+      */[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL][sS]|*/[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL][sS].*|*/[iI][dD]_*) echo "holds secret-named files"; return 0 ;;
+      *.[eE][nN][vV]|*.[eE][nN][vV].*|*.[pP][eE][mM]|*.[kK][eE][yY]|*.[pP]12|*.[pP][fF][xX]|*.[pP]8) echo "holds secret-named files"; return 0 ;;
+      *.[jJ][kK][sS]|*.[kK][eE][yY][sS][tT][oO][rR][eE]|*.[tT][fF][vV][aA][rR][sS]|*.[tT][fF][sS][tT][aA][tT][eE]) echo "holds secret-named files"; return 0 ;;
+    esac
+    # No name list is complete, so anything not proven regenerable is unproven data. A marker only says which tool owns
+    # the directory: its files are collected per marked root and each is proven by that tool's own records below.
+    if marker_of "$1" "$f"; then
+      if [ "$m_root" != "$cur_root" ]; then # ls-files sorts, so a root's files are contiguous
+        out="$(flush_claims "$1" "$cur_root" "$claims" "$proof")"; rc=$?
+        [ "$rc" -eq 1 ] || { echo "$out"; return "$rc"; }
+        cur_root="$m_root"; : >"$claims" || { echo "could not reset the claims list"; return 2; }
+      fi
+      printf '%s\n' "$f" >>"$claims" || { echo "could not record a marked file"; return 2; }
+      continue
+    fi
+    pyc_has_source "$1" "$f" || { echo "holds ignored files that are not proven regenerable ($f)"; return 0; }
+  done
+  exec 3<&-
+  out="$(flush_claims "$1" "$cur_root" "$claims" "$proof")"; rc=$?
+  [ "$rc" -eq 1 ] || { echo "$out"; return "$rc"; }
   return 1
 }
 
@@ -340,7 +332,7 @@ keep_reason() { # worktree primary merged-sha branch -> 0 + why when the tree mu
   local list out rc
   list="$(mktemp)" || { echo "could not create a temp file"; return 2; }
   out="$(keep_reason_scan "$1" "$2" "$3" "$4" "$list")"; rc=$?
-  rm -f "$list" "$list.c" "$list.p" "$list.idx" "$list.idx.lock"
+  rm -f "$list" "$list.c" "$list.p" "$list.p.e" "$list.idx" "$list.idx.lock"
   [ "$rc" -eq 1 ] || echo "$out"
   return "$rc"
 }
@@ -356,6 +348,15 @@ keep_reason_scan() { # worktree primary merged-sha branch list -> as keep_reason
   fi
   [ "$rc" -eq 0 ] || { echo "could not read git status"; return 2; }
   [ -z "$out" ] || { echo "PR merged but worktree dirty"; return 0; }
+  # The throwaway index above replaces the real one, so it cannot see staged-only work: stage new content, restore the
+  # file to HEAD's, and status against a fresh index is clean while the real index still holds the only copy. Git's own
+  # index-versus-HEAD comparison (exit 1 = differences) covers it; it reads no file, so no stat cache is involved.
+  wgit "$1" diff-index --cached --quiet HEAD -- >/dev/null 2>&1; rc=$?
+  case "$rc" in
+    0) ;;
+    1) echo "the index holds staged changes"; return 0 ;;
+    *) echo "could not compare the index with HEAD (git diff-index exit $rc)"; return 2 ;;
+  esac
   [ "$(git -C "$1" rev-parse HEAD 2>/dev/null)" = "$3" ] \
     || { echo "HEAD is not the merged commit, may hold unpushed commits"; return 0; }
   # refs/worktree, refs/bisect and refs/rewritten belong to this worktree alone and go with it on removal
@@ -377,12 +378,38 @@ long_lived() { # repo branch -> 0 for a branch that is never deleted: main, mast
   printf '%s\n' "$heads" | sed 's|^refs/remotes/[^/]*/||' | grep -qxF -- "$2"
 }
 
+checked_out_at() { # repo branch -> 0 + prints a worktree path with refs/heads/<branch> checked out, 1 when none, 2 on failure
+  # `git worktree list --porcelain -z` ends every field with a NUL, so no path can forge a `branch` field: a path is
+  # always the text of a `worktree ` field and never equals one that starts with `branch `.
+  local tmp f wt="" rc
+  tmp="$(mktemp)" || return 2
+  git -C "$1" worktree list --porcelain -z >"$tmp" 2>/dev/null; rc=$?
+  if [ "$rc" -ne 0 ] || ! exec 5<"$tmp"; then rm -f "$tmp"; return 2; fi
+  while IFS= read -r -d '' -u 5 f; do
+    case "$f" in
+      "worktree "*) wt="${f#worktree }" ;;
+      "branch refs/heads/$2") exec 5<&-; rm -f "$tmp"; printf '%s\n' "$wt"; return 0 ;;
+    esac
+  done
+  exec 5<&-; rm -f "$tmp"
+  return 1
+}
+
 delete_branch() { # repo branch sha -> delete the branch only while it still points at the checked commit
   # `branch -D` would drop a branch somebody moved after the scan. update-ref -d keeps a moved branch; it also leaves
-  # the branch.<name>.* config section behind, which `branch -D` would have removed.
-  local repo="$1" branch="$2" sha="$3" cfg cur rc
+  # the branch.<name>.* config section behind, which `branch -D` would have removed. It also lacks `branch -D`'s refusal
+  # to delete a branch another worktree has checked out (that worktree would be left on an unborn branch), so that
+  # refusal is made here, after the removed worktree is gone from the list. A checkout made between this list and the
+  # update-ref is a race this cannot close; update-ref has no such check to lean on.
+  local repo="$1" branch="$2" sha="$3" cfg cur rc other
   # a worktree on staging whose HEAD equals a merged promotion PR head may go; the integration branch itself never does
   if long_lived "$repo" "$branch"; then echo "kept    branch $branch of $repo  (long-lived branch, never deleted)"; return; fi
+  other="$(checked_out_at "$repo" "$branch")"; rc=$?
+  case "$rc" in
+    0) echo "kept    branch $branch of $repo  (checked out in another worktree: $other)"; return ;;
+    1) ;;
+    *) echo "kept    branch $branch of $repo  (could not list the worktrees to see whether it is checked out elsewhere)"; note_fault; return ;;
+  esac
   if git -C "$repo" update-ref -d "refs/heads/$branch" "$sha"; then
     cfg="$(git -C "$repo" config --remove-section "branch.$branch" 2>&1)"; rc=$?
     # a branch with no upstream has no section: git says so with exit 128 and this message
@@ -411,7 +438,16 @@ else
 fi
 
 quarantine_one() { # repo path branch sha mb -> move to the quarantine, rescan, move back on any hit
-  local repo="$1" path="$2" branch="$3" sha="$4" mb="$5" dir q n why rc
+  local repo="$1" path="$2" branch="$3" sha="$4" mb="$5" dir q n why rc why2
+  # A process whose cwd or open file is in the tree is moved out from under it by the rename, and the rescan below cannot
+  # see a process that has not written yet. Same check as before a removal; a process that starts after it is the
+  # residual race (see holder_scan).
+  why="$(holder_scan "$path")"; rc=$?
+  if [ "$rc" -ne 1 ]; then
+    [ "$rc" -eq 0 ] || note_fault
+    echo "keep    $path  ($branch: ${why:-holder check failed, exit $rc}; nothing was moved)"
+    return
+  fi
   dir="$QBASE/$(date -u +"$STAMP")"
   # check the quarantine base before creating anything in it: a .prune-quarantine symlink would otherwise get a directory made outside the root
   mkdir -p "$QBASE" || { echo "FAILED  $path  ($branch: could not create $QBASE)"; note_fault; return; }
@@ -496,34 +532,43 @@ for gitdir in "$ROOT"/*/.git "$ROOT"/*/*/.git; do
   # only a main checkout prints `.git` here (a linked worktree prints its own git dir)
   gd="$(git -C "$repo" rev-parse --git-dir)" || { echo "skip $repo: git rev-parse failed"; note_fault; continue; }
   [ "$gd" = .git ] || continue
-  wl="$(git -C "$repo" worktree list --porcelain)" || { echo "skip $repo: could not list worktrees"; note_fault; continue; }
-  # porcelain prints a path with a newline verbatim, so a line that is no known key means the paths below cannot be
-  # trusted: keep every worktree of this repo
-  bad="$(awk '!/^(worktree |HEAD |branch |detached$|bare$|locked( |$)|prunable( |$)|$)/ {print; exit}' <<<"$wl")"; rc=$?
-  [ "$rc" -eq 0 ] || { echo "keep    $repo  (could not check the worktree list, awk exit $rc)"; note_fault; continue; }
-  [ -z "$bad" ] || { echo "keep    $repo  (unrecognised line in the worktree list, a path with a newline? every worktree here is kept)"; continue; }
-  [ "$(grep -c '^worktree ' <<<"$wl")" -gt 1 ] || continue
+  # -z ends every field with a NUL, so a path (any byte but NUL: a newline, a TAB, a lookalike `branch ` line) is exactly
+  # one `worktree ` field and can never be read as another field or split into columns.
+  wtl="$(mktemp)" || { echo "skip $repo: could not create a temp file"; note_fault; continue; }
+  git -C "$repo" worktree list --porcelain -z >"$wtl"; rc=$?
+  if [ "$rc" -ne 0 ] || ! exec 4<"$wtl"; then rm -f "$wtl"; echo "skip $repo: could not list worktrees"; note_fault; continue; fi
+  wpaths=(); wbranches=() # one entry per worktree, "" for a detached or bare one
+  while IFS= read -r -d '' -u 4 f; do
+    case "$f" in
+      "worktree "*) wpaths+=("${f#worktree }"); wbranches+=("") ;;
+      "branch refs/heads/"*) [ "${#wbranches[@]}" -eq 0 ] || wbranches[${#wbranches[@]}-1]="${f#branch refs/heads/}" ;;
+    esac
+  done
+  exec 4<&-; rm -f "$wtl"
+  [ "${#wpaths[@]}" -gt 1 ] || continue
   merged="$(pr_heads "$repo" merged)" || { note_fault; continue; }
   open="$(pr_heads "$repo" open)" || { note_fault; continue; }
 
-  awk '/^worktree /{w=substr($0,10)} /^branch /{b=substr($0,8); sub("^refs/heads/","",b); print w "\t" b}' <<<"$wl" \
-    | while IFS=$'\t' read -r path branch; do
-        [ "$path" -ef "$repo" ] && continue # same directory, even when $ROOT reaches it through a symlink
-        inq=0; [ "$(dirname "$(dirname "$path")")" -ef "$QBASE" ] && inq=1
-        sha="$(awk -v b="$branch" '$1==b{print $2; exit}' <<<"$merged")"
-        if [ -z "$sha" ]; then [ "$inq" -eq 0 ] || echo "keep    $path  ($branch: quarantined, no longer in the merged PR list)"; continue; fi
-        awk -v b="$branch" '$1==b{f=1} END{exit !f}' <<<"$open"; rc=$?
-        if [ "$rc" -eq 0 ]; then echo "keep    $path  ($branch: name reused by an open PR)"; continue; fi
-        [ "$rc" -eq 1 ] || { echo "keep    $path  ($branch: could not read the open PR list, awk exit $rc)"; note_fault; continue; }
-        if [ -d "$path" ] && ! under_root "$path"; then echo "keep    $path  ($branch: outside $ROOT, only worktrees under the projects root are touched)"; continue; fi
-        kb="$(du -sk "$path" 2>/dev/null | cut -f1)"; mb=$(( ${kb:-0} / 1024 ))
-        if [ "$inq" -eq 1 ]; then purge_one "$repo" "$path" "$branch" "$sha" "$mb"; continue; fi
-        why="$(keep_reason "$path" "$repo" "$sha" "$branch")"; rc=$?
-        # exactly 1 means "may go"; a scan that was killed or failed some other way keeps the tree
-        if [ "$rc" -ne 1 ]; then [ "$rc" -eq 0 ] || note_fault; echo "keep    $path  ($branch: ${why:-scan failed, exit $rc})"; continue; fi
-        if [ "$DRY_RUN" != 0 ]; then echo "would   quarantine $path  ($branch, ${mb}M)"; continue; fi
-        quarantine_one "$repo" "$path" "$branch" "$sha" "$mb"
-      done
+  i=0
+  while [ "$i" -lt "${#wpaths[@]}" ]; do
+    path="${wpaths[$i]}"; branch="${wbranches[$i]}"; i=$((i + 1))
+    [ -n "$branch" ] || continue
+    [ "$path" -ef "$repo" ] && continue # same directory, even when $ROOT reaches it through a symlink
+    inq=0; [ "$(dirname "$(dirname "$path")")" -ef "$QBASE" ] && inq=1
+    sha="$(awk -v b="$branch" '$1==b{print $2; exit}' <<<"$merged")"
+    if [ -z "$sha" ]; then [ "$inq" -eq 0 ] || echo "keep    $path  ($branch: quarantined, no longer in the merged PR list)"; continue; fi
+    awk -v b="$branch" '$1==b{f=1} END{exit !f}' <<<"$open"; rc=$?
+    if [ "$rc" -eq 0 ]; then echo "keep    $path  ($branch: name reused by an open PR)"; continue; fi
+    [ "$rc" -eq 1 ] || { echo "keep    $path  ($branch: could not read the open PR list, awk exit $rc)"; note_fault; continue; }
+    if [ -d "$path" ] && ! under_root "$path"; then echo "keep    $path  ($branch: outside $ROOT, only worktrees under the projects root are touched)"; continue; fi
+    kb="$(du -sk "$path" 2>/dev/null | awk 'NR==1{print $1}')"; mb=$(( ${kb:-0} / 1024 ))
+    if [ "$inq" -eq 1 ]; then purge_one "$repo" "$path" "$branch" "$sha" "$mb"; continue; fi
+    why="$(keep_reason "$path" "$repo" "$sha" "$branch")"; rc=$?
+    # exactly 1 means "may go"; a scan that was killed or failed some other way keeps the tree
+    if [ "$rc" -ne 1 ]; then [ "$rc" -eq 0 ] || note_fault; echo "keep    $path  ($branch: ${why:-scan failed, exit $rc})"; continue; fi
+    if [ "$DRY_RUN" != 0 ]; then echo "would   quarantine $path  ($branch, ${mb}M)"; continue; fi
+    quarantine_one "$repo" "$path" "$branch" "$sha" "$mb"
+  done
   # no `git worktree prune` here: `worktree remove` cleans its own admin dir, and a missing directory is also a
   # moved folder or an unmounted volume whose detached HEAD may hold the only copy of unpushed commits. git's own
   # gc prunes stale entries after gc.worktreePruneExpire (3 months).

@@ -12,6 +12,8 @@ script that never removes anything must not pass).
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import os
 import shutil
@@ -353,7 +355,7 @@ def test_non_env_file_name_with_a_newline_keeps(fx: Fixture) -> None:
 
 def test_ignored_nested_repo_holding_an_env_file_keeps(fx: Fixture) -> None:
     fx.nested_repo("vendor/lib", **{".env": "unique\n"})
-    fx.keeps()
+    fx.keeps("holds a nested git repo")
 
 
 @pytest.mark.parametrize("name", [".ENV", ".eNv.local", "sub/.Env"])
@@ -361,7 +363,7 @@ def test_ignored_nested_repo_holding_a_mixed_case_env_file_keeps(fx: Fixture, na
     nested = fx.nested_repo("vendor/lib")
     (nested / name).parent.mkdir(parents=True, exist_ok=True)
     (nested / name).write_text("unique\n")
-    fx.keeps()
+    fx.keeps("holds a nested git repo")
 
 
 def test_env_named_parent_of_a_nested_repo_keeps(fx: Fixture) -> None:
@@ -370,7 +372,7 @@ def test_env_named_parent_of_a_nested_repo_keeps(fx: Fixture) -> None:
     _git(nested, "init", "-q")
     (nested / "credentials").write_text("unique\n")
     assert _git(fx.wt, "status", "--porcelain") == ""
-    fx.keeps()
+    fx.keeps("holds a nested git repo")
     assert (nested / "credentials").exists()
 
 
@@ -544,13 +546,14 @@ def test_git_ls_files_untracked_failure_keeps(fx: Fixture) -> None:
 
 @pytest.mark.skipif(IS_ROOT, reason="root ignores directory permissions")
 def test_unreadable_ignored_directory_keeps(fx: Fixture) -> None:
-    # git warns "could not open directory" and still exits 0; the .env inside is invisible to it
+    # git warns "could not open directory" and still exits 0; the .env inside is invisible to it. The nested-repo `find`
+    # runs first now and fails on the same directory, which keeps just as closed
     vault = fx.wt / "only-copy"
     vault.mkdir()
     (vault / ".env").write_text("unique\n")
     vault.chmod(0)
     try:
-        fx.keeps("could not list ignored files")
+        fx.keeps("could not scan for nested git repos")
     finally:
         vault.chmod(0o755)
 
@@ -568,34 +571,43 @@ def test_git_rev_parse_head_failure_keeps(fx: Fixture) -> None:
 def test_find_killed_in_a_nested_repo_scan_keeps(fx: Fixture) -> None:
     fx.nested_repo("vendor/lib", **{".env": "unique\n"})
     fx.shim("find", f'for a in "$@"; do [ "$a" = -iname ] && kill -9 $$; done\nexec "{_real("find")}" "$@"')
-    fx.keeps("could not scan vendor/lib/ (find exit 137)")
+    fx.keeps("could not scan for nested git repos (find exit 137)")
 
 
 def test_find_failing_quietly_in_a_nested_repo_scan_keeps(fx: Fixture) -> None:
     fx.nested_repo("vendor/lib", readme="nothing\n")
     fx.shim("find", f'for a in "$@"; do [ "$a" = -iname ] && exit 1; done\nexec "{_real("find")}" "$@"')
-    fx.keeps("could not scan vendor/lib/ (find exit 1)")
+    fx.keeps("could not scan for nested git repos (find exit 1)")
 
 
 def test_failing_head_does_not_change_the_nested_repo_verdict(fx: Fixture) -> None:
     fx.nested_repo("vendor/lib", **{".env": "unique\n"})
     fx.shim("head", "exit 1")
-    fx.keeps()
+    fx.keeps("holds a nested git repo")
 
 
 def test_scan_killed_mid_way_keeps(fx: Fixture) -> None:
     # the first `rm` is the scan's own, inside its command substitution; killing its parent kills the whole scan
     # with status 137. Later calls (the exit trap's) are the real rm, or the script itself would be killed.
-    marker = fx.bindir / "rm.killed"
-    fx.shim("rm", f'[ -e "{marker}" ] && exec "{_real("rm")}" "$@"\ntouch "{marker}"\nkill -9 $PPID')
+    # `rm` calls: the worktree-list file's cleanup is the first (real); the scan's is the second (killed); then real again
+    counter = fx.bindir / "rm.count"
+    fx.shim(
+        "rm",
+        f'n=$(cat "{counter}" 2>/dev/null || echo 0); echo $((n + 1)) >"{counter}"\n'
+        f'[ "$n" -ne 1 ] && exec "{_real("rm")}" "$@"\nkill -9 $PPID',
+    )
     fx.keeps("scan failed, exit 137", real=False)
     assert fx.last_rc == 1
 
 
-def _first_mktemp_is_real(fx: Fixture, then: str) -> None:
-    """The script's own bookkeeping file is the first mktemp; the scan's list files come after it."""
-    marker = fx.bindir / "mktemp.used"
-    fx.shim("mktemp", f'[ -e "{marker}" ] || {{ touch "{marker}"; exec "{_real("mktemp")}" "$@"; }}\n{then}')
+def _first_mktemp_is_real(fx: Fixture, then: str, real_calls: int = 2) -> None:
+    """The script's own bookkeeping files come first (the fault log, then the worktree list); the scan's list files after."""
+    counter = fx.bindir / "mktemp.count"
+    fx.shim(
+        "mktemp",
+        f'n=$(cat "{counter}" 2>/dev/null || echo 0); echo $((n + 1)) >"{counter}"\n'
+        f'[ "$n" -lt {real_calls} ] && exec "{_real("mktemp")}" "$@"\n{then}',
+    )
 
 
 def test_mktemp_failure_keeps(fx: Fixture) -> None:
@@ -1147,12 +1159,31 @@ KEEP_SECRET = "holds secret-named files"
 
 
 def _marked(fx: Fixture, top: str = "tree") -> None:
-    """An ignored cache directory (CACHEDIR.TAG, standard signature): the one marker whose spec makes the WHOLE directory
-    regenerable, so a file of any name under it is proven and only the rule under test can keep it. A venv or npm
-    marker proves only what its tool recorded (round 9), so it cannot play this part."""
+    """An ignored directory for a test about one rule (nested repo, secret name, record framing). Nothing under it is
+    proven regenerable since round 10 (only a venv's own RECORD proves a file), so such a test pins the reason it names,
+    which is reported ahead of the generic "not proven" keep; a test that needs a tree that goes uses `_proven`."""
     fx.exclude(f"{top}/")
     (fx.wt / top).mkdir(parents=True, exist_ok=True)
-    (fx.wt / top / "CACHEDIR.TAG").write_text(CACHEDIR_TAG)
+
+
+def _proven(fx: Fixture, rel: str, data: bytes = b"x\n", top: str = "tree") -> Path:
+    """Write `rel` as a file a venv's RECORD proves (path, real sha256 and size), so a test of the removal path has a tree
+    that may go. The venv is `top`/ with one installed package; every call appends to its RECORD."""
+    fx.exclude(f"{top}/")
+    site = fx.wt / top / "lib" / "python3.12" / "site-packages"
+    dist = site / "pkg-1.0.dist-info"
+    dist.mkdir(parents=True, exist_ok=True)
+    (fx.wt / top / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    target = site / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).decode().rstrip("=")
+    record = dist / "RECORD"
+    if not record.exists():
+        record.write_text("pkg-1.0.dist-info/RECORD,,\n")
+    with record.open("a") as fh:
+        fh.write(f"{rel},sha256={digest},{len(data)}\n")
+    return target
 
 
 def _purged(
@@ -1247,9 +1278,8 @@ def test_nested_repo_whose_path_is_a_prefix_of_a_submodule_path_keeps(fx: Fixtur
 
 
 def test_names_that_only_look_like_a_git_directory_do_not_keep(fx: Fixture) -> None:
-    _marked(fx)
-    for rel in ("tree/.github/ci.yml", "tree/pkg.git", "tree/.gitkeep", "tree/not.git/x"):
-        _ignored(fx, rel)
+    for rel in (".github/ci.yml", "pkg.git", ".gitkeep", "not.git/x"):
+        _proven(fx, rel)
     assert fx.verdict() == "would"
 
 
@@ -1296,9 +1326,8 @@ def test_ignored_secret_named_file_keeps_the_worktree(fx: Fixture, rel: str) -> 
 
 @pytest.mark.parametrize("rel", ["notes.txt", "monkey", "keyboard.js", "valid_rsa", "npmrc", "dev.vars", "pem", "src/key"])
 def test_names_that_only_resemble_a_secret_name_do_not_keep(fx: Fixture, rel: str) -> None:
-    """Under a marked tree (regenerable) so only the secret-NAME rule could keep these: it must not match a lookalike."""
-    _marked(fx)
-    _ignored(fx, f"tree/{rel}")
+    """Inside a venv's own record (proven) so only the secret-NAME rule could keep these: it must not match a lookalike."""
+    _proven(fx, rel)
     assert fx.verdict() == "would"
 
 
@@ -1363,7 +1392,8 @@ CACHEDIR_TAG = "Signature: 8a477f597d28d172789f06886806bc55\n# This file is a ca
     ],
 )
 def test_each_marker_proven_directory_alone_does_not_keep(fx: Fixture, marker: str, rel: str) -> None:
-    """The control for the marker rule: each documented marker really proves a tree removable (and not just never reached)."""
+    """Only a venv's own marker proves anything (its scaffold files); the npm and cache markers prove no file, so
+    those trees are kept as unproven. The venv rows are the control that the scaffold really is removable."""
     if marker.endswith("CACHEDIR.TAG"):
         text = CACHEDIR_TAG
     elif marker.endswith(".package-lock.json"):
@@ -1372,9 +1402,12 @@ def test_each_marker_proven_directory_alone_does_not_keep(fx: Fixture, marker: s
         text = "home = /usr/bin\n"
     _ignored(fx, marker, text)
     _ignored(fx, rel)
-    assert fx.verdict() == "would"
-    assert fx.verdict(dry=False) == "removed"
-    assert not fx.wt.exists()
+    if marker.endswith("pyvenv.cfg"):
+        assert fx.verdict() == "would"
+        assert fx.verdict(dry=False) == "removed"
+        assert not fx.wt.exists()
+    else:
+        fx.keeps(KEEP_UNPROVEN)
 
 
 def test_a_pycache_file_beside_its_tracked_source_does_not_keep(fx: Fixture) -> None:
@@ -1424,13 +1457,8 @@ def test_a_symlinked_marker_proves_nothing(fx: Fixture, marker: str) -> None:
     fx.keeps(KEEP_UNPROVEN)
 
 
-def test_worktree_with_only_marked_package_trees_is_still_removed(fx: Fixture) -> None:
-    for marker, text, rel in (
-        ("node_modules/.package-lock.json", _npm_lock("node_modules/pkg"), "node_modules/pkg/index.js"),
-        (".venv/pyvenv.cfg", "home = /usr/bin\n", ".venv/bin/activate"),
-    ):
-        _ignored(fx, marker, text)
-        _ignored(fx, rel)
+def test_worktree_with_only_a_proven_venv_is_still_removed(fx: Fixture) -> None:
+    _proven(fx, "pkg/module.py", top=".venv")
     assert fx.verdict(dry=False) == "removed"
     assert not fx.wt.exists()
 
@@ -1474,9 +1502,9 @@ def test_env_file_inside_node_modules_still_keeps(fx: Fixture, name: str) -> Non
 
 
 def test_env_file_inside_a_nested_repo_under_node_modules_is_reported_as_env(fx: Fixture) -> None:
-    """The exemption must not skip the `.env*` scan of a nested repo (git lists it as one `dir/` entry)."""
+    """A nested repo is kept as a repo (its `.env` included) wherever it sits, node_modules or not."""
     fx.nested_repo("node_modules/pkg", **{".env": "unique\n"})
-    fx.keeps("holds ignored .env files")
+    fx.keeps(KEEP_GIT)
 
 
 @pytest.mark.parametrize(
@@ -1635,6 +1663,12 @@ def test_a_minimal_bare_layout_keeps(fx: Fixture) -> None:
     fx.keeps(KEEP_GIT)
 
 
+def _is_not_a_repo_keep(fx: Fixture) -> None:
+    """Whatever else keeps the tree (unproven files), the nested-repo rule must not be the reason."""
+    line = fx.line(fx.run(True), fx.wt)
+    assert line is not None and KEEP_GIT not in line, line
+
+
 @pytest.mark.parametrize("spelling", ["OBJECTS", "Objects"])
 def test_a_bare_layout_with_objects_spelled_in_another_case_keeps(fx: Fixture, spelling: str) -> None:
     """APFS is case-insensitive: git opens `OBJECTS` as `objects`, so the name match must not be exact."""
@@ -1652,7 +1686,7 @@ def test_a_bare_layout_with_objects_spelled_in_another_case_keeps(fx: Fixture, s
     ids=["no-HEAD", "no-refs", "objects-is-a-file"],
 )
 def test_a_directory_that_only_partly_looks_like_a_bare_repo_does_not_keep(fx: Fixture, missing: str) -> None:
-    _marked(fx)  # regenerable: only the nested-repo rule can keep it
+    _marked(fx)
     bare = fx.wt / "tree" / "lib"
     bare.mkdir(parents=True)
     if missing == "objects-as-file":
@@ -1663,7 +1697,7 @@ def test_a_directory_that_only_partly_looks_like_a_bare_repo_does_not_keep(fx: F
         (bare / "refs").mkdir()
     if missing != "HEAD":
         (bare / "HEAD").write_text("ref: refs/heads/main\n")
-    assert fx.verdict() == "would"
+    _is_not_a_repo_keep(fx)
 
 
 @pytest.mark.parametrize("spelling", [".Git", ".GIT", ".gIt"])
@@ -1782,19 +1816,19 @@ def _worktree_with_newline_in_its_path(fx: Fixture) -> Path:
 
 
 def test_a_newline_in_a_worktree_path_cannot_make_another_worktree_go_under_the_wrong_label(fx: Fixture) -> None:
-    _worktree_with_newline_in_its_path(fx)
+    odd = _worktree_with_newline_in_its_path(fx)
     out = fx.run(dry=False)
-    assert fx.wt.exists(), out  # feat/x was never merged: nothing may remove it, whatever label is printed
+    assert fx.wt.exists(), out  # feat/x was never merged: nothing may move it, whatever the odd path prints as
     assert _git(fx.repo, "branch", "--list", BRANCH) != ""
-    assert "removed" not in out, out
-    assert f"keep    {fx.repo}  (" in out and "unrecognised line" in out, out
+    assert not odd.exists(), out  # the odd worktree is judged as itself, on its own branch (feat/nl), and goes under hold
 
 
-def test_an_unparseable_worktree_list_skips_the_whole_repo_not_just_the_odd_worktree(fx: Fixture) -> None:
-    _worktree_with_newline_in_its_path(fx)
-    fx.merged.append(f"{BRANCH} {_git(fx.wt, 'rev-parse', 'HEAD')}")  # now a clean, merged, removable fx.wt too
+def test_a_newline_path_worktree_and_its_neighbour_are_each_judged_on_their_own_branch(fx: Fixture) -> None:
+    odd = _worktree_with_newline_in_its_path(fx)
+    fx.merged.append(f"{BRANCH} {_git(fx.wt, 'rev-parse', 'HEAD')}")  # now a clean, merged fx.wt too
     out = fx.run(dry=False)
-    assert fx.wt.exists(), out
+    assert not fx.wt.exists() and not odd.exists(), out
+    assert len(fx.held()) == 2, out
 
 
 def test_every_known_porcelain_key_is_accepted(fx: Fixture) -> None:
@@ -1813,11 +1847,11 @@ def test_a_primary_marked_bare_prints_a_bare_line_that_is_accepted(fx: Fixture) 
     assert fx.verdict(dry=False) == "removed"
 
 
-def test_awk_failing_in_the_worktree_list_check_skips_the_repo(fx: Fixture) -> None:
-    fx.shim("awk", 'case "$*" in *prunable*) exit 2 ;; esac\nexec "' + _real("awk") + '" "$@"')
-    out = fx.run(dry=False)
+def test_a_failing_worktree_list_skips_the_repo_and_faults(fx: Fixture) -> None:
+    fx.git_fails("worktree list --porcelain -z")
+    out = fx.run(dry=False, expect_fault=True)
     assert fx.wt.exists(), out
-    assert f"keep    {fx.repo}  (" in out and "could not check the worktree list" in out, out
+    assert "could not list worktrees" in out, out
 
 
 # =============================================================================================================
@@ -1874,7 +1908,7 @@ def test_a_dangling_objects_symlink_without_a_bare_layout_does_not_keep(fx: Fixt
     _marked(fx)
     (fx.wt / "tree" / "lib").mkdir(parents=True)
     (fx.wt / "tree" / "lib" / "objects").symlink_to("nowhere")
-    assert fx.verdict() == "would"
+    _is_not_a_repo_keep(fx)
 
 
 # --- the branch is deleted by compare-and-delete -----------------------------------------------------------------
@@ -2032,22 +2066,24 @@ def test_an_unreadable_head_reflog_keeps(fx: Fixture) -> None:
 
 @pytest.mark.skipif(IS_ROOT, reason="root ignores file permissions")
 @pytest.mark.parametrize(
-    ("after", "why"),
+    ("tool", "after", "why"),
     [
-        ("ls-files -z -s -v", "could not list ignored files"),
-        ("ls-files -z -o", "could not scan for nested git repos"),
+        ("git", "ls-files -z -s -v", "could not scan for nested git repos"),
+        ("find", "-iname .git", "could not list ignored files"),
     ],
     ids=["second-use", "third-use"],
 )
-def test_a_scan_file_that_becomes_unwritable_midway_keeps(fx: Fixture, tmp_path: Path, after: str, why: str) -> None:
+def test_a_scan_file_that_becomes_unwritable_midway_keeps(
+    fx: Fixture, tmp_path: Path, tool: str, after: str, why: str
+) -> None:
     """The one temp file is reused by every scan step. Each later step's write failing must read as unknown, not
     as an empty list: the worktree has nothing else to protect, so only the failed write could save it."""
     target = tmp_path / "scratch"
     fx.shim("mktemp", f'chmod 644 "{target}" 2>/dev/null; : >"{target}"; echo "{target}"')
     fx.shim(
-        "git",
-        f'case " $* " in *" {after} "*) "{_real("git")}" "$@"; rc=$?; chmod 444 "{target}"; exit $rc ;; esac\n'
-        f'exec "{_real("git")}" "$@"',
+        tool,
+        f'case " $* " in *" {after} "*) "{_real(tool)}" "$@"; rc=$?; chmod 444 "{target}"; exit $rc ;; esac\n'
+        f'exec "{_real(tool)}" "$@"',
     )
     fx.keeps(why)
 

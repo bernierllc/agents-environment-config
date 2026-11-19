@@ -198,7 +198,8 @@ def test_purge_holder_found_and_failed_move_back_faults(fx: Fixture) -> None:
     """Fault-site audit (the holder-check branch): a holder is a policy keep (exit 0 from the check, so it records no
     fault of its own) AND the move back fails, so only the failed move can make the run exit 1; the tree stays at the
     `.purge` name."""
-    fx.shim("lsof", 'printf "p1\\ncinjected\\n"; exit 0')
+    # round 10: the first move scans too, so the holder appears only once the entry is at its `.purge` name
+    fx.shim("lsof", 'case "$*" in *.purge*) printf "p1\\ncinjected\\n"; exit 0 ;; esac\nexit 1')
     fx.shim(
         "git",
         'case "$*" in *worktree\\ move\\ *.purge\\ /*) echo "fatal: injected" >&2; exit 128 ;; esac\n'
@@ -319,13 +320,6 @@ def test_worktree_list_failure_is_a_recorded_fault(fx: Fixture) -> None:
     fx.git_fails("worktree list --porcelain")
     out = fx.run(False, expect_fault=True)
     assert "could not list worktrees" in out, out
-
-
-def test_worktree_list_awk_check_failure_is_a_recorded_fault(fx: Fixture) -> None:
-    """#238."""
-    fx.shim("awk", 'case "$*" in *"locked( |$)"*) exit 2 ;; esac\nexec "' + _real("awk") + '" "$@"')
-    out = fx.run(False, expect_fault=True)
-    assert "could not check the worktree list" in out, out
 
 
 def test_gh_merged_failure_with_a_held_entry_prints_nothing_about_it(fx: Fixture) -> None:
