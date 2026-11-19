@@ -275,6 +275,18 @@ def test_p0_2_a_tree_nothing_holds_is_still_removed(fx: Fixture) -> None:
     assert fx.verdict(dry=False) == "removed"
 
 
+@pytest.mark.parametrize("value", ["", "0", "yes", "true", "2"])
+def test_p0_2_deletion_is_off_unless_the_operator_sets_exactly_1(fx: Fixture, value: str) -> None:
+    """No lsof check can see another user's process or the milliseconds before the remove, so the unattended purge
+    stops at the quarantine until PRUNE_ALLOW_DELETE=1 (the suite's Fixture.run sets it for every other test)."""
+    fx.run(False)
+    (entry,) = fx.held()
+    entry = fx.age(entry)
+    out = fx.run(False, {"PRUNE_ALLOW_DELETE": value})
+    assert entry.exists(), out
+    assert "unattended deletion is off" in _line(fx, out), out
+
+
 # --- P1-3: FETCH_HEAD can be the only reference to fetched history ----------------------------------------
 
 
