@@ -536,21 +536,26 @@ class TestUnguardedScriptCommands:
         event = next(iter(settings["hooks"]))
         entry = settings["hooks"][event][0]
         current = json.dumps(entry)
-        assert f"/bin/sh {script}" in current
+        rendered = '/bin/sh "$GEMINI_PROJECT_DIR"/.claude/skills/demo/scripts/check.sh'
+        assert entry["hooks"][0]["command"] == rendered
 
-        # What the pre-interpreter install wrote: the bare path.
-        entry = json.loads(current.replace(f"/bin/sh {script}", str(script)))
-        settings["hooks"][event] = [entry]
-        settings_path.write_text(json.dumps(settings))
-        st = load_state(repo_root, item_type="skill", item_key="demo")
-        st.hooks_installed[0]["content_fingerprint"] = fingerprint_hook(entry)
-        save_state(repo_root, st)
+        # Older installs: the bare path (needs +x), then the interpreter with
+        # this machine's absolute path (not committable to a shared repo).
+        for legacy in (str(script), f"/bin/sh {script}"):
+            old = json.loads(current.replace(
+                json.dumps(rendered)[1:-1], json.dumps(legacy)[1:-1]))
+            assert old["hooks"][0]["command"] == legacy
+            settings["hooks"][event] = [old]
+            settings_path.write_text(json.dumps(settings))
+            st = load_state(repo_root, item_type="skill", item_key="demo")
+            st.hooks_installed[0]["content_fingerprint"] = fingerprint_hook(old)
+            save_state(repo_root, st)
 
-        assert [s.status for s in verify_repo(repo_root)] == [Drift.STALE]
-        assert any(r.repaired for r in repair_repo(repo_root))
-        arr = json.loads(settings_path.read_text())["hooks"][event]
-        assert [json.dumps(e) for e in arr] == [current]
-        assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
+            assert [s.status for s in verify_repo(repo_root)] == [Drift.STALE]
+            assert any(r.repaired for r in repair_repo(repo_root))
+            arr = json.loads(settings_path.read_text())["hooks"][event]
+            assert [json.dumps(e) for e in arr] == [current]
+            assert [s.status for s in verify_repo(repo_root)] == [Drift.OK]
 
     def test_hook_moved_to_another_event_is_stale(self, tmp_path):
         """Same id and command, new event: the old block fires on the wrong op."""

@@ -23,7 +23,8 @@ main checkout's and `_merge_gemini_entries` appends instead of replacing.
    the main work tree for separate-git-dir layouts.
 2. Render gemini and cursor script paths so they do not depend on the checkout location (the repo-relative or
    env-anchored form the claude and git renderers already use), so a worktree's files never carry its absolute
-   path.
+   path. Gemini is done: it renders `"$GEMINI_PROJECT_DIR"/<rel>` (Gemini CLI documents that variable). Cursor
+   documents no project-dir variable, so it stays absolute and remains open here.
 3. With valid `.aec/installed-hooks` state, `install_item_hooks` already calls `_remove_recorded_hooks` before
    merging, so a changed fingerprint is replaced, not appended. The duplicate therefore needs missing or stale
    state, and the gemini and cursor payloads carry neither the item key nor the source hook id (those exist only

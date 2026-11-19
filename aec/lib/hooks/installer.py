@@ -57,14 +57,17 @@ def _is_repo_local(script_path: Path, repo_root: Path) -> bool:
 # exports $CLAUDE_PROJECT_DIR, so a repo-local script can be addressed
 # portably — the same settings.json then works in a clone, a worktree, or on a
 # teammate's machine. Git hooks run with cwd at the repo root, so a plain
-# relative path is enough there. gemini/cursor expose no verified project-dir
-# variable, so they keep the absolute path.
+# relative path is enough there. Gemini CLI documents $GEMINI_PROJECT_DIR
+# (https://geminicli.com/docs/hooks/, "Environment variables"), so it gets the
+# same shape as claude. cursor exposes no verified project-dir variable, so it
+# keeps the absolute path.
 # ponytail: per-agent rendering, not a plugin registry — add one when a fourth
 # agent needs a third rendering.
 # The rendering claude gets. Also the marker drift detection keys on: a command
 # STARTING with this is a resolved repo-local script path, not just any hook that
 # happens to mention the variable.
 CLAUDE_PROJECT_DIR_PREFIX = '"$CLAUDE_PROJECT_DIR"/'
+GEMINI_PROJECT_DIR_PREFIX = '"$GEMINI_PROJECT_DIR"/'
 
 
 # Shell that prints the main checkout's root: the parent of the git common dir,
@@ -89,8 +92,12 @@ def _render_script_path(script_path: Path, repo_root: Path, agent: str) -> str:
         return shlex.quote(str(script_path))
     if agent == "claude":
         return CLAUDE_PROJECT_DIR_PREFIX + shlex.quote(str(rel))
+    if agent == "gemini":
+        return GEMINI_PROJECT_DIR_PREFIX + shlex.quote(str(rel))
     if agent == "git":
         return shlex.quote(str(rel))
+    # cursor: no documented project-dir variable, so the absolute path stays and
+    # .cursor/hooks.json cannot be committed portably (tracked residual).
     return shlex.quote(str(script_path))
 
 

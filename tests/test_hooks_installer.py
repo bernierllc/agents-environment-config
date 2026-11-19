@@ -514,9 +514,10 @@ class TestRepoLocalScriptRendering:
 
     Claude Code exports $CLAUDE_PROJECT_DIR, so settings.json can address the
     script portably — the same file then works in a clone, a worktree, or on a
-    teammate's checkout. Git hooks run with cwd at the repo root, so a plain
-    relative path is enough there. gemini/cursor have no verified project-dir
-    variable, so they keep absolute.
+    teammate's checkout. Gemini CLI documents $GEMINI_PROJECT_DIR, so it gets the
+    same shape. Git hooks run with cwd at the repo root, so a plain relative
+    path is enough there. cursor has no verified project-dir variable, so it
+    keeps absolute.
     """
 
     @staticmethod
@@ -625,14 +626,49 @@ class TestRepoLocalScriptRendering:
         result = subprocess.run(["sh", "-c", cmd], env=env, capture_output=True, text=True)
         assert result.returncode == 2 and "blocked" in result.stderr, result
 
-    def test_gemini_keeps_absolute_path(self, tmp_path):
+    def test_gemini_repo_local_script_has_no_absolute_path(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
-        script = self._install(repo_root, ["gemini"])
+        self._install(repo_root, ["gemini"])
         settings = json.loads((repo_root / ".gemini/settings.json").read_text())
-        cmd = json.dumps(settings)
-        assert str(script) in cmd
+        cmd = settings["hooks"]["AfterTool"][0]["hooks"][0]["command"]
+        assert cmd == '/bin/sh "$GEMINI_PROJECT_DIR"/.claude/skills/demo/scripts/check.sh --flag'
+        assert str(tmp_path) not in json.dumps(settings)
         assert "CLAUDE_PROJECT_DIR" not in cmd
+
+    def test_gemini_rendered_command_expands_in_a_shell(self, tmp_path):
+        """The variable must reach the script path when `sh -c` runs the command."""
+        import subprocess
+        repo_root = tmp_path / "repo with space"
+        repo_root.mkdir()
+        self._install(repo_root, ["gemini"])
+        cmd = json.loads((repo_root / ".gemini/settings.json").read_text())[
+            "hooks"]["AfterTool"][0]["hooks"][0]["command"]
+        env = {"GEMINI_PROJECT_DIR": str(repo_root), "PATH": "/usr/bin:/bin"}
+        result = subprocess.run(["sh", "-c", cmd], env=env, capture_output=True, text=True)
+        assert result.returncode == 0 and result.stdout == "ok\n", result
+
+    def test_gemini_global_item_dir_stays_absolute(self, tmp_path):
+        from aec.lib.hooks.installer import install_item_hooks
+        item_dir = tmp_path / "global-item"
+        (item_dir / "scripts").mkdir(parents=True)
+        script = item_dir / "scripts" / "check.sh"
+        script.write_text("#!/bin/sh\n")
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "on_file_edit",
+                "command": "aec run-script skill:demo check.sh", "description": "d",
+            }],
+        }))
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["gemini"],
+        )
+        cmd = json.loads((repo_root / ".gemini/settings.json").read_text())[
+            "hooks"]["AfterTool"][0]["hooks"][0]["command"]
+        assert cmd == f"/bin/sh {script}"
 
     def test_global_item_dir_stays_absolute(self, tmp_path):
         """An item installed from outside the repo has no relative rendering."""
