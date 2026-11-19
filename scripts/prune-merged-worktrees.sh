@@ -1,12 +1,15 @@
 #!/bin/bash
-# Removes linked git worktrees whose branch has a merged PR and whose HEAD is exactly the commit
-# GitHub merged, then deletes the local branch. Kept and reported: dirty worktrees, a HEAD past the
-# merged commit (unpushed work), a branch name with a newer open PR, and any worktree holding an ignored
-# or untracked .env* file or any .env* symlink, unless that file is a regular file byte-identical to the
-# primary checkout's copy. Anything that cannot be scanned is kept too.
-# Scans $PROJECTS_ROOT (default ~/projects) one and two levels deep. Fails closed on DRY_RUN: only DRY_RUN=0
-# (or unset) removes for real; any other value (1, true, yes, empty, ...) only prints.
-# Never runs `git worktree prune`: it cannot tell a moved or unmounted worktree from a deleted one.
+# Removes linked git worktrees whose branch has a merged PR and whose HEAD is exactly the commit GitHub merged,
+# then deletes the local branch (only if it still points at that commit). Fails closed on DRY_RUN: only DRY_RUN=0
+# (or unset) removes for real; any other value (1, true, yes, empty, ...) only prints. Scans $PROJECTS_ROOT
+# (default ~/projects) one and two levels deep. Never runs `git worktree prune`: it cannot tell a moved or
+# unmounted worktree from a deleted one. Kept and reported: dirty worktrees, a HEAD past the merged commit
+# (unpushed work), commits in the HEAD reflog that no ref reaches, a branch name with a newer open PR, and any
+# worktree holding an ignored or untracked path unless it is PROVEN regenerable: every such path must sit under a
+# directory named exactly node_modules, .venv, venv, site-packages, __pycache__, dist, build, .next, .turbo,
+# coverage, .pytest_cache, .mypy_cache or .ruff_cache (a symlink or another spelling does not count). Secret
+# names (.env*, keys, certificates, credentials, ...) keep the worktree even there, and a .env* file is exempt
+# only when it is byte-identical to the primary checkout's copy. Anything that cannot be scanned is kept too.
 # Idempotent; schedule it daily with cron or launchd.
 set -uo pipefail
 ROOT="${PROJECTS_ROOT:-$HOME/projects}"
@@ -35,6 +38,22 @@ same_as_primary() { # worktree primary relpath -> 0 only for a regular file byte
   # a symlinked parent could lead the "primary copy" back into a worktree that is about to be removed
   while [ "$d" != "${d%/*}" ]; do d="${d%/*}"; [ ! -L "$2/$d" ] || return 1; done
   cmp -s "$1/$3" "$2/$3"
+}
+
+regen_ok="" # the last validated regenerable directory prefix ("dir/"): ls-files sorts, so most paths hit it
+under_regenerable_dir() { # worktree relpath -> 0 when a leading directory of relpath is a real regenerable one
+  [ -z "$regen_ok" ] || case "$2" in "$regen_ok"*) return 0 ;; esac
+  local rest="${2%/*}" acc="" comp
+  [ "$rest" != "$2" ] || return 1 # no directory part
+  rest="$rest/"
+  while [ -n "$rest" ]; do
+    comp="${rest%%/*}"; rest="${rest#*/}"; acc="$acc$comp/"
+    case "$comp" in # whole components, case-sensitive: a spelling it cannot classify is kept
+      node_modules|.venv|venv|site-packages|__pycache__|dist|build|.next|.turbo|coverage|.pytest_cache|.mypy_cache|.ruff_cache)
+        if [ -d "$1/$acc" ] && [ ! -L "$1/${acc%/}" ]; then regen_ok="$acc"; return 0; fi ;;
+    esac
+  done
+  return 1
 }
 
 env_data_scan() { # worktree primary listfile -> returns 0 and prints why when the tree must be kept, 1 when it may go
@@ -70,21 +89,27 @@ env_data_scan() { # worktree primary listfile -> returns 0 and prints why when t
   while IFS= read -r -d '' f; do
     case "$f" in *"$NL"*) echo "has a file name with a newline"; return 0 ;; esac
     case "/$f" in # any path component may carry the name, in any case (APFS is case-insensitive)
-      */.[eE][nN][vV]*) same_as_primary "$1" "$2" "$f" || { echo "holds ignored .env files"; return 0; } ;;
-      */) out="$(find "$1/$f" -iname '.env*' 2>&1)"; rc=$?
+      # the one exemption: a regular file byte-identical to the primary's copy
+      */.[eE][nN][vV]*) same_as_primary "$1" "$2" "$f" || { echo "holds ignored .env files"; return 0; }; continue ;;
+      */) out="$(find "$1/$f" -iname '.env*' 2>&1)"; rc=$? # a nested repo: the scan below keeps it
           [ "$rc" -eq 0 ] || { echo "could not scan $f (find exit $rc)"; return 0; }
-          [ -z "$out" ] || { echo "holds ignored .env files"; return 0; } ;;
-      # package fixtures (dependency trees, virtualenvs) are exempt from the secret NAME rule only
-      */node_modules/*|*/.venv/*|*/venv/*|*/site-packages/*) ;;
-      */.[dD][eE][vV].[vV][aA][rR][sS]*|*/.[nN][pP][mM][rR][cC]|*/.[nN][eE][tT][rR][cC]|*/.[pP][yY][pP][iI][rR][cC]) echo "holds secret-named files"; return 0 ;;
-      *.[eE][nN][vV]|*.[pP][eE][mM]|*.[kK][eE][yY]|*.[pP]12|*.[pP][fF][xX]) echo "holds secret-named files"; return 0 ;;
-      */[iI][dD]_[rR][sS][aA]*|*/[iI][dD]_[eE][dD]25519*) echo "holds secret-named files"; return 0 ;;
+          [ -z "$out" ] || { echo "holds ignored .env files"; return 0; }
+          continue ;;
+      # secret names keep the tree everywhere, node_modules and virtualenvs included
+      */.[dD][eE][vV].[vV][aA][rR][sS]*|*/.[nN][pP][mM][rR][cC]|*/.[nN][eE][tT][rR][cC]|*/.[pP][yY][pP][iI][rR][cC]|*/.[gG][iI][tT]-[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL][sS]) echo "holds secret-named files"; return 0 ;;
+      */[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL][sS]|*/[cC][rR][eE][dD][eE][nN][tT][iI][aA][lL][sS].*|*/[iI][dD]_*) echo "holds secret-named files"; return 0 ;;
+      *.[eE][nN][vV]|*.[eE][nN][vV].*|*.[pP][eE][mM]|*.[kK][eE][yY]|*.[pP]12|*.[pP][fF][xX]|*.[pP]8) echo "holds secret-named files"; return 0 ;;
+      *.[jJ][kK][sS]|*.[kK][eE][yY][sS][tT][oO][rR][eE]|*.[tT][fF][vV][aA][rR][sS]|*.[tT][fF][sS][tT][aA][tT][eE]) echo "holds secret-named files"; return 0 ;;
     esac
+    # No name list is complete, so anything not proven regenerable is unproven data: keep unless it sits under a
+    # regenerable directory (dependency trees, virtualenvs, build output)
+    under_regenerable_dir "$1" "$f" || { echo "holds ignored files that are not known regenerable output ($f)"; return 0; }
   done <"$3"
   # Any nested .git, file or directory, in any case (APFS), is unproven pushed history. So is a bare repo, which has
   # no .git at all: a directory `objects` beside a file `HEAD` and a directory `refs`. git lists only a valid nested
   # repo (as `dir/`) and skips a broken one, so find every name. A tracked submodule's own .git is left to git's refusal.
-  out="$(find "$1" -mindepth 1 \( -iname .git -prune -print0 \) -o \( -type d -iname objects -print0 \) 2>&1 >"$3")"; rc=$?
+  # `objects` may itself be a symlink to a shared object store, so it is not required to be a plain directory.
+  out="$(find "$1" -mindepth 1 \( -iname .git -prune -print0 \) -o \( \( -type d -o -type l \) -iname objects -print0 \) 2>&1 >"$3")"; rc=$?
   { [ "$rc" -eq 0 ] && [ -z "$out" ]; } || { echo "could not scan for nested git repos (find exit $rc)"; return 0; }
   while IFS= read -r -d '' f; do
     rel="${f#"$1"/}"
@@ -99,6 +124,26 @@ env_data_scan() { # worktree primary listfile -> returns 0 and prints why when t
   return 1
 }
 
+reflog_orphans() { # worktree -> returns 0 and prints why when its HEAD reflog names a commit no ref reaches, 1 when none
+  # The reflog is private to the worktree and goes with it on removal. A commit that was checked out here (before a
+  # reset, an amend or a rebase) and that no branch, tag, remote ref or HEAD reaches would then be lost. The test:
+  # every sha in logs/HEAD that is a commit in this repo must be excluded by `git rev-list <shas> --not --all`.
+  # A sha that is not a commit here (all-zero, or pruned already) is dropped: there is nothing left to lose.
+  local gd log ids lost rc
+  gd="$(git -C "$1" rev-parse --absolute-git-dir)"; rc=$?
+  [ "$rc" -eq 0 ] || { echo "could not locate the git dir (git rev-parse exit $rc)"; return 0; }
+  log="$gd/logs/HEAD"
+  [ -e "$log" ] || [ -L "$log" ] || return 1 # no HEAD reflog: nothing to lose
+  ids="$(awk '{print $1; print $2}' "$log" | sort -u \
+        | wgit "$1" cat-file --batch-check='%(objecttype) %(objectname)' | awk '$1=="commit"{print $2}')"; rc=$?
+  [ "$rc" -eq 0 ] || { echo "could not read the HEAD reflog (exit $rc)"; return 0; }
+  [ -n "$ids" ] || return 1
+  lost="$(printf '%s\n' "$ids" | wgit "$1" rev-list --stdin --max-count=1 --not --all)"; rc=$?
+  [ "$rc" -eq 0 ] || { echo "could not check the HEAD reflog against the refs (git rev-list exit $rc)"; return 0; }
+  [ -z "$lost" ] || { echo "HEAD reflog holds commits no ref reaches"; return 0; }
+  return 1
+}
+
 keep_reason() { # worktree primary merged-sha -> returns 0 and prints why when the tree must be kept, 1 when it may go
   local out list rc
   out="$(wgit "$1" status --porcelain -uall 2>&1)" || { echo "could not read git status"; return 0; } # -uall: ignores status.showUntrackedFiles
@@ -109,6 +154,8 @@ keep_reason() { # worktree primary merged-sha -> returns 0 and prints why when t
   out="$(wgit "$1" for-each-ref refs/worktree refs/bisect refs/rewritten 2>&1)"; rc=$?
   [ "$rc" -eq 0 ] || { echo "could not read per-worktree refs (git for-each-ref exit $rc)"; return 0; }
   [ -z "$out" ] || { echo "holds per-worktree refs"; return 0; }
+  out="$(reflog_orphans "$1")"; rc=$?
+  [ "$rc" -eq 1 ] || { echo "${out:-reflog check failed, exit $rc}"; return 0; } # exactly 1 means "nothing to lose"
   list="$(mktemp)" || { echo "could not create a temp file"; return 0; }
   env_data_scan "$1" "$2" "$list"; rc=$?
   rm -f "$list"
@@ -148,8 +195,20 @@ for gitdir in "$ROOT"/*/.git "$ROOT"/*/*/.git; do
         if [ "$rc" -ne 1 ]; then echo "keep    $path  ($branch: ${why:-scan failed, exit $rc})"; continue; fi
         if [ "$DRY_RUN" != 0 ]; then echo "would   $path  ($branch, ${mb}M)"; continue; fi
         if git -C "$repo" worktree remove "$path"; then
-          git -C "$repo" branch -D "$branch" >/dev/null 2>&1 || true
           echo "removed $path  ($branch, ${mb}M)"
+          # Delete the branch only while it still points at the commit that was checked: `branch -D` would drop a
+          # branch somebody moved after the scan. update-ref -d keeps a moved branch; it also leaves the
+          # branch.<name>.* config section behind, which `branch -D` would have removed.
+          if git -C "$repo" update-ref -d "refs/heads/$branch" "$sha"; then
+            cfg="$(git -C "$repo" config --remove-section "branch.$branch" 2>&1)"; rc=$?
+            # a branch with no upstream has no section: git says so with exit 128 and this message
+            { [ "$rc" -eq 0 ] || case "$cfg" in *"no such section"*) true ;; *) false ;; esac; } \
+              || echo "note    $repo: could not remove the branch.$branch config section: $cfg"
+          else
+            cur="$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$branch")"
+            if [ "$cur" = "$sha" ]; then echo "kept    branch $branch of $repo  (git update-ref -d failed)"
+            else echo "kept    branch $branch of $repo  (not deleted: it is now ${cur:-absent}, not the checked $sha)"; fi
+          fi
         else
           echo "FAILED  $path  ($branch)"
         fi

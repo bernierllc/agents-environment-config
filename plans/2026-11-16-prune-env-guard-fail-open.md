@@ -55,7 +55,7 @@ The only exemptions:
 1. (#141 is preserved) a **regular, non-symlink** file with a `.env*` component whose bytes are identical (`cmp -s`)
    to the same relative path in the primary checkout, where that copy is itself a regular, non-symlink file and no
    parent directory on its path is a symlink.
-2. **(round 5)** The secret NAME rule (the list above) is not applied to a path with a `node_modules`, `.venv`,
+2. **(round 5; REMOVED in round 7, see below: secret names now keep the tree under package trees too)** The secret NAME rule (the list above) is not applied to a path with a `node_modules`, `.venv`,
    `venv` or `site-packages` component. Dependency trees and virtualenvs ship `*.pem`, `*.key` and `id_rsa`-named
    test fixtures by the hundred, and keeping every worktree that ran `npm install` would defeat the script. The
    exemption covers the NAME rule only: the `.env*` rule and the nested-`.git` rule still apply there. The
@@ -136,6 +136,64 @@ primary marked bare is accepted). All 53 pass now. Full suite (`test_prune_env_g
 `test_no_maintainer_specifics.py`): 245 passed, no skips. The old-script run of the final test file: 39 failed, 203
 passed.
 
+## Round 7 (option B: keep unless proven regenerable)
+
+Why: review pass (a) reproduced a P1. Ignored files whose names are not on the secret list (`x.p8`, `up.jks`,
+`prod.keystore`, `prod.tfvars`, `app.env.local`, `.git-credentials`, `credentials.json`) were deleted from a clean
+merged worktree. No name list is complete, so the rule is inverted.
+
+**The rule.** Keep the worktree if it holds ANY ignored or untracked path, unless every such path sits under a
+directory from a short allowlist of regenerable output, matched by WHOLE path components, case-sensitively:
+`node_modules`, `.venv`, `venv`, `site-packages`, `__pycache__`, `dist`, `build`, `.next`, `.turbo`, `coverage`,
+`.pytest_cache`, `.mypy_cache`, `.ruff_cache`. Not on the list on purpose: `.cache` and anything else that can hold
+user data. An allowlisted name that is a symlink (or sits below one), any other spelling (`Node_Modules`, `DIST`),
+and a lookalike (`my_node_modules`, `venv2`, `distribution`) is NOT allowlisted. Printed as
+`holds ignored files that are not known regenerable output (<path>)`.
+
+- **Secret names apply everywhere**, including under the allowlisted directories (the round-5 package-tree exemption
+  is gone). The glob list grew: `.git-credentials`, `credentials`, `credentials.*`, `*.p8`, `*.jks`, `*.keystore`,
+  `*.tfvars`, `*.tfstate`, plus the old `.dev.vars*`, `.npmrc`, `.netrc`, `.pypirc`, `id_*`, `*.env`, `*.env.*`,
+  `*.pem`, `*.key`, `*.p12`, `*.pfx`.
+- Unchanged: the `.env*` rule and its single exemption (a regular file byte-identical to the primary's copy), the
+  nested-repo and bare-layout keeps, uninitialized gitlinks, per-worktree refs, the dangling `.git` symlink, no
+  `git worktree prune`, `wgit` (`core.fsmonitor=false`), `DRY_RUN` live only when unset or `0`, a newline in a path
+  skips the repo.
+- **Cost, stated:** a worktree is kept when it holds any untracked scratch file outside those directories, and a
+  package tree that ships a `.pem` or `.key` fixture now keeps its worktree (round 5 exempted those). The allowlist
+  trusts directory NAMES: user data placed inside `node_modules/...` or `dist/...` is treated as regenerable, as
+  `git clean -X` would treat it.
+
+**Also in round 7.**
+
+- **P2, branch `-D` race.** The branch is deleted with `git update-ref -d refs/heads/<branch> <verified sha>`. If the
+  branch moved after the scan, git refuses, the branch is kept and the script prints
+  `kept    branch <b> of <repo>  (not deleted: it is now <sha>, not the checked <sha>)`. `update-ref -d` leaves the
+  `branch.<name>.*` config section behind, so it is removed with `git config --remove-section`; the one exit 128
+  "no such section" (a branch without upstream) is silent, any other failure prints a `note` line.
+- **P3, reflog.** `git worktree remove` takes the worktree's private HEAD reflog with it. Exact test
+  (`reflog_orphans`): read `$(git rev-parse --absolute-git-dir)/logs/HEAD`, take fields 1 and 2 of every line, `sort -u`,
+  keep only objects that exist as commits (`cat-file --batch-check='%(objecttype) %(objectname)'`), then
+  `git rev-list --stdin --max-count=1 --not --all`. Any output means KEEP (`HEAD reflog holds commits no ref reaches`).
+  A missing `logs/HEAD` has nothing to lose. Any git failure, or a kill, keeps (`exit 137` is tested). **Over-keep
+  cost:** a rebased, amended or force-pushed worktree has its old tip in the reflog and is kept, though the work may
+  be on the remote under a new sha. A commit reachable from any branch, tag or remote ref is not an orphan.
+- **P3, bare repo with a symlinked `objects`.** The nested-repo `find` matched `-type d -iname objects`; it now matches
+  `\( -type d -o -type l \)`, so a `git clone --shared` style store is kept.
+
+**Tests re-placed or reversed, and why.** The round-5/6 tests encoded the old contract. 27 tests failed on the first
+run of the new script and none was edited to fit the code; each was judged on its own: tests that isolate ONE keep
+rule (nested repo, `.env`, bare layout, per-worktree refs, ...) put their files under `dist/` so the new
+"not proven regenerable" rule cannot be the one that fires; the package-tree secret-name exemption tests and the old
+"unlisted names are removed" test were reversed to assert KEEP. The header test is unchanged (the header was
+shortened to fit its 10-line window).
+
+New tests: the allowlist (every component, symlink, symlinked parent, case, lookalikes, one unproven file among
+regenerable ones), secret names under `dist/`, the reflog (orphan after reset, amend, tag, other branch, absent
+object, no reflog, three git failures, kill 137, unreadable log), the compare-and-delete branch (moved branch, failed
+`update-ref`, config section removed, none present, failed cleanup), the symlinked `objects`, a tracked `.env`
+symlink to an ignored file, a unique file under an uninitialized submodule, and a scan file that becomes unwritable
+midway.
+
 ## Residual limits (documented, not solved)
 
 1. **A link held elsewhere.** An `.env*` symlink held in the primary checkout, in another repo, or in a kept
@@ -152,13 +210,11 @@ passed.
 3. **Submodules.** The scan does not look inside initialized submodules. `git worktree remove` refuses a worktree
    with one, which is all that protects an ignored `.env` in a submodule (pinned by a test that expects `FAILED`).
    (Round 6: files under an UNinitialized gitlink directory are now kept.)
-4. **Other ignored data without a secret name.** Ignored `.otto/` run-state and sqlite files under ignored caches,
-   and any other ignored file whose name is not on the secret list, are still lost with the worktree. Follow-up item
-   PRUNE-NONENV-NAMES; not fixed here.
+4. ~~**Other ignored data without a secret name.**~~ CLOSED in round 7: the guard keeps unless every ignored or untracked
+   path is proven regenerable (allowlist below). PRUNE-NONENV-NAMES is no longer needed.
 5. **Temp-list read-back.** A failure to read the temp list after it was written successfully is not handled
    separately; it cannot happen short of the file being deleted under the script.
-6. **P1-3, ignored data and secret names: awaiting Matt's decision.** The ignored-data and secret-name rules are
-   unchanged in round 6 (item 4 above is the same gap). Not touched until the decision is made.
+6. ~~**P1-3, ignored data and secret names: awaiting Matt's decision.**~~ DECIDED and implemented in round 7 (option B).
 7. **A forged worktree-list record.** A worktree path that contains a complete fake record (a blank line followed by
    valid keys) passes the round-6 line check. Telling it apart needs `git worktree list -z` (git 2.36+).
 8. **Bare-layout breadth.** The bare-repo rule fires on any `objects/` directory beside a `HEAD` file and a `refs/`
@@ -247,6 +303,22 @@ changes whether a tree is kept or removed:
 | n39 | `-prune` dropped: as the round-5 survivor above, a `.git` directory holds no entry named `.git` |
 | n49 | per-worktree `for-each-ref` stderr not merged: a failure is caught by the exit code, a warning is not a ref |
 | n66 | `awk` prints every unrecognised line instead of the first: `bad` is non-empty in both cases |
+
+**Round-7 head, whole script** (harness kept outside the repo; 130 entries, `noop` the control). First run: 117
+killed, 13 survived (the control plus 12 real). Five survivors were real test gaps and got tests (`.cache` and other
+cache-style directories are not allowlisted; plain `credentials` and `*.tfstate` under `dist/`; a reflog orphan named
+only in the old or only in the new field of a line). Re-run of those five: all killed. **Final: 129 real mutants, 122
+killed, 7 survived; the control survived as it must.** The 7, none changes whether a tree is kept or removed:
+
+| id | why it survives |
+|---|---|
+| regen-no-dir-part | `[ "$rest" != "$2" ] \|\| return 1` removed: a path with no directory part is a root-level file, and a file is never `-d`, so the loop returns 1 anyway: equivalent |
+| regen-needs-no-dir | the `-d` test dropped: every ancestor of a path git lists exists as a directory: equivalent |
+| regen-symlink-allowed | the `! -L` test dropped: `ls-files -o` never lists below a symlink (it lists the link as one entry with no directory part), so the check is unreachable defence in depth. The symlink tests pass because the link entry itself is not allowlisted |
+| sub-e-to-L | the "initialized submodule" test `-e .git` becomes `-f .git`: differs only for an old-style submodule whose `.git` is a directory, which then keeps (over-keeps) instead of failing in `git worktree remove`. Both keep the data |
+| reflog-rc-loose | `reflog_orphans` returns only 0 or 1, so `-ne 0` and `-eq 1` agree: equivalent |
+| reflog-empty-ids-keeps | `rev-list --stdin --not --all` on empty input prints nothing and exits 0, so the early `return 1` is redundant: equivalent |
+| moved-msg-dropped | the mutant turned out to be a no-op (`else :; echo`): a second control, not a real mutant |
 
 ## Out of scope
 
