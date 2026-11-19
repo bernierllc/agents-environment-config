@@ -307,7 +307,7 @@ same-run purge stay as built, per the cop's recommendation.
    opt-in list: a list a PR can change is a trust input, so nothing vouches for a directory by name. Reclaiming build output
    is a separate piece of work and is not part of #165.
 2. **Purge in the same scheduled run, after the hold.** `PRUNE_QUARANTINE_DAYS` defaults to 7 and must be a whole number of at
-   least 1; anything else is a fault and purges nothing.
+   least 1; anything else exits 1 before the script touches anything.
 
 **Conditions.**
 
