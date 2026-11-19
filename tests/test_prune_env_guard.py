@@ -12,6 +12,7 @@ script that never removes anything must not pass).
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -74,6 +75,7 @@ class Fixture:
             "GH_MERGED": "\n".join(self.merged),
             "GH_OPEN": "\n".join(self.open),
             "GH_FAIL": self.gh_fail,
+            "PRUNE_ALLOW_DELETE": "1",  # deletion is off by default (round 9); the suite exercises the deleting path
             **(env or {}),
         }
         proc = subprocess.run(
@@ -631,7 +633,7 @@ def test_hidden_local_edit_of_a_tracked_file_keeps(fx: Fixture, flag: str, name:
     _git(fx.wt, "update-index", flag, name)
     (fx.wt / name).write_text("LOCAL_SECRET=9\n")
     assert _git(fx.wt, "status", "--porcelain") == ""  # git itself calls this worktree clean
-    fx.keeps("assume-unchanged or skip-worktree")
+    fx.keeps("PR merged but worktree dirty")  # round 9: status runs on a throwaway index, so the flag hides nothing
     assert (fx.wt / name).read_text() == "LOCAL_SECRET=9\n"
 
 
@@ -843,7 +845,7 @@ def test_tracked_name_ending_in_a_backslash_cannot_swallow_a_hidden_edit(fx: Fix
     fx.commit("-a\\", "a.conf")
     _git(fx.wt, "update-index", "--assume-unchanged", "a.conf")
     (fx.wt / "a.conf").write_text("LOCAL_SECRET=9\n")
-    fx.keeps("assume-unchanged or skip-worktree")
+    fx.keeps("PR merged but worktree dirty")  # round 9: the throwaway index reads content, flags hide nothing
 
 
 def test_env_file_with_a_trailing_space_is_not_mistaken_for_its_identical_trimmed_name(fx: Fixture) -> None:
@@ -873,8 +875,20 @@ def test_both_index_flags_on_one_file_keep(fx: Fixture) -> None:
     (fx.wt / "a.conf").write_text("LOCAL_SECRET=9\n")
     assert _git(fx.wt, "status", "--porcelain") == ""
     assert _git(fx.wt, "ls-files", "-v", "a.conf").startswith("s ")
-    fx.keeps("assume-unchanged or skip-worktree")
+    fx.keeps("PR merged but worktree dirty")  # round 9: the throwaway index reads content, flags hide nothing
     assert (fx.wt / "a.conf").read_text() == "LOCAL_SECRET=9\n"
+
+
+@pytest.mark.parametrize("flags", [["--assume-unchanged"], ["--skip-worktree"], ["--skip-worktree", "--assume-unchanged"]])
+def test_an_index_flag_alone_still_keeps_with_its_own_reason(fx: Fixture, flags: list[str]) -> None:
+    """The flag arm of the admin scan outlived round 9's content-level status check: a flagged file with no edit is
+    clean to every status, and the flag is still the sign that somebody hid something from git."""
+    (fx.wt / "a.conf").write_text("TEMPLATE=1\n")
+    fx.commit("a.conf")
+    for flag in flags:
+        _git(fx.wt, "update-index", flag, "a.conf")
+    assert _git(fx.wt, "status", "--porcelain") == ""
+    fx.keeps("assume-unchanged or skip-worktree")
 
 
 # --- the byte comparison -----------------------------------------------------------------------------------
@@ -1115,10 +1129,12 @@ KEEP_SECRET = "holds secret-named files"
 
 
 def _marked(fx: Fixture, top: str = "tree") -> None:
-    """An ignored directory that a venv marker (pyvenv.cfg) proves regenerable, so only the rule under test can keep it."""
+    """An ignored cache directory (CACHEDIR.TAG, standard signature): the one marker whose spec makes the WHOLE directory
+    regenerable, so a file of any name under it is proven and only the rule under test can keep it. A venv or npm
+    marker proves only what its tool recorded (round 9), so it cannot play this part."""
     fx.exclude(f"{top}/")
     (fx.wt / top).mkdir(parents=True, exist_ok=True)
-    (fx.wt / top / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    (fx.wt / top / "CACHEDIR.TAG").write_text(CACHEDIR_TAG)
 
 
 def _purged(fx: Fixture, env: dict[str, str] | None = None) -> tuple[str, Path]:
@@ -1304,6 +1320,11 @@ def test_any_other_ignored_file_outside_a_regenerable_directory_keeps(fx: Fixtur
     fx.keeps(KEEP_UNPROVEN)
 
 
+def _npm_lock(*keys: str) -> str:
+    """node_modules/.package-lock.json as npm writes it: one pretty-printed key per installed package."""
+    return json.dumps({"lockfileVersion": 3, "packages": {k: {"version": "1.0.0"} for k in keys}}, indent=2) + "\n"
+
+
 CACHEDIR_TAG = "Signature: 8a477f597d28d172789f06886806bc55\n# This file is a cache directory tag.\n"
 
 
@@ -1311,13 +1332,10 @@ CACHEDIR_TAG = "Signature: 8a477f597d28d172789f06886806bc55\n# This file is a ca
     ("marker", "rel"),
     [
         ("node_modules/.package-lock.json", "node_modules/pkg/index.js"),
-        ("node_modules/.yarn-integrity", "node_modules/pkg/index.js"),
-        ("node_modules/.modules.yaml", "node_modules/pkg/index.js"),
-        ("node_modules/.pnpm/lock.yaml", "node_modules/.pnpm/pkg/index.js"),
         ("a/node_modules/.package-lock.json", "a/node_modules/pkg/index.js"),
-        (".venv/pyvenv.cfg", ".venv/lib/x.py"),
-        ("a/venv/pyvenv.cfg", "a/venv/lib/x.py"),
-        ("myenv/pyvenv.cfg", "myenv/lib/x.py"),  # a venv is a venv whatever it is called
+        (".venv/pyvenv.cfg", ".venv/bin/activate"),  # the scaffold files a venv creates; its other files need a RECORD
+        ("a/venv/pyvenv.cfg", "a/venv/bin/activate"),
+        ("myenv/pyvenv.cfg", "myenv/bin/activate"),  # a venv is a venv whatever it is called
         (".pytest_cache/CACHEDIR.TAG", ".pytest_cache/v/cache/nodeids"),
         (".mypy_cache/CACHEDIR.TAG", ".mypy_cache/3.12/x.json"),
         ("target/CACHEDIR.TAG", "target/debug/x"),
@@ -1325,7 +1343,13 @@ CACHEDIR_TAG = "Signature: 8a477f597d28d172789f06886806bc55\n# This file is a ca
 )
 def test_each_marker_proven_directory_alone_does_not_keep(fx: Fixture, marker: str, rel: str) -> None:
     """The control for the marker rule: each documented marker really proves a tree removable (and not just never reached)."""
-    _ignored(fx, marker, CACHEDIR_TAG if marker.endswith("CACHEDIR.TAG") else "{}\n")
+    if marker.endswith("CACHEDIR.TAG"):
+        text = CACHEDIR_TAG
+    elif marker.endswith(".package-lock.json"):
+        text = _npm_lock("node_modules/pkg")  # npm's own record, keyed relative to the project that owns node_modules
+    else:
+        text = "home = /usr/bin\n"
+    _ignored(fx, marker, text)
     _ignored(fx, rel)
     assert fx.verdict() == "would"
     assert fx.verdict(dry=False) == "removed"
@@ -1380,11 +1404,11 @@ def test_a_symlinked_marker_proves_nothing(fx: Fixture, marker: str) -> None:
 
 
 def test_worktree_with_only_marked_package_trees_is_still_removed(fx: Fixture) -> None:
-    for marker, rel in (
-        ("node_modules/.package-lock.json", "node_modules/pkg/index.js"),
-        (".venv/pyvenv.cfg", ".venv/lib/x.py"),
+    for marker, text, rel in (
+        ("node_modules/.package-lock.json", _npm_lock("node_modules/pkg"), "node_modules/pkg/index.js"),
+        (".venv/pyvenv.cfg", "home = /usr/bin\n", ".venv/bin/activate"),
     ):
-        _ignored(fx, marker, "{}\n")
+        _ignored(fx, marker, text)
         _ignored(fx, rel)
     assert fx.verdict(dry=False) == "removed"
     assert not fx.wt.exists()

@@ -25,6 +25,7 @@ from tests.test_prune_env_guard import (
     KEEP_SUB,
     KEEP_UNPROVEN,
     CACHEDIR_TAG,
+    _npm_lock,
     SCRIPT,
     Fixture,
     _git,
@@ -92,7 +93,9 @@ def test_case1_a_marked_tree_does_not_vouch_for_its_unmarked_neighbour(fx: Fixtu
     fx.keeps(KEEP_UNPROVEN)
 
 
-def test_case1_a_file_inside_a_marked_tree_is_regenerable_but_a_secret_name_still_keeps(fx: Fixture) -> None:
+def test_case1_a_cache_tree_is_regenerable_but_a_secret_name_still_keeps(fx: Fixture) -> None:
+    # round 9 replaces the round 8 test that pinned "any file under any marker is regenerable": only a cache marker
+    # (CACHEDIR.TAG) still vouches for a whole directory; a venv or npm marker vouches for what its tool recorded
     _marked(fx)
     _ignored(fx, "tree/lib/x.py")
     assert fx.verdict() == "would"
@@ -745,7 +748,7 @@ def test_audit1_a_directory_swapped_for_a_symlink_to_ignored_data_after_the_list
     fx.exclude("local-data/")
     data = fx.wt / "local-data"
     data.mkdir()
-    (data / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    (data / "CACHEDIR.TAG").write_text(CACHEDIR_TAG)
     (data / "notes.txt").write_text("UNIQUE NOTES\n")
     fx.exclude(link.split("/")[0] + ("/" if "/" in link else ""))
     (fx.wt / link).parent.mkdir(parents=True, exist_ok=True)
@@ -757,7 +760,7 @@ def test_audit1_a_directory_swapped_for_a_symlink_to_ignored_data_after_the_list
 
 
 def test_audit1_control_the_same_listing_over_a_real_marked_directory_goes(fx: Fixture) -> None:
-    _ignored(fx, "dist/pyvenv.cfg", "home = /usr/bin\n")
+    _ignored(fx, "dist/CACHEDIR.TAG", CACHEDIR_TAG)
     _ignored(fx, "dist/a")
     assert fx.verdict() == "would"
 
@@ -771,10 +774,10 @@ def _regen_dir(fx: Fixture, kind: str) -> str:
     """An ignored directory a marker proves regenerable, with a file under it; returns its top directory."""
     if kind == "venv":
         _ignored(fx, ".venv/pyvenv.cfg", "home = /usr/bin\n")
-        _ignored(fx, ".venv/lib/x.py")
+        _ignored(fx, ".venv/bin/activate")  # a file the venv scaffold proves
         return ".venv"
     if kind == "node_modules":
-        _ignored(fx, "node_modules/.package-lock.json", "{}\n")
+        _ignored(fx, "node_modules/.package-lock.json", _npm_lock("node_modules/pkg"))
         _ignored(fx, "node_modules/pkg/index.js")
         return "node_modules"
     _ignored(fx, "dist/CACHEDIR.TAG", CACHEDIR_TAG)
@@ -806,7 +809,8 @@ SECRETS_ONE_PER_ARM_PATTERN = [
 @pytest.mark.parametrize("kind", REGEN_KINDS)
 def test_audit3_control_a_regenerable_directory_without_a_secret_goes(fx: Fixture, kind: str) -> None:
     top = _regen_dir(fx, kind)
-    _ignored(fx, f"{top}/lib/plain.txt")
+    if kind == "cachedir":  # only a cache marker proves a file that no tool recorded
+        _ignored(fx, f"{top}/lib/plain.txt")
     assert fx.verdict() == "would"
 
 
