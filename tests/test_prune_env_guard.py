@@ -102,8 +102,8 @@ class Fixture:
         return sorted(p for p in self.qbase.glob("*/*") if p.is_dir()) if self.qbase.exists() else []
 
     def age(self, entry: Path) -> Path:
-        """Move a held worktree into a long-expired date directory, the way git itself would move it."""
-        old = self.qbase / "2000-01-01"
+        """Move a held worktree into a long-expired timestamp directory, the way git itself would move it."""
+        old = self.qbase / "2000-01-01T000000Z"
         old.mkdir(parents=True, exist_ok=True)
         dest = old / entry.name
         _git(entry, "worktree", "move", str(entry), str(dest))
@@ -184,8 +184,9 @@ class Fixture:
 
 @pytest.fixture
 def fx(tmp_path: Path) -> Fixture:
-    base = tmp_path.resolve()  # git prints realpaths; /var is a symlink to /private/var on macOS
-    root = base / "pro jects"  # a space in the root: every path below must survive being quoted
+    tmp = tmp_path.resolve()  # git prints realpaths; /var is a symlink to /private/var on macOS
+    root = tmp / "pro jects"  # a space in the root: every path below must survive being quoted
+    base = root  # round 9: a worktree outside the root is refused, so the fixture's worktrees live under it
     repo = root / "proj"
     repo.mkdir(parents=True)
     _git(repo, "init", "-q", "-b", "main")
@@ -198,7 +199,7 @@ def fx(tmp_path: Path) -> Fixture:
     _git(repo, "worktree", "add", "-q", "-b", BRANCH, str(wt))
     sha = _git(wt, "rev-parse", "HEAD")
 
-    bindir = base / "bin"
+    bindir = tmp / "bin"
     bindir.mkdir()
     gh = bindir / "gh"
     gh.write_text(GH_STUB)
@@ -1160,7 +1161,7 @@ def _ignored(fx: Fixture, rel: str, text: str = "x\n") -> None:
 def test_symlinked_projects_root_still_skips_the_primary_and_removes_the_worktree(fx: Fixture) -> None:
     """`git worktree list` prints realpaths while the sweep reaches the primary through the link; comparing the
     two as text would treat the primary as a linked worktree and try to remove it."""
-    link = fx.wt.parent / "root-link"
+    link = fx.root.parent / "root-link"
     link.symlink_to(fx.root)
     fx.merged.append(f"main {_git(fx.repo, 'rev-parse', 'HEAD')}")
     out = fx.run(dry=False, env={"PROJECTS_ROOT": str(link)})

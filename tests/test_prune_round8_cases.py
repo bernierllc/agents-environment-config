@@ -71,7 +71,9 @@ def _entry_on(fx: Fixture, entry: Path, day: str) -> Path:
 
 
 def _days_ago(n: int) -> str:
-    return (datetime.date.today() - datetime.timedelta(days=n)).isoformat()
+    """The quarantine directory name (a UTC instant, round 9) of an entry made n days ago."""
+    then = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=n)
+    return then.strftime("%Y-%m-%dT%H%M%SZ")
 
 
 # =============================================================================================================
@@ -330,7 +332,9 @@ def test_a_real_run_moves_the_worktree_aside_and_keeps_it_a_working_worktree(fx:
     line = fx.line(out, fx.wt)
     assert line is not None and line.startswith("quarantined"), out
     (entry,) = fx.held()
-    assert entry.parent.name == datetime.date.today().isoformat() and entry.name == f"{fx.repo.name}--{fx.wt.name}"
+    assert entry.name == f"{fx.repo.name}--{fx.wt.name}"
+    made = datetime.datetime.strptime(entry.parent.name, "%Y-%m-%dT%H%M%SZ").replace(tzinfo=datetime.timezone.utc)
+    assert abs((datetime.datetime.now(datetime.timezone.utc) - made).total_seconds()) < 120, entry.parent.name
     assert not fx.wt.exists()
     assert f"restore: git -C {fx.repo} worktree move {entry} {fx.wt}" in line
     assert str(entry) in _git(fx.repo, "worktree", "list", "--porcelain")
@@ -347,7 +351,7 @@ def test_dry_run_reports_would_quarantine_and_would_purge_and_changes_nothing(fx
     out = fx.run(dry=False)
     assert (fx.line(out, fx.wt) or "").startswith("quarantined")
     (entry,) = fx.held()
-    aged = _entry_on(fx, entry, "2000-01-01")
+    aged = _entry_on(fx, entry, "2000-01-01T000000Z")
     out = fx.run(dry=True)
     assert f"would   purge {aged}" in out and aged.exists()
     assert _git(fx.repo, "branch", "--list", BRANCH) != ""
@@ -440,7 +444,7 @@ def test_an_entry_whose_pr_left_the_merged_list_is_kept_and_reported(fx: Fixture
     fx.run(dry=False)
     fx.merged = []
     (entry,) = fx.held()
-    aged = _entry_on(fx, entry, "2000-01-01")
+    aged = _entry_on(fx, entry, "2000-01-01T000000Z")
     out = fx.run(dry=False)
     line = fx.line(out, aged)
     assert line is not None and "no longer in the merged PR list" in line, out
@@ -453,14 +457,14 @@ def test_an_entry_under_a_directory_that_is_not_a_date_is_kept_and_faults(fx: Fi
     odd = _entry_on(fx, entry, "not-a-date")
     out = fx.run(dry=False)
     line = fx.line(out, odd)
-    assert line is not None and "is not a date" in line, out
+    assert line is not None and "is not a UTC timestamp" in line, out
     assert odd.exists() and fx.last_rc == 1
 
 
 def test_an_aside_name_that_is_already_taken_fails_the_purge_and_keeps_the_entry(fx: Fixture) -> None:
     fx.run(dry=False)
     (entry,) = fx.held()
-    aged = _entry_on(fx, entry, "2000-01-01")
+    aged = _entry_on(fx, entry, "2000-01-01T000000Z")
     Path(f"{aged}.purge").mkdir()
     out = fx.run(dry=False)
     line = fx.line(out, aged)
@@ -613,7 +617,10 @@ def test_a_failed_move_back_after_a_rescan_hit_says_where_the_tree_stays_and_fau
 
 
 def test_a_dangling_symlink_at_the_quarantine_name_is_not_overwritten_and_the_name_gets_a_suffix(fx: Fixture) -> None:
-    day = fx.qbase / datetime.date.today().isoformat()
+    # pin the clock the script names its directory from, so the dangling link sits where the script will look
+    pinned = "2030-01-01T000000Z"
+    fx.shim("date", f'[ "$*" = "-u +%Y-%m-%dT%H%M%SZ" ] && {{ echo {pinned}; exit 0; }}\nexec /bin/date "$@"')
+    day = fx.qbase / pinned
     day.mkdir(parents=True)
     taken = day / f"{fx.repo.name}--{fx.wt.name}"
     taken.symlink_to(fx.root.parent / "nowhere")
@@ -625,7 +632,7 @@ def test_a_dangling_symlink_at_the_quarantine_name_is_not_overwritten_and_the_na
 def test_a_dry_run_purge_runs_the_whole_guard_before_it_says_would_purge(fx: Fixture) -> None:
     fx.run(dry=False)
     (entry,) = fx.held()
-    aged = _entry_on(fx, entry, "2000-01-01")
+    aged = _entry_on(fx, entry, "2000-01-01T000000Z")
     (aged / ".env.example").write_text("EDITED\n")
     out = fx.run(dry=True)
     line = fx.line(out, aged)
@@ -653,10 +660,10 @@ def test_an_uncomputable_cutoff_date_purges_nothing_and_faults(fx: Fixture) -> N
         'case "$*" in *-v-*|*"days ago"*) exit 1 ;; esac\nexec "' + _real("date") + '" "$@"',
     )
     out = fx.run(dry=False)
-    assert "cannot compute the quarantine cutoff date" in out and fx.last_rc == 1
+    assert "cannot compute the quarantine cutoff time" in out and fx.last_rc == 1
     assert (fx.line(out, fx.wt) or "").startswith("quarantined"), out
     (entry,) = fx.held()
-    aged = _entry_on(fx, entry, "2000-01-01")
+    aged = _entry_on(fx, entry, "2000-01-01T000000Z")
     out = fx.run(dry=False)
     line = fx.line(out, aged)
     assert line is not None and line.startswith("keep") and "no cutoff date" in line, out

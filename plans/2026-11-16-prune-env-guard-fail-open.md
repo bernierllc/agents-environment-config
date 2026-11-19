@@ -429,6 +429,31 @@ four (`reg-dir-symlink`, `reg-dir-half-d`, `reg-cache-no-slash`, `reg-cache-drop
 (`BAD-PATTERN`, nothing to mutate), `reg-no-dir-part` is now equivalent for the verdict (a swapped-in directory is kept by
 the per-file proof anyway), and `nested-git-no-prune` stays equivalent as in rounds 5-8.
 
+### Round 9 addendum 1 (independent Review B, Sonnet high, on `5a8f894`)
+
+Review B reproduced both Review A defects without seeing it. Its **P2-1** is the marker-authorises-everything-beneath
+problem (ignore `node_modules/`, add `node_modules/.package-lock.json`, put `node_modules/pkg/my.sqlite` and
+`node_modules/notes.txt` under it: both were quarantined and later purged) and its **P2-2** is the post-rescan writer race
+(a `git` wrapper writes `.env.late` into the `.purge` tree just before `git worktree remove`). Review B graded them P2;
+that grade is not ours to change and Review A's P0 grade stands. Both repros are permanent tests
+(`test_p2_1_an_npm_marker_that_lists_no_package_authorizes_nothing_beneath_it`, `test_p2_2_*`) and are closed by the P0-1 and P0-2 fixes above, unchanged. P2-2 stays
+the documented residual: the default test (deletion off) passes, and the same race with `PRUNE_ALLOW_DELETE=1` is pinned
+as a **strict xfail**, so closing the gap later fails the suite until the xfail is removed.
+
+| finding | what was wrong | how it is closed |
+|---|---|---|
+| P2-3 a worktree outside `$PROJECTS_ROOT` was quarantined | the discovery loop trusted any path `git worktree list` printed | `RROOT` is the root's real path (`pwd -P`); `under_root` accepts a path only when its real path is strictly below it (`"$RROOT"/?*`, so `/projects2` is not `/projects`). The discovery loop refuses and reports (`keep ... outside <root>`, a policy keep, exit 0). Tests: `../` and sibling-prefix forms, a worktree directory that is a symlink out, a root given as a symlink or with `..`. The quarantine base and the run's directory are checked the same way before anything is moved, and the base is checked **before** the run directory is created, so a `.prune-quarantine` symlink out of the root makes no directory out there (`FAILED`, fault, exit 1) |
+| P3-1 the hold was calendar-day granular | `PRUNE_QUARANTINE_DAYS=1` purged an entry quarantined at 23:59 about a minute later | the quarantine directory is a UTC instant, `YYYY-MM-DDTHHMMSSZ`, and the cutoff is the same format for now minus DAYS; they are compared as fixed-width strings, so DAYS is a true minimum and "noticed within N days" is accurate. Test: an entry made 23h59m ago stays and one made 24h01m ago goes with DAYS=1. **Replaced tests:** every existing test that built or read a `YYYY-MM-DD` directory now uses the stamp. **No legacy support:** a date-only directory is kept and faults with a rename hint (`not a UTC timestamp`); nothing in the field can hold one, since deletion has never run unattended |
+| P3-2 `delete_branch` could delete `staging` | a linked worktree on `staging` at a merged promotion head was removed and its branch deleted | `long_lived` (`main`, `master`, `staging`, `develop`, every remote's HEAD branch) is checked first in `delete_branch`: the branch is kept (`kept    branch ... long-lived`), the worktree removal still follows the guard. A `for-each-ref` that fails keeps the branch. Tests per name plus a remote HEAD branch (`trunk`) and the failing-`for-each-ref` shim |
+| P3-3 `gh pr list --limit 1000` truncated silently | a repo with 1000 open PRs could hide the PR that reuses a branch name | `PR_LIMIT=1000`; an open list whose count reaches it is unverifiable: the repo is skipped with exit 1. The merged list is exempt: a full page only hides candidates, and a worktree absent from it is kept anyway. Tests: exactly the limit (skip), one below (trusted), merged at the limit (not a skip) |
+
+**Addendum results.** Suite: **569 prune tests** (the four prune/maintainer test files, all passing; the full `tests/` run also passed except two timing-sensitive signal tests in `test_cleanup_hung_processes_script.py` that pass alone and are unrelated). Mutation: **18 mutants over the new code
+(limit check, `-le`, applying it to the merged list; the long-lived guard, `staging`, the remote HEAD list, an unreadable
+list; date granularity, local time, a non-stamp accepted, an unnoted cutoff fault; a text-prefix root, an always-true
+root check, logical (non-`pwd -P`) paths for the path and for the root, the discovery check, the quarantine-base check,
+the stamp-directory check), 18 killed; the 37 round-9 mutants re-run on this script: 55 of 55 killed.** The first run had two survivors, both real test gaps: an unreadable remote-HEAD
+list (the guard fell open) and a stamp-directory symlink; both got tests and are killed.
+
 ## Residual limits (documented, not solved)
 
 1. **A link held elsewhere.** An `.env*` symlink held in the primary checkout, in another repo, or in a kept
@@ -460,6 +485,14 @@ the per-file proof anyway), and `nested-git-no-prune` stays equivalent as in rou
    valid keys) passes the round-6 line check. Telling it apart needs `git worktree list -z` (git 2.36+).
 8. **Bare-layout breadth.** The bare-repo rule fires on any `objects/` directory beside a `HEAD` file and a `refs/`
    directory, tracked or not. Fail-closed by design.
+9. **Lossy `.gitattributes` clean filter** (Review B, no repro of harm). A clean filter that rewrites content can make
+   `git status` read a modified file as clean; the content check compares what the filter produces.
+10. **Numeric-looking branch names in awk** (Review B, no repro of harm). Branch names are compared in awk and a name
+    such as `1e3` could be compared as a number rather than a string; no failing input found.
+11. **Newline in a path forging a branch line** (Review B, no repro of harm). A worktree path containing a newline can
+    print a line that looks like a `branch` record; the same cause as item 7, fixed by `git worktree list -z`.
+12. **`baseRefName` ignored** (Review B, no repro of harm). A PR merged into a branch other than the default still
+    counts as merged; the script checks the head commit, not where it landed.
 
 ## Affected surfaces
 

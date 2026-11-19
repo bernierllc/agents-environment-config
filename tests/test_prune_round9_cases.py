@@ -11,8 +11,10 @@ Every test runs the real script under /bin/bash against a real git repo with a s
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -345,7 +347,7 @@ def test_p0_2_lsof_failing_keeps_the_tree_and_faults(fx: Fixture) -> None:
     fx.shim("lsof", 'echo "lsof: injected failure" >&2; exit 1')
     out = fx.run(False)
     assert "could not list open files" in out and fx.last_rc == 1, out
-    assert any(p.exists() for p in fx.qbase.glob("2000-01-01/*")), out
+    assert any(p.exists() for p in fx.qbase.glob("2000-01-01T000000Z/*")), out
 
 
 def test_p0_2_lsof_missing_keeps_the_tree_and_faults(fx: Fixture) -> None:
@@ -360,7 +362,7 @@ def test_p0_2_lsof_missing_keeps_the_tree_and_faults(fx: Fixture) -> None:
                 (safe / tool.name).symlink_to(tool)
     out = fx.run(False, {"PATH": f"{fx.bindir}{os.pathsep}{safe}"})
     assert "could not list open files (lsof not found)" in out and fx.last_rc == 1, out
-    assert any(p.exists() for p in fx.qbase.glob("2000-01-01/*")), out
+    assert any(p.exists() for p in fx.qbase.glob("2000-01-01T000000Z/*")), out
 
 
 def test_p0_2_a_tree_nothing_holds_is_still_removed(fx: Fixture) -> None:
@@ -467,3 +469,230 @@ def test_p1_4_a_clean_worktree_with_the_cache_settings_is_still_removed(fx: Fixt
     _git(fx.repo, "config", "core.trustctime", "false")
     _git(fx.repo, "config", "core.checkStat", "minimal")
     assert fx.verdict(dry=False) == "removed"
+
+
+# --- Addendum 1: Review B (Sonnet high, on 5a8f894), independent of Review A -----------------------------------
+# P2-1 and P2-2 are the same two defects Review A found (P0-1 and P0-2); Review B's own repros are kept as tests.
+# P2-3, P3-1, P3-2 and P3-3 are new. Each test below failed against 5a8f894.
+
+
+@pytest.mark.parametrize("lock", ["", "{}\n", '{"name": "app", "lockfileVersion": 3, "packages": {"": {"name": "app"}}}\n'])
+def test_p2_1_an_npm_marker_that_lists_no_package_authorizes_nothing_beneath_it(fx: Fixture, lock: str) -> None:
+    """Review B's repro: ignore node_modules/, add node_modules/.package-lock.json, put node_modules/pkg/my.sqlite and
+    node_modules/notes.txt under it: both were quarantined and later purged."""
+    fx.exclude("node_modules/")
+    nm = fx.wt / "node_modules"
+    (nm / "pkg").mkdir(parents=True)
+    (nm / ".package-lock.json").write_text(lock)
+    _database(nm / "pkg" / "my.sqlite")
+    (nm / "notes.txt").write_text("only copy\n")
+    out = _to_the_end(fx)
+    place = _where(fx)
+    assert place is not None, f"the worktree is gone:\n{out}"
+    assert (place / "node_modules/pkg/my.sqlite").exists() and (place / "node_modules/notes.txt").exists(), out
+    assert _line(fx, out).startswith("keep"), out
+
+
+LATE_WRITER = """
+args=("$@"); n=${{#args[@]}}
+case " $* " in *" worktree remove "*) printf 'ONLY COPY\\n' > "${{args[$((n-1))]}}/.env.late" ;; esac
+exec '{real}' "$@"
+"""
+
+
+def test_p2_2_a_file_written_just_before_the_native_remove_is_not_deleted_by_default(fx: Fixture) -> None:
+    """Review B's repro: a git wrapper writes .env.late into the .purge tree right before `git worktree remove`.
+    Unattended deletion is off by default, so the remove is never reached and the entry stays held."""
+    fx.run(False)
+    (entry,) = fx.held()
+    entry = fx.age(entry)
+    fx.shim("git", LATE_WRITER.format(real=_real("git")))
+    out = fx.run(False, {"PRUNE_ALLOW_DELETE": None})
+    assert entry.exists() and not (entry / ".env.late").exists(), out
+    assert "unattended deletion is off" in _line(fx, out), out
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="documented residual (plan, Residual limits): once PRUNE_ALLOW_DELETE=1 is set, a writer that acts between "
+    "the holder scan and `git worktree remove` still loses its file; no check can close that gap, which is why "
+    "deletion is off by default. If this ever XPASSes the residual was closed: delete the xfail and the plan entry.",
+)
+def test_p2_2_residual_with_deletion_enabled_a_writer_in_the_last_gap_still_loses_its_file(fx: Fixture) -> None:
+    fx.run(False)
+    (entry,) = fx.held()
+    entry = fx.age(entry)
+    fx.shim("git", LATE_WRITER.format(real=_real("git")))
+    out = fx.run(False)
+    survivors = [p for p in (entry, Path(str(entry) + ".purge")) if (p / ".env.late").exists()]
+    assert survivors, out
+
+
+def _outside_worktree(fx: Fixture, where: Path, branch: str = "feat/out") -> Path:
+    where.parent.mkdir(parents=True, exist_ok=True)
+    _git(fx.repo, "worktree", "add", "-q", "-b", branch, str(where))
+    fx.merged.append(f"{branch} {_git(where, 'rev-parse', 'HEAD')}")
+    return where
+
+
+@pytest.mark.parametrize("name", ["elsewhere", "pro jects2/wt2"])
+def test_p2_3_a_worktree_outside_the_projects_root_is_refused_not_quarantined(fx: Fixture, name: str) -> None:
+    """Review B's repro (`$S/elsewhere`), and a sibling whose name merely starts with the root's: a text prefix test
+    would let `pro jects2` through."""
+    out_wt = _outside_worktree(fx, fx.root.parent / name)
+    for dry in (True, False):
+        out = fx.run(dry)
+        line = fx.line(out, out_wt)
+        assert line is not None and line.startswith("keep") and "outside" in line, out
+        assert out_wt.exists() and not any(out_wt.name in p.name for p in fx.held()), out
+    assert fx.last_rc == 0, "a policy refusal is a keep, not a fault"
+
+
+def test_p2_3_a_worktree_directory_that_is_really_a_symlink_to_outside_the_root_is_refused(fx: Fixture) -> None:
+    inside = fx.root / "w4"
+    _git(fx.repo, "worktree", "add", "-q", "-b", "feat/w4", str(inside))
+    fx.merged.append(f"feat/w4 {_git(inside, 'rev-parse', 'HEAD')}")
+    away = fx.root.parent / "away"
+    away.mkdir()
+    shutil.move(str(inside), str(away / "w4"))
+    inside.symlink_to(away / "w4")
+    out = fx.run(False)
+    line = fx.line(out, inside)
+    assert line is not None and line.startswith("keep") and "outside" in line, out
+    assert (away / "w4").is_dir() and not any("w4" in p.name for p in fx.held()), out
+
+
+def test_p2_3_a_quarantine_directory_that_is_a_symlink_out_of_the_root_moves_nothing_and_faults(fx: Fixture) -> None:
+    """The quarantine lives under the root only by name: a `.prune-quarantine` symlink would carry the worktree out."""
+    away = fx.root.parent / "away-q"
+    away.mkdir()
+    (fx.root / ".prune-quarantine").symlink_to(away)
+    out = fx.run(False)
+    line = fx.line(out, fx.wt)
+    assert line is not None and line.startswith("FAILED") and "resolves outside" in line, out
+    assert fx.wt.is_dir() and not any(away.iterdir()) and fx.last_rc == 1, out
+
+
+def test_p2_3_a_stamp_directory_that_is_a_symlink_out_of_the_root_moves_nothing_and_faults(fx: Fixture) -> None:
+    """The quarantine base is fine but the directory named for this run is a planted link: the move would leave the root."""
+    pinned = "2030-01-01T000000Z"
+    fx.shim("date", f'[ "$*" = "-u +%Y-%m-%dT%H%M%SZ" ] && {{ echo {pinned}; exit 0; }}\nexec /bin/date "$@"')
+    away = fx.root.parent / "away-s"
+    away.mkdir()
+    fx.qbase.mkdir(parents=True)
+    (fx.qbase / pinned).symlink_to(away)
+    out = fx.run(False)
+    line = fx.line(out, fx.wt)
+    assert line is not None and line.startswith("FAILED") and "resolves outside" in line, out
+    assert fx.wt.is_dir() and not any(away.iterdir()) and fx.last_rc == 1, out
+
+
+@pytest.mark.parametrize("form", ["symlink", "dotdot"])
+def test_p2_3_a_root_given_as_a_symlink_or_with_dotdot_still_accepts_its_own_worktrees_and_refuses_others(
+    fx: Fixture, form: str
+) -> None:
+    if form == "symlink":
+        link = fx.root.parent / "root-link"
+        link.symlink_to(fx.root)
+        given = str(link)
+    else:
+        given = f"{fx.root}/proj/../../{fx.root.name}"
+    out_wt = _outside_worktree(fx, fx.root.parent / "elsewhere")
+    out = fx.run(False, {"PROJECTS_ROOT": given})
+    inside = fx.line(out, fx.wt)
+    assert inside is not None and inside.startswith("quarantined"), out
+    outside = fx.line(out, out_wt)
+    assert outside is not None and outside.startswith("keep") and "outside" in outside, out
+    assert out_wt.exists()
+
+
+def _stamped(fx: Fixture, entry: Path, ago: datetime.timedelta) -> Path:
+    """Move a held worktree into a directory named for the UTC instant `ago` before now, the way git itself would."""
+    stamp = (datetime.datetime.now(datetime.timezone.utc) - ago).strftime("%Y-%m-%dT%H%M%SZ")
+    parent = fx.qbase / stamp
+    parent.mkdir(parents=True)
+    dest = parent / entry.name
+    _git(entry, "worktree", "move", str(entry), str(dest))
+    return dest
+
+
+def test_p3_1_the_hold_is_a_true_minimum_of_the_configured_days(fx: Fixture) -> None:
+    """With PRUNE_QUARANTINE_DAYS=1 an entry quarantined 23h59m ago stays, one quarantined 24h01m ago goes, however
+    the clock sits against midnight. A calendar-day directory purged the first one about a minute after midnight."""
+    env = {"PRUNE_QUARANTINE_DAYS": "1"}
+    fx.run(False, env)
+    (entry,) = fx.held()
+    young = _stamped(fx, entry, datetime.timedelta(hours=23, minutes=59))
+    out = fx.run(False, env)
+    assert young.exists() and "purge after" in _line(fx, out), out
+    old = _stamped(fx, young, datetime.timedelta(hours=24, minutes=1))
+    # _stamped moved it out of the first stamped directory
+    out = fx.run(False, env)
+    assert not old.exists() and not Path(str(old) + ".purge").exists(), out
+    assert "removed" in out, out
+
+
+def test_p3_1_a_quarantine_directory_that_is_not_a_timestamp_is_kept_and_faults(fx: Fixture) -> None:
+    fx.run(False)
+    (entry,) = fx.held()
+    legacy = fx.qbase / "2000-01-01"  # the pre-round-9 calendar-day name
+    legacy.mkdir()
+    dest = legacy / entry.name
+    _git(entry, "worktree", "move", str(entry), str(dest))
+    out = fx.run(False)
+    assert dest.exists() and "not a UTC timestamp" in out and fx.last_rc == 1, out
+
+
+@pytest.mark.parametrize("name", ["staging", "develop", "master", "trunk"])
+def test_p3_2_a_long_lived_branch_is_never_deleted_when_its_worktree_goes(fx: Fixture, name: str) -> None:
+    """A linked worktree on staging whose HEAD equals a merged promotion PR head: the worktree may go, the branch
+    (staging, develop, master, main or the remote HEAD branch) stays."""
+    if name == "trunk":
+        _git(fx.repo, "update-ref", "refs/remotes/origin/trunk", _git(fx.repo, "rev-parse", "HEAD"))
+        _git(fx.repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+    stg = fx.root / "stg"
+    _git(fx.repo, "worktree", "add", "-q", "-b", name, str(stg))
+    fx.merged.append(f"{name} {_git(stg, 'rev-parse', 'HEAD')}")
+    out = _to_the_end(fx)
+    assert not any(stg.name in p.name for p in [stg, *fx.held()] if p.exists()), f"worktree should be gone:\n{out}"
+    assert _git(fx.repo, "branch", "--list", name) != "", out
+    assert f"kept    branch {name}" in out and "long-lived" in out, out
+    assert _git(fx.repo, "branch", "--list", BRANCH_X) == "", "an ordinary merged branch is still deleted"
+
+
+def test_p3_2_when_the_remote_head_branches_cannot_be_listed_the_branch_is_kept(fx: Fixture) -> None:
+    """Fail closed: an unreadable `for-each-ref` for the remote HEADs means the branch might be the default branch."""
+    fx.shim("git", f'case "$*" in *for-each-ref*symref*) exit 1 ;; esac\nexec \'{_real("git")}\' "$@"')
+    out = _to_the_end(fx)
+    assert not fx.wt.exists() and _git(fx.repo, "branch", "--list", "feat/x") != "", out
+    assert "kept    branch feat/x" in out, out
+
+
+BRANCH_X = "feat/x"
+
+
+def _lines(prefix: str, n: int) -> list[str]:
+    return [f"{prefix}-{i} {'0' * 40}" for i in range(n)]
+
+
+def test_p3_3_an_open_pr_list_that_reached_the_limit_skips_the_repo_and_faults(fx: Fixture) -> None:
+    """`gh pr list --limit 1000` truncates silently; a list of exactly 1000 might be missing the PR that reuses the
+    branch name, so the repo is unverifiable."""
+    fx.open = _lines("other", 1000)
+    out = fx.run(False)
+    assert "open PR list reached the limit" in out and fx.last_rc == 1, out
+    assert fx.wt.exists() and not fx.held(), out
+
+
+def test_p3_3_an_open_pr_list_below_the_limit_is_trusted(fx: Fixture) -> None:
+    fx.open = _lines("other", 999)
+    out = fx.run(False)
+    assert "reached the limit" not in out and fx.last_rc == 0, out
+    assert fx.held() and not fx.wt.exists(), out
+
+
+def test_p3_3_a_merged_list_at_the_limit_only_misses_candidates_so_it_is_not_a_skip(fx: Fixture) -> None:
+    fx.merged = [*_lines("old", 999), *fx.merged]
+    out = fx.run(False)
+    assert "reached the limit" not in out and fx.last_rc == 0, out
+    assert fx.held(), out

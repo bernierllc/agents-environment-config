@@ -1,8 +1,8 @@
 #!/bin/bash
 # Quarantines, then removes, linked git worktrees whose branch has a merged PR and whose HEAD is exactly the commit
 # GitHub merged. A run never deletes a worktree it has just found: it moves it (git worktree move, one rename) to
-# $PROJECTS_ROOT/.prune-quarantine/<date>/, rescans the moved tree and moves it back on any hit. A later run purges an
-# entry older than PRUNE_QUARANTINE_DAYS (default 7, minimum 1): full guard again, rename aside, no process holding it,
+# $PROJECTS_ROOT/.prune-quarantine/<UTC time>/ (YYYY-MM-DDTHHMMSSZ), rescans the moved tree and moves it back on any hit. A later run purges an
+# entry quarantined at least PRUNE_QUARANTINE_DAYS ago (default 7, minimum 1; compared as an instant, so the hold is a true minimum): full guard again, rename aside, no process holding it,
 # rescan, git worktree remove, and only when PRUNE_ALLOW_DELETE=1 (deletion is off by default: see holder_scan), then the branch is deleted only if it still points at the checked commit. Fails closed on DRY_RUN: only
 # DRY_RUN=0 (or unset) acts for real. Scans $PROJECTS_ROOT (default ~/projects) one and two levels deep. Never runs
 # `git worktree prune`. Kept and reported: dirty worktrees, a HEAD past the merged commit, commits in the HEAD, branch
@@ -15,6 +15,9 @@
 # its cwd or a file open inside a tree about to be removed keeps it (lsof). Secret names (.env*, keys, credentials, ...)
 # keep the worktree everywhere. Anything that cannot be read or scanned keeps the worktree, is logged, and makes the
 # run exit 1.
+# A worktree whose real path is not strictly under $PROJECTS_ROOT is reported and never touched. The branch is deleted only
+# when it is not main, master, staging, develop or a remote's HEAD branch. An open-PR list that reaches the limit
+# (1000) skips the repo with exit 1: a PR reusing a branch name could be missing from it.
 # Idempotent; schedule it daily with cron or launchd.
 set -uo pipefail
 ROOT="${PROJECTS_ROOT:-$HOME/projects}"
@@ -24,6 +27,7 @@ DAYS="${PRUNE_QUARANTINE_DAYS-7}"
 # the tree, and no check closes the last gap (see holder_scan), so by default a purge pass stops at the quarantine.
 ALLOW_DELETE="${PRUNE_ALLOW_DELETE-0}"
 QBASE="$ROOT/.prune-quarantine"
+RROOT="$(cd "$ROOT" 2>/dev/null && pwd -P)" || RROOT="" # the resolved root: symlinks and .. gone
 NL=$'\n'
 TAB=$'\t'
 command -v gh >/dev/null || { echo "gh not found in PATH=$PATH"; exit 1; }
@@ -33,12 +37,26 @@ trap 'rm -f "$FAULTS"' EXIT
 note_fault() { echo x >>"$FAULTS" || echo "note    could not record a fault, the exit status may be wrong"; }
 echo "== $(date '+%F %T') prune-merged-worktrees (DRY_RUN=$DRY_RUN, ROOT=$ROOT, quarantine ${DAYS}d)"
 
+PR_LIMIT=1000 # gh pr list truncates silently at --limit
 pr_heads() { # repo state -> "branch sha" lines; on failure prints why and returns 1
-  local out
-  out="$(cd "$1" && gh pr list --state "$2" --limit 1000 --json headRefName,headRefOid \
+  local out n
+  out="$(cd "$1" && gh pr list --state "$2" --limit "$PR_LIMIT" --json headRefName,headRefOid \
         -q '.[] | "\(.headRefName) \(.headRefOid)"' 2>&1)" \
     || { echo "skip $1: gh pr list --state $2 failed: $out" >&2; return 1; } # stderr: stdout is captured by the caller
+  # A full page may be missing the open PR that reuses a branch name, so the repo cannot be verified. A full merged
+  # page only hides candidates (a worktree absent from it is kept), so it is not a reason to skip.
+  if [ "$2" = open ]; then
+    n="$(printf '%s\n' "$out" | awk 'NF{n++} END{print n+0}')"
+    [ "$n" -lt "$PR_LIMIT" ] || { echo "skip $1: open PR list reached the limit of $PR_LIMIT, a PR reusing a branch name may be missing" >&2; return 1; }
+  fi
   printf '%s\n' "$out"
+}
+
+under_root() { # path -> 0 only when its resolved real path lies strictly below the resolved projects root
+  local rp
+  [ -n "$RROOT" ] || return 1
+  rp="$(cd "$1" 2>/dev/null && pwd -P)" || return 1
+  case "$rp" in "$RROOT"/?*) return 0 ;; *) return 1 ;; esac # a text prefix alone would accept /projects2 for /projects
 }
 
 wgit() { # worktree git-args... -> git run in the worktree with a stale core.fsmonitor hook unable to call edits clean
@@ -351,10 +369,19 @@ keep_reason_scan() { # worktree primary merged-sha branch list -> as keep_reason
   return "$rc"
 }
 
+long_lived() { # repo branch -> 0 for a branch that is never deleted: main, master, staging, develop, a remote's HEAD
+  local heads
+  case "$2" in main|master|staging|develop) return 0 ;; esac
+  heads="$(git -C "$1" for-each-ref --format='%(symref)' 'refs/remotes/*/HEAD')" || return 0 # unreadable: keep the branch
+  printf '%s\n' "$heads" | sed 's|^refs/remotes/[^/]*/||' | grep -qxF -- "$2"
+}
+
 delete_branch() { # repo branch sha -> delete the branch only while it still points at the checked commit
   # `branch -D` would drop a branch somebody moved after the scan. update-ref -d keeps a moved branch; it also leaves
   # the branch.<name>.* config section behind, which `branch -D` would have removed.
   local repo="$1" branch="$2" sha="$3" cfg cur rc
+  # a worktree on staging whose HEAD equals a merged promotion PR head may go; the integration branch itself never does
+  if long_lived "$repo" "$branch"; then echo "kept    branch $branch of $repo  (long-lived branch, never deleted)"; return; fi
   if git -C "$repo" update-ref -d "refs/heads/$branch" "$sha"; then
     cfg="$(git -C "$repo" config --remove-section "branch.$branch" 2>&1)"; rc=$?
     # a branch with no upstream has no section: git says so with exit 128 and this message
@@ -372,18 +399,24 @@ move_wt() { # repo from to -> git worktree move; prints the failure with context
   out="$(git -C "$1" worktree move "$2" "$3" 2>&1)" || { echo "could not move $2 to $3: $out"; return 1; }
 }
 
+# A quarantine directory is named for the UTC instant it was made (fixed width, so string order is time order). The hold
+# is compared as an instant, never as a calendar day, so PRUNE_QUARANTINE_DAYS is a true minimum.
+STAMP='%Y-%m-%dT%H%M%SZ'
+is_stamp() { case "$1" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z) true ;; *) false ;; esac; }
 cutoff=""
-if cutoff="$(date -v-"$DAYS"d +%F 2>/dev/null || date -d "$DAYS days ago" +%F 2>/dev/null)" \
-   && case "$cutoff" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) true ;; *) false ;; esac; then :
+if cutoff="$(date -u -v-"$DAYS"d +"$STAMP" 2>/dev/null || date -u -d "$DAYS days ago" +"$STAMP" 2>/dev/null)" && is_stamp "$cutoff"; then :
 else
-  cutoff=""; echo "note    cannot compute the quarantine cutoff date: nothing will be purged"; note_fault
+  cutoff=""; echo "note    cannot compute the quarantine cutoff time: nothing will be purged"; note_fault
 fi
-today="$(date +%F)"
 
 quarantine_one() { # repo path branch sha mb -> move to the quarantine, rescan, move back on any hit
   local repo="$1" path="$2" branch="$3" sha="$4" mb="$5" dir q n why rc
-  dir="$QBASE/$today"
+  dir="$QBASE/$(date -u +"$STAMP")"
+  # check the quarantine base before creating anything in it: a .prune-quarantine symlink would otherwise get a directory made outside the root
+  mkdir -p "$QBASE" || { echo "FAILED  $path  ($branch: could not create $QBASE)"; note_fault; return; }
+  under_root "$QBASE" || { echo "FAILED  $path  ($branch: $QBASE resolves outside $ROOT, nothing was moved)"; note_fault; return; }
   mkdir -p "$dir" || { echo "FAILED  $path  ($branch: could not create $dir)"; note_fault; return; }
+  under_root "$dir" || { echo "FAILED  $path  ($branch: $dir resolves outside $ROOT, nothing was moved)"; note_fault; return; }
   q="$dir/$(basename "$repo")--$(basename "$path")"; n=1
   while [ -e "$q" ] || [ -L "$q" ]; do n=$((n + 1)); q="$dir/$(basename "$repo")--$(basename "$path")-$n"; done
   if ! why="$(move_wt "$repo" "$path" "$q")"; then echo "FAILED  $path  ($branch: $why)"; note_fault; return; fi
@@ -419,7 +452,7 @@ holder_scan() { # tree -> 0 + why when a process has its cwd or a file open insi
 purge_one() { # repo path branch sha mb -> after the hold: full guard, rename aside, rescan, remove, delete the branch
   local repo="$1" path="$2" branch="$3" sha="$4" mb="$5" d aside why rc why2
   d="$(basename "$(dirname "$path")")"
-  case "$d" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;; *) echo "keep    $path  ($branch: quarantine date '$d' is not a date)"; note_fault; return ;; esac
+  is_stamp "$d" || { echo "keep    $path  ($branch: quarantine directory '$d' is not a UTC timestamp like 2026-01-31T235959Z; rename it to the time it was quarantined)"; note_fault; return; }
   [ -n "$cutoff" ] || { echo "keep    $path  ($branch: quarantined, no cutoff date)"; return; }
   if [[ "$d" > "$cutoff" ]]; then echo "keep    $path  ($branch: quarantined $d, purge after $cutoff)"; return; fi
   why="$(keep_reason "$path" "$repo" "$sha" "$branch")"; rc=$?
@@ -481,6 +514,7 @@ for gitdir in "$ROOT"/*/.git "$ROOT"/*/*/.git; do
         awk -v b="$branch" '$1==b{f=1} END{exit !f}' <<<"$open"; rc=$?
         if [ "$rc" -eq 0 ]; then echo "keep    $path  ($branch: name reused by an open PR)"; continue; fi
         [ "$rc" -eq 1 ] || { echo "keep    $path  ($branch: could not read the open PR list, awk exit $rc)"; note_fault; continue; }
+        if [ -d "$path" ] && ! under_root "$path"; then echo "keep    $path  ($branch: outside $ROOT, only worktrees under the projects root are touched)"; continue; fi
         kb="$(du -sk "$path" 2>/dev/null | cut -f1)"; mb=$(( ${kb:-0} / 1024 ))
         if [ "$inq" -eq 1 ]; then purge_one "$repo" "$path" "$branch" "$sha" "$mb"; continue; fi
         why="$(keep_reason "$path" "$repo" "$sha" "$branch")"; rc=$?
