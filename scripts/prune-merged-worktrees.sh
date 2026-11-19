@@ -18,7 +18,7 @@
 # A worktree whose real path is not strictly under $PROJECTS_ROOT is reported and never touched. The branch is deleted only
 # when it is not main, master, staging, develop or a remote's HEAD branch. An open-PR list that reaches the limit
 # (1000) skips the repo with exit 1: a PR reusing a branch name could be missing from it.
-# Idempotent; schedule it daily with cron or launchd.
+# Idempotent; schedule it daily with cron or another scheduler.
 set -uo pipefail
 ROOT="${PROJECTS_ROOT:-$HOME/projects}"
 DRY_RUN="${DRY_RUN-0}" # `-`, not `:-`: DRY_RUN= (set but empty) is not "0"

@@ -239,7 +239,7 @@ cutoff that needs `date -v` (BSD) or `date -d` (GNU) and purges nothing when nei
 **Decision: ADOPT.** The cost is delayed reclaim, which is a tunable; the benefit is that the next unknown guard hole
 costs a move instead of the data. It is adopted together with the direct fixes (2-6 are fixed in the guard as well:
 the quarantine is the second line, not the excuse for a weaker first one), and case 1 is closed by narrowing the rule,
-not by the hold. Open for Matt: the purge runs in the same scheduled run (the existing LaunchAgent keeps working and
+not by the hold. Open for the operator: the purge runs in the same scheduled run (the existing scheduled job keeps working and
 reclaims after the hold) rather than behind a second explicit `--purge` command, which would mean no disk is ever
 reclaimed until someone schedules that second command. Flipping it is a five-line gate.
 
@@ -315,8 +315,8 @@ same-run purge stay as built, per the cop's recommendation.
   `keep_reason` on the held path, then again on the `.purge` path after the rename, and a fault at either keeps the tree
   (`test_the_purge_runs_the_full_guard_again_on_the_held_tree`, `test_a_dry_run_purge_runs_the_whole_guard_before_it_says_would_purge`,
   and the refused-rename and rescan-hit tests). The guard result from the quarantine run is never reused.
-- **(b) The pruner LaunchAgent stays booted out until Matt pulls this change; re-enabling it is Matt's.** Nothing in this
-  branch loads, boots or edits a LaunchAgent, and no run of the script may start before Matt has this version.
+- **(b) The scheduled prune job stays disabled until the operator pulls this change; re-enabling it is the operator's.** Nothing in this
+  branch loads, enables or edits a scheduled job, and no run of the script may start before the operator has this version.
 - **(c) "Recoverable" means "noticed within N days", and the purge still deletes.** A quarantined worktree can be restored with
   `git worktree move` for `PRUNE_QUARANTINE_DAYS` days (7 by default). Nobody is told when something is quarantined, so a
   file nobody notices missing in that window is deleted by the purge, for good, once the guard passes. Quarantine narrows
@@ -407,7 +407,7 @@ passes after.
 | finding | what was wrong | how it is closed |
 |---|---|---|
 | P0-1 a marker authorised everything beneath it | `.package-lock.json` / `pyvenv.cfg` / `CACHEDIR.TAG` made every ignored file under that directory "regenerable", so `node_modules/customers.sqlite` went | A marker says which TOOL owns the directory; each file under it must be proven by that tool's own records. **venv:** a scaffold regex (`pyvenv.cfg`, `.gitignore`, `CACHEDIR.TAG`, `lib64`, `bin/*`, anchored) plus the files each `*/site-packages/*.dist-info/RECORD` lists (a path that climbs out of the worktree, or an absolute one, proves nothing; an unreadable RECORD keeps and faults). **npm:** the package directories `.package-lock.json` lists, plus `.package-lock.json` and `.bin/*` (marker only counts for a directory named `node_modules`). **cache:** the standard `CACHEDIR.TAG` signature line proves the directory, spec-based. **yarn / pnpm trees keep** (`.yarn-integrity`, `.modules.yaml`, `.pnpm` list no package files). A `__pycache__` `.pyc` is proven if its `.py` is beside it or is itself a claim. Secret-name arms still run first. Anything unproven blocks and is named in the keep line. The old blanket-rule test is replaced (said so in the commit message) and every other test that put arbitrary files under a marker was reviewed |
-| P0-2 write between the final rescan and `git worktree remove` | A rename cannot stop a process that already holds the directory | **Structural choice, and it is not a full close.** After the rescan the purge runs `holder_scan` (`lsof -n -P -w -F pc +D <realpath>`): any process with a cwd or open file inside refuses the delete. `lsof` missing, failing, or printing to stderr is a fault keep, never "no holder". Residuals: a process owned by another user that `lsof` cannot see; the gap between `lsof` returning and `git worktree remove` starting; platforms whose `lsof` hides processes. **So deletion ships OFF by default**: the scheduled run quarantines and rescans, and only deletes when `PRUNE_ALLOW_DELETE` is exactly `1` (unset, `0`, `true`, empty: all keep, `unattended deletion is off`). Product consequence for Matt: with the LaunchAgent as is, disk is NOT reclaimed until the variable is set |
+| P0-2 write between the final rescan and `git worktree remove` | A rename cannot stop a process that already holds the directory | **Structural choice, and it is not a full close.** After the rescan the purge runs `holder_scan` (`lsof -n -P -w -F pc +D <realpath>`): any process with a cwd or open file inside refuses the delete. `lsof` missing, failing, or printing to stderr is a fault keep, never "no holder". Residuals: a process owned by another user that `lsof` cannot see; the gap between `lsof` returning and `git worktree remove` starting; platforms whose `lsof` hides processes. **So deletion ships OFF by default**: the scheduled run quarantines and rescans, and only deletes when `PRUNE_ALLOW_DELETE` is exactly `1` (unset, `0`, `true`, empty: all keep, `unattended deletion is off`). Product consequence for the operator: with the scheduled job as is, disk is NOT reclaimed until the variable is set |
 | P1-3 `FETCH_HEAD` treated as disposable | After `git fetch <url> <ref>` the fetched commits are reachable only from `FETCH_HEAD` | `reflog_orphans` now feeds the `FETCH_HEAD` object ids through the same `rev-list --not --all` check as the reflogs and `ORIG_HEAD`; a dangling `FETCH_HEAD` symlink or an unreadable file is a fault keep |
 | P1-4 clean per the stat cache, dirty in content | `git status` trusts size+mtime, so a same-size edit with the mtime restored reads clean | `status --porcelain -uall` runs against a throwaway index built from `HEAD` (`GIT_INDEX_FILE=$list.idx git read-tree HEAD`), so every file is compared by content; a failing `read-tree` is a fault keep; the throwaway index is removed with the other temp files |
 
@@ -510,7 +510,7 @@ directory name) and on round 9.
 5. ~~**Temp-list read-back.**~~ CLOSED in round 8 (case 6): every list is opened with `exec 3<"$list" || return 2`, so
    a failed read-back is a fault keep (exit 1, logged), never "nothing found". Pinned by shim fault injection for the
    four lists (index, ignored, nested, admin), without `lsof`.
-6. ~~**P1-3, ignored data and secret names: awaiting Matt's decision.**~~ DECIDED and implemented in round 7 (option B).
+6. ~~**P1-3, ignored data and secret names: awaiting the operator's decision.**~~ DECIDED and implemented in round 7 (option B).
 7. **A forged worktree-list record.** A worktree path that contains a complete fake record (a blank line followed by
    valid keys) passes the round-6 line check. Telling it apart needs `git worktree list -z` (git 2.36+).
 8. **Bare-layout breadth.** The bare-repo rule fires on any `objects/` directory beside a `HEAD` file and a `refs/`
@@ -527,7 +527,7 @@ directory name) and on round 9.
 ## Affected surfaces
 
 - `scripts/prune-merged-worktrees.sh`: the guard and the discovery loop's failure reporting. Nothing else changed.
-- Callers: the scheduled prune (cron/launchd) and anyone running the script by hand. It now prints `keep` where
+- Callers: the scheduled prune (cron or another scheduler) and anyone running the script by hand. It now prints `keep` where
   it used to print `would`/`removed` for the cases above.
 - Tests: `tests/test_prune_env_guard.py` (real git repo, stub `gh`, real script under `/bin/bash`). A test, or a parametrized set, per
   refusal branch (the mutation check below names the 8 statements no test can tell from their removal), including each round-5 branch (nested `.git` under `node_modules`, in a path with spaces, empty
