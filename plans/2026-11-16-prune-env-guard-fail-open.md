@@ -294,6 +294,13 @@ decision below (strict, or a per-repo opt-in list). Any unknown ignored file kee
 (`MERGE_MSG`, bisect state, `modules/`, `config.worktree`). A merged worktree's disk stays for `PRUNE_QUARANTINE_DAYS`
 (7 by default; 1 for a disk emergency) before it is reclaimed. A reftable repository keeps every worktree.
 
+**Standing helper rule (traffic cop, 2026-11-18): the unattended purge deletes only through `git worktree remove` on a
+registered path.** The script's only deleting commands are that call (on the `.purge` path git registered with its own
+`worktree move`) and `rm -f` of its own temp files. `test_the_unattended_purge_deletes_only_through_git_worktree_remove_on_a_registered_path`
+logs every `rm`/`rmdir`/`unlink`/`mv`/`find`/`git worktree` call of a quarantine plus purge and asserts it; a mutant adding
+`rm -rf` after the remove is killed (118 mutants: 111 killed, 7 equivalent). Decisions (1) and (2) below: strict and
+same-run purge stay as built, per the cop's recommendation.
+
 **Open decisions for Matt.** (1) `dist`/`build`/`.next`/`.turbo`/`coverage`: stay strict (keep until marked or cleared),
 or add a per-repo opt-in list of directory names the user vouches for. (2) Purge in the same scheduled run (current;
 the existing LaunchAgent reclaims after the hold) or behind an explicit `--purge`.

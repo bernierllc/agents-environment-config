@@ -10,6 +10,7 @@ here the readback failure is injected through a private TMPDIR instead).
 from __future__ import annotations
 
 import datetime
+import re
 import subprocess
 from pathlib import Path
 
@@ -653,3 +654,30 @@ def test_an_uncomputable_cutoff_date_purges_nothing_and_faults(fx: Fixture) -> N
     line = fx.line(out, aged)
     assert line is not None and line.startswith("keep") and "no cutoff date" in line, out
     assert aged.exists() and fx.last_rc == 1
+
+
+# =============================================================================================================
+# The unattended purge deletes only through `git worktree remove`, on a path git has registered
+# =============================================================================================================
+
+
+def test_the_unattended_purge_deletes_only_through_git_worktree_remove_on_a_registered_path(fx: Fixture) -> None:
+    log = fx.root.parent / "calls.log"
+    for tool in ("rm", "rmdir", "unlink", "mv", "find"):
+        fx.shim(tool, f'echo "{tool} $*" >> "{log}"\nexec "{_real(tool)}" "$@"')
+    fx.shim("git", f'echo "git $*" >> "{log}"\nexec "{_real("git")}" "$@"')
+    assert fx.run(dry=False)
+    out, aged = fx.purge_run(fx.wt)
+    assert (fx.line(out, aged) or "").startswith("removed"), out
+    assert not aged.exists() and not Path(f"{aged}.purge").exists()
+    calls = log.read_text().splitlines()
+    # nothing but git touches anything under the projects root: the only rm calls are the script's own temp files
+    touching = [c for c in calls if not c.startswith("git ") and str(fx.root) in c and not c.startswith("find ")]
+    assert touching == [], touching
+    assert not any(c.startswith("find ") and ("-delete" in c or "-exec" in c) for c in calls), calls
+    verbs = {m.group(1) for c in calls if (m := re.search(r" worktree (\S+)", c))}
+    assert verbs <= {"list", "move", "remove"}, calls
+    removes = [c for c in calls if " worktree remove " in c]
+    moves = [c for c in calls if " worktree move " in c]
+    assert len(removes) == 1 and removes[0].endswith(f"{aged}.purge"), removes
+    assert any(m.endswith(f"{aged}.purge") for m in moves), moves  # the target was registered by git's own move
