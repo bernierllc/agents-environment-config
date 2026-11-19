@@ -24,7 +24,8 @@ SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "prune-merged-worktre
 BRANCH = "feat/x"
 IS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
 KEEP_ENV = "holds ignored .env files"
-KEEP_UNPROVEN = "holds ignored files that are not known regenerable output"
+KEEP_UNPROVEN = "holds ignored files that are not proven regenerable"
+FAULT_LINE = "exit 1: at least one check could not complete"
 GH_STUB = """#!/bin/bash
 state=""
 case "$*" in *"--state merged"*) state=merged ;; *"--state open"*) state=open ;; esac
@@ -60,6 +61,8 @@ class Fixture:
         self.merged = [f"{BRANCH} {sha}"]
         self.open: list[str] = []
         self.gh_fail = ""
+        self.last_rc = 0
+        self.last_out = ""
 
     # --- running the script -------------------------------------------------------------------------------
     def run(self, dry: bool = True, env: dict[str, str] | None = None, timeout: int = 60) -> str:
@@ -76,18 +79,57 @@ class Fixture:
         proc = subprocess.run(
             ["/bin/bash", str(SCRIPT)], capture_output=True, text=True, env=full, timeout=timeout
         )
-        assert proc.returncode == 0, proc.stdout + proc.stderr
-        return proc.stdout + proc.stderr
+        # exit status 1 exactly when the script says a check could not complete; every policy keep exits 0
+        faulted = FAULT_LINE in proc.stdout
+        assert proc.returncode == (1 if faulted else 0), proc.stdout + proc.stderr
+        self.last_rc = proc.returncode
+        self.last_out = proc.stdout + proc.stderr
+        return self.last_out
 
     @staticmethod
     def line(out: str, wt: Path) -> str | None:
         return next((ln for ln in out.splitlines() if f"{wt}  (" in ln), None)
 
+    # --- the quarantine hold --------------------------------------------------------------------------------
+    @property
+    def qbase(self) -> Path:
+        return self.root / ".prune-quarantine"
+
+    def held(self) -> list[Path]:
+        return sorted(p for p in self.qbase.glob("*/*") if p.is_dir()) if self.qbase.exists() else []
+
+    def age(self, entry: Path) -> Path:
+        """Move a held worktree into a long-expired date directory, the way git itself would move it."""
+        old = self.qbase / "2000-01-01"
+        old.mkdir(parents=True, exist_ok=True)
+        dest = old / entry.name
+        _git(entry, "worktree", "move", str(entry), str(dest))
+        return dest
+
+    def purge_run(self, wt: Path, env: dict[str, str] | None = None) -> tuple[str, Path]:
+        """Age every held worktree past the cutoff and do a real run: (its output, `wt`'s aged entry)."""
+        entries = self.held()
+        assert entries, self.last_out
+        aged = [self.age(entry) for entry in entries]
+        mine = [p for p in aged if p.name.endswith(f"--{wt.name}")]
+        assert len(mine) == 1, (aged, self.last_out)
+        return self.run(False, env), mine[0]
+
     def verdict(self, dry: bool = True, wt: Path | None = None, env: dict[str, str] | None = None) -> str:
-        """The first word printed for the worktree: keep | would | removed | FAILED."""
+        """The first word printed for the worktree: keep | would | quarantined | removed | FAILED.
+
+        A real run only quarantines; `removed` is what the purge pass prints once the hold has expired, so a real
+        run that quarantines is followed by the aged purge run and its verdict is returned."""
+        wt = wt or self.wt
         out = self.run(dry, env)
-        line = self.line(out, wt or self.wt)
+        line = self.line(out, wt)
         assert line is not None, f"script printed nothing for the worktree:\n{out}"
+        word = line.split()[0]
+        if dry or word != "quarantined":
+            return word
+        out, aged = self.purge_run(wt, env)
+        line = self.line(out, aged)
+        assert line is not None, f"the purge pass printed nothing for the held worktree:\n{out}"
         return line.split()[0]
 
     def keeps(self, reason: str = KEEP_ENV, env: dict[str, str] | None = None, real: bool = True) -> None:
@@ -381,10 +423,11 @@ def _component(fx: Fixture) -> None:
 
 
 def _admin_dir(fx: Fixture) -> None:
-    """The link points into the worktree's own git admin dir, which `git worktree remove` deletes with it."""
+    """The link points into the worktree's own git admin dir, which `git worktree remove` deletes with it. The target
+    is FETCH_HEAD, a name the admin-dir allowlist accepts, so the .env rule is what keeps the tree here."""
     admin = Path(_git(fx.wt, "rev-parse", "--git-dir"))
-    (admin / "envdata").write_text("ADMIN_SECRET=1\n")
-    (fx.wt / ".env").symlink_to(admin / "envdata")
+    (admin / "FETCH_HEAD").write_text("ADMIN_SECRET=1\n")
+    (fx.wt / ".env").symlink_to(admin / "FETCH_HEAD")
 
 
 LINKS: dict[str, Callable[[Fixture], None]] = {
@@ -413,7 +456,7 @@ def test_env_symlink_keeps_the_worktree_whatever_it_points_at(fx: Fixture, make:
 def test_admin_dir_symlink_target_survives_a_real_run(fx: Fixture) -> None:
     _admin_dir(fx)
     fx.keeps()
-    assert (Path(_git(fx.wt, "rev-parse", "--git-dir")) / "envdata").read_text() == "ADMIN_SECRET=1\n"
+    assert (Path(_git(fx.wt, "rev-parse", "--git-dir")) / "FETCH_HEAD").read_text() == "ADMIN_SECRET=1\n"
 
 
 def test_ignored_symlink_target_survives_a_real_run(fx: Fixture) -> None:
@@ -510,7 +553,7 @@ def test_find_killed_in_a_nested_repo_scan_keeps(fx: Fixture) -> None:
 
 def test_find_failing_quietly_in_a_nested_repo_scan_keeps(fx: Fixture) -> None:
     fx.nested_repo("vendor/lib", readme="nothing\n")
-    fx.shim("find", "exit 1")
+    fx.shim("find", f'for a in "$@"; do [ "$a" = -iname ] && exit 1; done\nexec "{_real("find")}" "$@"')
     fx.keeps("could not scan vendor/lib/ (find exit 1)")
 
 
@@ -521,14 +564,36 @@ def test_failing_head_does_not_change_the_nested_repo_verdict(fx: Fixture) -> No
 
 
 def test_scan_killed_mid_way_keeps(fx: Fixture) -> None:
-    # `rm` runs directly inside the scan's subshell; killing its parent kills the whole scan with status 137
-    fx.shim("rm", 'kill -9 $PPID')
-    fx.keeps("scan failed, exit 137")
+    # the first `rm` is the scan's own, inside its command substitution; killing its parent kills the whole scan
+    # with status 137. Later calls (the exit trap's) are the real rm, or the script itself would be killed.
+    marker = fx.bindir / "rm.killed"
+    fx.shim("rm", f'[ -e "{marker}" ] && exec "{_real("rm")}" "$@"\ntouch "{marker}"\nkill -9 $PPID')
+    fx.keeps("scan failed, exit 137", real=False)
+    assert fx.last_rc == 1
+
+
+def _first_mktemp_is_real(fx: Fixture, then: str) -> None:
+    """The script's own bookkeeping file is the first mktemp; the scan's list files come after it."""
+    marker = fx.bindir / "mktemp.used"
+    fx.shim("mktemp", f'[ -e "{marker}" ] || {{ touch "{marker}"; exec "{_real("mktemp")}" "$@"; }}\n{then}')
 
 
 def test_mktemp_failure_keeps(fx: Fixture) -> None:
+    _first_mktemp_is_real(fx, "exit 1")
+    fx.keeps("could not create a temp file", real=False)
+    assert fx.last_rc == 1
+
+
+def test_mktemp_failing_at_start_stops_the_run_nonzero(fx: Fixture) -> None:
     fx.shim("mktemp", "exit 1")
-    fx.keeps("could not create a temp file")
+    proc = subprocess.run(
+        ["/bin/bash", str(SCRIPT)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PATH": f"{fx.bindir}{os.pathsep}{os.environ['PATH']}", "PROJECTS_ROOT": str(fx.root)},
+    )
+    assert proc.returncode == 1 and "could not create a temp file" in proc.stdout, proc.stdout + proc.stderr
+    assert fx.wt.exists() and not fx.held()
 
 
 @pytest.mark.parametrize("kind", ["directory", "read-only-file"])
@@ -542,9 +607,10 @@ def test_unwritable_temp_file_keeps(fx: Fixture, tmp_path: Path, kind: str) -> N
     else:
         target.write_text("")
         target.chmod(0o444)
-    fx.shim("mktemp", f'echo "{target}"')
+    _first_mktemp_is_real(fx, f'echo "{target}"')
     (fx.wt / ".env").write_text("unique\n")  # would be removed if the unwritable list were taken as empty
-    fx.keeps("could not read the index")
+    fx.keeps("could not scan the git dir", real=False)  # the first scan to write into the list stops the run
+    assert fx.last_rc == 1
 
 
 def test_du_runs_before_the_scan_so_a_file_created_meanwhile_is_seen(fx: Fixture) -> None:
@@ -643,10 +709,32 @@ def test_failing_worktree_list_skips_the_repo_with_a_reason(fx: Fixture) -> None
     assert fx.wt.exists()
 
 
-def test_a_refused_removal_is_reported_and_keeps_the_branch(fx: Fixture) -> None:
-    _git(fx.repo, "worktree", "lock", str(fx.wt))  # git refuses to remove a locked worktree
-    assert fx.verdict(dry=False) == "FAILED"
-    assert fx.wt.exists()
+def test_a_locked_worktree_is_kept_by_policy(fx: Fixture) -> None:
+    """Round 7 let git's own refusal stop a locked worktree; round 8 keeps it before touching it (`locked` is not a
+    file git creates for a clean worktree), so the run exits 0 and nothing is moved."""
+    _git(fx.repo, "worktree", "lock", str(fx.wt))
+    fx.keeps("its git directory holds locked")
+    assert _git(fx.repo, "branch", "--list", BRANCH) != ""
+
+
+def test_a_refused_quarantine_move_is_reported_and_keeps_everything(fx: Fixture) -> None:
+    fx.git_fails("worktree move")
+    out = fx.run(dry=False)
+    line = fx.line(out, fx.wt)
+    assert line is not None and line.startswith("FAILED") and "could not move" in line, out
+    assert fx.last_rc == 1 and fx.wt.exists() and not fx.held()
+    assert _git(fx.repo, "branch", "--list", BRANCH) != ""
+
+
+def test_a_refused_purge_removal_is_reported_and_keeps_the_branch(fx: Fixture) -> None:
+    out = fx.run(dry=False)
+    assert (fx.line(out, fx.wt) or "").startswith("quarantined"), out
+    fx.git_fails("worktree remove")
+    out, aged = fx.purge_run(fx.wt)
+    aside = Path(f"{aged}.purge")
+    line = fx.line(out, aside)
+    assert line is not None and line.startswith("FAILED"), out
+    assert fx.last_rc == 1 and aside.exists()
     assert _git(fx.repo, "branch", "--list", BRANCH) != ""
 
 
@@ -669,13 +757,12 @@ def _with_submodule(fx: Fixture, init: bool = True) -> None:
     fx.merged = [f"{BRANCH} {_git(fx.wt, 'rev-parse', 'HEAD')}"]
 
 
-def test_worktree_with_an_initialized_submodule_is_left_to_gits_own_refusal(fx: Fixture) -> None:
-    """The scan does not look inside submodules; `git worktree remove` refuses them, which is all that
-    protects an ignored .env inside one. This pins that refusal, and that a tracked submodule's own `.git`
-    is not mistaken for a nested repo."""
+def test_worktree_with_an_initialized_submodule_is_kept_by_policy(fx: Fixture) -> None:
+    """Round 7 left an initialized submodule to git's refusal to remove it (a FAILED line, exit 1). Round 8 keeps
+    it before touching it: its git dir holds modules/<name>, which git does not create for a clean worktree."""
     _with_submodule(fx)
     (fx.wt / "sub" / ".env").write_text("SUBSECRET=1\n")
-    assert fx.verdict(dry=False) == "FAILED"
+    fx.keeps("its git directory holds modules/")
     assert (fx.wt / "sub" / ".env").read_text() == "SUBSECRET=1\n"
 
 
@@ -720,10 +807,9 @@ def _silent_git_failure(fx: Fixture, args: str, code: int = 1) -> None:
 def test_untracked_name_ending_in_a_backslash_cannot_swallow_the_next_env_file(fx: Fixture) -> None:
     """`read -d ''` without -r treats `\\<NUL>` as an escaped delimiter and fuses two records (bash 3.2 and 5).
     Round 7: the fused record `dist/-adocs.txt` sits under dist/, so a swallowed `docs.txt` would be removed."""
-    fx.exclude("dist/")
+    _marked(fx)
     fx.exclude("docs.txt")
-    (fx.wt / "dist").mkdir()
-    (fx.wt / "dist" / "-a\\").write_text("x\n")  # sorts directly before docs.txt
+    (fx.wt / "tree" / "-a\\").write_text("x\n")  # sorts directly before docs.txt
     (fx.wt / "docs.txt").write_text("unique\n")
     fx.keeps(KEEP_UNPROVEN)
 
@@ -1004,6 +1090,20 @@ KEEP_GIT = "holds a nested git repo"
 KEEP_SECRET = "holds secret-named files"
 
 
+def _marked(fx: Fixture, top: str = "tree") -> None:
+    """An ignored directory that a venv marker (pyvenv.cfg) proves regenerable, so only the rule under test can keep it."""
+    fx.exclude(f"{top}/")
+    (fx.wt / top).mkdir(parents=True, exist_ok=True)
+    (fx.wt / top / "pyvenv.cfg").write_text("home = /usr/bin\n")
+
+
+def _purged(fx: Fixture, env: dict[str, str] | None = None) -> tuple[str, Path]:
+    """A real run that quarantines the worktree, then the aged purge run: (the purge run's output, the aged entry)."""
+    out = fx.run(False, env)
+    assert (fx.line(out, fx.wt) or "").startswith("quarantined"), out
+    return fx.purge_run(fx.wt, env)
+
+
 def _ignored(fx: Fixture, rel: str, text: str = "x\n") -> None:
     """An ignored (not untracked) file at `rel` in the worktree, parents created."""
     fx.exclude(rel)
@@ -1025,7 +1125,7 @@ def test_symlinked_projects_root_still_skips_the_primary_and_removes_the_worktre
     out = fx.run(dry=False, env={"PROJECTS_ROOT": str(link)})
     assert fx.line(out, fx.repo) is None, out
     line = fx.line(out, fx.wt)
-    assert line is not None and line.startswith("removed"), out
+    assert line is not None and line.startswith("quarantined"), out
     assert fx.repo.exists() and (fx.repo / ".git").exists()
     assert "FAILED" not in out and "skip" not in out, out
 
@@ -1046,9 +1146,9 @@ def test_nested_repo_under_a_path_with_spaces_keeps(fx: Fixture) -> None:
 
 def test_nested_repo_with_an_empty_git_directory_keeps(fx: Fixture) -> None:
     """git skips a broken nested repo silently, so only a scan for the name `.git` sees it."""
-    fx.exclude("dist/")  # a regenerable directory, so only the nested-repo rule can keep this
-    (fx.wt / "dist" / "lib" / ".git").mkdir(parents=True)
-    (fx.wt / "dist" / "lib" / "a").write_text("x\n")
+    _marked(fx)  # a proven-regenerable directory, so only the nested-repo rule can keep this
+    (fx.wt / "tree" / "lib" / ".git").mkdir(parents=True)
+    (fx.wt / "tree" / "lib" / "a").write_text("x\n")
     fx.keeps(KEEP_GIT)
 
 
@@ -1072,21 +1172,22 @@ def test_nested_repo_under_site_packages_keeps(fx: Fixture) -> None:
 
 
 def test_nested_repo_next_to_a_tracked_submodule_still_keeps(fx: Fixture) -> None:
-    """Only the exact submodule path is left to git's refusal; a lookalike path is a nested repo."""
-    _with_submodule(fx)
+    """A lookalike path next to an (uninitialized) gitlink directory is still a nested repo."""
+    _with_submodule(fx, init=False)
     fx.nested_repo("sub-extra/lib", readme="x\n")
     fx.keeps(KEEP_GIT)
 
 
 def test_nested_repo_whose_path_is_a_prefix_of_a_submodule_path_keeps(fx: Fixture) -> None:
-    """`su` is a substring of the submodule path `sub`, but only the exact path is git's to refuse."""
-    _with_submodule(fx)
+    """`su` is a substring of the gitlink path `sub`, but it is a different directory and a nested repo."""
+    _with_submodule(fx, init=False)
     fx.nested_repo("su", readme="x\n")
     fx.keeps(KEEP_GIT)
 
 
 def test_names_that_only_look_like_a_git_directory_do_not_keep(fx: Fixture) -> None:
-    for rel in ("dist/.github/ci.yml", "dist/pkg.git", "dist/.gitkeep", "dist/not.git/x"):
+    _marked(fx)
+    for rel in ("tree/.github/ci.yml", "tree/pkg.git", "tree/.gitkeep", "tree/not.git/x"):
         _ignored(fx, rel)
     assert fx.verdict() == "would"
 
@@ -1134,8 +1235,9 @@ def test_ignored_secret_named_file_keeps_the_worktree(fx: Fixture, rel: str) -> 
 
 @pytest.mark.parametrize("rel", ["notes.txt", "monkey", "keyboard.js", "valid_rsa", "npmrc", "dev.vars", "pem", "src/key"])
 def test_names_that_only_resemble_a_secret_name_do_not_keep(fx: Fixture, rel: str) -> None:
-    """Under dist/ (regenerable) so only the secret-NAME rule could keep these: it must not match a lookalike."""
-    _ignored(fx, f"dist/{rel}")
+    """Under a marked tree (regenerable) so only the secret-NAME rule could keep these: it must not match a lookalike."""
+    _marked(fx)
+    _ignored(fx, f"tree/{rel}")
     assert fx.verdict() == "would"
 
 
@@ -1178,45 +1280,98 @@ def test_any_other_ignored_file_outside_a_regenerable_directory_keeps(fx: Fixtur
     fx.keeps(KEEP_UNPROVEN)
 
 
+CACHEDIR_TAG = "Signature: 8a477f597d28d172789f06886806bc55\n# This file is a cache directory tag.\n"
+
+
 @pytest.mark.parametrize(
-    "rel",
+    ("marker", "rel"),
     [
-        "node_modules/pkg/index.js",
-        ".venv/lib/x.py",
-        "a/venv/lib/x.py",
-        "lib/site-packages/pkg/mod.py",
-        "src/__pycache__/m.cpython-312.pyc",
-        "dist/out.js",
-        "build/out.js",
-        "web/.next/cache/x",
-        ".turbo/log",
-        "coverage/lcov.info",
-        ".pytest_cache/v/cache/nodeids",
-        ".mypy_cache/3.12/x.json",
-        ".ruff_cache/0.1/x",
+        ("node_modules/.package-lock.json", "node_modules/pkg/index.js"),
+        ("node_modules/.yarn-integrity", "node_modules/pkg/index.js"),
+        ("node_modules/.modules.yaml", "node_modules/pkg/index.js"),
+        ("node_modules/.pnpm/lock.yaml", "node_modules/.pnpm/pkg/index.js"),
+        ("a/node_modules/.package-lock.json", "a/node_modules/pkg/index.js"),
+        (".venv/pyvenv.cfg", ".venv/lib/x.py"),
+        ("a/venv/pyvenv.cfg", "a/venv/lib/x.py"),
+        ("myenv/pyvenv.cfg", "myenv/lib/x.py"),  # a venv is a venv whatever it is called
+        (".pytest_cache/CACHEDIR.TAG", ".pytest_cache/v/cache/nodeids"),
+        (".mypy_cache/CACHEDIR.TAG", ".mypy_cache/3.12/x.json"),
+        ("target/CACHEDIR.TAG", "target/debug/x"),
     ],
 )
-def test_each_regenerable_directory_alone_does_not_keep(fx: Fixture, rel: str) -> None:
-    """The control for the allowlist: each documented directory really is removable (and not just never reached)."""
+def test_each_marker_proven_directory_alone_does_not_keep(fx: Fixture, marker: str, rel: str) -> None:
+    """The control for the marker rule: each documented marker really proves a tree removable (and not just never reached)."""
+    _ignored(fx, marker, CACHEDIR_TAG if marker.endswith("CACHEDIR.TAG") else "{}\n")
     _ignored(fx, rel)
     assert fx.verdict() == "would"
     assert fx.verdict(dry=False) == "removed"
     assert not fx.wt.exists()
 
 
-def test_worktree_with_only_package_trees_and_build_output_is_still_removed(fx: Fixture) -> None:
-    for rel in ("node_modules/pkg/index.js", ".venv/lib/x.py", "build/out.js"):
+def test_a_pycache_file_beside_its_tracked_source_does_not_keep(fx: Fixture) -> None:
+    (fx.wt / "src").mkdir()
+    (fx.wt / "src" / "m.py").write_text("x = 1\n")
+    fx.commit("src/m.py")
+    _ignored(fx, "src/__pycache__/m.cpython-312.pyc")
+    assert fx.verdict(dry=False) == "removed"
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "dist/out.js",  # reversed in round 8: a directory NAME proves nothing
+        "build/out.js",
+        "web/.next/cache/x",
+        ".turbo/log",
+        "coverage/lcov.info",
+        ".pytest_cache/v/cache/nodeids",  # no CACHEDIR.TAG written
+        ".ruff_cache/0.1/x",
+        ".venv/lib/x.py",  # no pyvenv.cfg
+        "lib/site-packages/pkg/mod.py",
+        "node_modules/pkg/index.js",  # no npm/yarn/pnpm marker
+        "src/__pycache__/m.cpython-312.pyc",  # no source beside it
+    ],
+)
+def test_a_directory_name_alone_never_proves_a_tree_regenerable(fx: Fixture, rel: str) -> None:
+    _ignored(fx, rel)
+    fx.keeps(KEEP_UNPROVEN)
+
+
+def test_a_cachedir_tag_with_the_wrong_signature_proves_nothing(fx: Fixture) -> None:
+    _ignored(fx, "cache/CACHEDIR.TAG", "Signature: not-the-standard-one\n")
+    _ignored(fx, "cache/x")
+    fx.keeps(KEEP_UNPROVEN)
+
+
+@pytest.mark.parametrize("marker", ["pyvenv.cfg", "CACHEDIR.TAG", "node_modules/.package-lock.json"])
+def test_a_symlinked_marker_proves_nothing(fx: Fixture, marker: str) -> None:
+    fx.exclude("tree/")
+    tree = fx.wt / "tree"
+    (tree / "node_modules").mkdir(parents=True)
+    real = fx.wt.parent / "real-marker"
+    real.write_text(CACHEDIR_TAG)
+    (tree / marker).symlink_to(real)
+    (tree / "node_modules" / "pkg.js").write_text("x\n")
+    fx.keeps(KEEP_UNPROVEN)
+
+
+def test_worktree_with_only_marked_package_trees_is_still_removed(fx: Fixture) -> None:
+    for marker, rel in (
+        ("node_modules/.package-lock.json", "node_modules/pkg/index.js"),
+        (".venv/pyvenv.cfg", ".venv/lib/x.py"),
+    ):
+        _ignored(fx, marker, "{}\n")
         _ignored(fx, rel)
     assert fx.verdict(dry=False) == "removed"
     assert not fx.wt.exists()
 
 
 def test_an_allowlisted_name_that_is_a_symlink_is_not_allowlisted(fx: Fixture) -> None:
-    """`dist` -> a directory holding unique data: git lists the link as one entry and never enumerates the target."""
-    fx.exclude("dist")
+    """`tree` -> a directory holding unique data: git lists the link as one entry and never enumerates the target."""
+    fx.exclude("tree")
     (fx.wt.parent / "elsewhere").mkdir()
     (fx.wt.parent / "elsewhere" / "data").write_text("unique\n")
-    (fx.wt / "dist").symlink_to(fx.wt.parent / "elsewhere")
+    (fx.wt / "tree").symlink_to(fx.wt.parent / "elsewhere")
     fx.keeps(KEEP_UNPROVEN)
 
 
@@ -1328,11 +1483,9 @@ def test_an_empty_uninitialized_submodule_directory_is_removable(fx: Fixture) ->
     assert not fx.wt.exists()
 
 
-def test_an_initialized_submodule_is_still_left_to_gits_own_refusal(fx: Fixture) -> None:
+def test_an_initialized_submodule_with_an_ignored_file_keeps(fx: Fixture) -> None:
     _with_submodule(fx, init=True)
-    (fx.wt / "sub" / ".env").write_text("SUBSECRET=1\n")
-    assert fx.verdict(dry=False) == "FAILED"
-    assert (fx.wt / "sub" / ".env").read_text() == "SUBSECRET=1\n"
+    fx.keeps("its git directory holds modules/")  # even a clean initialized submodule: nothing is lost by keeping it
 
 
 def test_a_dangling_git_symlink_does_not_make_a_gitlink_directory_look_initialized(fx: Fixture) -> None:
@@ -1386,17 +1539,16 @@ def test_a_tracked_submodule_path_with_a_newline_keeps(fx: Fixture) -> None:
 
 def test_a_bare_repo_inside_an_ignored_directory_keeps(fx: Fixture) -> None:
     """A bare repo has no `.git` entry at all, so only its layout (HEAD, objects/, refs/) gives it away."""
-    fx.exclude("dist/")  # regenerable: only the nested-repo rule can keep it
-    (fx.wt / "dist").mkdir()
-    _git(fx.wt / "dist", "init", "-q", "--bare", "lib.git")
-    assert not (fx.wt / "dist" / "lib.git" / ".git").exists()
+    _marked(fx)  # regenerable: only the nested-repo rule can keep it
+    _git(fx.wt / "tree", "init", "-q", "--bare", "lib.git")
+    assert not (fx.wt / "tree" / "lib.git" / ".git").exists()
     assert _git(fx.wt, "status", "--porcelain") == ""
     fx.keeps(KEEP_GIT)
 
 
 def test_a_minimal_bare_layout_keeps(fx: Fixture) -> None:
-    fx.exclude("dist/")  # regenerable: only the nested-repo rule can keep it
-    bare = fx.wt / "dist" / "lib"
+    _marked(fx)  # regenerable: only the nested-repo rule can keep it
+    bare = fx.wt / "tree" / "lib"
     (bare / "objects").mkdir(parents=True)
     (bare / "refs").mkdir()
     (bare / "HEAD").write_text("ref: refs/heads/main\n")
@@ -1406,8 +1558,8 @@ def test_a_minimal_bare_layout_keeps(fx: Fixture) -> None:
 @pytest.mark.parametrize("spelling", ["OBJECTS", "Objects"])
 def test_a_bare_layout_with_objects_spelled_in_another_case_keeps(fx: Fixture, spelling: str) -> None:
     """APFS is case-insensitive: git opens `OBJECTS` as `objects`, so the name match must not be exact."""
-    fx.exclude("dist/")  # regenerable: only the nested-repo rule can keep it
-    bare = fx.wt / "dist" / "lib"
+    _marked(fx)  # regenerable: only the nested-repo rule can keep it
+    bare = fx.wt / "tree" / "lib"
     (bare / spelling).mkdir(parents=True)
     (bare / "refs").mkdir()
     (bare / "HEAD").write_text("ref: refs/heads/main\n")
@@ -1420,8 +1572,8 @@ def test_a_bare_layout_with_objects_spelled_in_another_case_keeps(fx: Fixture, s
     ids=["no-HEAD", "no-refs", "objects-is-a-file"],
 )
 def test_a_directory_that_only_partly_looks_like_a_bare_repo_does_not_keep(fx: Fixture, missing: str) -> None:
-    fx.exclude("dist/")  # regenerable: only the nested-repo rule can keep it
-    bare = fx.wt / "dist" / "lib"
+    _marked(fx)  # regenerable: only the nested-repo rule can keep it
+    bare = fx.wt / "tree" / "lib"
     bare.mkdir(parents=True)
     if missing == "objects-as-file":
         (bare / "objects").write_text("not a directory\n")
@@ -1525,11 +1677,11 @@ def test_any_dry_run_value_other_than_exactly_zero_only_prints(fx: Fixture, valu
 
 
 @pytest.mark.parametrize("value", [None, "0"], ids=["unset", "zero"])
-def test_dry_run_unset_or_exactly_zero_removes_for_real(fx: Fixture, value: str | None) -> None:
+def test_dry_run_unset_or_exactly_zero_acts_for_real(fx: Fixture, value: str | None) -> None:
     out = _run_with_dry_run(fx, value)
     line = fx.line(out, fx.wt)
-    assert line is not None and line.startswith("removed"), out
-    assert not fx.wt.exists()
+    assert line is not None and line.startswith("quarantined"), out
+    assert not fx.wt.exists() and len(fx.held()) == 1
 
 
 def test_dry_run_is_documented_as_fail_closed_in_the_header() -> None:
@@ -1594,12 +1746,13 @@ def test_awk_failing_in_the_worktree_list_check_skips_the_repo(fx: Fixture) -> N
 # Each rule has a test that fails on 3b3b76f (see plans/2026-11-16-prune-env-guard-fail-open.md, round 7).
 # =============================================================================================================
 
-KEEP_REFLOG = "HEAD reflog holds commits no ref reaches"
+KEEP_REFLOG = "a reflog holds commits no ref reaches"
 
 
 @pytest.mark.parametrize("rel", UNLISTED_NAMES)
 def test_new_secret_names_keep_even_inside_a_regenerable_directory(fx: Fixture, rel: str) -> None:
-    _ignored(fx, f"dist/{rel}", "not a real secret\n")
+    _marked(fx)
+    _ignored(fx, f"tree/{rel}", "not a real secret\n")
     fx.keeps(KEEP_SECRET)
 
 
@@ -1627,10 +1780,10 @@ def test_an_uninitialized_submodule_directory_holding_a_unique_file_keeps_and_th
 
 def test_a_bare_layout_whose_objects_is_a_symlink_to_a_shared_store_keeps(fx: Fixture) -> None:
     """`git clone --shared`-style repos and linked object stores make objects/ a symlink; `-type d` missed it."""
-    fx.exclude("dist/")
+    _marked(fx)
     store = fx.wt.parent / "shared-objects"
     store.mkdir()
-    bare = fx.wt / "dist" / "lib"
+    bare = fx.wt / "tree" / "lib"
     (bare / "refs").mkdir(parents=True)
     (bare / "objects").symlink_to(store)
     (bare / "HEAD").write_text("ref: refs/heads/main\n")
@@ -1638,9 +1791,9 @@ def test_a_bare_layout_whose_objects_is_a_symlink_to_a_shared_store_keeps(fx: Fi
 
 
 def test_a_dangling_objects_symlink_without_a_bare_layout_does_not_keep(fx: Fixture) -> None:
-    fx.exclude("dist/")
-    (fx.wt / "dist" / "lib").mkdir(parents=True)
-    (fx.wt / "dist" / "lib" / "objects").symlink_to("nowhere")
+    _marked(fx)
+    (fx.wt / "tree" / "lib").mkdir(parents=True)
+    (fx.wt / "tree" / "lib" / "objects").symlink_to("nowhere")
     assert fx.verdict() == "would"
 
 
@@ -1663,8 +1816,8 @@ def _move_the_branch_after_the_worktree_is_removed(fx: Fixture) -> str:
 
 def test_a_branch_moved_after_the_scan_is_kept_and_reported(fx: Fixture) -> None:
     other = _move_the_branch_after_the_worktree_is_removed(fx)
-    out = fx.run(dry=False)
-    line = fx.line(out, fx.wt)
+    out, aged = _purged(fx)
+    line = fx.line(out, aged)
     assert line is not None and line.startswith("removed"), out
     assert f"kept    branch {BRANCH} of {fx.repo}" in out and f"it is now {other}" in out, out
     assert _git(fx.repo, "rev-parse", f"refs/heads/{BRANCH}") == other
@@ -1672,9 +1825,10 @@ def test_a_branch_moved_after_the_scan_is_kept_and_reported(fx: Fixture) -> None
 
 def test_a_failing_branch_deletion_is_reported_not_swallowed(fx: Fixture) -> None:
     fx.git_fails("update-ref -d")
-    out = fx.run(dry=False)
-    line = fx.line(out, fx.wt)
+    out, aged = _purged(fx)
+    line = fx.line(out, aged)
     assert line is not None and line.startswith("removed"), out
+    assert fx.last_rc == 1
     assert f"kept    branch {BRANCH} of {fx.repo}  (git update-ref -d failed)" in out, out
     assert _git(fx.repo, "branch", "--list", BRANCH) != ""
 
@@ -1683,7 +1837,7 @@ def test_the_branch_config_section_goes_with_the_branch(fx: Fixture) -> None:
     """`branch -D` removed branch.<name>.*; update-ref -d does not, so the script must."""
     _git(fx.repo, "config", f"branch.{BRANCH}.remote", "origin")
     _git(fx.repo, "config", f"branch.{BRANCH}.merge", f"refs/heads/{BRANCH}")
-    out = fx.run(dry=False)
+    out, _aged = _purged(fx)
     assert "note" not in out and "kept    branch" not in out, out
     assert _git(fx.repo, "branch", "--list", BRANCH) == ""
     assert subprocess.run(
@@ -1692,7 +1846,7 @@ def test_the_branch_config_section_goes_with_the_branch(fx: Fixture) -> None:
 
 
 def test_a_branch_without_a_config_section_is_deleted_without_a_note(fx: Fixture) -> None:
-    out = fx.run(dry=False)
+    out, _aged = _purged(fx)
     assert "note" not in out and "kept    branch" not in out, out
     assert _git(fx.repo, "branch", "--list", BRANCH) == ""
 
@@ -1700,7 +1854,7 @@ def test_a_branch_without_a_config_section_is_deleted_without_a_note(fx: Fixture
 def test_a_failing_config_cleanup_is_reported(fx: Fixture) -> None:
     _git(fx.repo, "config", f"branch.{BRANCH}.remote", "origin")
     fx.git_fails("config --remove-section")
-    out = fx.run(dry=False)
+    out, _aged = _purged(fx)
     assert f"note    {fx.repo}: could not remove the branch.{BRANCH} config section" in out, out
     assert _git(fx.repo, "branch", "--list", BRANCH) == ""
 
@@ -1769,8 +1923,8 @@ def test_a_worktree_without_a_head_reflog_does_not_keep(fx: Fixture) -> None:
     ("args", "why"),
     [
         ("rev-parse --absolute-git-dir", "could not locate the git dir (git rev-parse exit 128)"),
-        ("cat-file", "could not read the HEAD reflog (exit 128)"),
-        ("rev-list --stdin", "could not check the HEAD reflog against the refs (git rev-list exit 128)"),
+        ("cat-file", "could not read the reflogs (exit 128)"),
+        ("rev-list --stdin", "could not check the reflogs against the refs (git rev-list exit 128)"),
     ],
 )
 def test_a_git_failure_while_checking_the_reflog_keeps(fx: Fixture, args: str, why: str) -> None:
@@ -1780,7 +1934,7 @@ def test_a_git_failure_while_checking_the_reflog_keeps(fx: Fixture, args: str, w
 
 def test_rev_list_killed_while_checking_the_reflog_keeps(fx: Fixture) -> None:
     fx.shim("git", f'case " $* " in *" rev-list --stdin "*) kill -9 $$ ;; esac\nexec "{_real("git")}" "$@"')
-    fx.keeps("could not check the HEAD reflog against the refs (git rev-list exit 137)")
+    fx.keeps("could not check the reflogs against the refs (git rev-list exit 137)")
 
 
 @pytest.mark.skipif(IS_ROOT, reason="root ignores file permissions")
@@ -1788,7 +1942,7 @@ def test_an_unreadable_head_reflog_keeps(fx: Fixture) -> None:
     log = Path(_git(fx.wt, "rev-parse", "--absolute-git-dir")) / "logs" / "HEAD"
     log.chmod(0)
     try:
-        fx.keeps("could not read the HEAD reflog")
+        fx.keeps("could not read the reflogs")
     finally:
         log.chmod(0o644)
 
@@ -1823,7 +1977,8 @@ def test_a_scan_file_that_becomes_unwritable_midway_keeps(fx: Fixture, tmp_path:
 
 @pytest.mark.parametrize("rel", ["credentials", "CREDENTIALS", "terraform.tfstate", "prod.TFSTATE"])
 def test_credentials_and_tfstate_names_keep_even_inside_a_regenerable_directory(fx: Fixture, rel: str) -> None:
-    _ignored(fx, f"dist/{rel}", "not a real secret\n")
+    _marked(fx)
+    _ignored(fx, f"tree/{rel}", "not a real secret\n")
     fx.keeps(KEEP_SECRET)
 
 

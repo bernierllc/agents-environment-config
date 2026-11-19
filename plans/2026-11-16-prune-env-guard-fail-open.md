@@ -194,6 +194,110 @@ object, no reflog, three git failures, kill 137, unreadable log), the compare-an
 symlink to an ignored file, a unique file under an uninitialized submodule, and a scan file that becomes unwritable
 midway.
 
+## Round 8 (independent Codex-high pass on `c5d4663`: six reproduced data-loss cases)
+
+The six, each reproduced on `c5d4663`: (1) an allowlisted directory NAME (`dist/customer-database.sqlite`) authorises
+deleting any ignored file under it; (2) `update-ref -d` deletes the BRANCH reflog and only the worktree HEAD reflog was
+checked; (3) `MERGE_AUTOSTASH` of a clean in-progress `merge --autostash` goes with the admin dir; (4) `config.worktree`
+(`extensions.worktreeConfig`) can hold the only copy of a credential; (5) a `.env.local` written between the scan and
+`git worktree remove` is deleted; (6) a failed read-back of the scan list prints an error but the caller reads "nothing
+found" and deletes (a failed safety read failed OPEN).
+
+### Structural evaluation: quarantine instead of delete (decided BEFORE any round-8 code)
+
+Every round since 5 found the next place the guard trusts something (a name, a list, a log, a window). Question: can
+one change make a guard miss recoverable instead of fatal?
+
+**Design.** `git worktree move <wt> $PROJECTS_ROOT/.prune-quarantine/<YYYY-MM-DD>/<repo>--<name>` (one same-volume
+`rename`, atomic; git keeps the admin dir, so `HEAD`, its reflog, `config.worktree`, pseudorefs and the checked-out
+branch ref with its own reflog all stay intact). Rescan the moved tree with the full guard; any hit moves it back.
+Nothing is deleted. A later pass (the same scheduled run, entries whose date is older than `PRUNE_QUARANTINE_DAYS`,
+default 7, minimum 1, anything else is an error) re-runs the full guard on the quarantined tree and only then
+`git worktree remove`s it and deletes the branch by compare-and-delete. The directory sits outside every worktree glob
+(`*` does not match a dot name). Restore is `git worktree move <qpath> <original>` and is printed in the log line.
+
+**What it closes.** 1-6 all become recoverable for the hold: 1, 3, 4 (nothing is deleted by the guard's verdict; the
+file, the autostash and `config.worktree` are all still there), 2 (the branch ref and its reflog are not touched until
+purge, which re-checks the branch reflog), 5 (a rename is atomic; a writer that still holds the old path fails or lands
+in the moved tree, and the purge rescan sees it), 6 (a failed read-back that still lets a tree through now costs a
+move, not a deletion). It also shrinks the residual window of the rename-aside-then-delete variant: a process with its
+cwd inside the tree (shell, editor, dev server) keeps writing into the renamed tree until the delete; with a hold of
+days that process is seen by the purge rescan instead.
+
+**What it does not close.** (a) Disk is not reclaimed for the hold, which is the tool's purpose: with `PRUNE_QUARANTINE_DAYS=7`
+a merged worktree's `node_modules` stays 7 days longer (`PRUNE_QUARANTINE_DAYS=1` for a disk emergency). (b) It does
+not replace the guard: the purge deletes, so a miss that nobody notices within the hold is lost then. Recoverable means
+"noticed within N days", not "never lost". (c) The purge still has the `git worktree remove` status-then-delete gap
+(measured 1.19 s at 100k files) against a writer with the quarantined directory open. (d) Branch deletion is deferred
+to purge, so a merged branch name lingers for the hold.
+
+**Cost.** One new orchestration step (move, rescan, move back) and one purge selection (path under the quarantine base,
+date component older than the cutoff, still a registered worktree of a repo this run scans), about 70 lines, a date
+cutoff that needs `date -v` (BSD) or `date -d` (GNU) and purges nothing when neither works. Purge acts only through
+`git worktree remove`, which refuses an unregistered path, so a wrong path cannot delete anything git does not own.
+
+**Decision: ADOPT.** The cost is delayed reclaim, which is a tunable; the benefit is that the next unknown guard hole
+costs a move instead of the data. It is adopted together with the direct fixes (2-6 are fixed in the guard as well:
+the quarantine is the second line, not the excuse for a weaker first one), and case 1 is closed by narrowing the rule,
+not by the hold. Open for Matt: the purge runs in the same scheduled run (the existing LaunchAgent keeps working and
+reclaims after the hold) rather than behind a second explicit `--purge` command, which would mean no disk is ever
+reclaimed until someone schedules that second command. Flipping it is a five-line gate.
+
+### Round 8 results
+
+**Suites** (real git, stub `gh`, real script under `/bin/bash`): `tests/test_prune_env_guard.py` 334, `tests/test_prune_round8_cases.py`
+74 (new), `tests/test_no_maintainer_specifics.py` 3: **411 passed**, none skipped.
+
+**The six cases, old script (`c5d4663`) against new.** Each `test_case<N>_` test in `tests/test_prune_round8_cases.py` was
+run against the `c5d4663` script (34 of the 37 `test_case*` tests fail there; the 3 that pass are the controls: a
+worktree with nothing to protect still goes, a clean `COMMIT_EDITMSG`/`FETCH_HEAD` admin dir still goes, a shim that
+never fires still goes) and against the new script (all pass).
+
+| case | old script, `c5d4663` | new script |
+|---|---|---|
+| 1 `dist/customer-database.sqlite` (also build, coverage, .next, .turbo, out, `node_modules`) | `would`/`removed`: the directory name authorises the delete | `keep ... not proven regenerable`; a marker (`.package-lock.json`, `pyvenv.cfg`, `CACHEDIR.TAG`, a `.pyc` beside its `.py`) proves only its own tree |
+| 2 commit only the BRANCH reflog (or `ORIG_HEAD`) names | `would`/`removed`; the commit is unreachable after `update-ref -d` | `keep: a reflog holds commits no ref reaches`; an unreadable branch log is a fault keep, exit 1 |
+| 3 `MERGE_AUTOSTASH` (and any admin-dir file git does not create for a clean worktree) | `would`/`removed`: the stash goes with the admin dir | `keep: its git directory holds MERGE_AUTOSTASH ...` |
+| 4 `config.worktree` | `would`/`removed`: the credential goes with the admin dir | `keep: its git directory holds config.worktree` |
+| 5 `.env.local` written between the scan and the move/remove | deleted by `git worktree remove` | rename first (quarantine), rescan, hit moves it back (`moved back after the move`); the same at the purge (`moved back after the rescan`) |
+| 6 scan list that cannot be read back (index, ignored, admin dir, nested repo, submodule directory) | `would`/`removed`: "nothing found" | `keep ... could not read back ...`, exit 1, "at least one check could not complete" |
+
+Case 6 is portable: the lists are made in a private directory through a template-based `mktemp` shim and deleted after the
+named `git`/`find` call, so no macOS `lsof` and no platform `TMPDIR` rules are involved. Case 5 is a `git` shim that
+writes the file just before the first `worktree move|remove`.
+
+**What changed in the guard.** Regenerable is a marker rule, not a name rule (round 7's name allowlist is gone). The
+admin-dir allowlist is `HEAD ORIG_HEAD FETCH_HEAD AUTO_MERGE COMMIT_EDITMSG commondir gitdir index logs/HEAD`; any other
+non-directory file there keeps (this includes everything under `modules/`, so the submodule carve-out in the nested-repo
+scan is removed). `reflog_orphans` also reads the branch reflog in the primary's git dir and keeps reftable repositories.
+Every list read-back is checked (`exec 3<"$list" || return 2`), and every failed safety read is a fault keep: exit 1,
+logged with context, never a delete. A real run quarantines, a later run past `PRUNE_QUARANTINE_DAYS` purges
+(full guard, rename aside, rescan, `git worktree remove`, then compare-and-delete of the branch).
+
+**Reversed tests (they pinned the old behaviour), with the reason.**
+
+- Immediate-removal tests (`verdict(dry=False)` expected `removed` from the first run): a real run now quarantines; the
+  fixture's `verdict()` follows it with the aged purge run, so they still assert the end state.
+- Name-allowlist tests (`dist`, `build`, `.next`, `coverage`, ... removable by name): reversed to the marker rules; the
+  name alone now keeps (case 1).
+- The locked-worktree "refused removal" test: a locked worktree is now a policy keep at the move; new tests cover a
+  refused move and a refused purge removal.
+- The initialized-submodule `FAILED` tests: now a policy keep through `modules/` in the admin dir.
+- The submodule-skip nested-repo tests: the carve-out is gone, the tree keeps.
+- Reflog wording, and the `mktemp`/`rm`/`find` shim adaptations (a second `mktemp` is the scan list, not the script's own
+  file).
+- `_admin_dir` in the round-6 admin-dir tests uses `FETCH_HEAD` as the file git leaves behind.
+
+**Over-keep costs (what the stricter rules hold back).** A worktree with an unmarked `dist/`, `build/`, `coverage/`,
+`.next/` or `.turbo/` is kept whole until someone clears that directory: this is the price of case 1, and the open
+decision below (strict, or a per-repo opt-in list). Any unknown ignored file keeps. Any extra admin-dir file keeps
+(`MERGE_MSG`, bisect state, `modules/`, `config.worktree`). A merged worktree's disk stays for `PRUNE_QUARANTINE_DAYS`
+(7 by default; 1 for a disk emergency) before it is reclaimed. A reftable repository keeps every worktree.
+
+**Open decisions for Matt.** (1) `dist`/`build`/`.next`/`.turbo`/`coverage`: stay strict (keep until marked or cleared),
+or add a per-repo opt-in list of directory names the user vouches for. (2) Purge in the same scheduled run (current;
+the existing LaunchAgent reclaims after the hold) or behind an explicit `--purge`.
+
 ## Residual limits (documented, not solved)
 
 1. **A link held elsewhere.** An `.env*` symlink held in the primary checkout, in another repo, or in a kept
@@ -201,19 +305,25 @@ midway.
    cannot enumerate every link on disk. Example: the primary's `.env -> ../wt/only-copy` loses `only-copy` when
    `wt` is removed. Reproducers t4 9R, t5 17d and t6 from the data-loss hunt (not in the test suite: nothing the
    script can see distinguishes them).
-2. **No lock window.** Nothing locks the worktree between the final scan and the removal, and the removal is not one
+2. ~~**No lock window.**~~ SUPERSEDED in round 8: the tree is renamed (`git worktree move`, one atomic rename) and
+   rescanned before anything is deleted; a hit moves it back. What is left is the purge's own `git worktree remove`
+   status-then-delete gap against a process whose cwd is inside the quarantined directory (see the round-8 quarantine
+   evaluation, "What it does not close" (c)). The original description follows. Nothing locks the worktree between the final scan and the removal, and the removal is not one
    git invocation: `git worktree remove` makes its own `git status` pass before it deletes. Measured with 100k ignored
    files, the gap between the script's scan finishing and the deletion starting is **1.19 s**. A `.env*` file (or
    other protected data) created inside that window is lost. A quarantine-rename was considered and rejected as more
    machinery than the window warrants. An earlier revision of this file and of a script comment said the window was
    "one `git` invocation"; that was wrong.
-3. **Submodules.** The scan does not look inside initialized submodules. `git worktree remove` refuses a worktree
-   with one, which is all that protects an ignored `.env` in a submodule (pinned by a test that expects `FAILED`).
-   (Round 6: files under an UNinitialized gitlink directory are now kept.)
+3. ~~**Submodules.**~~ CHANGED in round 8: the nested-repo scan no longer carves out submodule directories, and the
+   admin-dir scan keeps any non-directory file it does not recognise, including everything under `modules/`. A worktree
+   with an initialized submodule is therefore a policy keep, not a `FAILED` from `git worktree remove`. (Tests that
+   expected `FAILED` for that case were reversed; see the round-8 results.) Round 6: files under an UNinitialized
+   gitlink directory are kept.
 4. ~~**Other ignored data without a secret name.**~~ CLOSED in round 7: the guard keeps unless every ignored or untracked
    path is proven regenerable (allowlist below). PRUNE-NONENV-NAMES is no longer needed.
-5. **Temp-list read-back.** A failure to read the temp list after it was written successfully is not handled
-   separately; it cannot happen short of the file being deleted under the script.
+5. ~~**Temp-list read-back.**~~ CLOSED in round 8 (case 6): every list is opened with `exec 3<"$list" || return 2`, so
+   a failed read-back is a fault keep (exit 1, logged), never "nothing found". Pinned by shim fault injection for the
+   four lists (index, ignored, nested, admin), without `lsof`.
 6. ~~**P1-3, ignored data and secret names: awaiting Matt's decision.**~~ DECIDED and implemented in round 7 (option B).
 7. **A forged worktree-list record.** A worktree path that contains a complete fake record (a blank line followed by
    valid keys) passes the round-6 line check. Telling it apart needs `git worktree list -z` (git 2.36+).
@@ -319,6 +429,26 @@ killed, 7 survived; the control survived as it must.** The 7, none changes wheth
 | reflog-rc-loose | `reflog_orphans` returns only 0 or 1, so `-ne 0` and `-eq 1` agree: equivalent |
 | reflog-empty-ids-keeps | `rev-list --stdin --not --all` on empty input prints nothing and exits 0, so the early `return 1` is redundant: equivalent |
 | moved-msg-dropped | the mutant turned out to be a no-op (`else :; echo`): a second control, not a real mutant |
+
+**Round-8 head, whole script** (harness kept outside the repo, same method; both new-file tests and the old suite run per
+mutant). 117 mutants over the new rules (marker rule, admin-dir allowlist, the three reflog sources, read-back checks,
+quarantine and purge, the cutoff). First run: 91 killed, 26 survived. Nineteen survivors were real test gaps and got tests
+(`test_prune_round8_cases.py`, "Mutation-run survivors"): the CACHEDIR signature as a prefix, the `node_modules`-only
+marker, a symlinked `.pnpm`, `.pyo` and other extensions, a `.pyc` outside `__pycache__`, a dangling `.py` symlink, the
+submodule-directory read-back, `logs/*` beyond `logs/HEAD`, a leftover `AUTO_MERGE`, `ORIG_HEAD` and each column of a
+reflog line as the only source, a reftable repository, a failed move back, a dangling symlink at the quarantine name,
+the full guard on a dry-run purge, a refused rename-aside, and an uncomputable cutoff. Re-run of those 19: all killed.
+**Final: 117 mutants, 110 killed, 7 survived.** The 7, none changes whether a tree is kept or removed:
+
+| id | why it survives |
+|---|---|
+| reg-no-dir-part | `[ "$rest" != "$2" ] \|\| return 1` removed: a root-level file has no directory part, `-d "$1/$2/"` is false for a file, so the loop returns 1 anyway: equivalent |
+| reg-dir-symlink | the `! -L` test on a directory dropped: `ls-files -o` never lists a path through a symlinked directory (it lists the link once, with no directory part); only a race that swaps a directory for a link between the list and the check could differ |
+| rl-max-count | `--max-count=1` dropped from `rev-list`: only the volume of the output changes, the `-z` test is the same |
+| rl-ids-empty | the early `return 1` on an empty id list dropped: `rev-list --stdin --not --all` with no positive revisions prints nothing: equivalent |
+| q-mkdir-fault | a failed `mkdir -p` of the quarantine date directory no longer prints/faults itself: the next `move_wt` into that directory fails with `FAILED` and `note_fault` anyway, same verdict and exit status |
+| p-cutoff-empty | an empty cutoff no longer keeps: the empty cutoff only exists when the startup computation already printed its note and called `note_fault`, and `[[ "$d" > "" ]]` is true for any date, so the entry is kept either way |
+| p-aside-always | the `.purge` suffix is added even when the entry already ends in `.purge`: it is renamed to `.purge.purge`, rescanned and removed; same outcome |
 
 ## Out of scope
 
