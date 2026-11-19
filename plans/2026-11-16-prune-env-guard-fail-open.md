@@ -429,6 +429,8 @@ four (`reg-dir-symlink`, `reg-dir-half-d`, `reg-cache-no-slash`, `reg-cache-drop
 (`BAD-PATTERN`, nothing to mutate), `reg-no-dir-part` is now equivalent for the verdict (a swapped-in directory is kept by
 the per-file proof anyway), and `nested-git-no-prune` stays equivalent as in rounds 5-8.
 
+**Who turns deletion on.** Enabling unattended deletion (setting `PRUNE_ALLOW_DELETE` to exactly `1` on a real machine) and re-enabling the scheduled job are the operator's decision, never an agent's or a CI job's.
+
 ### Round 9 addendum 1 (independent Review B, Sonnet high, on `5a8f894`)
 
 Review B reproduced both Review A defects without seeing it. Its **P2-1** is the marker-authorises-everything-beneath

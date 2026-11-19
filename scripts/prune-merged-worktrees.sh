@@ -25,6 +25,7 @@ DRY_RUN="${DRY_RUN-0}" # `-`, not `:-`: DRY_RUN= (set but empty) is not "0"
 DAYS="${PRUNE_QUARANTINE_DAYS-7}"
 # Unattended deletion is OFF unless PRUNE_ALLOW_DELETE=1 (exactly). A rename cannot stop a process that already holds
 # the tree, and no check closes the last gap (see holder_scan), so by default a purge pass stops at the quarantine.
+# Setting it, and re-enabling the scheduled job, is the operator's decision, never an agent's or a CI job's.
 ALLOW_DELETE="${PRUNE_ALLOW_DELETE-0}"
 QBASE="$ROOT/.prune-quarantine"
 RROOT="$(cd "$ROOT" 2>/dev/null && pwd -P)" || RROOT="" # the resolved root: symlinks and .. gone
