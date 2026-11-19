@@ -66,8 +66,8 @@ class Fixture:
         self.last_out = ""
 
     # --- running the script -------------------------------------------------------------------------------
-    def run(self, dry: bool = True, env: dict[str, str] | None = None, timeout: int = 60) -> str:
-        full = {
+    def run(self, dry: bool = True, env: dict[str, str | None] | None = None, timeout: int = 60) -> str:
+        full: dict[str, str | None] = {
             **os.environ,
             "PATH": f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
             "PROJECTS_ROOT": str(self.root),
@@ -78,6 +78,7 @@ class Fixture:
             "PRUNE_ALLOW_DELETE": "1",  # deletion is off by default (round 9); the suite exercises the deleting path
             **(env or {}),
         }
+        full = {k: v for k, v in full.items() if v is not None}  # a None value unsets the variable
         proc = subprocess.run(
             ["/bin/bash", str(SCRIPT)], capture_output=True, text=True, env=full, timeout=timeout
         )

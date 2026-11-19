@@ -98,8 +98,9 @@ pyc_has_source() { # worktree relpath -> 0 for <dir>/__pycache__/<module>.<tag>.
 
 proof_venv() { # worktree root outfile -> the paths the venv's installed packages list in their RECORD files, under root
   # RECORD lines are `path,hash,size`, the path relative to site-packages (`../../../bin/tool` reaches bin/); a path
-  # that leaves the venv proves nothing, so a RECORD cannot vouch for a file outside its own venv.
-  ( cd "$1" && find "${2%/}" -path '*/site-packages/*.dist-info/RECORD' -type f -exec awk -v root="$2" '
+  # that leaves the worktree proves nothing (`bad`), and the claims it is matched against all lie under root, so a
+  # RECORD cannot vouch for a file outside its own venv.
+  ( cd "$1" && find "${2%/}" -path '*/site-packages/*.dist-info/RECORD' -type f -exec awk '
       /^\// { next }
       { line = $0; sub(/,[^,]*,[^,]*$/, "", line)
         if (line ~ /^".*"$/) { line = substr(line, 2, length(line) - 2); gsub(/""/, "\"", line) }
@@ -113,7 +114,7 @@ proof_venv() { # worktree root outfile -> the paths the venv's installed package
         }
         if (bad || m == 0) next
         p = stack[1]; for (i = 2; i <= m; i++) p = p "/" stack[i]
-        if (index(p, root) == 1) print p
+        print p
       }' {} + ) >"$3" 2>&1
 }
 

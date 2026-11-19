@@ -104,7 +104,16 @@ def test_p0_1_a_plain_venv_with_nothing_of_ours_in_it_is_still_removed(fx: Fixtu
 
 @pytest.mark.parametrize(
     "rel",
-    ["lib/customers.sqlite", "bin/customers.sqlite", "include/customers.sqlite", "customers.sqlite", "share/x.db"],
+    [
+        "lib/customers.sqlite",
+        "bin/customers.sqlite",
+        "include/customers.sqlite",
+        "customers.sqlite",
+        "share/x.db",
+        "share/pyvenv.cfg",  # a scaffold NAME is proven only where the tool puts it
+        "sub/.gitignore",
+        "lib/bin/python3",
+    ],
 )
 def test_p0_1_a_file_the_venv_tool_never_wrote_keeps_wherever_it_sits(fx: Fixture, rel: str) -> None:
     venv = _make_venv(fx)
@@ -188,6 +197,84 @@ def test_p0_1_yarn_and_pnpm_markers_prove_no_package_so_their_trees_keep(fx: Fix
     assert KEEP_UNPROVEN in (_line(fx, out)), out
 
 
+def _venv_with_record(fx: Fixture, *record_lines: str) -> tuple[Path, Path]:
+    venv = _make_venv(fx)
+    dist = _site_packages(venv) / "foo-1.0.dist-info"
+    dist.mkdir()
+    (dist / "RECORD").write_text("".join(f"{ln}\n" for ln in ("foo-1.0.dist-info/RECORD,,", *record_lines)))
+    return venv, dist
+
+
+def test_p0_1_a_record_entry_that_climbs_out_of_the_worktree_proves_nothing_inside_it(fx: Fixture) -> None:
+    """`..` past the top of the tree must not be clamped to the top: five levels up from site-packages leaves the
+    worktree, and re-entering `.venv/` from there is not the venv tool's own listing of that file."""
+    venv, _ = _venv_with_record(fx, "../../../../../.venv/customers.sqlite,,")
+    _database(venv / "customers.sqlite")
+    out = _to_the_end(fx)
+    assert (venv / "customers.sqlite").exists() or _where(fx) is not None, out
+    assert "customers.sqlite" in _line(fx, out) and KEEP_UNPROVEN in _line(fx, out), out
+
+
+def test_p0_1_an_absolute_record_entry_is_not_a_path_under_site_packages(fx: Fixture) -> None:
+    """`/foo/data.sqlite` names a file at the filesystem root; joined onto site-packages it would look like the
+    venv's own `foo/data.sqlite`."""
+    venv, _ = _venv_with_record(fx, "/foo/data.sqlite,,")
+    stray = _site_packages(venv) / "foo" / "data.sqlite"
+    stray.parent.mkdir()
+    _database(stray)
+    out = _to_the_end(fx)
+    assert "foo/data.sqlite" in _line(fx, out) and KEEP_UNPROVEN in _line(fx, out), out
+
+
+def test_p0_1_an_unreadable_record_keeps_the_tree_and_faults(fx: Fixture) -> None:
+    """Not being able to read what the venv tool wrote is a failed check, not "nothing is proven"."""
+    _, dist = _venv_with_record(fx)
+    (dist / "RECORD").chmod(0)
+    out = fx.run(False)
+    assert "could not read the venv RECORD files" in out and fx.last_rc == 1, out
+    assert fx.wt.exists()
+
+
+def test_p0_1_a_lock_file_in_a_directory_not_called_node_modules_is_not_npms(fx: Fixture) -> None:
+    fx.exclude("build/")
+    build = fx.wt / "build"
+    (build / "left-pad").mkdir(parents=True)
+    (build / "left-pad/index.js").write_text("1\n")
+    keys = {"": {"name": "app"}, "node_modules/left-pad": {"version": "1.0.0"}}
+    (build / ".package-lock.json").write_text(json.dumps({"packages": keys}, indent=2))
+    out = fx.run(False)
+    assert fx.wt.exists() and (build / "left-pad/index.js").exists(), out
+    assert fx.line(out, fx.wt).startswith("keep"), out
+
+
+def test_p0_1_a_pycache_file_with_no_source_and_no_record_entry_keeps(fx: Fixture) -> None:
+    venv = _make_venv(fx)
+    cache = _site_packages(venv) / "__pycache__"
+    cache.mkdir()
+    (cache / "lonely.cpython-312.pyc").write_bytes(b"\0\0\0\0")
+    out = _to_the_end(fx)
+    assert "lonely.cpython-312.pyc" in _line(fx, out) and KEEP_UNPROVEN in _line(fx, out), out
+
+
+def test_p0_1_a_pycache_file_with_its_source_listed_in_the_record_goes(fx: Fixture) -> None:
+    venv, _ = _venv_with_record(fx, "foo/__init__.py,,")
+    site = _site_packages(venv)
+    (site / "foo/__pycache__").mkdir(parents=True)
+    (site / "foo/__init__.py").write_text("X = 1\n")
+    (site / "foo/__pycache__/__init__.cpython-312.pyc").write_bytes(b"\0\0\0\0")
+    assert fx.verdict(dry=True) == "would"
+
+
+def test_p0_1_a_venv_marker_that_is_a_symlink_is_no_marker(fx: Fixture) -> None:
+    fx.exclude(".venv/")
+    target = fx.root.parent / "elsewhere.cfg"
+    target.write_text("home = /usr/bin\n")
+    (fx.wt / ".venv").mkdir()
+    (fx.wt / ".venv/pyvenv.cfg").symlink_to(target)
+    out = fx.run(False)
+    assert fx.wt.exists() and fx.line(out, fx.wt).startswith("keep"), out
+
+
 # --- P0-2: a writer that already holds the tree is not stopped by a rename ---------------------------------
 
 WRITER = """
@@ -265,9 +352,14 @@ def test_p0_2_lsof_missing_keeps_the_tree_and_faults(fx: Fixture) -> None:
     fx.run(False)
     for entry in fx.held():
         fx.age(entry)
-    fx.shim("lsof", "exit 127")
-    out = fx.run(False)
-    assert "could not list open files" in out and fx.last_rc == 1, out
+    safe = fx.root.parent / "no-lsof-bin"
+    safe.mkdir()
+    for d in ("/usr/bin", "/bin"):
+        for tool in Path(d).iterdir():
+            if tool.name != "lsof" and not (safe / tool.name).exists():
+                (safe / tool.name).symlink_to(tool)
+    out = fx.run(False, {"PATH": f"{fx.bindir}{os.pathsep}{safe}"})
+    assert "could not list open files (lsof not found)" in out and fx.last_rc == 1, out
     assert any(p.exists() for p in fx.qbase.glob("2000-01-01/*")), out
 
 
@@ -275,8 +367,29 @@ def test_p0_2_a_tree_nothing_holds_is_still_removed(fx: Fixture) -> None:
     assert fx.verdict(dry=False) == "removed"
 
 
-@pytest.mark.parametrize("value", ["", "0", "yes", "true", "2"])
-def test_p0_2_deletion_is_off_unless_the_operator_sets_exactly_1(fx: Fixture, value: str) -> None:
+def test_p0_2_a_write_between_the_first_guard_and_the_rename_is_caught_by_the_rescan(fx: Fixture) -> None:
+    """The rescan of the renamed tree exists for writes that land after the first guard: a git shim writes a
+    credential into the tree the moment the rename starts."""
+    fx.run(False)
+    (entry,) = fx.held()
+    entry = fx.age(entry)
+    fx.shim(
+        "git",
+        f"""
+args=("$@"); n=${{#args[@]}}
+case "${{args[$((n-1))]}}" in *.purge) case " $* " in *" worktree move "*)
+  printf 'ONLY COPY OF CREDENTIAL\\n' > "${{args[$((n-2))]}}/.env.local" ;; esac ;; esac
+exec '{_real("git")}' "$@"
+""",
+    )
+    out = fx.run(False)
+    survivors = [p for p in (entry, Path(str(entry) + ".purge")) if (p / ".env.local").exists()]
+    assert survivors, f"the credential written during the rename was deleted with the tree:\n{out}"
+    assert "moved back after the rescan" in out, out
+
+
+@pytest.mark.parametrize("value", [None, "", "0", "yes", "true", "2"])
+def test_p0_2_deletion_is_off_unless_the_operator_sets_exactly_1(fx: Fixture, value: str | None) -> None:
     """No lsof check can see another user's process or the milliseconds before the remove, so the unattended purge
     stops at the quarantine until PRUNE_ALLOW_DELETE=1 (the suite's Fixture.run sets it for every other test)."""
     fx.run(False)
@@ -334,6 +447,20 @@ def test_p1_4_a_same_size_edit_with_the_mtime_restored_is_still_found(fx: Fixtur
     out = _to_the_end(fx)
     assert fx.wt.exists() and p.read_text() == "SECRET!=1\n", out
     assert KEEP_DIRTY in (_line(fx, out)), out
+
+
+def test_p1_4_a_failing_read_tree_keeps_the_tree_and_faults(fx: Fixture) -> None:
+    fx.git_fails("read-tree HEAD")
+    out = fx.run(False)
+    assert "could not read git status" in out and fx.last_rc == 1, out
+    assert fx.wt.exists()
+
+
+def test_p1_3_a_dangling_fetch_head_symlink_keeps_the_tree_and_faults(fx: Fixture) -> None:
+    gd = Path(_git(fx.wt, "rev-parse", "--absolute-git-dir"))
+    (gd / "FETCH_HEAD").symlink_to(fx.root.parent / "nowhere")
+    out = fx.run(False)
+    assert fx.wt.exists() and fx.last_rc == 1 and "could not read the reflogs" in out, out
 
 
 def test_p1_4_a_clean_worktree_with_the_cache_settings_is_still_removed(fx: Fixture) -> None:

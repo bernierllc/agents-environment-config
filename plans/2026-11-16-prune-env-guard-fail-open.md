@@ -256,7 +256,7 @@ never fires still goes) and against the new script (all pass).
 | case | old script, `c5d4663` | new script |
 |---|---|---|
 | 1 `dist/customer-database.sqlite` (also build, coverage, .next, .turbo, out, `node_modules`) | `would`/`removed`: the directory name authorises the delete | `keep ... not proven regenerable`; a marker (`.package-lock.json`, `pyvenv.cfg`, `CACHEDIR.TAG`, a `.pyc` beside its `.py`) proves only its own tree |
-| 2 commit only the BRANCH reflog (or `ORIG_HEAD`) names | `would`/`removed`; the commit is unreachable after `update-ref -d` | `keep: a reflog holds commits no ref reaches`; an unreadable branch log is a fault keep, exit 1 |
+| 2 commit only the BRANCH reflog (or `ORIG_HEAD`) names | `would`/`removed`; the commit is unreachable after `update-ref -d` | `keep: a reflog holds commits no ref reaches (reflogs, ORIG_HEAD or FETCH_HEAD)`; an unreadable branch log is a fault keep, exit 1 |
 | 3 `MERGE_AUTOSTASH` (and any admin-dir file git does not create for a clean worktree) | `would`/`removed`: the stash goes with the admin dir | `keep: its git directory holds MERGE_AUTOSTASH ...` |
 | 4 `config.worktree` | `would`/`removed`: the credential goes with the admin dir | `keep: its git directory holds config.worktree` |
 | 5 `.env.local` written between the scan and the move/remove | deleted by `git worktree remove` | rename first (quarantine), rescan, hit moves it back (`moved back after the move`); the same at the purge (`moved back after the rescan`) |
@@ -394,6 +394,40 @@ named test(s) and failed. Re-grading closed none of them.
 | `gh-merged` (`\|\| true` on the merged-PR lookup) | `pr_heads` prints its reason and returns before it prints any `branch sha` line, so `merged` is empty either way and no candidate passes the non-empty-SHA guard; the mutant costs at most one extra open-PR request |
 | `-prune` dropped from the nested-`.git` `find` | the nested `.git` entry itself is printed first and keeps the tree; descending only adds later hits for the same verdict |
 | the `-d` half of the directory test | removed from the script (row 4), so there is nothing to mutate |
+
+## Round 9 (independent Codex-high review of `5a8f894`: 2 P0 + 2 P1, all reproduced; no gate waived)
+
+Five rounds of my own tests and 118 of my own mutants missed all four, because the tests encoded my model of the
+guard. **How round 9 avoids that: the reviewer's own repros are permanent tests** (`tests/test_prune_round9_cases.py`,
+`test_p0_*`, `test_p1_*`, copied from `/tmp/review-A-5a8f894-findings.md`), each ran against the pre-fix script first
+(**20 failed, 4 passed**; the 4 are controls), and the P0-2 test injects the write in the real window with a `git` shim
+that fires on the rename, not by simulating the outcome. A finding is closed only when its repro fails before and
+passes after.
+
+| finding | what was wrong | how it is closed |
+|---|---|---|
+| P0-1 a marker authorised everything beneath it | `.package-lock.json` / `pyvenv.cfg` / `CACHEDIR.TAG` made every ignored file under that directory "regenerable", so `node_modules/customers.sqlite` went | A marker says which TOOL owns the directory; each file under it must be proven by that tool's own records. **venv:** a scaffold regex (`pyvenv.cfg`, `.gitignore`, `CACHEDIR.TAG`, `lib64`, `bin/*`, anchored) plus the files each `*/site-packages/*.dist-info/RECORD` lists (a path that climbs out of the worktree, or an absolute one, proves nothing; an unreadable RECORD keeps and faults). **npm:** the package directories `.package-lock.json` lists, plus `.package-lock.json` and `.bin/*` (marker only counts for a directory named `node_modules`). **cache:** the standard `CACHEDIR.TAG` signature line proves the directory, spec-based. **yarn / pnpm trees keep** (`.yarn-integrity`, `.modules.yaml`, `.pnpm` list no package files). A `__pycache__` `.pyc` is proven if its `.py` is beside it or is itself a claim. Secret-name arms still run first. Anything unproven blocks and is named in the keep line. The old blanket-rule test is replaced (said so in the commit message) and every other test that put arbitrary files under a marker was reviewed |
+| P0-2 write between the final rescan and `git worktree remove` | A rename cannot stop a process that already holds the directory | **Structural choice, and it is not a full close.** After the rescan the purge runs `holder_scan` (`lsof -n -P -w -F pc +D <realpath>`): any process with a cwd or open file inside refuses the delete. `lsof` missing, failing, or printing to stderr is a fault keep, never "no holder". Residuals: a process owned by another user that `lsof` cannot see; the gap between `lsof` returning and `git worktree remove` starting; platforms whose `lsof` hides processes. **So deletion ships OFF by default**: the scheduled run quarantines and rescans, and only deletes when `PRUNE_ALLOW_DELETE` is exactly `1` (unset, `0`, `true`, empty: all keep, `unattended deletion is off`). Product consequence for Matt: with the LaunchAgent as is, disk is NOT reclaimed until the variable is set |
+| P1-3 `FETCH_HEAD` treated as disposable | After `git fetch <url> <ref>` the fetched commits are reachable only from `FETCH_HEAD` | `reflog_orphans` now feeds the `FETCH_HEAD` object ids through the same `rev-list --not --all` check as the reflogs and `ORIG_HEAD`; a dangling `FETCH_HEAD` symlink or an unreadable file is a fault keep |
+| P1-4 clean per the stat cache, dirty in content | `git status` trusts size+mtime, so a same-size edit with the mtime restored reads clean | `status --porcelain -uall` runs against a throwaway index built from `HEAD` (`GIT_INDEX_FILE=$list.idx git read-tree HEAD`), so every file is compared by content; a failing `read-tree` is a fault keep; the throwaway index is removed with the other temp files |
+
+**Decisions worth a second look.** The cache marker is spec-based (trusts the signature line). npm proof is
+package-granular, not file-granular (a stray file inside a listed package directory is not seen). yarn and pnpm trees
+keep, which over-keeps. A venv with pip installed keeps because `pip/_vendor/certifi/cacert.pem` matches the `*.pem`
+secret arm (pre-existing, fail-closed). One redundant guard is kept on purpose (the flag arm). One dead check in
+`proof_venv` (a RECORD path outside the worktree compared against the root) was removed: claims only ever lie under the
+root, and the mutant that removed it was equivalent.
+
+**Round 9 results.** Suite: **547 tests** (`test_prune_env_guard.py`, `test_prune_round8_cases.py`,
+`test_prune_round9_cases.py`, `test_no_maintainer_specifics.py`), final run: 547 passed, none skipped. Mutation, harness
+outside the repo, one edit per mutant, `-x`: **37 mutants over the new code (marker proofs, holder scan and the
+deletion gate, `FETCH_HEAD`, the throwaway index), 37 killed.** The first run had 13 survivors: 12 were real test gaps
+(top-level-only scaffold names, a `lsof` stand-in that never exercised `command -v`, the absolute RECORD path, the
+symlinked marker, an unreadable RECORD, a failing `read-tree`) and got tests; one was an equivalent dead check, deleted
+from the script together with its mutant. The round-8 audit mutants (38) re-run on the new script: **32 killed, 6 not**:
+four (`reg-dir-symlink`, `reg-dir-half-d`, `reg-cache-no-slash`, `reg-cache-drop`) target code round 9 removed
+(`BAD-PATTERN`, nothing to mutate), `reg-no-dir-part` is now equivalent for the verdict (a swapped-in directory is kept by
+the per-file proof anyway), and `nested-git-no-prune` stays equivalent as in rounds 5-8.
 
 ## Residual limits (documented, not solved)
 
@@ -544,6 +578,9 @@ the full guard on a dry-run purge, a refused rename-aside, and an uncomputable c
 | q-mkdir-fault | a failed `mkdir -p` of the quarantine date directory no longer prints/faults itself: the next `move_wt` into that directory fails with `FAILED` and `note_fault` anyway, same verdict and exit status |
 | p-cutoff-empty | an empty cutoff no longer keeps: the empty cutoff only exists when the startup computation already printed its note and called `note_fault`, and `[[ "$d" > "" ]]` is true for any date, so the entry is kept either way |
 | p-aside-always | the `.purge` suffix is added even when the entry already ends in `.purge`: it is renamed to `.purge.purge`, rescanned and removed; same outcome |
+
+**Round-9 head:** 37 mutants over the per-file marker proofs, the holder scan, the deletion gate, `FETCH_HEAD` and the
+throwaway index, all killed (see Round 9 results above for the first-run survivors and what they became).
 
 ## Out of scope
 
