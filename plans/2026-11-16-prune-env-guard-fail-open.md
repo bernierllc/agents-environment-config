@@ -342,7 +342,7 @@ pattern is pinned below against the round-8 design; every new test fails on the 
 | 9 | fsmonitor | `test_audit9_*` | fail on the call count only (`c5d4663` already used the flag on every call but has no rescan or purge scans); the flag itself is pinned by the mutants | `=true` and the flag dropped: killed |
 
 **Item 8, vacuous tests fixed** (in `tests/test_prune_env_guard.py`): the two discovery-failure tests now also assert the
-fault line, exit 1 and nothing held; `test_clean_sweep_prints_no_skip_lines` and `test_scan_leaves_no_temp_file_behind`
+fault line, exit 1 and nothing held, and run a print-then-die git as well as a silent one; `test_clean_sweep_prints_no_skip_lines` and `test_scan_leaves_no_temp_file_behind`
 now carry a real-removal control (the worktree line is `quarantined`; the scratch-dir test also runs the purge and sees
 `removed`); the symlink-leaf and below-symlink allowlist tests now reach the symlink predicate (git never lists a path
 through a link, so they use the stale listing, and the link points at a marked directory holding unique data, so only
@@ -354,16 +354,46 @@ be non-deterministic. The substitute is deterministic: a logging `git` shim over
 that every `status`, `ls-files` and `diff` call carries `-c core.fsmonitor=false`. The hook-based staleness test from
 round 8 still covers the hook form.
 
-**Surviving mutants of the new tests, with equivalence arguments.**
+### The 13 P1 survivors: end state per item (Program Cop directive, 01:54Z)
+
+Each ends in (a) a named test that fails against the audit's mutant, or (b) moot because round 8 removed the code path.
+Mutants are the audit's, translated line-for-line to the new script (`/tmp/mutate_final.py`); each was run against the
+named test(s) and failed. Re-grading closed none of them.
+
+| # | audit mutant | state | test that fails against it, or the rule that removed the path |
+|---|---|---|---|
+| 1 | `regen-cache-boundary` (`"${regen_ok%/}"*`) | (a) | `test_audit2_a_proven_directory_does_not_vouch_for_a_sibling_that_shares_its_name_as_a_prefix` |
+| 2 | `regen-no-directory` (no directory-part check) | (a) | `test_audit1_a_file_git_listed_that_is_now_a_directory_with_data_keeps[marked]` (and `[unmarked]`) |
+| 3 | `regen-symlink` (no symlink check on a directory) | (a) | `test_audit1_a_directory_swapped_for_a_symlink_to_ignored_data_after_the_listing_keeps[dist]`, plus the two rewritten symlink-allowlist tests, each of which fails alone |
+| 4 | `regen-real-directory` (`-d` half of the directory test) | (b) | the strict marker rule: an exemption needs a marker file *inside* the directory (`pyvenv.cfg`, `CACHEDIR.TAG` with its signature, `.package-lock.json`/`.yarn-integrity`/`.modules.yaml`/`.pnpm`), which a non-directory cannot hold. The `-d` test was removed from `regenerable()` in this round, so the mutant has no line to change |
+| 5 | `reflog-exact-one` (`-ne 0` for the reflog verdict) | (a) | `test_audit5_a_reflog_check_killed_part_way_keeps_and_faults[head-ids]` |
+| 6 | `read-ifs` (`read` without `IFS=`) | (a) | `test_audit6_a_tracked_gitlink_whose_name_ends_in_whitespace_is_not_trimmed[trailing-newline]` |
+| 7 | `repo-revparse` (`continue` dropped) | (a) | `test_audit7_discovery_that_printed_valid_output_and_then_died_skips_the_repo[rev-parse]` and `test_failing_worktree_discovery_skips_the_repo_with_a_reason[prints-then-dies]` |
+| 8 | `repo-list` (`continue` dropped) | (a) | `test_audit7_..._skips_the_repo[worktree-list]` and `test_failing_worktree_list_skips_the_repo_with_a_reason[prints-then-dies]` |
+| 9 | `nested-git-symlink` | (a) | `test_audit4_a_nested_dot_git_that_is_not_a_directory_inside_a_regenerable_tree_keeps[symlink...]` |
+| 10-13 | `regen-secret-exempt-*` (four secret-name arms exempted when inside a regenerable directory; the same observable behaviour as deleting an alternative from its arm) | (a) | `test_audit3_a_secret_named_file_inside_a_regenerable_directory_keeps[...]`: one mutant per alternative of every secret arm, 19 of 19 killed, covering all four |
+
+**Weak tests now kill their mutant by themselves** (each run alone against the mutant; the empty script also fails all six):
+
+| test | mutant it kills alone |
+|---|---|
+| `test_failing_worktree_discovery_skips_the_repo_with_a_reason[prints-then-dies]` | `rev-parse` skip without `continue`. The test used a git that prints nothing and fails, so the later `[ "$gd" = .git ] \|\| continue` supplied the keep; it now also runs a git that prints its valid answer and exits 137 |
+| `test_failing_worktree_list_skips_the_repo_with_a_reason[prints-then-dies]` | `worktree list` skip without `continue`, same reason |
+| `test_an_allowlisted_name_that_is_a_symlink_is_not_allowlisted` | symlink check on the directory removed (stale listing over a symlink to a marked directory holding unique data) |
+| `test_an_allowlisted_directory_below_a_symlinked_one_is_not_allowlisted` | same mutant, symlink below the listed directory |
+| `test_scan_leaves_no_temp_file_behind[dry\|real]` | `rm -f "$list"` dropped. It used `TMPDIR`, which BSD `mktemp` ignores without a template, so it watched nothing on macOS; a `mktemp` shim now sends every temp file to the scratch dir and the test asserts the shim was used |
+| `test_clean_sweep_prints_no_skip_lines` | `[ -e "$gitdir" ] \|\| continue` dropped (the unmatched glob is then treated as a repo) |
+
+**Item 9, fsmonitor: a test, no Tracker row.** `test_audit9_*` kills both the `=true` and the flag-dropped mutants.
+
+**Surviving mutants after the final pass (all P3, none touches data safety).**
 
 | mutant | why it survives |
 |---|---|
-| `-d` half of the directory test in `regenerable()` dropped | every marker (`pyvenv.cfg`, `CACHEDIR.TAG`, `.package-lock.json`, `.pnpm`) is a file or directory *inside* that directory, so a non-directory cannot hold one, and the `__pycache__` tail needs a sibling `.py` under the same path: behaviour-equivalent |
-| the `regen_ok` cache lookup dropped | the cache only skips re-running the same checks for a path under an already-proven directory; the verdict is identical, only slower (the audit's `regen-cache-remove`, P3 safety-preserving) |
-| `-prune` dropped from the nested-`.git` `find` | the nested `.git` entry itself is printed first and keeps the tree; descending into it only adds later hits for the same verdict (the worktree's own `.git` is skipped by name either way) |
-
-The audit's other verdicts stand: `gh-merged` is a redundant guard (P3, the quarantine rescan and the purge guard hold the
-same line), and the control mutants are equivalent.
+| `regen-cache-remove` (the `regen_ok` lookup dropped) | the cache only skips re-running the same checks for a path under an already-proven directory; the verdict is identical, only slower |
+| `gh-merged` (`\|\| true` on the merged-PR lookup) | `pr_heads` prints its reason and returns before it prints any `branch sha` line, so `merged` is empty either way and no candidate passes the non-empty-SHA guard; the mutant costs at most one extra open-PR request |
+| `-prune` dropped from the nested-`.git` `find` | the nested `.git` entry itself is printed first and keeps the tree; descending only adds later hits for the same verdict |
+| the `-d` half of the directory test | removed from the script (row 4), so there is nothing to mutate |
 
 ## Residual limits (documented, not solved)
 

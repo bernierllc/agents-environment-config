@@ -66,7 +66,7 @@ regenerable() { # worktree relpath -> 0 when the path is proven regenerable
   rest="$rest/"
   while [ -n "$rest" ]; do
     comp="${rest%%/*}"; rest="${rest#*/}"; acc="$acc$comp/"
-    { [ -d "$1/$acc" ] && [ ! -L "$1/${acc%/}" ]; } || return 1
+    [ ! -L "$1/${acc%/}" ] || return 1 # a marker below a non-directory cannot exist, so no -d test is needed
     if [ -f "$1/${acc}pyvenv.cfg" ] && [ ! -L "$1/${acc}pyvenv.cfg" ]; then regen_ok="$acc"; return 0; fi
     if [ -f "$1/${acc}CACHEDIR.TAG" ] && [ ! -L "$1/${acc}CACHEDIR.TAG" ]; then
       line=""; read -r line <"$1/${acc}CACHEDIR.TAG" 2>/dev/null

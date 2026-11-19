@@ -695,22 +695,31 @@ def test_gh_failure_skips_the_repo_and_removes_nothing(fx: Fixture, state: str) 
     assert fx.wt.exists()
 
 
-def test_failing_worktree_discovery_skips_the_repo_with_a_reason(fx: Fixture) -> None:
-    fx.git_fails("rev-parse --git-dir")
+def _discovery_fails(fx: Fixture, args: str, mode: str) -> None:
+    """`silent`: git prints nothing and fails. `prints-then-dies`: the real git prints its valid answer, then exits
+    137, so no later check (`$gd = .git`, the worktree count) can supply the keep: only the exit-status test can."""
+    if mode == "silent":
+        fx.git_fails(args)
+    else:
+        fx.shim("git", f'case " $* " in *" {args} "*) "{_real("git")}" "$@"; exit 137 ;; esac\nexec "{_real("git")}" "$@"')
+
+
+@pytest.mark.parametrize("mode", ["silent", "prints-then-dies"])
+def test_failing_worktree_discovery_skips_the_repo_with_a_reason(fx: Fixture, mode: str) -> None:
+    _discovery_fails(fx, "rev-parse --git-dir", mode)
     out = fx.run(dry=False)
     assert f"skip {fx.repo}: git rev-parse failed" in out
-    assert fx.last_rc == 1 and FAULT_LINE in out and fx.held() == []  # a skipped repo is a fault, not a clean run
-    assert fx.wt.exists()
-    # the variant where git prints the right answer and THEN dies: test_audit7 in test_prune_round8_cases.py
+    assert fx.last_rc == 1 and FAULT_LINE in out  # a skipped repo is a fault, not a clean run
+    assert fx.line(out, fx.wt) is None and fx.held() == [] and fx.wt.exists()
 
 
-def test_failing_worktree_list_skips_the_repo_with_a_reason(fx: Fixture) -> None:
-    fx.git_fails("worktree list --porcelain")
+@pytest.mark.parametrize("mode", ["silent", "prints-then-dies"])
+def test_failing_worktree_list_skips_the_repo_with_a_reason(fx: Fixture, mode: str) -> None:
+    _discovery_fails(fx, "worktree list --porcelain", mode)
     out = fx.run(dry=False)
     assert f"skip {fx.repo}: could not list worktrees" in out
-    assert fx.last_rc == 1 and FAULT_LINE in out and fx.held() == []
-    assert fx.wt.exists()
-    # the variant where git prints the right answer and THEN dies: test_audit7 in test_prune_round8_cases.py
+    assert fx.last_rc == 1 and FAULT_LINE in out
+    assert fx.line(out, fx.wt) is None and fx.held() == [] and fx.wt.exists()
 
 
 def test_a_locked_worktree_is_kept_by_policy(fx: Fixture) -> None:
@@ -1067,12 +1076,16 @@ def test_worktree_path_with_a_space_keeps_a_nested_repo_without_env(fx: Fixture,
 def test_scan_leaves_no_temp_file_behind(fx: Fixture, tmp_path: Path, verdict_run: str) -> None:
     scratch = tmp_path / "scratch"
     scratch.mkdir()
-    env = {"TMPDIR": str(scratch)}
+    # BSD mktemp ignores $TMPDIR when called without a template, so a TMPDIR scratch dir would watch nothing on macOS:
+    # a shim puts every temp file the script makes in the scratch dir, whatever the platform
+    made = fx.bindir / "mktemp.calls"
+    fx.shim("mktemp", f'echo x >>"{made}"; exec "{_real("mktemp")}" "{scratch}/tmp.XXXXXX"')
     if verdict_run == "dry":
-        assert fx.verdict(env=env) == "would"
+        assert fx.verdict() == "would"
     else:  # control: the scan, the rescan and the purge scan all ran and the tree really went
-        assert fx.verdict(dry=False, env=env) == "removed"
+        assert fx.verdict(dry=False) == "removed"
         assert not fx.wt.exists()
+    assert len(made.read_text().split()) >= 2  # the shim was used: the script's own file and at least one scan list
     assert list(scratch.iterdir()) == []
 
 
