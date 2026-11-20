@@ -57,12 +57,22 @@ Each step is one dispatchable unit and its own PR into `staging`, rebased fresh 
 
 - **S1. Time-bound rules (4b).** Cherry-pick `289f21f`, `28ff874`, `2ee13f8` onto a fresh branch, resolve in `apply.py`
   and `validator.py`, tests green on 3.9 and 3.12. Smallest, no dependency on the others.
-- **S2. Enrollment script and source sync (4c).** `782a29e`, `838bcc4`, `7ffab1e` only. Drop `d9e00a4`. Decide the
-  per-source error-capture gap against `git_source.py` and add only that, with a test that one failing source skips only its own items.
+- **S2. Enrollment script and source sync (4c).** `782a29e`, `838bcc4`, `7ffab1e` only. Drop `d9e00a4`, and adapt what
+  depended on it, because those commits do not apply as written: `838bcc4` imports `sync_source` from the dropped
+  `sources_sync.py` and calls `apply_mod._catalog("global")`, while `staging` requires `_catalog(paths, synced)`. Rewrite
+  the enrollment `add_source` and `install_items` actions, `tests/test_enrollment.py` and `tests/test_org_enroll_script.py`
+  to go through `staging`'s source lifecycle (`git_source.py` and the publish path in `apply.py`), keeping its validation,
+  ref pinning and crash-safe publication. Decide the per-source error-capture gap against `git_source.py` and add only
+  that, with a test that one failing source skips only its own items.
 - **S3. Per-project overlays (4a).** `97d8813`, `efa9bb8`, `f2dc87d`, `3b6a845`. Includes the owner-scoped answers interaction from item 3.
 - **S4. Branding (4d), public surface, docs.** `fdc05ec`, `fe96bfd`, `e2e5a45`, example YAML, plus archiving the build plan (`7aa2967`).
-- **S5. Retire the branch.** After S4 merges, verify content-equivalence with `git diff origin/staging origin/claude/org-config-phase-4 -- aec docs tests`
-  (squash merges make `ahead_by` meaningless), take a bundle (`git bundle create`) as the restore point, then delete the branch.
+  `fe96bfd` exports `SyncResult`, `sync_source` and `sync_sources` from `aec/lib/org_config/__init__.py`; those names no
+  longer exist, so export only what S1 to S3 actually landed.
+- **S5. Retire the branch.** After S4 merges, verify each branch-only change against its landing commit and record, per
+  commit of the 15, the PR that landed it or the reason it was replaced or omitted (`d9e00a4` is the intentional omission).
+  A full-tree `git diff origin/staging origin/claude/org-config-phase-4 -- aec docs tests` is diagnostic only: it also
+  holds 208 intervening `staging` commits and the dropped `sources_sync.py`, so it never reaches empty. Squash merges make
+  `ahead_by` meaningless. Take a bundle (`git bundle create`) as the restore point, then delete the branch.
   Deleting it is destructive, so it stays with the maintainer.
 
 Order: S1, S2, S3 can run in parallel only if their file ownership is split (they all touch `apply.py` and `validator.py`),
@@ -70,9 +80,14 @@ so run them in sequence. S4 last.
 
 ## Contract change coverage
 
-Every step adds optional keys to the org config schema. `schema_version` stays `"1.0"`; older `aec` readers reject
-unknown keys, so an org that uses a Phase 4 key needs members on a Phase 4 `aec`. The step that adds the key states
-that in `docs/orgs/authoring-org-configs.md` (the branch already carries the text). Before each step, grep every
+Every step adds optional keys to the org config schema, and `schema_version` stays `"1.0"`. Older readers do not
+treat all new keys alike. Today's `staging` validator (`validator.py` lines 147 to 156) rejects `projects` and
+`install.enrollment_script`, but silently ignores `required_after`, `expires_at` and `branding`. An older `aec` therefore
+accepts an org config with an expired blocking rule and keeps enforcing it forever. The step that adds each key states
+this in `docs/orgs/authoring-org-configs.md` (the branch carries draft text), names the minimum `aec` version an org
+must require of its members before using the key, and adds a compatibility test that pins what the previous release
+does with that key. Released clients cannot be changed, so the rollout requirement (members upgrade before the org
+config uses the key) is the only control for time-bound rules and branding. Before each step, grep every
 writer and reader of the org config: `validate_org_config`, `parse_org_config_text`, `effective_policy`, `apply_org_policy`,
 `aec org enroll`, `aec org apply`, `aec doctor`, the examples under `docs/orgs/examples/`, and the tests that enumerate them.
 
