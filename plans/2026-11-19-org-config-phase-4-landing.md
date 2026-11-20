@@ -64,7 +64,7 @@ calls into `apply.py`, `effective.py` and `validator.py` and ports every one it 
 - **S2. Enrollment script and source sync (4c).** `782a29e`, `838bcc4`, `7ffab1e` only. Drop `d9e00a4`, and adapt what
   depended on it, because those commits do not apply as written: `838bcc4` imports `sync_source` from the dropped
   `sources_sync.py` and calls `apply_mod._catalog("global")`, while `staging` requires `_catalog(paths, synced)`. Rewrite
-  the enrollment `add_source` and `install_items` actions, `tests/test_enrollment.py` and `tests/test_org_enroll_script.py`
+  the enrollment `add_source` and `install_items` actions, `tests/lib/org_config/test_enrollment.py` and `tests/commands/test_org_enroll_script.py`
   to go through `staging`'s source lifecycle (`git_source.py` and the publish path in `apply.py`), keeping its validation,
   ref pinning and crash-safe publication. `apply_items` no longer exists on `staging` (apply is now plan, publish,
   execute), so `838bcc4` cannot call it either. It also builds the install policy directly from `config.items` with
