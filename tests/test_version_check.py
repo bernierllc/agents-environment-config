@@ -30,6 +30,44 @@ class TestParseVersion:
         from aec.lib.version_check import parse_version
         parse_version(scm_version)  # old int()-per-part split raised ValueError here
 
+    @pytest.mark.parametrize("lower, higher", [
+        ("2.52.8.dev14+g19465b4", "2.52.8"),  # a dev build of X sorts below X
+        ("2.52.7", "2.52.8.dev14+g19465b4"),  # ...and above the previous release
+        ("2.53.0rc1", "2.53.0"),
+        ("2.9.0", "2.10.0"),  # numeric, not lexicographic
+    ])
+    def test_orders_scm_and_prerelease_versions(self, lower, higher):
+        from aec.lib.version_check import parse_version
+        assert parse_version(lower) < parse_version(higher)
+
+    def test_local_suffix_is_ignored(self):
+        from aec.lib.version_check import parse_version
+        assert parse_version("2.52.8.dev14+g19465b4") == parse_version("2.52.8.dev14+gabcdef0.d20261120")
+
+    @pytest.mark.parametrize("bad", ["", "latest", "2.x.0", "2.0.0-beta"])
+    def test_rejects_unrecognised_versions(self, bad):
+        from aec.lib.version_check import parse_version
+        with pytest.raises(ValueError):
+            parse_version(bad)
+
+    def test_cli_imports_without_the_packaging_distribution(self):
+        """`aec update` pulls sources but installs no dependencies, so the runtime import
+        graph must not need anything beyond what an existing install already has."""
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        repo = Path(__file__).resolve().parent.parent
+        code = (
+            "import sys; sys.modules['packaging'] = None; "
+            f"sys.path.insert(0, {str(repo)!r}); "
+            "import aec.cli; "
+            "from aec.lib.version_check import parse_version; "
+            "assert parse_version('2.52.8.dev14+g19465b4') < parse_version('2.52.8')"
+        )
+        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+
     def test_comparison_newer(self):
         from aec.lib.version_check import parse_version
         assert parse_version("2.1.0") > parse_version("2.0.0")

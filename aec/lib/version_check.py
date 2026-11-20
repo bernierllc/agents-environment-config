@@ -5,9 +5,10 @@ import os
 import urllib.request
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
-from packaging.version import Version
+import re
+from typing import NamedTuple
 
 from .config import VERSION, AEC_HOME, get_repo_root
 
@@ -21,13 +22,36 @@ VERSION_CACHE_FILE = AEC_HOME / "version-check.json"
 CACHE_TTL = timedelta(days=7)
 
 
-def parse_version(version_string: str) -> Version:
-    """Parse 'v2.1.0', '2.1.0' or a PEP 440 dev/local version into a comparable Version.
+class ParsedVersion(NamedTuple):
+    """Orders by release numbers, then final above dev/pre-release of the same release."""
+
+    release: Tuple[int, ...]
+    is_final: bool
+
+
+# Stdlib only on purpose: `aec update` pulls sources but never installs dependencies, so a
+# new runtime import (e.g. `packaging`) would crash every command after an update.
+# shortcut: release parts are compared as written (2.1 < 2.1.0) and only dev/a/b/rc suffixes
+# are understood, which covers vX.Y.Z tags and setuptools-scm output; upgrade if tags change.
+_VERSION_RE = re.compile(
+    r"^(?P<release>\d+(?:\.\d+)*)"
+    r"(?P<pre>(?:\.?(?:dev|a|b|rc)\d*)*)"
+    r"(?:\+[0-9A-Za-z.]+)?$"
+)
+
+
+def parse_version(version_string: str) -> ParsedVersion:
+    """Parse 'v2.1.0', '2.1.0' or a setuptools-scm version into a comparable value.
 
     The installed version comes from setuptools-scm, so a clone past the latest tag reports
-    e.g. '2.52.8.dev14+g19465b4'; a plain int-per-part split would raise on it.
+    e.g. '2.52.8.dev14+g19465b4' (a dev build of 2.52.8, which sorts below 2.52.8; the local
+    '+...' part is ignored). Raises ValueError on anything else.
     """
-    return Version(version_string.lstrip("v"))
+    match = _VERSION_RE.match(version_string.lstrip("v"))
+    if match is None:
+        raise ValueError(f"unrecognised version: {version_string!r}")
+    release = tuple(int(part) for part in match["release"].split("."))
+    return ParsedVersion(release, is_final=not match["pre"])
 
 
 def _read_cache() -> Optional[dict]:
