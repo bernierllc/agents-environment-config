@@ -153,6 +153,17 @@ jobs:
           git tag "v$NEW"
           git push origin "refs/tags/v$NEW"
 
+      - name: Create the release for an already-tagged HEAD
+        # A rerun after a failed "Create GitHub Release" finds the tag on HEAD (level none).
+        if: steps.bump.outputs.level == 'none'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=$(git tag --points-at HEAD -l 'v*' --sort=-v:refname | head -n 1)
+          if [ -n "$TAG" ] && ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          fi
+
       - name: Create GitHub Release
         if: steps.bump.outputs.level != 'none'
         env:

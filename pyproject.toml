@@ -33,6 +33,7 @@ keywords = ["ai", "agents", "cli", "configuration", "claude", "cursor"]
 dependencies = [
     "typer>=0.9.0",
     "PyYAML>=6.0",  # aec.cli imports the org commands, which parse YAML
+    "packaging>=21.0",  # PEP 440 comparison of the installed (setuptools-scm) version
 ]
 
 [project.optional-dependencies]
@@ -42,6 +43,7 @@ dev = [
     "pytest-cov>=4.0.0",
     "pytest-timeout>=2.0.0",
     "jsonschema>=4.0",
+    "setuptools-scm==10.3.3",  # tests/test_release_tag_only.py builds a version from git archive; same pin as [build-system]
 ]
 org-configs-preview = [
     "PyYAML>=6.0",

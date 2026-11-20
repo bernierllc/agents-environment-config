@@ -7,6 +7,8 @@ breaks only after a promotion lands. These tests fail before that.
 """
 
 import re
+import shutil
+import subprocess
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 
@@ -39,6 +41,44 @@ def test_setuptools_scm_is_pinned_in_build_requires():
 def test_setuptools_scm_is_switched_on():
     # Without this table setuptools silently builds version 0.0.0.
     assert re.search(r"^\[tool\.setuptools_scm\]", PYPROJECT, re.M)
+
+
+def test_version_survives_a_build_with_no_git_directory(tmp_path):
+    """git archive / GitHub source ZIPs have no .git; .git_archival.txt must carry the tag."""
+    from setuptools_scm import get_version
+
+    repo, out = tmp_path / "repo", tmp_path / "archive"
+    repo.mkdir()
+    out.mkdir()
+    for name in (".git_archival.txt", ".gitattributes"):
+        shutil.copy(REPO / name, repo / name)
+    (repo / "pyproject.toml").write_text('[project]\nname = "x"\ndynamic = ["version"]\n')
+
+    def git(*args, **kw):
+        return subprocess.run(
+            ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", *args],
+            cwd=repo, check=True, capture_output=True, **kw,
+        )
+
+    git("init", "-q")
+    git("add", "-A")
+    git("commit", "-qm", "init")
+    git("tag", "v9.9.9")
+    archive = subprocess.run(
+        ["git", "archive", "HEAD"], cwd=repo, check=True, capture_output=True
+    ).stdout
+    subprocess.run(["tar", "-x", "-C", str(out)], input=archive, check=True)
+
+    assert not (out / ".git").exists()
+    assert get_version(root=str(out), relative_to=str(out / "pyproject.toml")) == "9.9.9"
+
+
+def test_release_workflow_creates_the_release_when_the_tag_already_exists():
+    # A rerun after a failed `gh release create` finds the tag on HEAD, so bump level is
+    # `none`; without this step the release would never be made.
+    steps = WORKFLOW["jobs"]["version-bump"]["steps"]
+    script = "\n".join(s.get("run", "") for s in steps if "== 'none'" in str(s.get("if", "")))
+    assert "gh release view" in script and "gh release create" in script
 
 
 def test_release_workflow_pushes_only_the_tag():
