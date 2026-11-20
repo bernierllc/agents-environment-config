@@ -54,6 +54,10 @@ A trial `git merge-tree` of the branch onto `staging` conflicts in two files, `a
 ## Steps
 
 Each step is one dispatchable unit and its own PR into `staging`, rebased fresh from `staging`, not merged from the branch.
+Treat the branch's commits as intent, not patches: the branch predates `staging`'s apply lifecycle (plan, publish,
+execute), its `_catalog(paths, synced, published)` signature, and `effective_policy(paths)`, so any call into those
+seams is ported, not cherry-picked. The per-step notes below name the known cases; each step also greps its commits for
+calls into `apply.py`, `effective.py` and `validator.py` and ports every one it finds.
 
 - **S1. Time-bound rules (4b).** Cherry-pick `289f21f`, `28ff874`, `2ee13f8` onto a fresh branch, resolve in `apply.py`
   and `validator.py`, tests green on 3.9 and 3.12. Smallest, no dependency on the others.
@@ -62,9 +66,16 @@ Each step is one dispatchable unit and its own PR into `staging`, rebased fresh 
   `sources_sync.py` and calls `apply_mod._catalog("global")`, while `staging` requires `_catalog(paths, synced)`. Rewrite
   the enrollment `add_source` and `install_items` actions, `tests/test_enrollment.py` and `tests/test_org_enroll_script.py`
   to go through `staging`'s source lifecycle (`git_source.py` and the publish path in `apply.py`), keeping its validation,
-  ref pinning and crash-safe publication. Decide the per-source error-capture gap against `git_source.py` and add only
+  ref pinning and crash-safe publication. `apply_items` no longer exists on `staging` (apply is now plan, publish,
+  execute), so `838bcc4` cannot call it either. It also builds the install policy directly from `config.items` with
+  `held=()`; replace that with `effective_policy(paths)` so enrollment never installs an item whose `required_after`
+  is in the future, whose `expires_at` has passed, or that a cross-org conflict holds. Integration tests cover each of those three cases. Decide the per-source error-capture gap against `git_source.py` and add only
   that, with a test that one failing source skips only its own items.
 - **S3. Per-project overlays (4a).** `97d8813`, `efa9bb8`, `f2dc87d`, `3b6a845`. Includes the owner-scoped answers interaction from item 3.
+  `3b6a845` does not apply as written: its `_apply_repo_overlays()` calls `_catalog(scope)` and `apply_items()`, and
+  `staging` has `_catalog(paths, synced, published)` and no `apply_items`. Port repo-scope item application into
+  `staging`'s plan, publish, execute lifecycle, with validation before publication and failure recording, and test that a
+  matching project overlay applies end to end and that a failing one is recorded rather than swallowed.
 - **S4. Branding (4d), public surface, docs.** `fdc05ec`, `fe96bfd`, `e2e5a45`, example YAML, plus archiving the build plan (`7aa2967`).
   `fe96bfd` exports `SyncResult`, `sync_source` and `sync_sources` from `aec/lib/org_config/__init__.py`; those names no
   longer exist, so export only what S1 to S3 actually landed.
