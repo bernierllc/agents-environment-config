@@ -21,7 +21,7 @@ Counts are from `git diff --stat` against the merge base: 29 files, +2186 / -81.
 | 4b time-bound rules (`required_after`, `expires_at` per item) | `289f21f`, `28ff874`, `2ee13f8` | `timebound.py`, validator, `apply.py` | `test_timebound.py`, validator tests |
 | 4a per-project overlays (`projects[]`, match by git remote or directory, first match wins, repo-scope apply) | `97d8813`, `efa9bb8`, `f2dc87d`, `3b6a845` | `projects.py`, `schema.py`, `effective.py`, `apply.py` | `test_projects.py`, `test_effective_projects.py`, `test_org_apply_repo.py` |
 | 4c `enrollment_script` (closed action set, no shell) | `782a29e`, `838bcc4`, `7ffab1e` | `enrollment.py`, validator, `aec/commands/org.py` | `test_enrollment.py`, `test_org_enroll_script.py` |
-| 4c custom source clone with per-source error capture | `d9e00a4` | `sources_sync.py` | `test_sources_sync.py` |
+| 4c custom source clone (superseded by `staging`, dropped) | `d9e00a4` | `sources_sync.py` | `test_sources_sync.py` |
 | 4d branding (`display_name`, `welcome_message`, `doctor_footer`) | `fdc05ec` | `aec/commands/org.py`, `aec/commands/doctor.py` | `test_branding.py` |
 | Public surface, docs, example | `fe96bfd`, `e2e5a45`, `7aa2967` | `__init__.py`, `docs/orgs/authoring-org-configs.md`, `docs/users/org-configs.md`, `docs/orgs/examples/phase4-features.yaml` | `tests/docs/test_org_examples.py` |
 
@@ -38,8 +38,9 @@ A trial `git merge-tree` of the branch onto `staging` conflicts in two files, `a
    `2026-11-15-custom-source-validation-hardening.md` and `2026-11-15-local-org-ref-tip-check.md`) own cloning,
    ref pinning, validation and crash-safe publication. The branch's `sources_sync.py` (`d9e00a4`) is a second clone
    implementation that predates all of that. Per "check what already provides it", it is dropped, not rebased.
-   Its one idea worth keeping is per-source error capture, so a failed source skips only its own items: S2 checks
-   whether `staging` already does that and adds only the gap.
+   Nothing from it is kept. Its per-source error capture (a failed source skips only its own items) contradicts
+   `staging`'s contract, where `sync_custom_sources` discards every staged checkout and applies nothing when any source
+   fails, so a mandatory item in the failed source can never be silently absent. That all-or-nothing contract stays.
 2. **The validator was rewritten around it.** `validator.py` on the branch changed by about 286 lines and assumes
    the old `projects`/`enrollment_script` rejection seams (validator lines 82 and 88 at the merge base). `staging`
    added source, version-range and hardening checks in the same functions. Re-apply the Phase 4 checks onto the
@@ -69,8 +70,9 @@ calls into `apply.py`, `effective.py` and `validator.py` and ports every one it 
   ref pinning and crash-safe publication. `apply_items` no longer exists on `staging` (apply is now plan, publish,
   execute), so `838bcc4` cannot call it either. It also builds the install policy directly from `config.items` with
   `held=()`; replace that with `effective_policy(paths)` so enrollment never installs an item whose `required_after`
-  is in the future, whose `expires_at` has passed, or that a cross-org conflict holds. Integration tests cover each of those three cases. Decide the per-source error-capture gap against `git_source.py` and add only
-  that, with a test that one failing source skips only its own items.
+  is in the future, whose `expires_at` has passed, or that a cross-org conflict holds. Integration tests cover each of those three cases. Enrollment `add_source` keeps `staging`'s all-or-nothing contract:
+  one failing source discards every staged checkout and applies nothing. A test pins that an enrollment run with one
+  failing source and one good source leaves nothing applied.
 - **S3. Per-project overlays (4a).** `97d8813`, `efa9bb8`, `f2dc87d`, `3b6a845`. Includes the owner-scoped answers interaction from item 3.
   `3b6a845` does not apply as written: its `_apply_repo_overlays()` calls `_catalog(scope)` and `apply_items()`, and
   `staging` has `_catalog(paths, synced, published)` and no `apply_items`. Port repo-scope item application into
