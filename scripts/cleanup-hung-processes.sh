@@ -153,6 +153,11 @@ free_percent() {
 low_disk_check() {
     local min="${CLEANUP_MIN_FREE_PERCENT:-15}" pct
     local prune="${CLEANUP_PRUNE_SCRIPT:-$(dirname "${BASH_SOURCE[0]}")/prune-merged-worktrees.sh}"
+    case "$min" in
+        ''|*[!0-9]*|????*) echo "LOW DISK check failed: CLEANUP_MIN_FREE_PERCENT must be a whole number from 0 to 100 (got '$min')." >&2; return 1 ;;
+    esac
+    [ "$((10#$min))" -le 100 ] || { echo "LOW DISK check failed: CLEANUP_MIN_FREE_PERCENT must be a whole number from 0 to 100 (got '$min')." >&2; return 1; }
+    min=$((10#$min))
     pct=$(free_percent) || { echo "LOW DISK check failed: could not read free space on the volume holding $HOME." >&2; return 1; }
     [ "$pct" -ge "$min" ] && return 0
     if [ "${CLEANUP_PRUNE_ON_LOW_DISK:-0}" = 1 ]; then

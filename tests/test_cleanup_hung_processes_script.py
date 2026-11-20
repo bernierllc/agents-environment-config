@@ -455,6 +455,28 @@ def test_an_unreadable_disk_measurement_fails_and_never_runs_the_prune(tmp_path:
     assert not marker.exists(), "a failed measurement must not trigger the prune"
 
 
+@pytest.mark.parametrize("threshold", ["15%", "abc", "-5", "1.5", "101", "99999999999999999999"])
+def test_an_invalid_threshold_fails_the_check_and_never_runs_the_prune(tmp_path: Path, threshold: str) -> None:
+    marker = tmp_path / "pruned"
+    prune = _fake_prune(tmp_path, marker)
+    result = _run_low_disk_check(
+        _fake_df(tmp_path, used_kb=100, avail_kb=900),  # healthy: 90% free
+        {"CLEANUP_MIN_FREE_PERCENT": threshold, "CLEANUP_PRUNE_ON_LOW_DISK": "1", "CLEANUP_PRUNE_SCRIPT": str(prune)},
+    )
+    assert "RC=1" in result.stdout, result.stdout
+    assert "CLEANUP_MIN_FREE_PERCENT must be a whole number" in result.stderr, result.stderr
+    assert not marker.exists(), "an invalid threshold must not trigger the prune"
+
+
+@pytest.mark.parametrize("threshold", ["0", "100", "007"])
+def test_boundary_thresholds_are_accepted(tmp_path: Path, threshold: str) -> None:
+    result = _run_low_disk_check(
+        _fake_df(tmp_path, used_kb=900, avail_kb=100), {"CLEANUP_MIN_FREE_PERCENT": threshold}  # 10% free
+    )
+    assert "must be a whole number" not in result.stderr, result.stderr
+    assert ("RC=0" if int(threshold) <= 10 else "RC=1") in result.stdout, result.stdout
+
+
 def test_opt_in_with_a_missing_prune_script_says_so(tmp_path: Path) -> None:
     result = _run_low_disk_check(
         _fake_df(tmp_path, used_kb=900, avail_kb=100),
