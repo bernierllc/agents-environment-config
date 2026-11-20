@@ -424,3 +424,33 @@ def test_a_failing_prune_is_logged_not_swallowed(tmp_path: Path) -> None:
     )
     assert "prune exited non-zero" in result.stdout, result.stdout
     assert "RC=1" in result.stdout, result.stdout
+
+
+@pytest.mark.parametrize(
+    "df_body",
+    [
+        "exit 1",  # df fails and prints nothing
+        'echo "Filesystem 1024-blocks Used Available Capacity Mounted"\necho "/dev/fake 1000 0 0 0% /"\n',  # zero denominator
+        'echo "Filesystem 1024-blocks Used Available Capacity Mounted"\necho "/dev/fake 1000 100 900 0% /"\nexit 1\n',  # healthy row, failing df
+    ],
+    ids=["df-fails", "zero-size-volume", "failing-df-with-a-healthy-row"],
+)
+def test_an_unreadable_disk_measurement_fails_and_never_runs_the_prune(tmp_path: Path, df_body: str) -> None:
+    marker = tmp_path / "pruned"
+    prune = _fake_prune(tmp_path, marker)
+    bindir = _fake_tool(tmp_path, "df", df_body)
+    result = _run_low_disk_check(
+        bindir, {"CLEANUP_PRUNE_ON_LOW_DISK": "1", "CLEANUP_PRUNE_SCRIPT": str(prune)}
+    )
+    assert "RC=1" in result.stdout, result.stdout
+    assert "could not read free space" in result.stderr, result.stderr
+    assert not marker.exists(), "a failed measurement must not trigger the prune"
+
+
+def test_opt_in_with_a_missing_prune_script_says_so(tmp_path: Path) -> None:
+    result = _run_low_disk_check(
+        _fake_df(tmp_path, used_kb=900, avail_kb=100),
+        {"CLEANUP_PRUNE_ON_LOW_DISK": "1", "CLEANUP_PRUNE_SCRIPT": str(tmp_path / "absent.sh")},
+    )
+    assert "RC=1" in result.stdout, result.stdout
+    assert "no executable prune script" in result.stderr, result.stderr

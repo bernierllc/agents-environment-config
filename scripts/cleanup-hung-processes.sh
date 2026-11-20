@@ -136,8 +136,12 @@ free_kb() {
 }
 
 # Free space on the volume holding $HOME, as a whole percent of used + free.
+# Fails (prints nothing) when df fails or its row is not usable numbers, so a
+# broken measurement is never read as a number.
 free_percent() {
-    df -Pk "$HOME" | awk 'NR==2 {print int($4 * 100 / ($3 + $4))}'
+    local out
+    out=$(df -Pk "$HOME") || return 1
+    printf '%s\n' "$out" | awk 'NR==2 && $3 + $4 > 0 {print int($4 * 100 / ($3 + $4)); ok=1} END {exit !ok}'
 }
 
 # Fails loudly (banner on stderr, return 1) when free space is under
@@ -149,13 +153,18 @@ free_percent() {
 low_disk_check() {
     local min="${CLEANUP_MIN_FREE_PERCENT:-15}" pct
     local prune="${CLEANUP_PRUNE_SCRIPT:-$(dirname "${BASH_SOURCE[0]}")/prune-merged-worktrees.sh}"
-    pct=$(free_percent)
+    pct=$(free_percent) || { echo "LOW DISK check failed: could not read free space on the volume holding $HOME." >&2; return 1; }
     [ "$pct" -ge "$min" ] && return 0
-    if [ "${CLEANUP_PRUNE_ON_LOW_DISK:-0}" = 1 ] && [ -x "$prune" ]; then
-        echo "  Free space is ${pct}%, under ${min}%: running $prune"
-        "$prune" || echo "  (prune exited non-zero: $prune)"
-        pct=$(free_percent)
-        [ "$pct" -ge "$min" ] && return 0
+    if [ "${CLEANUP_PRUNE_ON_LOW_DISK:-0}" = 1 ]; then
+        if [ -x "$prune" ]; then
+            echo "  Free space is ${pct}%, under ${min}%: running $prune"
+            "$prune" || echo "  (prune exited non-zero: $prune)"
+            pct=$(free_percent) || { echo "LOW DISK check failed: could not re-read free space after the prune." >&2; return 1; }
+            [ "$pct" -ge "$min" ] && return 0
+        else
+            # A symlinked invocation looks for the sibling next to the link, so name the fix.
+            echo "  CLEANUP_PRUNE_ON_LOW_DISK=1 but no executable prune script at $prune (set CLEANUP_PRUNE_SCRIPT)." >&2
+        fi
     fi
     echo "LOW DISK: only ${pct}% free on the volume holding $HOME (threshold ${min}%)." >&2
     echo "  Free space by removing unused worktrees, build output and caches, then re-run." >&2
