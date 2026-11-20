@@ -1,5 +1,10 @@
 name: Version Bump & Release
 
+# Releases are tag-only: this workflow pushes the vX.Y.Z tag and the GitHub Release and
+# never commits to main, so main stays byte-identical to what was promoted from staging
+# and the `main promotion gate` ruleset needs no bypass. setuptools-scm reads the
+# version from the tag (pyproject.toml has no static version).
+
 on:
   push:
     branches: [main]
@@ -15,8 +20,6 @@ permissions:
 jobs:
   version-bump:
     runs-on: ubuntu-latest
-    # Skip version bump for commits made by this action
-    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
 
     steps:
       - uses: actions/checkout@v7
@@ -102,14 +105,6 @@ jobs:
           echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
           echo "Version: $CURRENT -> $NEW_VERSION ($LEVEL)"
 
-      - name: Update pyproject.toml
-        if: steps.bump.outputs.level != 'none'
-        run: |
-          NEW="${{ steps.version.outputs.new_version }}"
-          sed -i "s/^version = \".*\"/version = \"$NEW\"/" pyproject.toml
-          echo "Updated pyproject.toml to $NEW"
-          grep '^version' pyproject.toml
-
       - name: Generate release notes
         id: notes
         if: steps.bump.outputs.level != 'none'
@@ -151,16 +146,12 @@ jobs:
 
           cat /tmp/release-notes.md
 
-      - name: Commit version bump
+      - name: Tag release
         if: steps.bump.outputs.level != 'none'
         run: |
           NEW="${{ steps.version.outputs.new_version }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml
-          git commit -m "chore(release): v$NEW"
           git tag "v$NEW"
-          git push origin main --tags
+          git push origin "refs/tags/v$NEW"
 
       - name: Create GitHub Release
         if: steps.bump.outputs.level != 'none'

@@ -1,10 +1,16 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = [
+    "setuptools>=61.0",
+    # Release version comes from the git tag (see version-bump.yml), never from a
+    # commit to main. Same supply-chain hold as the pynacl pin below: 10.3.3 is one
+    # release behind the latest (10.3.4) and about eight weeks old.
+    "setuptools-scm==10.3.3",
+]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "aec"
-version = "2.52.7"
+dynamic = ["version"]
 description = "Agents Environment Configuration - Cross-platform AI agent setup CLI"
 readme = "README.md"
 license = {text = "MIT"}
@@ -57,6 +63,9 @@ aec = "aec.cli:main"
 [project.urls]
 Homepage = "https://github.com/bernierllc/agents-environment-config"
 Repository = "https://github.com/bernierllc/agents-environment-config"
+
+# The empty table is what switches setuptools-scm on; without it setuptools builds 0.0.0.
+[tool.setuptools_scm]
 
 [tool.setuptools.packages.find]
 include = ["aec*"]

@@ -110,7 +110,7 @@ Loadout schema: `docs/loadout/` — plugin publishers ship a `plugin.json` at th
 ## Commits and PRs
 
 - Conventional commits: `feat:`, `fix:`, `docs:`, `chore:`
-- Feature branches from `staging`, and feature PRs target `staging`. `main` is promotion-only: the only allowed PR into `main` is `staging` → `main` (merge commit), enforced by the `main via staging` check and the `main promotion gate` ruleset. The `version-bump` workflow cuts a release after each promotion.
+- Feature branches from `staging`, and feature PRs target `staging`. `main` is promotion-only: the only allowed PR into `main` is `staging` → `main` (merge commit), enforced by the `main via staging` check and the `main promotion gate` ruleset. The `version-bump` workflow cuts a release after each promotion by pushing only the `vX.Y.Z` tag and the GitHub Release, never a commit to `main`; the package version comes from that tag (setuptools-scm), so `pyproject.toml` has no `version` line.
 
 ### Merging without maintainer approval
 
