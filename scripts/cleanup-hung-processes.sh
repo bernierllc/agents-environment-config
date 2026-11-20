@@ -141,7 +141,7 @@ free_kb() {
 free_percent() {
     local out
     out=$(df -Pk "$HOME") || return 1
-    printf '%s\n' "$out" | awk 'NR==2 && $3 + $4 > 0 {print int($4 * 100 / ($3 + $4)); ok=1} END {exit !ok}'
+    printf '%s\n' "$out" | awk 'NR==2 && $3 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/ && $3 + $4 > 0 {print int($4 * 100 / ($3 + $4)); ok=1} END {exit !ok}'
 }
 
 # Fails loudly (banner on stderr, return 1) when free space is under

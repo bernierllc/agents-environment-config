@@ -432,8 +432,16 @@ def test_a_failing_prune_is_logged_not_swallowed(tmp_path: Path) -> None:
         "exit 1",  # df fails and prints nothing
         'echo "Filesystem 1024-blocks Used Available Capacity Mounted"\necho "/dev/fake 1000 0 0 0% /"\n',  # zero denominator
         'echo "Filesystem 1024-blocks Used Available Capacity Mounted"\necho "/dev/fake 1000 100 900 0% /"\nexit 1\n',  # healthy row, failing df
+        'echo "Filesystem 1024-blocks Used Available Capacity Mounted"\necho "/dev/fake 1000 900 garbage 0% /"\n',  # non-numeric available
+        'echo "Filesystem 1024-blocks Used Available Capacity Mounted"\necho "/dev/fake 1000 garbage 900 0% /"\n',  # non-numeric used
     ],
-    ids=["df-fails", "zero-size-volume", "failing-df-with-a-healthy-row"],
+    ids=[
+        "df-fails",
+        "zero-size-volume",
+        "failing-df-with-a-healthy-row",
+        "non-numeric-available",
+        "non-numeric-used",
+    ],
 )
 def test_an_unreadable_disk_measurement_fails_and_never_runs_the_prune(tmp_path: Path, df_body: str) -> None:
     marker = tmp_path / "pruned"
