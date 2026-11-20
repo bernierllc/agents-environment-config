@@ -14,11 +14,16 @@ Surfaces: `version-bump.yml`, `ci.yml` triggers, the merge policy in `AGENTINFO.
 
 ## S1 — Choose the release mechanism
 
-1. Verify whether a GitHub Actions bypass actor is possible for rulesets at all
-   (documentation, then a throwaway repo). Do not assume it.
-2. If not: have the workflow open a release PR with the version bump and enable auto-merge,
-   or use a dedicated GitHub App as the ruleset bypass actor. Pick one and record why.
-3. Prove it end to end on a throwaway repo before touching this one.
+**Decided: tag-only releases.** The workflow pushes only the `vX.Y.Z` tag and the GitHub
+Release; setuptools-scm reads the package version from the tag. No commit ever reaches
+`main`, so the ruleset needs no bypass actor, no GitHub App and no secrets. Rulesets here
+contain only branch rules, which a tag push does not trigger. Rejected: a release PR with
+auto-merge (a bot commit per release, and the PR needs its own approval path) and a GitHub
+App bypass actor (a credential to hold and rotate, for something a tag already does).
+
+Consequences: `pyproject.toml` has no static `version`; `aec.lib.config.VERSION` reads the
+installed metadata; `tests/test_release_tag_only.py` pins all of it. An editable install
+keeps the version it was installed at until `pip install -e .` runs again.
 
 ## S2 — Adopt the rules
 
