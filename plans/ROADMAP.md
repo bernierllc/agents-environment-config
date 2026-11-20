@@ -17,6 +17,12 @@ unit of impact lives — not a contract.
 
 ## Review follow-ups awaiting prioritization
 
+- [Land org-config Phase 4 from the parked branch](2026-11-19-org-config-phase-4-landing.md): time-bound
+  rules, per-project overlays, `enrollment_script` and branding are built, tested and documented on
+  `claude/org-config-phase-4` (tip `7aa2967`, 15 commits, never a PR) and exist nowhere else. `staging` moved
+  on (208 commits, two conflicting files, and its own custom-source clone). Four rebased PRs, then retire the
+  branch. Scheduling pending.
+
 - [Unforgeable required checks (SEC-MVS-01)](2026-11-16-unforgeable-required-checks.md): required checks
   match name + Actions app id, so a PR workflow can publish a protected name (as a job or through the Checks
   API). Interim detector covers the job case; the permanent fix is an org required workflow or our own App.
