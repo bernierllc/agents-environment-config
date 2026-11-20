@@ -105,7 +105,7 @@ writer and reader of the org config: `validate_org_config`, `parse_org_config_te
 ## Done when
 
 - S1 through S4 merged to `staging`, each with tests on Python 3.9 and 3.12, `docs/qa-verification.md` updated where a user-visible flow changed.
-- `aec org validate` accepts `docs/orgs/examples/phase4-features.yaml` on `staging` (`tests/docs/test_org_examples.py` pins it).
+- `parse_org_config_text()` and `validate_org_config()` accept `docs/orgs/examples/phase4-features.yaml` on `staging` (`tests/docs/test_org_examples.py` pins it). There is no `aec org validate` command and this plan does not add one.
 - No second clone implementation in `aec/lib/org_config/`.
 - The branch is retired by the maintainer after S5's check, with the bundle kept.
 
