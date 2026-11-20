@@ -332,3 +332,95 @@ def test_pm_cache_runs_from_home_not_the_callers_repo(tmp_path: Path) -> None:
         ["bash", "-c", script], cwd=repo, env=_env(bindir, {"HOME": str(home)}), check=False, capture_output=True, text=True, timeout=15
     )
     assert f"cwd={home}" in result.stdout, result.stdout
+
+
+def _fake_df(tmp_path: Path, used_kb: int, avail_kb: int, prune_marker: Path | None = None,
+             avail_after_prune_kb: int | None = None) -> Path:
+    """A `df -Pk` reporting fixed usage; after the prune marker exists it reports more free space."""
+    avail = f'avail={avail_kb}\n'
+    if prune_marker is not None and avail_after_prune_kb is not None:
+        avail += f'[ -e "{prune_marker}" ] && avail={avail_after_prune_kb}\n'
+    return _fake_tool(
+        tmp_path,
+        "df",
+        avail + f'echo "Filesystem 1024-blocks Used Available Capacity Mounted"\n'
+        f'echo "/dev/fake 1000 {used_kb} $avail 0% /"\n',
+    )
+
+
+def _fake_prune(tmp_path: Path, marker: Path, exit_code: int = 0) -> Path:
+    prune = tmp_path / "fake-prune.sh"
+    prune.write_text(f'#!/bin/bash\ntouch "{marker}"\nexit {exit_code}\n')
+    prune.chmod(0o755)
+    return prune
+
+
+def _run_low_disk_check(bindir: Path, extra: dict | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["bash", "-c", _helper_prelude() + '\nlow_disk_check\necho "RC=$?"\n'],
+        env=_env(bindir, extra), check=False, capture_output=True, text=True, timeout=20,
+    )
+
+
+def test_low_disk_check_is_silent_when_free_space_meets_the_threshold(tmp_path: Path) -> None:
+    result = _run_low_disk_check(_fake_df(tmp_path, used_kb=800, avail_kb=200))  # 20% free
+    assert "RC=0" in result.stdout, result.stdout
+    assert result.stderr == "", result.stderr
+
+
+def test_low_disk_check_fails_loudly_below_the_default_threshold(tmp_path: Path) -> None:
+    result = _run_low_disk_check(_fake_df(tmp_path, used_kb=900, avail_kb=100))  # 10% free
+    assert "RC=1" in result.stdout, result.stdout
+    assert "LOW DISK" in result.stderr and "10%" in result.stderr, result.stderr
+
+
+def test_low_disk_threshold_is_configurable(tmp_path: Path) -> None:
+    bindir = _fake_df(tmp_path, used_kb=900, avail_kb=100)  # 10% free
+    ok = _run_low_disk_check(bindir, {"CLEANUP_MIN_FREE_PERCENT": "5"})
+    assert "RC=0" in ok.stdout, ok.stdout
+    bad = _run_low_disk_check(bindir, {"CLEANUP_MIN_FREE_PERCENT": "11"})
+    assert "RC=1" in bad.stdout, bad.stdout
+
+
+def test_low_disk_check_does_not_run_the_prune_by_default(tmp_path: Path) -> None:
+    marker = tmp_path / "pruned"
+    prune = _fake_prune(tmp_path, marker)
+    result = _run_low_disk_check(
+        _fake_df(tmp_path, used_kb=900, avail_kb=100), {"CLEANUP_PRUNE_SCRIPT": str(prune)}
+    )
+    assert "RC=1" in result.stdout, result.stdout
+    assert not marker.exists(), "the prune removes worktrees and must stay opt-in"
+
+
+def test_opt_in_prune_runs_and_the_disk_is_measured_again(tmp_path: Path) -> None:
+    marker = tmp_path / "pruned"
+    prune = _fake_prune(tmp_path, marker)
+    bindir = _fake_df(tmp_path, used_kb=900, avail_kb=100, prune_marker=marker, avail_after_prune_kb=300)
+    result = _run_low_disk_check(
+        bindir, {"CLEANUP_PRUNE_ON_LOW_DISK": "1", "CLEANUP_PRUNE_SCRIPT": str(prune)}
+    )
+    assert marker.exists(), result.stdout
+    assert "RC=0" in result.stdout, result.stdout  # 10% free before the prune, 25% after
+    assert "LOW DISK" not in result.stderr, result.stderr
+
+
+def test_opt_in_prune_that_frees_too_little_still_fails(tmp_path: Path) -> None:
+    marker = tmp_path / "pruned"
+    prune = _fake_prune(tmp_path, marker)
+    bindir = _fake_df(tmp_path, used_kb=900, avail_kb=100, prune_marker=marker, avail_after_prune_kb=110)
+    result = _run_low_disk_check(
+        bindir, {"CLEANUP_PRUNE_ON_LOW_DISK": "1", "CLEANUP_PRUNE_SCRIPT": str(prune)}
+    )
+    assert marker.exists(), result.stdout
+    assert "RC=1" in result.stdout and "LOW DISK" in result.stderr, (result.stdout, result.stderr)
+
+
+def test_a_failing_prune_is_logged_not_swallowed(tmp_path: Path) -> None:
+    marker = tmp_path / "pruned"
+    prune = _fake_prune(tmp_path, marker, exit_code=2)
+    result = _run_low_disk_check(
+        _fake_df(tmp_path, used_kb=900, avail_kb=100),
+        {"CLEANUP_PRUNE_ON_LOW_DISK": "1", "CLEANUP_PRUNE_SCRIPT": str(prune)},
+    )
+    assert "prune exited non-zero" in result.stdout, result.stdout
+    assert "RC=1" in result.stdout, result.stdout
