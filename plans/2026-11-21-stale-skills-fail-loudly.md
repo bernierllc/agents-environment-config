@@ -18,7 +18,9 @@ and compares versions) is built by the incumbent plan; every step here that need
    `pr-merge-flow` was 1.4.6 in one repo against 1.5.4 upstream.
 3. `aec upgrade` always exits 0, including when it stops partway or skips repos.
 4. `aec upgrade --yes` edits the working tree of every tracked repo, not the current one, with no commits (a separate fix:
-   "repo-local upgrades apply to the current repo only"; step 2 below is not safe to automate until it lands).
+   "repo-local upgrades apply to the current repo only"; tracker id AEC-UPGRADE-SCOPE owns it, including the `--all` flag
+   and the fate of the interactive "upgrade other repos too?" prompt in `aec/commands/upgrade.py`; step 2 below is not safe to
+   automate until it lands, and its `--all` test line is gated on it).
 5. `aec run-script <type>:<item> <script>` resolves the repo copy first and the global copy second
    (`_resolve_item_dir` in `aec/commands/run_script_cmd.py`), so a stale repo copy runs silently.
 6. `aec doctor` checks manifest/directory consistency only; it never compares a vendored skill's version with what is available,
@@ -66,7 +68,7 @@ Each behavior lives in the one component that owns it; callers call.
 ### 2. `aec upgrade` returns an honest exit code (aec)
 
 - Exit 0 only when every in-scope item reached the target version. Non-zero (`EXIT_UPGRADE_INCOMPLETE`) when an in-scope
-  scope was skipped, an in-scope repo-local upgrade stopped, or an in-scope item failed; the last line lists what was skipped
+  target could not be checked or was skipped (for example a vendored scope whose check cannot run), an in-scope repo-local upgrade stopped, or an in-scope item failed; the last line lists what was skipped
   and why. "In scope" is the scope the run selected: the current repo by default, every tracked repo with `--all`. Tracked
   repos outside the selected scope are listed as "not selected" for information and never affect the exit code, so a default
   upgrade for a user who tracks several repos is not a permanent failure.
