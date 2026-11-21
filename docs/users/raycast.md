@@ -45,3 +45,19 @@ The macOS/Linux script detects which runtime backs the `docker` CLI:
 Anonymous volumes are pruned, including those of containers the cleanup just removed: a stopped database whose data sits in an anonymous volume loses that data. Keep dev data in named volumes, which are kept: they often hold a stopped dev database's data. Set `CLEANUP_PRUNE_NAMED_VOLUMES=1` to prune them too. Compose stacks whose project directory no longer exists (a removed worktree) are reported with the command to stop them, but never stopped automatically.
 
 From the terminal, the `cleanup` shell function runs the script as a subprocess, so the shell stays open when it finishes.
+
+### Disk reclaim
+
+Beyond processes and Docker, the macOS/Linux script frees disk that builds up silently:
+
+- **Colima disk:** before any recycle it runs `colima ssh -- sudo fstrim -a`. The VM disk is sparse and only grows; trimming returns blocks freed by `docker system prune` to macOS.
+- **App updater staging** (macOS only: Sparkle `Installation` and `*.ShipIt` directories under `~/Library/Caches`): keeps the newest entry, which may be waiting to install on quit, and removes older entries untouched for 7 days that no process has open.
+- Package-manager caches (npm, pnpm, yarn, uv, pip, Homebrew) are cleaned only when that tool is installed.
+
+### Worktree pruning
+
+`scripts/prune-merged-worktrees.sh` reclaims disk from linked git worktrees under `$PROJECTS_ROOT` (default `~/projects`). It removes a clean worktree (and its local branch) when its PR merged at exactly its HEAD, or when HEAD is already pushed, no open PR uses the branch, no process has its cwd inside it, and git has not touched it for `PRUNE_IDLE_HOURS` (default 24). Worktrees it keeps get their `node_modules` stripped after `STRIP_IDLE_DAYS` (default 3) idle; the next install restores them. Dirty worktrees, unpushed commits, worktrees with their own ignored `.env*` files and worktrees holding a nested worktree, clone or submodule are never removed. Only ignored `node_modules` directories with no tracked files inside are stripped.
+
+Below `LOW_DISK_GB` free (default 30) it uses 2-hour / 1-day thresholds and posts a notification (macOS). Set `LOW_DISK_CLEANUP=1` to also run `cleanup-hung-processes.sh` at that point; it is opt-in because that script kills hung processes and prunes Docker, including anonymous volumes.
+
+It runs on macOS and Linux. Without `gh` it removes nothing and only strips idle `node_modules`; without `lsof` (or `/proc` on Linux) it cannot tell which worktrees are in use and leaves them all alone. `DRY_RUN=1` prints what it would do. It is idempotent, so schedule it hourly (launchd `StartInterval 3600` or cron).

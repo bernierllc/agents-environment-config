@@ -243,6 +243,34 @@ start_pm_job() {
     clean_pm_cache "$@" >"$PM_LOG_DIR/$name.log" 2>&1 &
 }
 
+# App updaters (Sparkle, Squirrel's ShipIt) leave staged updates behind; Codex's
+# Sparkle cache alone held 6.9GB. Each staged update is its own subdirectory; the
+# parent's mtime changes on every update check, so age each entry, not the parent,
+# and keep the newest one in case it is waiting to install on quit. Older entries go
+# after 7 days unless a process (the updater) has files open in them.
+# Usage: prune_updater_staging DIR...
+prune_updater_staging() {
+    local staging staged
+    # lsof must be present and able to see this shell, or "nothing open" would be a guess
+    if ! lsof -t -p $$ 2>/dev/null | grep -qx "$$"; then
+        echo "  Skipping app update staging: lsof is missing or cannot list open files"; return 0
+    fi
+    for staging in "$@"; do
+        [ -d "$staging" ] || continue
+        # shellcheck disable=SC2012 # names are generated (update.XXXX), never contain newlines
+        ls -td "$staging"/*/ 2>/dev/null | tail -n +2 | while IFS= read -r staged; do
+            staged="${staged%/}"
+            # an older entry untouched for a week with no process holding files in it is long installed
+            find "$staged" -maxdepth 0 -mtime +7 -print -quit 2>/dev/null | grep -q . || continue
+            if lsof -t +D "$staged" 2>/dev/null | grep -q .; then  # exit code is unreliable on macOS
+                echo "  Keeping app update $staged (in use)"; continue
+            fi
+            echo "  Removing stale app update $staged ($(du -sh "$staged" 2>/dev/null | awk '{print $1}'))"
+            rm -rf "$staged" || echo "    (could not remove $staged)"
+        done
+    done
+}
+
 on_exit() {
     restart_colima || true
     [ -n "${PM_LOG_DIR:-}" ] && rm -rf "$PM_LOG_DIR"
@@ -391,6 +419,10 @@ else
     run_with_timeout "$DOCKER_TIMEOUT" docker image prune -a -f --filter "until=24h" 2>/dev/null || echo "  (Image prune timed out)"
 
     if [ "$DOCKER_RUNTIME" = "colima" ]; then
+        # Colima's VM disk is a sparse file that only grows: blocks Docker just freed stay
+        # allocated on the Mac until the guest discards them (13.5GB in one run).
+        echo "  Trimming Colima VM disk (fstrim)..."
+        run_with_timeout 120 colima ssh -- sudo fstrim -a 2>&1 | tail -n1 || echo "  (fstrim failed or timed out)"
         recycle_colima
     fi
 
@@ -529,6 +561,7 @@ for profile in "$HOME/Library/Caches/ms-playwright"/mcp-chrome-*; do
     fi
 done
 
+
 echo ""
 echo "  Claude cleanup: $CLAUDE_CLEANED items cleaned"
 
@@ -584,15 +617,7 @@ for name in "${PM_JOB_NAMES[@]}"; do
     cat "$PM_LOG_DIR/$name.log"
 done
 
-# App updaters (Sparkle, Squirrel's ShipIt) leave staged updates behind; Codex's
-# Sparkle cache alone held 6.9GB. Anything staged 7d+ ago is long installed.
-for staged in "$HOME"/Library/Caches/*/org.sparkle-project.Sparkle/Installation "$HOME"/Library/Caches/*.ShipIt; do
-    [ -d "$staged" ] || continue
-    if find "$staged" -maxdepth 0 -mtime +7 -print -quit 2>/dev/null | grep -q .; then
-        echo "  Removing stale app update $staged ($(du -sh "$staged" 2>/dev/null | awk '{print $1}'))"
-        rm -rf "$staged" 2>/dev/null || true
-    fi
-done
+prune_updater_staging "$HOME"/Library/Caches/*/org.sparkle-project.Sparkle/Installation "$HOME"/Library/Caches/*.ShipIt
 
 echo ""
 echo "Package manager cache cleanup complete"
