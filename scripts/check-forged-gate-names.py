@@ -91,7 +91,7 @@ def _gh_run_lookup(repo):
 
 def _load_check_runs(text):
     """`gh api --paginate` concatenates one JSON object per page."""
-    decoder, index, runs = json.JSONDecoder(), 0, []
+    decoder, index, runs, totals = json.JSONDecoder(), 0, [], set()
     while index < len(text):
         while index < len(text) and text[index].isspace():
             index += 1
@@ -105,10 +105,15 @@ def _load_check_runs(text):
         ):
             raise ValueError("check_runs holds an entry that is not a named check run")
         runs.extend(page_runs)
+        if "total_count" in page:
+            totals.add(page["total_count"])
     # Fail closed: a head always has check runs by merge time (the guard's own, at least), so
     # empty input (a caller without pipefail, a silent `gh api`) or zero runs is not "no forgery".
     if not runs:
         raise ValueError("input contains no check runs")
+    # A truncated listing (an omitted page could hold the forged run) is not an evaluated one.
+    if totals and totals != {len(runs)}:
+        raise ValueError(f"listing holds {len(runs)} check runs but total_count says {sorted(totals)}")
     return runs
 
 

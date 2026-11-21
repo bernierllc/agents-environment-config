@@ -117,7 +117,7 @@ The guard's own `checkout` still selects `pull_request.base.sha`, so the scripts
 
   On the promotion that carries it to `main`, `main`'s old file has no `pull_request_target` trigger, so the
   `pull_request` run of the head's file is the only publisher. That run's own scan flags itself (pinned path, event
-  `pull_request`), so the check is red on that one promotion and needs the one owner waiver (below). The next
+  `pull_request`), so the check is red on that one promotion and needs an owner waiver (below). The next
   `staging` PR deletes the 3 lines; from then on `main`'s file runs under `pull_request_target`, its job is the
   pinned pair, and promotions pass with no waiver. a staging-default repo needs no transitional shape.
 
@@ -141,7 +141,7 @@ the default branch alone:
 | Default branch | `main-via-staging.yml` | `main` ruleset requires the context | Waiver needed |
 |---|---|---|---|
 | main | not yet on `main` | no | none: follow the default=main order below |
-| main | legacy on `main` | yes | one, see "Bootstrap for a repo whose main ruleset already requires the context" |
+| main | legacy on `main` | yes | two, see "Bootstrap for a repo whose main ruleset already requires the context" |
 | staging | legacy (`pull_request`) | yes | one, on the scripts promotion |
 | staging | legacy (`pull_request`) | no | none: follow "Waiver-free variant when `main` does not require the context" (delete the legacy file first), not the waiver order |
 | staging | canonical (`pull_request_target`), `main` already has the scripts | either | none |
@@ -169,9 +169,18 @@ The default=main order, for a repo whose `main` has the scripts last:
 
 ### Bootstrap for a repo whose main ruleset already requires the context
 
-Not a free pass: the plan has no sanctioned bootstrap that avoids a scan waiver, because the legacy job is still in
-the head of the promotion that carries the canonical guard to `main`. Exactly one promotion is waived, and the
-waiver is the owner's to grant (a directive or a cop never waives a gate); record the approval on that PR.
+Not a free pass. This bootstrap needs two owner waivers, on two different promotions, and each one is the owner's to
+grant (a directive or a cop never waives a gate); record each approval on its PR:
+
+- **Waiver 1, the scripts promotion (step 1):** its head still carries the legacy `pull_request` job, so the
+  merge-time scan flags that job. The owner waives the scan result on that PR.
+- **Waiver 2, promotion P1 (step 3):** the TRANSITIONAL job's own scan flags itself, so the required check is red.
+  The owner waives the guard check on that PR.
+
+A main-default repo whose `main` already carries the canonical workflow is not in this section. It
+does not inherently need a waiver for the first replacement promotion: `main`'s file runs under
+`pull_request_target`, and GitHub evaluates a `pull_request_target` job's check for rulesets
+(<https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks#checks-from-some-workflow-jobs-are-not-evaluated>).
 
 An earlier version of this section put the canonical workflow at a temporary second path while the legacy file
 stayed. That no longer works: the guard's job is now the required check, and a job from the temporary path is not
@@ -179,10 +188,11 @@ the pinned (`.github/workflows/main-via-staging.yml`, `pull_request_target`) pai
 promotion until the file moves. Use the TRANSITIONAL shape in place instead:
 
 1. `staging`: scripts and their tests land first (default=main order steps 1 and 2 carry them to `main`), with the
-   legacy workflow untouched.
+   legacy workflow untouched. Waiver 1: the merge-time scan flags the legacy job on this scripts promotion; the
+   owner waives it with the waiver text below, recorded on that PR.
 2. `staging`: one PR replaces the legacy `main-via-staging.yml` with the TRANSITIONAL shape at the same path.
 3. Promotion P1 to `main`. Only the head's `pull_request` run publishes the context, and its scan flags its own
-   job, so the check is red. The owner waives it once, after hand-verifying and writing on the PR: head repo equals
+   job, so the check is red. Waiver 2: the owner waives it, after hand-verifying and writing on the PR: head repo equals
    base repo, head ref is `staging`, every flagged run is this workflow's own job (path matches, event
    `pull_request`), and the promotion adds no other workflow.
 4. A normal PR into `staging` deletes the 3-line `pull_request:` block. Open no further promotion before it lands.

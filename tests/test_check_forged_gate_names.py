@@ -60,6 +60,13 @@ def test_a_guard_named_job_from_the_trusted_path_on_another_event_is_forged():
     assert [name for name, _ in found] == [GUARD]
 
 
+def test_an_empty_trusted_set_flags_every_actions_job_bearing_the_name():
+    # The pre-job-as-check guard entry: no Actions job, not even the guard workflow's own, may publish the name.
+    runs = [api_run(GUARD), job_run(GUARD, "782")]
+    found = mod.forged(runs, lookup_table({"782": TRUSTED_GUARD}), protected={GUARD: set()})
+    assert [name for name, _ in found] == [GUARD]
+
+
 def test_review_gate_forged_by_a_pr_head_workflow_is_detected():
     runs = [job_run("Review Gate", "888")]
     assert mod.forged(runs, lookup_table({"888": (".github/workflows/ci.yml", "pull_request")}))
@@ -120,6 +127,19 @@ def test_cli_fails_closed_on_empty_malformed_or_runless_input(stdin):
     proc = _cli(stdin)
     assert proc.returncode == 2
     assert "failing closed" in proc.stderr
+
+
+def test_cli_fails_closed_when_pages_hold_fewer_runs_than_total_count():
+    # A truncated listing (an omitted second page could hold the forged run) must not read as evaluated.
+    proc = _cli('{"total_count":2,"check_runs":[{"name":"ci"}]}')
+    assert proc.returncode == 2
+    assert "failing closed" in proc.stderr
+
+
+def test_cli_passes_when_paginated_runs_match_total_count():
+    pages = json.dumps({"total_count": 2, "check_runs": [api_run("a")]}) + "\n" + \
+        json.dumps({"total_count": 2, "check_runs": [api_run("b")]})
+    assert _cli(pages).returncode == 0
 
 
 def test_cli_passes_a_page_whose_protected_name_came_from_the_checks_api():

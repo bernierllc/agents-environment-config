@@ -74,3 +74,8 @@ def test_plan_requires_vendoring_from_a_released_tag():
     assert "### Vendoring source is a released tag, never a branch" in PLAN
     assert "compares a repo's copy against the TAGGED blob" in PLAN
     assert "prints the tag it vendored from" in PLAN
+
+
+def test_main_default_bootstrap_documents_both_owner_waivers():
+    assert "This bootstrap needs two owner waivers" in PLAN
+    assert "does not inherently need a waiver for the first replacement promotion" in PLAN
