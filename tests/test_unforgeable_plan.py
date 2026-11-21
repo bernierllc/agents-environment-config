@@ -15,7 +15,8 @@ def test_plan_documents_merge_time_scan_with_pipefail():
 def test_plan_covers_staging_default_order_and_one_waiver_per_legacy_repo():
     assert "### Rollout order when the default branch is staging" in PLAN
     assert "needs exactly one owner waiver" in PLAN
-    assert "Never combine them." in PLAN
+    assert "Do not combine them until a disposable-repository probe has run that shape end to end." in PLAN
+    assert "pending live\nvalidation in a disposable repository" in PLAN
     assert "`main` ruleset requires the context" in PLAN
 
 

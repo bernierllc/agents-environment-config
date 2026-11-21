@@ -173,7 +173,8 @@ def test_a_forged_same_name_job_fails_the_job_even_from_staging(tmp_path):
     assert "forged check" in out
 
 
-def test_a_missing_guard_script_fails_the_job_with_a_message_not_127(tmp_path):
-    code, out = _run_workflow_step(tmp_path, "staging", drop_script="check-main-source.sh")
+@pytest.mark.parametrize("script", ["check-main-source.sh", "check-forged-gate-names.py"])
+def test_a_missing_guard_script_fails_the_job_with_a_message_not_127(tmp_path, script):
+    code, out = _run_workflow_step(tmp_path, "staging", drop_script=script)
     assert code == 1
-    assert "guard script missing on base: scripts/check-main-source.sh" in out
+    assert f"guard script missing on base: scripts/{script}" in out

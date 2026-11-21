@@ -221,14 +221,15 @@ job, the detector exits 1 on it, and the scripts promotion needs exactly one own
 canonical workflow need no scan waiver, and no guard waiver either when `main` lacks the scripts: the guard runs
 them from `staging` (see "Canonical workflow already on staging, scripts missing on main").
 
-No order avoids that waiver:
+No order is proven to avoid that waiver. The sequence below is the conservative recommendation, pending live
+validation in a disposable repository:
 
 - Delete the legacy file in the scripts PR: `main` has no publisher, the required context never appears, and the
   promotion is blocked.
 - Scripts, legacy deletion and the canonical workflow in one `staging` PR: `staging` is the default branch, so the
   canonical workflow runs on main-targeted PRs at once. That shape has not been run end to end, and with the legacy
   job gone the required context depends on the canonical job alone, so a defect there leaves no promotion able to
-  pass. Never combine them.
+  pass. Do not combine them until a disposable-repository probe has run that shape end to end.
 
 The order:
 
