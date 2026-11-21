@@ -117,7 +117,14 @@ The guard's own `checkout` still selects `pull_request.base.sha`, so the scripts
 
   On the promotion that carries it to `main`, `main`'s old file has no `pull_request_target` trigger, so the
   `pull_request` run of the head's file is the only publisher. That run's own scan flags itself (pinned path, event
-  `pull_request`), so the check is red on that one promotion and needs an owner waiver (below). The next
+  `pull_request`), so the check is red on that one promotion and needs an owner waiver (below).
+
+  Probe evidence (PR #176, a throwaway PR closed after the run, 2026-11-20): the transitional shape with its
+  `pull_request` branch filter pointed at a throwaway base. In run 44877949889 (event `pull_request`) `github.sha`
+  was the merge commit `96316cf`, and the scan for `pull_request.head.sha` `738fdb8` listed the job's own check run
+  (`PRs into main must come from staging`, in progress, job 136766720792). A `pull_request` job's check run is
+  listed under the PR head sha, not the merge commit, so the scan sees it; the detector flagged it as forged and the
+  job exited 1. The waiver step cannot be bypassed by the scan missing its own job. The next
   `staging` PR deletes the 3 lines; from then on `main`'s file runs under `pull_request_target`, its job is the
   pinned pair, and promotions pass with no waiver. a staging-default repo needs no transitional shape.
 

@@ -79,3 +79,11 @@ def test_plan_requires_vendoring_from_a_released_tag():
 def test_main_default_bootstrap_documents_both_owner_waivers():
     assert "This bootstrap needs two owner waivers" in PLAN
     assert "does not inherently need a waiver for the first replacement promotion" in PLAN
+
+
+def test_transitional_self_flag_claim_cites_the_probe_evidence():
+    # The claim that the transitional pull_request run flags itself was a review question
+    # (its job check could have attached to the merge commit); it stays pinned to the probe.
+    assert "Probe evidence (PR #176" in PLAN
+    assert "run 44877949889" in PLAN
+    assert "listed under the PR head sha, not the merge commit" in PLAN
