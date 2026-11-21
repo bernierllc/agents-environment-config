@@ -17,10 +17,24 @@ unit of impact lives — not a contract.
 
 ## Review follow-ups awaiting prioritization
 
+- [Land org-config Phase 4 from the parked branch](2026-11-19-org-config-phase-4-landing.md): time-bound
+  rules, per-project overlays, `enrollment_script` and branding are built, tested and documented on
+  `claude/org-config-phase-4` (tip `7aa2967`, 15 commits, never a PR) and exist nowhere else. `staging` moved
+  on (208 commits, two conflicting files, and its own custom-source clone). Four rebased PRs, then retire the
+  branch. Scheduling pending.
+
 - [Unforgeable required checks (SEC-MVS-01)](2026-11-16-unforgeable-required-checks.md): required checks
   match name + Actions app id, so a PR workflow can publish a protected name (as a job or through the Checks
   API). Interim detector covers the job case; the permanent fix is an org required workflow or our own App.
   Awaiting the maintainer's A/B choice.
+
+- [`aec upgrade` detects vendored skill copies](2026-11-16-upgrade-detects-vendored-skills.md): "(up to date)"
+  is computed from the manifest only, so stale vendored skill copies in a repo are never reported or upgraded.
+  Scheduling pending.
+
+- [Idempotent hook install from a git worktree](2026-11-16-install-from-worktree-idempotent-hooks.md):
+  installing from a linked worktree appends a duplicate gemini hook with the worktree's absolute path and
+  repoints `.aec/installed-hooks`. Scheduling pending.
 
 - [Honor the AGENTINFO.md layout everywhere](2026-11-15-agentinfo-layout-honored.md): `aec migrate
   agents-md` (and its `--all` / maintenance-prompt path) ignores `instructions_layout=agentinfo`, and

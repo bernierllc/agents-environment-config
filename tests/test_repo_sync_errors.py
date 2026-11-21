@@ -1,6 +1,7 @@
 """`aec update` git failures reach the user as a cause plus fix steps (real git repos)."""
 
 import json
+import shlex
 import subprocess
 
 import pytest
@@ -11,7 +12,7 @@ from aec.lib.errors import AecError, RepoSyncError, Remedy
 from aec.lib.prompt_catalog import get_spec
 from aec.lib.prompt_catalog.maintenance_area import UPDATE_RESET_TO_REMOTE
 from aec.lib.prompts import prompt
-from aec.lib.sources import fetch_latest
+from aec.lib.sources import _diagnose_sync_failure, fetch_latest
 
 
 def git(cwd, *args):
@@ -80,6 +81,179 @@ def test_detached_head_says_switch_to_branch(remote_and_clone):
         fetch_latest(clone)
     assert "not on a branch" in exc.value.message
     assert "git switch main" in exc.value.fix
+
+
+def multi_ref_error(clone):
+    return _diagnose_sync_failure(
+        clone, ["git", "pull", "--ff-only"], "fatal: Cannot fast-forward to multiple branches."
+    )
+
+
+def add_remote_branch(seed, clone, name="staging"):
+    git(seed, "checkout", "-q", "-b", name)
+    commit(seed, f"{name}-file")
+    git(seed, "push", "-q", "origin", name)
+    git(clone, "fetch", "-q", "origin")
+
+
+def run_repair(clone, err, keep):
+    """Run the printed steps through a real shell, as a user pasting them would.
+
+    The user runs ONE of the `--replace-all` lines (the one keeping `keep`); every printed step is
+    executed exactly as printed, with no substitution by the test.
+    """
+    replace = [s for s in err.fix if s.startswith("git config --replace-all")]
+    for step in err.fix:
+        if step.startswith(("cd ", "git config --get-all")) or step.split()[0] != "git":
+            continue
+        if step in replace and f" {shlex.quote(keep)}  " not in step + "  ":
+            continue
+        subprocess.run(["bash", "-c", step], cwd=clone, check=True, capture_output=True, text=True)
+
+
+def merge_refs_raw(clone, branch="main"):
+    out = subprocess.run(["git", "config", "--get-all", "-z", f"branch.{branch}.merge"], cwd=clone, check=True,
+                         capture_output=True, text=True)
+    return out.stdout.split("\0")[:-1]
+
+
+def merge_refs(clone, branch="main"):
+    out = subprocess.run(["git", "config", "--get-all", f"branch.{branch}.merge"], cwd=clone, check=True,
+                         capture_output=True, text=True)
+    return out.stdout.split()
+
+
+def test_two_merge_refs_name_the_branch_and_the_replace_fix(remote_and_clone):
+    seed, clone = remote_and_clone
+    add_remote_branch(seed, clone)
+    git(clone, "config", "--add", "branch.main.merge", "refs/heads/staging")
+
+    with pytest.raises(RepoSyncError) as exc:
+        fetch_latest(clone)
+
+    err = exc.value
+    assert "'main' has more than one upstream merge ref" in err.message
+    steps = "\n".join(err.fix)
+    assert "git config --get-all branch.main.merge" in steps
+    assert "git config --replace-all branch.main.merge refs/heads/main" in steps
+    assert "git config --replace-all branch.main.merge refs/heads/staging" in steps
+    assert "<" not in steps  # no placeholder the user must fill in and quote themselves
+    assert "--unset-all" not in steps and "--set-upstream-to" not in steps  # no guessed upstream
+    assert err.detail and "multiple branches" in err.detail.lower()
+
+
+@pytest.mark.parametrize("keep", ["refs/heads/main", "refs/heads/staging"])
+def test_repair_keeps_exactly_the_chosen_ref_and_git_pull_works_again(remote_and_clone, keep):
+    seed, clone = remote_and_clone
+    add_remote_branch(seed, clone)
+    git(clone, "config", "--add", "branch.main.merge", "refs/heads/staging")
+
+    run_repair(clone, multi_ref_error(clone), keep=keep)
+
+    assert merge_refs(clone) == [keep]
+
+
+def test_repair_for_a_local_upstream_and_a_same_named_tag(remote_and_clone):
+    # Codex P2 on #173 round 3: `remote = .` plus a tag named like the branch made a guessed target ambiguous.
+    _, clone = remote_and_clone
+    git(clone, "branch", "staging")
+    git(clone, "tag", "main")
+    git(clone, "checkout", "-q", "-b", "local-aec", "refs/heads/main")  # the tag makes bare `main` ambiguous
+    git(clone, "config", "branch.local-aec.remote", ".")
+    git(clone, "config", "branch.local-aec.merge", "refs/heads/main")
+    git(clone, "config", "--add", "branch.local-aec.merge", "refs/heads/staging")
+
+    err = multi_ref_error(clone)
+
+    run_repair(clone, err, keep="refs/heads/main")
+    assert merge_refs(clone, "local-aec") == ["refs/heads/main"]
+
+
+def test_repair_does_not_guess_a_remote_for_custom_fetch_mappings(remote_and_clone):
+    # Codex P2 on #173 round 4: with a non-default fetch refspec `origin/<branch>` is the wrong name.
+    seed, clone = remote_and_clone
+    add_remote_branch(seed, clone)
+    git(clone, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/cache/*")
+    git(clone, "config", "--replace-all", "branch.main.merge", "refs/heads/main")
+    git(clone, "config", "--add", "branch.main.merge", "refs/heads/staging")
+
+    err = multi_ref_error(clone)
+
+    assert "origin/" not in "\n".join(err.fix)
+    run_repair(clone, err, keep="refs/heads/staging")
+    assert merge_refs(clone) == ["refs/heads/staging"]
+
+
+def test_branch_name_with_shell_metacharacters_cannot_inject_through_the_printed_steps(remote_and_clone):
+    # Codex P1 on #173 round 4: the steps are pasted into a shell, and a branch name can carry `;`.
+    _, clone = remote_and_clone
+    name = "aec;touch${IFS}INJECTED"
+    git(clone, "checkout", "-q", "-b", name, "main")
+    git(clone, "config", f"branch.{name}.remote", ".")
+    git(clone, "config", f"branch.{name}.merge", "refs/heads/main")
+    git(clone, "config", "--add", f"branch.{name}.merge", "refs/heads/other")
+
+    err = multi_ref_error(clone)
+    run_repair(clone, err, keep="refs/heads/main")
+
+    assert not list(clone.glob("INJECTED*")) and not list(clone.parent.glob("INJECTED*"))
+    assert merge_refs(clone, name) == ["refs/heads/main"]
+
+
+def test_a_listed_ref_with_shell_metacharacters_cannot_inject_through_the_printed_steps(remote_and_clone):
+    # Codex P1 on #173 round 5: the ref the user keeps comes from git's own listing, so the printed
+    # line must already carry it quoted; a metacharacter ref pasted bare ran `touch INJECTED`.
+    _, clone = remote_and_clone
+    evil = "refs/heads/a;touch${IFS}INJECTED"
+    git(clone, "config", "--add", "branch.main.merge", evil)
+
+    err = multi_ref_error(clone)
+    run_repair(clone, err, keep=evil)
+
+    assert not list(clone.glob("INJECTED*"))
+    assert merge_refs(clone) == [evil]
+
+
+@pytest.mark.parametrize("odd", ["", "refs/heads/a b"])
+def test_merge_values_keep_their_boundaries_when_one_is_empty_or_has_a_space(remote_and_clone, odd):
+    # Codex P2 on #173 round 6: strip()/split() dropped an empty value and split "refs/heads/a b" in two,
+    # so the repair was missing or offered refs that match no configured value.
+    _, clone = remote_and_clone
+    git(clone, "config", "--add", "branch.main.merge", odd)
+
+    err = multi_ref_error(clone)
+
+    assert "'main' has more than one upstream merge ref" in err.message
+    run_repair(clone, err, keep="refs/heads/main")
+    assert merge_refs_raw(clone) == ["refs/heads/main"]
+    # the odd value itself is also offered as a choice, exactly as configured
+    assert f"git config --replace-all branch.main.merge {shlex.quote(odd)}" in err.fix
+
+
+def test_cd_step_quotes_a_checkout_path_with_spaces(remote_and_clone, tmp_path):
+    _, clone = remote_and_clone
+    spaced = tmp_path / "my clone"
+    clone.rename(spaced)
+
+    err = multi_ref_error(spaced)
+
+    assert f"cd {shlex.quote(str(spaced))}" in err.fix
+
+
+def test_multiple_branches_with_one_merge_ref_does_not_blame_the_config(remote_and_clone):
+    # nevar-auth saw this error on a checkout whose branch.main.merge held ONE value; the
+    # message must not claim two refs there, and rewriting the config would not help.
+    _, clone = remote_and_clone
+    git(clone, "config", "--get-all", "branch.main.merge")  # exactly one value, or git fails
+
+    err = multi_ref_error(clone)
+
+    assert "more than one upstream merge ref" not in err.message
+    steps = "\n".join(err.fix)
+    assert "--unset-all" not in steps and "--replace-all" not in steps and "origin/" not in steps
+    assert "git branch -vv" in steps
+    assert "git branch --set-upstream-to=<remote>/<branch> main" in steps
+    assert err.detail and "multiple branches" in err.detail.lower()
 
 
 def test_unreachable_remote_points_at_network_or_credentials(remote_and_clone, tmp_path):
