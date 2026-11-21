@@ -60,10 +60,10 @@ def test_trigger_is_pull_request_target_on_main_only():
     assert on["pull_request_target"]["types"] == ["opened", "edited", "synchronize", "reopened"]
 
 
-def test_checkout_is_v7_on_the_base_sha_without_unsafe_pr_checkout():
+def test_checkout_is_v7_on_the_default_branch_without_unsafe_pr_checkout():
     (checkout,) = [s for s in _job()["steps"] if str(s.get("uses", "")).startswith("actions/checkout")]
     assert checkout["uses"] == "actions/checkout@v7"
-    assert checkout["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
+    assert checkout["with"]["ref"] == "${{ github.event.repository.default_branch }}"
     assert "allow-unsafe-pr-checkout" not in checkout["with"]
     assert "Never add allow-unsafe-pr-checkout" in WORKFLOW
 
