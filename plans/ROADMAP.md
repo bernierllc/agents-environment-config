@@ -28,6 +28,11 @@ unit of impact lives — not a contract.
   API). Interim detector covers the job case; the permanent fix is an org required workflow or our own App.
   Awaiting the maintainer's A/B choice.
 
+- [Stale skills fail loudly](2026-11-21-stale-skills-fail-loudly.md): `aec update` reports stale skills and exits 0,
+  `aec upgrade` always exits 0, `run-script` silently runs an older repo copy, `doctor` ignores vendored versions, and
+  re-vendoring from a stale source ships old checkers. Exit-code contract (14 = work remains), `run-script` and `doctor`
+  warnings, re-vendor refusal in claude-skills. Extends the vendored-copies plan below. Scheduling pending.
+
 - [`aec upgrade` detects vendored skill copies](2026-11-16-upgrade-detects-vendored-skills.md): "(up to date)"
   is computed from the manifest only, so stale vendored skill copies in a repo are never reported or upgraded.
   Scheduling pending.
