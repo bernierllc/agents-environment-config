@@ -456,15 +456,17 @@ def _diagnose_sync_failure(repo_path: Path, cmd: list, stderr: str):
         )
     if "multiple branches" in text:
         # `git pull --ff-only` refuses when the branch has more than one branch.<name>.merge value.
-        branch = (_git_out(repo_path, "symbolic-ref", "-q", "--short", "HEAD") or "").strip()
+        # Full ref, not --short: a tag with the branch's name makes --short print `heads/<name>`.
+        head = (_git_out(repo_path, "symbolic-ref", "-q", "HEAD") or "").strip()
+        branch = head.removeprefix("refs/heads/") if head.startswith("refs/heads/") else ""
         refs = _git_out(repo_path, "config", "--get-all", f"branch.{branch}.merge") if branch else None
         b = branch or "<branch>"
         merge_refs = (refs or "").split()
-        # Re-pin to what the branch already tracks: its own remote, and the remote branch name
-        # (it can differ from the local name). Several refs compete, so fall back to the local name.
+        # Never invent an upstream: name the one ref the branch already tracks, else ask the user to
+        # pick from the listed ones. `remote = .` means a local branch, which has no `./` prefix.
         remote = ((_git_out(repo_path, "config", "--get", f"branch.{b}.remote") or "").strip()) or "origin"
-        target = merge_refs[0].removeprefix("refs/heads/") if len(merge_refs) == 1 else b
-        set_upstream = f"git branch --set-upstream-to={remote}/{target} {b}"
+        target = merge_refs[0].removeprefix("refs/heads/") if len(merge_refs) == 1 else "<branch to track>"
+        set_upstream = f"git branch --set-upstream-to={target if remote == '.' else f'{remote}/{target}'} {b}"
         if len(merge_refs) > 1:
             return RepoSyncError(
                 f"Branch '{branch}' has more than one upstream merge ref configured, "
@@ -472,7 +474,7 @@ def _diagnose_sync_failure(repo_path: Path, cmd: list, stderr: str):
                 detail=detail or refs,
                 fix=[
                     cd,
-                    f"git config --get-all branch.{b}.merge   # lists the competing refs",
+                    f"git config --get-all branch.{b}.merge   # lists the competing refs; keep one as <branch to track>",
                     f"git config --unset-all branch.{b}.merge",
                     set_upstream,
                     rerun,

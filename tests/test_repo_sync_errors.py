@@ -1,6 +1,7 @@
 """`aec update` git failures reach the user as a cause plus fix steps (real git repos)."""
 
 import json
+import shlex
 import subprocess
 
 import pytest
@@ -97,8 +98,79 @@ def test_two_merge_refs_name_the_branch_and_the_unset_fix(remote_and_clone):
     assert "'main' has more than one upstream merge ref" in err.message
     steps = "\n".join(err.fix)
     assert "git config --unset-all branch.main.merge" in steps
-    assert "git branch --set-upstream-to=origin/main main" in steps
+    assert "git branch --set-upstream-to=origin/<branch to track> main" in steps
     assert err.detail and "multiple branches" in err.detail.lower()
+
+
+def run_repair(clone, err, keep):
+    """Execute the git steps of a diagnosis the way a user would, choosing `keep` for the placeholder."""
+    for step in err.fix:
+        if step.startswith(("git config --unset-all", "git branch --set-upstream-to")):
+            subprocess.run(
+                shlex.split(step.split("#")[0].replace("<branch to track>", keep)),
+                cwd=clone, check=True, capture_output=True, text=True,
+            )
+
+
+def upstream(clone):
+    out = subprocess.run(["git", "rev-parse", "--abbrev-ref", "@{u}"], cwd=clone, check=True,
+                         capture_output=True, text=True)
+    return out.stdout.strip()
+
+
+def multi_ref_error(clone):
+    return _diagnose_sync_failure(
+        clone, ["git", "pull", "--ff-only"], "fatal: Cannot fast-forward to multiple branches."
+    )
+
+
+def test_repair_for_differing_local_and_remote_names_runs_and_restores_tracking(remote_and_clone):
+    # Codex P2 on #173 round 3: a local name unlike the remote's must not become origin/<local name>.
+    seed, clone = remote_and_clone
+    git(seed, "checkout", "-q", "-b", "staging")
+    commit(seed, "staged")
+    git(seed, "push", "-q", "origin", "staging")
+    git(clone, "fetch", "-q", "origin")
+    git(clone, "checkout", "-q", "-b", "local/aec", "--track", "origin/main")
+    git(clone, "config", "--add", "branch.local/aec.merge", "refs/heads/staging")
+
+    err = multi_ref_error(clone)
+
+    assert "origin/local/aec" not in "\n".join(err.fix)
+    run_repair(clone, err, keep="staging")
+    assert upstream(clone) == "origin/staging"
+
+
+def test_repair_for_a_local_upstream_has_no_dot_remote_prefix(remote_and_clone):
+    _, clone = remote_and_clone
+    git(clone, "branch", "staging")
+    git(clone, "checkout", "-q", "-b", "local-aec", "main")
+    git(clone, "config", "branch.local-aec.remote", ".")
+    git(clone, "config", "branch.local-aec.merge", "refs/heads/main")
+    git(clone, "config", "--add", "branch.local-aec.merge", "refs/heads/staging")
+
+    err = multi_ref_error(clone)
+
+    assert "./" not in "\n".join(err.fix)
+    run_repair(clone, err, keep="main")
+    assert upstream(clone) == "main"
+
+
+def test_repair_survives_a_tag_named_like_the_branch(remote_and_clone):
+    seed, clone = remote_and_clone
+    git(seed, "checkout", "-q", "-b", "staging")
+    commit(seed, "staged")
+    git(seed, "push", "-q", "origin", "staging")
+    git(clone, "fetch", "-q", "origin")
+    git(clone, "tag", "main")
+    git(clone, "config", "--add", "branch.main.merge", "refs/heads/staging")
+
+    err = multi_ref_error(clone)
+
+    steps = "\n".join(err.fix)
+    assert "branch.main.merge" in steps and "heads/" not in steps
+    run_repair(clone, err, keep="main")
+    assert upstream(clone) == "origin/main"
 
 
 def test_multiple_branches_with_one_merge_ref_does_not_blame_the_config(remote_and_clone):
