@@ -65,12 +65,15 @@ Each behavior lives in the one component that owns it; callers call.
 
 ### 2. `aec upgrade` returns an honest exit code (aec)
 
-- Exit 0 only when every in-scope item reached the target version. Non-zero (`EXIT_UPGRADE_INCOMPLETE`) when any scope was
-  skipped, a repo-local upgrade stopped, or an item failed; the last line lists what was skipped and why.
+- Exit 0 only when every in-scope item reached the target version. Non-zero (`EXIT_UPGRADE_INCOMPLETE`) when an in-scope
+  scope was skipped, an in-scope repo-local upgrade stopped, or an in-scope item failed; the last line lists what was skipped
+  and why. "In scope" is the scope the run selected: the current repo by default, every tracked repo with `--all`. Tracked
+  repos outside the selected scope are listed as "not selected" for information and never affect the exit code, so a default
+  upgrade for a user who tracks several repos is not a permanent failure.
 - `run_upgrade`'s `finally` still persists manifest progress; the code is decided after it, so a partial run saves progress and
   still fails loudly.
 - Scope itself (current repo unless `--all`) is the separate fix named in Problem 4; this plan only pins the exit code of
-  whatever scope ran and reports unvisited tracked repos as "skipped".
+  whatever scope ran and reports unselected tracked repos as "not selected" (informational, exit code unaffected).
 
 ### 3. `aec run-script` warns; it never swaps copies (aec)
 
@@ -137,8 +140,10 @@ Each behavior lives in the one component that owns it; callers call.
 - `tests/test_update_cmd.py`: `--check` with a stale item -> 14 and the "N items outdated" line; up to date -> 0; org pending
   only -> 14; both -> 14 once; **a recorded Claude-managed plugin and nothing else outdated -> 0**; default `aec update` with a
   stale item still -> 0 (pins the `update && upgrade` chain).
-- `tests/test_upgrade_cmd.py`: a failing item, a skipped repo and an interrupted run each exit non-zero; manifest progress is
-  still saved; a clean run exits 0; `--yes` across other tracked repos reports them as skipped or upgraded, never silent.
+- `tests/test_upgrade_cmd.py`: a failing in-scope item, a skipped in-scope repo and an interrupted run each exit non-zero;
+  manifest progress is still saved; a clean run exits 0; a default run for a user who tracks several repos (other repos
+  "not selected") with every in-scope item current exits 0; `--all` makes the other repos in scope, so a failure in one exits
+  non-zero; unselected repos are always listed, never silent.
 - `tests/test_outdated_cmd.py`: `--exit-code` stale -> 14, current -> 0, managed plugin only -> 0; without the flag always 0.
 - `tests/test_doctor_cmd.py`: any reported issue -> non-zero; healthy -> 0.
 - New `tests/test_run_script_staleness.py` (added by the run-script PR) and doctor cases in `tests/test_doctor_cmd.py` (added by
