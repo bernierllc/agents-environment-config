@@ -44,6 +44,9 @@ on:
   pull_request_target:
     types: [opened, edited, synchronize, reopened]
     branches: [main]
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches: [probe/self-scan-base]
 permissions:
   contents: read
   # the forged-name scan reads GET /actions/runs/{id}; private repos need this scope
@@ -86,6 +89,8 @@ jobs:
           # input and read as "none forged".
           runs_json=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" --paginate)
           list_rc=$?
+          echo "probe: github.sha=${{ github.sha }} event=${{ github.event_name }} scanned head sha=$SHA"
+          printf '%s' "$runs_json" | jq -r '.check_runs[] | "probe seen: \(.name) | \(.status) | \(.details_url)"'
           if [ "$list_rc" -eq 0 ]; then
             printf '%s' "$runs_json" | REPO="$REPO" python3 scripts/check-forged-gate-names.py 2>&1
             forged_rc=$?
