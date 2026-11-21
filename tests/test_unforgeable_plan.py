@@ -15,7 +15,8 @@ def test_plan_documents_merge_time_scan_with_pipefail():
 def test_plan_covers_staging_default_order_and_one_waiver_per_legacy_repo():
     assert "### Rollout order when the default branch is staging" in PLAN
     assert "needs exactly one owner waiver" in PLAN
-    assert "Never combine them." in PLAN
+    assert "Do not combine them until a disposable-repository probe has run that shape end to end." in PLAN
+    assert "pending live\nvalidation in a disposable repository" in PLAN
     assert "`main` ruleset requires the context" in PLAN
 
 
@@ -25,16 +26,19 @@ def test_plan_gives_waiver_free_order_when_context_not_required():
     assert "delete the legacy `main-via-staging.yml` alone" in PLAN
 
 
-def test_plan_covers_canonical_on_staging_with_scripts_missing_on_main():
+def test_plan_covers_canonical_on_staging_with_scripts_missing_on_main_without_a_waiver():
     assert "#### Canonical workflow already on staging, scripts missing on main" in PLAN
-    assert "`main` lacks the scripts" in PLAN
-    assert "the owner waives the guard check once" in PLAN
+    assert "checkout pins `github.sha`" in PLAN
+    assert "That waiver is obsolete." in PLAN
+    assert "the owner waives the guard check once" not in PLAN
+    assert "guard script missing on base\" on the scripts promotion" not in PLAN
 
 
-def test_canonical_no_waiver_claims_are_qualified_by_main_having_the_scripts():
-    assert "need no scan waiver, provided `main` already has the guard scripts" in PLAN
-    assert "needs no scan waiver, but only when\n`main` already has the scripts" in PLAN
-    assert "A repo that already runs the canonical workflow starts at the promotion step and needs no waiver." not in PLAN
+def test_canonical_no_waiver_claims_do_not_depend_on_main_having_the_scripts():
+    assert "need no scan waiver, and no guard waiver either when `main` lacks the scripts" in PLAN
+    assert "needs no scan waiver, but only when" not in PLAN
+    assert "provided `main` already has the guard scripts" not in PLAN
+    assert "so the scripts come from `main`" not in PLAN
 
 
 def test_copied_files_qualify_the_plan_path_as_an_aec_repo_path():

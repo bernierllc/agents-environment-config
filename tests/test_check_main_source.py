@@ -60,10 +60,10 @@ def test_trigger_is_pull_request_target_on_main_only():
     assert on["pull_request_target"]["types"] == ["opened", "edited", "synchronize", "reopened"]
 
 
-def test_checkout_is_v7_on_the_base_sha_without_unsafe_pr_checkout():
+def test_checkout_is_v7_pinned_to_the_event_sha_without_unsafe_pr_checkout():
     (checkout,) = [s for s in _job()["steps"] if str(s.get("uses", "")).startswith("actions/checkout")]
     assert checkout["uses"] == "actions/checkout@v7"
-    assert checkout["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
+    assert checkout["with"]["ref"] == "${{ github.sha }}"
     assert "allow-unsafe-pr-checkout" not in checkout["with"]
     assert "Never add allow-unsafe-pr-checkout" in WORKFLOW
 
@@ -173,7 +173,8 @@ def test_a_forged_same_name_job_fails_the_job_even_from_staging(tmp_path):
     assert "forged check" in out
 
 
-def test_a_missing_guard_script_fails_the_job_with_a_message_not_127(tmp_path):
-    code, out = _run_workflow_step(tmp_path, "staging", drop_script="check-main-source.sh")
+@pytest.mark.parametrize("script", ["check-main-source.sh", "check-forged-gate-names.py"])
+def test_a_missing_guard_script_fails_the_job_with_a_message_not_127(tmp_path, script):
+    code, out = _run_workflow_step(tmp_path, "staging", drop_script=script)
     assert code == 1
-    assert "guard script missing on base: scripts/check-main-source.sh" in out
+    assert f"guard script missing on base: scripts/{script}" in out
