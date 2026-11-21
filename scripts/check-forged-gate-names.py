@@ -105,14 +105,17 @@ def _load_check_runs(text):
         ):
             raise ValueError("check_runs holds an entry that is not a named check run")
         runs.extend(page_runs)
-        if "total_count" in page:
-            totals.add(page["total_count"])
+        # The API sends total_count on every page; missing, bool, float or negative is not a listing we trust.
+        total = page.get("total_count")
+        if type(total) is not int or total < 0:
+            raise ValueError(f"page total_count is not a nonnegative integer: {total!r}")
+        totals.add(total)
     # Fail closed: a head always has check runs by merge time (the guard's own, at least), so
     # empty input (a caller without pipefail, a silent `gh api`) or zero runs is not "no forgery".
     if not runs:
         raise ValueError("input contains no check runs")
     # A truncated listing (an omitted page could hold the forged run) is not an evaluated one.
-    if totals and totals != {len(runs)}:
+    if totals != {len(runs)}:
         raise ValueError(f"listing holds {len(runs)} check runs but total_count says {sorted(totals)}")
     return runs
 

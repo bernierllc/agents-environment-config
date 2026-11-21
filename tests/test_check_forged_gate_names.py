@@ -99,7 +99,8 @@ def test_a_failed_run_lookup_fails_closed():
 
 
 def test_paginated_gh_output_is_parsed():
-    text = json.dumps({"check_runs": [api_run("a")]}) + "\n" + json.dumps({"check_runs": [api_run("b")]})
+    text = json.dumps({"total_count": 2, "check_runs": [api_run("a")]}) + "\n" + \
+        json.dumps({"total_count": 2, "check_runs": [api_run("b")]})
     assert [r["name"] for r in mod._load_check_runs(text)] == ["a", "b"]
 
 
@@ -136,6 +137,18 @@ def test_cli_fails_closed_when_pages_hold_fewer_runs_than_total_count():
     assert "failing closed" in proc.stderr
 
 
+@pytest.mark.parametrize("total", [True, 1.0, "1", None, -1, "missing"])
+def test_cli_fails_closed_when_total_count_is_not_a_nonnegative_int(total):
+    # bool is an int subclass and 1.0 == 1, so a loose check would accept them; a page without
+    # total_count would skip the completeness check entirely.
+    page = {"check_runs": [{"name": "ci"}]}
+    if total != "missing":
+        page["total_count"] = total
+    proc = _cli(json.dumps(page))
+    assert proc.returncode == 2
+    assert "failing closed" in proc.stderr
+
+
 def test_cli_passes_when_paginated_runs_match_total_count():
     pages = json.dumps({"total_count": 2, "check_runs": [api_run("a")]}) + "\n" + \
         json.dumps({"total_count": 2, "check_runs": [api_run("b")]})
@@ -144,7 +157,7 @@ def test_cli_passes_when_paginated_runs_match_total_count():
 
 def test_cli_passes_a_page_whose_protected_name_came_from_the_checks_api():
     # No Actions job involved, so no workflow-run lookup (no gh call) is needed.
-    assert _cli(json.dumps({"check_runs": [api_run(GUARD)]})).returncode == 0
+    assert _cli(json.dumps({"total_count": 1, "check_runs": [api_run(GUARD)]})).returncode == 0
 
 
 def test_workflow_run_path_with_a_ref_suffix_is_normalized(monkeypatch):

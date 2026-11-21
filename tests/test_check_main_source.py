@@ -91,7 +91,7 @@ def test_check_run_listing_uses_filter_all_so_an_earlier_same_name_run_is_not_hi
 
 
 # What the real listing holds at that point: the guard's own in-progress job check run.
-OWN_JOB_ONLY = json.dumps({"check_runs": [{
+OWN_JOB_ONLY = json.dumps({"total_count": 1, "check_runs": [{
     "name": CHECK_NAME,
     "details_url": "https://github.com/my-org/my-repo/actions/runs/42/job/7",
 }]})
