@@ -82,6 +82,25 @@ def test_detached_head_says_switch_to_branch(remote_and_clone):
     assert "git switch main" in exc.value.fix
 
 
+def test_two_merge_refs_name_the_branch_and_the_unset_fix(remote_and_clone):
+    seed, clone = remote_and_clone
+    git(seed, "checkout", "-q", "-b", "staging")
+    commit(seed, "staged")
+    git(seed, "push", "-q", "origin", "staging")
+    git(clone, "fetch", "-q", "origin")
+    git(clone, "config", "--add", "branch.main.merge", "refs/heads/staging")
+
+    with pytest.raises(RepoSyncError) as exc:
+        fetch_latest(clone)
+
+    err = exc.value
+    assert "'main' has more than one upstream merge ref" in err.message
+    steps = "\n".join(err.fix)
+    assert "git config --unset-all branch.main.merge" in steps
+    assert "git branch --set-upstream-to=origin/main main" in steps
+    assert err.detail and "multiple branches" in err.detail.lower()
+
+
 def test_unreachable_remote_points_at_network_or_credentials(remote_and_clone, tmp_path):
     _, clone = remote_and_clone
     git(clone, "remote", "set-url", "origin", str(tmp_path / "gone.git"))

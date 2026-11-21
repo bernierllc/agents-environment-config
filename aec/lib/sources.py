@@ -454,6 +454,22 @@ def _diagnose_sync_failure(repo_path: Path, cmd: list, stderr: str):
                 "If you stashed: git stash pop",
             ],
         )
+    if "multiple branches" in text:
+        # `git pull --ff-only` refuses when the branch has more than one branch.<name>.merge value.
+        branch = (_git_out(repo_path, "symbolic-ref", "-q", "--short", "HEAD") or "").strip()
+        refs = _git_out(repo_path, "config", "--get-all", f"branch.{branch}.merge") if branch else None
+        which = f"Branch '{branch}' has more than one upstream merge ref" if branch else "Your AEC checkout"
+        return RepoSyncError(
+            f"{which} configured, so `git pull --ff-only` cannot pick one to fast-forward to.",
+            detail=detail or refs,
+            fix=[
+                cd,
+                f"git config --get-all branch.{branch or '<branch>'}.merge   # lists the competing refs",
+                f"git config --unset-all branch.{branch or '<branch>'}.merge",
+                f"git branch --set-upstream-to=origin/{branch or '<branch>'} {branch or '<branch>'}",
+                rerun,
+            ],
+        )
     if "no tracking information" in text or "not currently on a branch" in text:
         return RepoSyncError(
             "Your AEC checkout is not on a branch that tracks the remote.",
