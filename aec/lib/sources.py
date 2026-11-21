@@ -463,7 +463,7 @@ def _diagnose_sync_failure(repo_path: Path, cmd: list, stderr: str):
         refs = _git_out(repo_path, "config", "--get-all", f"branch.{branch}.merge") if branch else None
         # The printed steps are pasted into a shell and a branch name can hold `;` or `$(...)`: quote it.
         # Never guess an upstream (remote names, fetch mappings and same-named tags all break a guess):
-        # the repair keeps one of the full merge refs git already lists, or names a placeholder.
+        # the repair offers one ready, quoted line per merge ref git already lists, or names a placeholder.
         b = shlex.quote(branch) if branch else "<branch>"
         key = shlex.quote(f"branch.{branch}.merge") if branch else "branch.<branch>.merge"
         if len((refs or "").split()) > 1:
@@ -474,7 +474,9 @@ def _diagnose_sync_failure(repo_path: Path, cmd: list, stderr: str):
                 fix=[
                     cd,
                     f"git config --get-all {key}   # lists the competing refs",
-                    f"git config --replace-all {key} <the one ref to keep, copied from that list>",
+                    "Run ONE of these lines, the one for the ref you want to keep (it drops the others):",
+                    # Each ref is quoted here: a ref the user copied out of git's listing could hold `;` or `$(...)`.
+                    *[f"git config --replace-all {key} {shlex.quote(r)}" for r in refs.split()],
                     rerun,
                 ],
             )

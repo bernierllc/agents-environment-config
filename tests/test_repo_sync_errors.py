@@ -99,15 +99,16 @@ def add_remote_branch(seed, clone, name="staging"):
 def run_repair(clone, err, keep):
     """Run the printed steps through a real shell, as a user pasting them would.
 
-    `<the one ref to keep, ...>` is replaced by `keep`, a full merge ref the user copied from the listing.
+    The user runs ONE of the `--replace-all` lines (the one keeping `keep`); every printed step is
+    executed exactly as printed, with no substitution by the test.
     """
+    replace = [s for s in err.fix if s.startswith("git config --replace-all")]
     for step in err.fix:
         if step.startswith(("cd ", "git config --get-all")) or step.split()[0] != "git":
             continue
-        subprocess.run(
-            ["bash", "-c", step.replace("<the one ref to keep, copied from that list>", shlex.quote(keep))],
-            cwd=clone, check=True, capture_output=True, text=True,
-        )
+        if step in replace and f" {shlex.quote(keep)}  " not in step + "  ":
+            continue
+        subprocess.run(["bash", "-c", step], cwd=clone, check=True, capture_output=True, text=True)
 
 
 def merge_refs(clone, branch="main"):
@@ -128,7 +129,9 @@ def test_two_merge_refs_name_the_branch_and_the_replace_fix(remote_and_clone):
     assert "'main' has more than one upstream merge ref" in err.message
     steps = "\n".join(err.fix)
     assert "git config --get-all branch.main.merge" in steps
-    assert "git config --replace-all branch.main.merge <the one ref to keep" in steps
+    assert "git config --replace-all branch.main.merge refs/heads/main" in steps
+    assert "git config --replace-all branch.main.merge refs/heads/staging" in steps
+    assert "<" not in steps  # no placeholder the user must fill in and quote themselves
     assert "--unset-all" not in steps and "--set-upstream-to" not in steps  # no guessed upstream
     assert err.detail and "multiple branches" in err.detail.lower()
 
@@ -189,6 +192,20 @@ def test_branch_name_with_shell_metacharacters_cannot_inject_through_the_printed
 
     assert not list(clone.glob("INJECTED*")) and not list(clone.parent.glob("INJECTED*"))
     assert merge_refs(clone, name) == ["refs/heads/main"]
+
+
+def test_a_listed_ref_with_shell_metacharacters_cannot_inject_through_the_printed_steps(remote_and_clone):
+    # Codex P1 on #173 round 5: the ref the user keeps comes from git's own listing, so the printed
+    # line must already carry it quoted; a metacharacter ref pasted bare ran `touch INJECTED`.
+    _, clone = remote_and_clone
+    evil = "refs/heads/a;touch${IFS}INJECTED"
+    git(clone, "config", "--add", "branch.main.merge", evil)
+
+    err = multi_ref_error(clone)
+    run_repair(clone, err, keep=evil)
+
+    assert not list(clone.glob("INJECTED*"))
+    assert merge_refs(clone) == [evil]
 
 
 def test_cd_step_quotes_a_checkout_path_with_spaces(remote_and_clone, tmp_path):
