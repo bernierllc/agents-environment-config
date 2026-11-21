@@ -458,17 +458,27 @@ def _diagnose_sync_failure(repo_path: Path, cmd: list, stderr: str):
         # `git pull --ff-only` refuses when the branch has more than one branch.<name>.merge value.
         branch = (_git_out(repo_path, "symbolic-ref", "-q", "--short", "HEAD") or "").strip()
         refs = _git_out(repo_path, "config", "--get-all", f"branch.{branch}.merge") if branch else None
-        which = f"Branch '{branch}' has more than one upstream merge ref" if branch else "Your AEC checkout"
+        b = branch or "<branch>"
+        set_upstream = f"git branch --set-upstream-to=origin/{b} {b}"
+        if len((refs or "").split()) > 1:
+            return RepoSyncError(
+                f"Branch '{branch}' has more than one upstream merge ref configured, "
+                "so `git pull --ff-only` cannot pick one to fast-forward to.",
+                detail=detail or refs,
+                fix=[
+                    cd,
+                    f"git config --get-all branch.{b}.merge   # lists the competing refs",
+                    f"git config --unset-all branch.{b}.merge",
+                    set_upstream,
+                    rerun,
+                ],
+            )
+        # One or no merge value: the config is not the cause (nevar-auth saw this on such a checkout),
+        # so do not tell the user to unset it. Pinning the upstream is harmless and git's own text is shown.
         return RepoSyncError(
-            f"{which} configured, so `git pull --ff-only` cannot pick one to fast-forward to.",
-            detail=detail or refs,
-            fix=[
-                cd,
-                f"git config --get-all branch.{branch or '<branch>'}.merge   # lists the competing refs",
-                f"git config --unset-all branch.{branch or '<branch>'}.merge",
-                f"git branch --set-upstream-to=origin/{branch or '<branch>'} {branch or '<branch>'}",
-                rerun,
-            ],
+            "`git pull --ff-only` found more than one branch to fast-forward to in your AEC checkout.",
+            detail=detail,
+            fix=[cd, set_upstream, rerun],
         )
     if "no tracking information" in text or "not currently on a branch" in text:
         return RepoSyncError(

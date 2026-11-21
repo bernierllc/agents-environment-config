@@ -11,7 +11,7 @@ from aec.lib.errors import AecError, RepoSyncError, Remedy
 from aec.lib.prompt_catalog import get_spec
 from aec.lib.prompt_catalog.maintenance_area import UPDATE_RESET_TO_REMOTE
 from aec.lib.prompts import prompt
-from aec.lib.sources import fetch_latest
+from aec.lib.sources import _diagnose_sync_failure, fetch_latest
 
 
 def git(cwd, *args):
@@ -97,6 +97,23 @@ def test_two_merge_refs_name_the_branch_and_the_unset_fix(remote_and_clone):
     assert "'main' has more than one upstream merge ref" in err.message
     steps = "\n".join(err.fix)
     assert "git config --unset-all branch.main.merge" in steps
+    assert "git branch --set-upstream-to=origin/main main" in steps
+    assert err.detail and "multiple branches" in err.detail.lower()
+
+
+def test_multiple_branches_with_one_merge_ref_does_not_blame_the_config(remote_and_clone):
+    # nevar-auth saw this error on a checkout whose branch.main.merge held ONE value; the
+    # message must not claim two refs there, and `--unset-all` would not help.
+    _, clone = remote_and_clone
+    git(clone, "config", "--get-all", "branch.main.merge")  # exactly one value, or git fails
+
+    err = _diagnose_sync_failure(
+        clone, ["git", "pull", "--ff-only"], "fatal: Cannot fast-forward to multiple branches."
+    )
+
+    assert "more than one upstream merge ref" not in err.message
+    steps = "\n".join(err.fix)
+    assert "--unset-all" not in steps
     assert "git branch --set-upstream-to=origin/main main" in steps
     assert err.detail and "multiple branches" in err.detail.lower()
 
