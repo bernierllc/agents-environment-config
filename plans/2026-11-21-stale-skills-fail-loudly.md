@@ -79,8 +79,9 @@ Each behavior lives in the one component that owns it; callers call.
 - After resolving, ask the **incumbent plan's staleness helper** (version AND content hash: an equal version with different
   content is still stale) for a verdict on the chosen copy. This step builds no comparator of its own and therefore waits for
   that helper (Sequencing). Hot path: run-script runs on every hook call, so the helper is read from local files only (no
-  network, no subprocess, `skills-manifest.json` lookup rather than a scan of every skill directory), and the PR states the
-  measured added latency. When the verdict is stale, print `warning: <item> in this repo is <old>; <new> is available; run aec
+  network, no subprocess, and only the one named skill: its `SKILL.md` frontmatter version plus its catalog hash, never the
+  `skills-manifest.json` version alone, which can lag behind `SKILL.md` bumps and would hide exactly the staleness this plan
+  exists to surface), and the PR states the measured added latency. When the verdict is stale, print `warning: <item> in this repo is <old>; <new> is available; run aec
   upgrade` (or `older content at <version>`) to stderr and still run the script (a refusal here would break the hook that
   called it).
 - Hook-bearing skills (for example `review-gate`) are never installed globally, so the comparison is against the catalog, which
@@ -101,7 +102,10 @@ Each behavior lives in the one component that owns it; callers call.
   version with older content) is a doctor issue naming the fix (`aec upgrade`, or the skill's own installer for hook-bearing
   skills).
 - Reuses the detection helper from the incumbent plan (the same one step 3 calls); neither doctor nor run-script grows its own
-  parser or comparator.
+  parser or comparator. The incumbent plan lists four comparison sites; the first PR to need a verdict (this plan's step 3 or 4,
+  or the incumbent's own step 2) extracts them into one function taking a skill directory and returning a verdict, and the
+  incumbent plan is edited to name it. That PR also creates the shared test fixture module; the later one adds the cross-check
+  test. The doctor step here owns only the `doctor_cmd` exit contract and its call into the helper.
 - `docs/qa-verification.md` already says "`aec doctor` fails" in the org-pending scenario, which is false today; the same PR
   makes it true and corrects any other doc that states doctor's exit behavior.
 
