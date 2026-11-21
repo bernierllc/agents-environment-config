@@ -22,10 +22,10 @@ def test_every_workflow_pins_one_checkout_major():
     assert len(pins) == 1, f"mixed actions/checkout majors: {pins}"
 
 
-def test_guard_checks_out_the_default_branch_never_pr_code():
+def test_guard_checks_out_the_event_sha_never_pr_code():
     # checkout@v7 blocks fork PR checkouts under pull_request_target; the bump is safe only while the guard
-    # selects the default branch and does not opt in to unsafe PR checkouts.
-    assert "ref: ${{ github.event.repository.default_branch }}" in GUARD
+    # pins the event commit (github.sha) and does not opt in to unsafe PR checkouts.
+    assert "ref: ${{ github.sha }}" in GUARD
     assert not re.search(r"^\s*allow-unsafe-pr-checkout:", GUARD, re.M)
     assert "pull_request.head.sha" not in re.search(r"uses: actions/checkout.*?persist-credentials", GUARD, re.S).group(0)
 

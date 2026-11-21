@@ -98,7 +98,12 @@ takes the workflow file and the checkout commit from the repository default bran
   No transitional trigger is needed.
 - **main-default repo**: unchanged. The guard counts only once it is on `main`, so it lands on `main` first.
 
-The guard's own `checkout` still selects `pull_request.base.sha`, so the scripts come from `main`.
+The guard's own `checkout` pins `github.sha`, which under `pull_request_target` is the default-branch commit GitHub
+loaded the workflow from. The workflow and the scripts it runs are therefore one immutable revision: in a
+staging-default repo the scripts come from `staging`, never from `main`. (Selecting `pull_request.base.sha` made them
+come from `main`, whose old detector flagged the new guard job's own check as forged on the first promotion carrying
+both: a deadlock. A moving branch name was rejected too, because staging could advance between workflow load and
+checkout.)
 
 ### Workflow shapes: old, transitional, canonical
 
@@ -131,14 +136,15 @@ The guard's own `checkout` still selects `pull_request.base.sha`, so the scripts
 ### Rollout order for a repo adopting the guard
 
 `main-via-staging.yml` runs under `pull_request_target`: GitHub loads the workflow from the repository's DEFAULT
-branch, and the workflow's own checkout then takes the validator scripts from the PR base (`main`). Which branch is
+branch, and the workflow's own checkout then takes the validator scripts from that same commit (`github.sha`). Which branch is
 the default decides the order, so check it first (`gh api repos/<repo> --jq .default_branch`):
 
 - **default=main**: the workflow publishes nothing until it is on `main`. If it reaches `main` before the scripts,
   the first promotion after that publishes a failing `PRs into main must come from staging` ("guard script missing
   on base"). Follow the order below.
-- **default=staging**: the workflow is live on every main-targeted PR the moment it merges to `staging`, while
-  `main` may still lack the scripts. Follow "Rollout order when the default branch is staging" further down.
+- **default=staging**: the workflow is live on every main-targeted PR the moment it merges to `staging`, and it runs
+  the scripts as they are on `staging`, so `main` lacking them does not matter. Follow "Rollout order when the
+  default branch is staging" further down.
 
 Which case a repo is in depends on three facts, all read-only to check: the default branch, the workflow type on
 `main` and `staging`, and whether the `main` ruleset already requires the guard context
@@ -151,9 +157,7 @@ the default branch alone:
 | main | legacy on `main` | yes | two, see "Bootstrap for a repo whose main ruleset already requires the context" |
 | staging | legacy (`pull_request`) | yes | one, on the scripts promotion |
 | staging | legacy (`pull_request`) | no | none: follow "Waiver-free variant when `main` does not require the context" (delete the legacy file first), not the waiver order |
-| staging | canonical (`pull_request_target`), `main` already has the scripts | either | none |
-| staging | canonical (`pull_request_target`), `main` lacks the scripts | no | none: the guard check is red ("guard script missing on base") on the scripts promotion but is not required; note it on the PR |
-| staging | canonical (`pull_request_target`), `main` lacks the scripts | yes | one, of the guard check itself: it cannot pass until the scripts are on `main`, see "Canonical workflow already on staging, scripts missing on main" |
+| staging | canonical (`pull_request_target`) | either | none: the scripts run from `staging`, whether or not `main` has them yet |
 
 Which downstream repo falls in which row is tracked outside this product repo.
 
@@ -214,17 +218,17 @@ result here.
 The waiver rule is about the legacy workflow, not the default branch. Whenever `staging` still carries a legacy
 `pull_request` `main-via-staging.yml` and `main` requires its context, every main-targeted PR head carries the legacy
 job, the detector exits 1 on it, and the scripts promotion needs exactly one owner waiver. Repos already on the
-canonical workflow need no scan waiver, provided `main` already has the guard scripts; if it lacks them and requires
-the context, the guard check itself needs one waiver (see "Canonical workflow already on staging, scripts missing on
-main").
+canonical workflow need no scan waiver, and no guard waiver either when `main` lacks the scripts: the guard runs
+them from `staging` (see "Canonical workflow already on staging, scripts missing on main").
 
 No order avoids that waiver:
 
 - Delete the legacy file in the scripts PR: `main` has no publisher, the required context never appears, and the
   promotion is blocked.
 - Scripts, legacy deletion and the canonical workflow in one `staging` PR: `staging` is the default branch, so the
-  canonical workflow runs on main-targeted PRs at once and checks out `main`, which still lacks the scripts. It
-  publishes "guard script missing on base" and the legacy job is gone, so nothing can pass. Never combine them.
+  canonical workflow runs on main-targeted PRs at once. That shape has not been run end to end, and with the legacy
+  job gone the required context depends on the canonical job alone, so a defect there leaves no promotion able to
+  pass. Never combine them.
 
 The order:
 
@@ -235,23 +239,19 @@ The order:
 4. Promote again. The head has no legacy job and `main` has the scripts, so the detector exits 0: no waiver.
 5. Flip the required check to the guard name only after a green canonical run.
 
-A repo that already runs the canonical workflow starts at the promotion step and needs no scan waiver, but only when
-`main` already has the scripts; otherwise see "Canonical workflow already on staging, scripts missing on main".
+A repo that already runs the canonical workflow starts at the promotion step and needs no scan waiver.
 
 #### Canonical workflow already on staging, scripts missing on main
 
-This is the combined-rollout failure above reached by another route: with `staging` as the default branch the
-canonical workflow runs on every main-targeted PR, checks out `main`, and fails on the missing scripts. Fourth
-fact to read before choosing a row: whether `main` has `scripts/check-main-source.sh` and
-`scripts/check-forged-gate-names.py` (`gh api "repos/<repo>/contents/scripts?ref=main" --jq '.[].name'`).
-No order fixes it, because the scripts can only reach `main` through a promotion the guard then judges:
-
-- `main` does not require the guard context: the scripts promotion carries a red, non-required guard check. Merge it
-  with that stated on the PR; the next promotion is green.
-- `main` requires it: the owner waives the guard check once, on the scripts promotion only, with the same
-  record-on-the-PR rule as the scan waiver (a directive or a cop never waives). The next promotion must pass with no
-  waiver. Do not delete the canonical workflow to dodge it: with the publisher gone the required context never
-  appears and the promotion is blocked anyway.
+No waiver. With `staging` as the default branch the canonical workflow runs on every main-targeted PR and its
+checkout pins `github.sha`, the `staging` commit it was loaded from, so it runs the scripts as they are on `staging`
+whether or not `main` has them yet. (Before that checkout was pinned to the default-branch commit it took the
+scripts from `main` and failed with "guard script missing on base"; this section then prescribed one owner waiver of
+the guard check. That waiver is obsolete.) The only fact to read is that `staging` carries
+`scripts/check-main-source.sh` and `scripts/check-forged-gate-names.py` together with the workflow
+(`gh api "repos/<repo>/contents/scripts?ref=staging" --jq '.[].name'`); the workflow's own "guard script missing"
+error covers the case where it does not. A repo whose vendored copy predates this checkout re-vendors the guard from
+the release that carries it.
 
 #### Waiver-free variant when `main` does not require the context
 
