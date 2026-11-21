@@ -2,9 +2,14 @@
 #
 # Uses pull_request_target so GitHub loads this workflow from the repository's
 # DEFAULT branch (main, or staging in a repo whose default is staging), never from
-# the PR head. The validator scripts come from the explicit checkout below, which
-# selects the PR's base sha (the tip of main). Only PR *metadata* (head ref / repo)
-# is read from the event; no PR code is checked out or executed.
+# the PR head. The validator scripts come from the explicit checkout below, pinned to
+# github.sha: under pull_request_target that is the default-branch commit GitHub loaded
+# this file from, so the workflow and the scripts it runs are one immutable revision
+# (a moving branch name could advance between loading and checkout). (The PR's base
+# sha would be main, which in a staging-default repo can still carry the previous
+# detector while this file is already new: the first promotion carrying both is then
+# judged by the old detector and fails its own required check.) Only PR *metadata*
+# (head ref / repo) is read from the event; no PR code is checked out or executed.
 #
 # This job IS the required check: its name is exactly "PRs into main must come from
 # staging" and its exit code is the result (0 = allowed source, non-zero = rejected,
@@ -54,12 +59,12 @@ jobs:
     name: PRs into main must come from staging
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout trusted base (not PR head)
+      - name: Checkout trusted default-branch commit (not PR head)
         # actions/checkout@v7 refuses to fetch fork PR code under pull_request_target. This step selects
-        # the base sha of the base repository, so it is unaffected. Never add allow-unsafe-pr-checkout.
+        # the commit this run loaded the workflow from (github.sha), so it is unaffected. Never add allow-unsafe-pr-checkout.
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: Check head branch and scan for forged same-name checks
         env:
@@ -70,11 +75,11 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -u
-          # Bootstrap: the scripts load from the base sha. If the workflow reached the
-          # default branch before them, say so; never exit 127 silently.
+          # Bootstrap: the scripts load from the default branch, with this file. If one
+          # is missing, say so; never exit 127 silently.
           for guard_script in scripts/check-forged-gate-names.py scripts/check-main-source.sh; do
             if [ ! -f "$guard_script" ]; then
-              echo "::error::guard script missing on base: $guard_script. Land the scripts and this workflow together; the scripts go to staging first."
+              echo "::error::guard script missing on base: $guard_script. Land the scripts and this workflow together."
               exit 1
             fi
           done
