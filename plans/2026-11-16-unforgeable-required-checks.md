@@ -268,7 +268,8 @@ remove it before any promotion carries it:
    correct).
 5. Promote again, then flip the required check to the guard name after a green canonical run.
 
-Steps 1 and 2 may be one PR; the canonical workflow must never share a PR with the scripts, for the reason above.
+Steps 1 and 2 may be one PR; the canonical workflow should not share a PR with the scripts until a disposable-repository
+probe has run that shape end to end, for the reason above.
 
 The waiver is the owner's to grant; a directive or a cop never waives a gate. The merger re-runs the detector after
 the comment is posted and merges only when the flagged set is exactly the one legacy run. Waiver text (fill in the
