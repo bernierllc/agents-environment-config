@@ -83,12 +83,42 @@ def test_detached_head_says_switch_to_branch(remote_and_clone):
     assert "git switch main" in exc.value.fix
 
 
-def test_two_merge_refs_name_the_branch_and_the_unset_fix(remote_and_clone):
-    seed, clone = remote_and_clone
-    git(seed, "checkout", "-q", "-b", "staging")
-    commit(seed, "staged")
-    git(seed, "push", "-q", "origin", "staging")
+def multi_ref_error(clone):
+    return _diagnose_sync_failure(
+        clone, ["git", "pull", "--ff-only"], "fatal: Cannot fast-forward to multiple branches."
+    )
+
+
+def add_remote_branch(seed, clone, name="staging"):
+    git(seed, "checkout", "-q", "-b", name)
+    commit(seed, f"{name}-file")
+    git(seed, "push", "-q", "origin", name)
     git(clone, "fetch", "-q", "origin")
+
+
+def run_repair(clone, err, keep):
+    """Run the printed steps through a real shell, as a user pasting them would.
+
+    `<the one ref to keep, ...>` is replaced by `keep`, a full merge ref the user copied from the listing.
+    """
+    for step in err.fix:
+        if step.startswith(("cd ", "git config --get-all")) or step.split()[0] != "git":
+            continue
+        subprocess.run(
+            ["bash", "-c", step.replace("<the one ref to keep, copied from that list>", shlex.quote(keep))],
+            cwd=clone, check=True, capture_output=True, text=True,
+        )
+
+
+def merge_refs(clone, branch="main"):
+    out = subprocess.run(["git", "config", "--get-all", f"branch.{branch}.merge"], cwd=clone, check=True,
+                         capture_output=True, text=True)
+    return out.stdout.split()
+
+
+def test_two_merge_refs_name_the_branch_and_the_replace_fix(remote_and_clone):
+    seed, clone = remote_and_clone
+    add_remote_branch(seed, clone)
     git(clone, "config", "--add", "branch.main.merge", "refs/heads/staging")
 
     with pytest.raises(RepoSyncError) as exc:
@@ -97,122 +127,94 @@ def test_two_merge_refs_name_the_branch_and_the_unset_fix(remote_and_clone):
     err = exc.value
     assert "'main' has more than one upstream merge ref" in err.message
     steps = "\n".join(err.fix)
-    assert "git config --unset-all branch.main.merge" in steps
-    assert "git branch --set-upstream-to=origin/<branch to track> main" in steps
+    assert "git config --get-all branch.main.merge" in steps
+    assert "git config --replace-all branch.main.merge <the one ref to keep" in steps
+    assert "--unset-all" not in steps and "--set-upstream-to" not in steps  # no guessed upstream
     assert err.detail and "multiple branches" in err.detail.lower()
 
 
-def run_repair(clone, err, keep):
-    """Execute the git steps of a diagnosis the way a user would, choosing `keep` for the placeholder."""
-    for step in err.fix:
-        if step.startswith(("git config --unset-all", "git branch --set-upstream-to")):
-            subprocess.run(
-                shlex.split(step.split("#")[0].replace("<branch to track>", keep)),
-                cwd=clone, check=True, capture_output=True, text=True,
-            )
-
-
-def upstream(clone):
-    out = subprocess.run(["git", "rev-parse", "--abbrev-ref", "@{u}"], cwd=clone, check=True,
-                         capture_output=True, text=True)
-    return out.stdout.strip()
-
-
-def multi_ref_error(clone):
-    return _diagnose_sync_failure(
-        clone, ["git", "pull", "--ff-only"], "fatal: Cannot fast-forward to multiple branches."
-    )
-
-
-def test_repair_for_differing_local_and_remote_names_runs_and_restores_tracking(remote_and_clone):
-    # Codex P2 on #173 round 3: a local name unlike the remote's must not become origin/<local name>.
+@pytest.mark.parametrize("keep", ["refs/heads/main", "refs/heads/staging"])
+def test_repair_keeps_exactly_the_chosen_ref_and_git_pull_works_again(remote_and_clone, keep):
     seed, clone = remote_and_clone
-    git(seed, "checkout", "-q", "-b", "staging")
-    commit(seed, "staged")
-    git(seed, "push", "-q", "origin", "staging")
-    git(clone, "fetch", "-q", "origin")
-    git(clone, "checkout", "-q", "-b", "local/aec", "--track", "origin/main")
-    git(clone, "config", "--add", "branch.local/aec.merge", "refs/heads/staging")
+    add_remote_branch(seed, clone)
+    git(clone, "config", "--add", "branch.main.merge", "refs/heads/staging")
 
-    err = multi_ref_error(clone)
+    run_repair(clone, multi_ref_error(clone), keep=keep)
 
-    assert "origin/local/aec" not in "\n".join(err.fix)
-    run_repair(clone, err, keep="staging")
-    assert upstream(clone) == "origin/staging"
+    assert merge_refs(clone) == [keep]
 
 
-def test_repair_for_a_local_upstream_has_no_dot_remote_prefix(remote_and_clone):
+def test_repair_for_a_local_upstream_and_a_same_named_tag(remote_and_clone):
+    # Codex P2 on #173 round 3: `remote = .` plus a tag named like the branch made a guessed target ambiguous.
     _, clone = remote_and_clone
     git(clone, "branch", "staging")
-    git(clone, "checkout", "-q", "-b", "local-aec", "main")
+    git(clone, "tag", "main")
+    git(clone, "checkout", "-q", "-b", "local-aec", "refs/heads/main")  # the tag makes bare `main` ambiguous
     git(clone, "config", "branch.local-aec.remote", ".")
     git(clone, "config", "branch.local-aec.merge", "refs/heads/main")
     git(clone, "config", "--add", "branch.local-aec.merge", "refs/heads/staging")
 
     err = multi_ref_error(clone)
 
-    assert "./" not in "\n".join(err.fix)
-    run_repair(clone, err, keep="main")
-    assert upstream(clone) == "main"
+    run_repair(clone, err, keep="refs/heads/main")
+    assert merge_refs(clone, "local-aec") == ["refs/heads/main"]
 
 
-def test_repair_survives_a_tag_named_like_the_branch(remote_and_clone):
+def test_repair_does_not_guess_a_remote_for_custom_fetch_mappings(remote_and_clone):
+    # Codex P2 on #173 round 4: with a non-default fetch refspec `origin/<branch>` is the wrong name.
     seed, clone = remote_and_clone
-    git(seed, "checkout", "-q", "-b", "staging")
-    commit(seed, "staged")
-    git(seed, "push", "-q", "origin", "staging")
-    git(clone, "fetch", "-q", "origin")
-    git(clone, "tag", "main")
+    add_remote_branch(seed, clone)
+    git(clone, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/cache/*")
+    git(clone, "config", "--replace-all", "branch.main.merge", "refs/heads/main")
     git(clone, "config", "--add", "branch.main.merge", "refs/heads/staging")
 
     err = multi_ref_error(clone)
 
-    steps = "\n".join(err.fix)
-    assert "branch.main.merge" in steps and "heads/" not in steps
-    run_repair(clone, err, keep="main")
-    assert upstream(clone) == "origin/main"
+    assert "origin/" not in "\n".join(err.fix)
+    run_repair(clone, err, keep="refs/heads/staging")
+    assert merge_refs(clone) == ["refs/heads/staging"]
+
+
+def test_branch_name_with_shell_metacharacters_cannot_inject_through_the_printed_steps(remote_and_clone):
+    # Codex P1 on #173 round 4: the steps are pasted into a shell, and a branch name can carry `;`.
+    _, clone = remote_and_clone
+    name = "aec;touch${IFS}INJECTED"
+    git(clone, "checkout", "-q", "-b", name, "main")
+    git(clone, "config", f"branch.{name}.remote", ".")
+    git(clone, "config", f"branch.{name}.merge", "refs/heads/main")
+    git(clone, "config", "--add", f"branch.{name}.merge", "refs/heads/other")
+
+    err = multi_ref_error(clone)
+    run_repair(clone, err, keep="refs/heads/main")
+
+    assert not list(clone.glob("INJECTED*")) and not list(clone.parent.glob("INJECTED*"))
+    assert merge_refs(clone, name) == ["refs/heads/main"]
+
+
+def test_cd_step_quotes_a_checkout_path_with_spaces(remote_and_clone, tmp_path):
+    _, clone = remote_and_clone
+    spaced = tmp_path / "my clone"
+    clone.rename(spaced)
+
+    err = multi_ref_error(spaced)
+
+    assert f"cd {shlex.quote(str(spaced))}" in err.fix
 
 
 def test_multiple_branches_with_one_merge_ref_does_not_blame_the_config(remote_and_clone):
     # nevar-auth saw this error on a checkout whose branch.main.merge held ONE value; the
-    # message must not claim two refs there, and `--unset-all` would not help.
+    # message must not claim two refs there, and rewriting the config would not help.
     _, clone = remote_and_clone
     git(clone, "config", "--get-all", "branch.main.merge")  # exactly one value, or git fails
 
-    err = _diagnose_sync_failure(
-        clone, ["git", "pull", "--ff-only"], "fatal: Cannot fast-forward to multiple branches."
-    )
+    err = multi_ref_error(clone)
 
     assert "more than one upstream merge ref" not in err.message
     steps = "\n".join(err.fix)
-    assert "--unset-all" not in steps
-    assert "git branch --set-upstream-to=origin/main main" in steps
+    assert "--unset-all" not in steps and "--replace-all" not in steps and "origin/" not in steps
+    assert "git branch -vv" in steps
+    assert "git branch --set-upstream-to=<remote>/<branch> main" in steps
     assert err.detail and "multiple branches" in err.detail.lower()
-
-
-def test_repair_keeps_the_configured_remote_and_branch_name(remote_and_clone):
-    # Codex P2 on #173: the local branch name and remote branch name can differ.
-    _, clone = remote_and_clone
-    git(clone, "checkout", "-q", "-b", "local-aec", "--track", "origin/main")
-
-    err = _diagnose_sync_failure(
-        clone, ["git", "pull", "--ff-only"], "fatal: Cannot fast-forward to multiple branches."
-    )
-
-    assert "git branch --set-upstream-to=origin/main local-aec" in "\n".join(err.fix)
-
-
-def test_repair_uses_the_branchs_own_remote_not_origin(remote_and_clone):
-    _, clone = remote_and_clone
-    git(clone, "remote", "rename", "origin", "upstream")  # rewrites branch.main.remote too
-
-    err = _diagnose_sync_failure(
-        clone, ["git", "pull", "--ff-only"], "fatal: Cannot fast-forward to multiple branches."
-    )
-
-    steps = "\n".join(err.fix)
-    assert "git branch --set-upstream-to=upstream/main main" in steps
-    assert "origin/" not in steps
 
 
 def test_unreachable_remote_points_at_network_or_credentials(remote_and_clone, tmp_path):
