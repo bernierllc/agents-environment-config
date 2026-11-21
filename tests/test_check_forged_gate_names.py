@@ -16,6 +16,7 @@ spec.loader.exec_module(mod)
 REPO = "https://github.com/my-org/my-repo"
 GUARD = "PRs into main must come from staging"
 TRUSTED_GATE = (".github/workflows/review-gate.yml", "pull_request_target")
+TRUSTED_GUARD = (".github/workflows/main-via-staging.yml", "pull_request_target")
 
 
 def api_run(name, run_id=1):
@@ -43,6 +44,19 @@ def test_disallowed_pr_supplying_a_same_name_success_job_is_detected():
     # ci.yml in the PR head: `jobs: x: name: <guard name>, run: true`.
     runs = [api_run(GUARD), job_run(GUARD, "777")]
     found = mod.forged(runs, lookup_table({"777": (".github/workflows/ci.yml", "pull_request")}))
+    assert [name for name, _ in found] == [GUARD]
+
+
+def test_the_trusted_guard_job_is_not_forged():
+    # The guard workflow's own job IS the required check, so its (path, pull_request_target) pair is trusted.
+    runs = [job_run(GUARD, "780")]
+    assert mod.forged(runs, lookup_table({"780": TRUSTED_GUARD})) == []
+
+
+def test_a_guard_named_job_from_the_trusted_path_on_another_event_is_forged():
+    # A PR head can add a pull_request trigger to its copy of the file; only pull_request_target loads the default branch's.
+    runs = [job_run(GUARD, "781")]
+    found = mod.forged(runs, lookup_table({"781": (TRUSTED_GUARD[0], "pull_request")}))
     assert [name for name, _ in found] == [GUARD]
 
 

@@ -6,10 +6,22 @@
 # selects the PR's base sha (the tip of main). Only PR *metadata* (head ref / repo)
 # is read from the event; no PR code is checked out or executed.
 #
-# A pull_request_target job is not attached to the PR head, so a required status
-# check named after the job would never appear on the PR head. The result is
-# therefore published as a Check Run on pull_request.head.sha through the Checks
-# API (same approach as review-gate.yml).
+# This job IS the required check: its name is exactly "PRs into main must come from
+# staging" and its exit code is the result (0 = allowed source, non-zero = rejected,
+# with the reason in the log). A pull_request_target job's check run lands on
+# pull_request.head.sha in this run's own check suite, the suite the required-status
+# rule reads; review-gate.yml's `Review Gate` job works the same way. No hand-made
+# Checks-API run is published (an API POST lands in the head's oldest suite).
+#
+# Default-branch rule: GitHub loads a pull_request_target workflow file from the
+# repository DEFAULT branch. In a staging-default repo this file on staging governs
+# PRs into main as soon as it merges there (no transitional `pull_request:` trigger
+# needed); in a main-default repo it counts only once it is on main, so it lands on
+# main first.
+#
+# No `concurrency:` group, on purpose: a cancelled newest run leaves the required
+# check cancelled or absent until re-run (same reasoning as review-gate.yml). Each run
+# is an idempotent read of the PR's metadata and check runs.
 #
 # Activation: advisory until the `main promotion gate` ruleset requires the
 # check "PRs into main must come from staging".
@@ -34,15 +46,12 @@ on:
     branches: [main]
 permissions:
   contents: read
-  checks: write
   # the forged-name scan reads GET /actions/runs/{id}; private repos need this scope
   actions: read
-concurrency:
-  group: main-via-staging-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
 jobs:
-  publish-guard-result:
-    name: Publish the promotion guard result
+  guard:
+    # This job IS the required check: its exit code is the guard result.
+    name: PRs into main must come from staging
     runs-on: ubuntu-latest
     steps:
       - name: Checkout trusted base (not PR head)
@@ -52,67 +61,46 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
-      - name: Check head branch and publish on the PR head
+      - name: Check head branch and scan for forged same-name checks
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           SHA: ${{ github.event.pull_request.head.sha }}
           REPO: ${{ github.repository }}
-          CHECK_NAME: PRs into main must come from staging
         run: |
           set -u
-          # Fail closed: the named check exists (in_progress) before anything is
-          # evaluated, and a rejection completes it as `failure`. A rejected PR can
-          # never leave the required name absent or leave an older success standing
-          # as the latest result.
-          check_id=$(gh api -X POST "repos/$REPO/check-runs" \
-            -f name="$CHECK_NAME" -f head_sha="$SHA" \
-            -f status="in_progress" \
-            -f "output[title]=promotion guard running" \
-            -f "output[summary]=Checking the source branch…" --jq .id)
-          complete_check() {
-            gh api -X PATCH "repos/$REPO/check-runs/$check_id" \
-              -f status="completed" -f conclusion="$1" \
-              -f "output[title]=$2" -f "output[summary]=$3"
-          }
           # Bootstrap: the scripts load from the base sha. If the workflow reached the
           # default branch before them, say so; never exit 127 silently.
           for guard_script in scripts/check-forged-gate-names.py scripts/check-main-source.sh; do
             if [ ! -f "$guard_script" ]; then
-              msg="guard script missing on base: $guard_script. Land the scripts and this workflow together; the scripts go to staging first."
-              echo "::error::$msg"
-              complete_check failure "guard script missing on base" "$msg"
+              echo "::error::guard script missing on base: $guard_script. Land the scripts and this workflow together; the scripts go to staging first."
               exit 1
             fi
           done
-          # A PR-controlled job can borrow a required check's name (see
+          # A PR-controlled job can borrow this job's name (see
           # scripts/check-forged-gate-names.py). Detection only; the unforgeable
           # fix is a required workflow or a distinct publisher app.
           # filter=all: the default (latest) can hide an earlier same-name run. The list
           # is captured on its own so an API failure cannot reach the detector as empty
           # input and read as "none forged".
-          set +e
           runs_json=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" --paginate)
           list_rc=$?
           if [ "$list_rc" -eq 0 ]; then
-            forged_out=$(printf '%s' "$runs_json" | REPO="$REPO" python3 scripts/check-forged-gate-names.py 2>&1)
+            printf '%s' "$runs_json" | REPO="$REPO" python3 scripts/check-forged-gate-names.py 2>&1
             forged_rc=$?
           else
-            forged_out="could not list check runs (gh api exit $list_rc); failing closed"
+            echo "::error::could not list check runs (gh api exit $list_rc); failing closed"
             forged_rc=2
           fi
-          source_out=$(HEAD_REF="$HEAD_REF" HEAD_REPO="$HEAD_REPO" REPO="$REPO" \
-            bash scripts/check-main-source.sh 2>&1)
+          HEAD_REF="$HEAD_REF" HEAD_REPO="$HEAD_REPO" REPO="$REPO" bash scripts/check-main-source.sh 2>&1
           source_rc=$?
-          set -e
-          printf '%s\n%s\n' "$forged_out" "$source_out"
           if [ "$forged_rc" -ne 0 ]; then
-            complete_check failure "forged check name" "$forged_out"
+            echo "::error::forged check name or unreadable check runs (detector exit $forged_rc); rejected"
             exit 1
           fi
           if [ "$source_rc" -ne 0 ]; then
-            complete_check failure "source branch rejected" "$source_out"
+            echo "::error::head '$HEAD_REF' from '$HEAD_REPO' rejected: only the 'staging' branch of $REPO may open a PR into main"
             exit 1
           fi
-          complete_check success "source branch ok" "This PR comes from staging."
+          echo "head '$HEAD_REF' from '$HEAD_REPO' is staging of $REPO: allowed"

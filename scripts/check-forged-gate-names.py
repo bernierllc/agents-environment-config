@@ -5,9 +5,10 @@ Required checks are matched by NAME (plus the GitHub Actions app id), and a same
 workflows in its own head. So a PR can add a job named exactly like a required check, with
 `run: true`, and Actions publishes a success under that name.
 
-A legitimate result for a protected name is either published through the Checks API (its
-details_url is `.../runs/<id>`, no `/actions/`) or comes from one pinned trusted workflow
-(path + event). Any other Actions-job check run bearing a protected name is forged.
+A legitimate result for a protected name comes from one pinned trusted workflow (path + event):
+that workflow's job IS the required check. A run published through the Checks API (details_url
+`.../runs/<id>`, no `/actions/`) is not flagged (see KNOWN LIMIT). Any other Actions-job check run
+bearing a protected name is forged.
 
 This is DETECTION, not prevention: the forged success still sits beside our result. The
 unforgeable fix is a required workflow or a distinct publisher app (plan `plans/2026-11-16-unforgeable-required-checks.md` in the aec repo; copies of this
@@ -15,8 +16,8 @@ script elsewhere do not carry it).
 It exists so the guard, and the merge step of whoever merges, fail loudly instead of trusting a name.
 
 KNOWN LIMIT: a PR workflow with `checks: write` can also POST the name straight to the Checks API. That
-check run has no job URL, so it looks exactly like our own guard's publication (same app, same name) and
-this script cannot tell them apart; reruns and `edited` events legitimately add same-name runs too. Only
+check run has no job URL and is not flagged: older guards published their result that way, so an API run
+cannot be told apart from a legacy legitimate one; reruns and `edited` events legitimately add same-name runs too. Only
 provenance (required workflow or a distinct publisher app) closes it. Pinned by
 test_api_published_guard_check_is_not_forged_known_limit.
 
@@ -41,7 +42,7 @@ import sys
 # name -> allowed (workflow path, event) pairs for an Actions-job check run bearing that name.
 # An empty set means no Actions job may use the name: only the Checks API publishes it.
 PROTECTED = {
-    "PRs into main must come from staging": set(),
+    "PRs into main must come from staging": {(".github/workflows/main-via-staging.yml", "pull_request_target")},
     "Review Gate": {(".github/workflows/review-gate.yml", "pull_request_target")},
 }
 _JOB_URL = re.compile(r"/actions/runs/(\d+)/job/")

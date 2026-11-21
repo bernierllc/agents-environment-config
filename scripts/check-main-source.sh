@@ -14,12 +14,11 @@
 #
 # Bootstrap: this check runs for PRs targeting main. It does not move the
 # GitHub default branch; activating it as a merge gate requires a ruleset /
-# branch protection that requires the published Check Run named exactly
-# "PRs into main must come from staging" (not the Actions job name); see the
-# `main promotion gate` ruleset. The workflow creates that check in_progress
-# first and completes it `success` for an allowed source or `failure` for a
-# rejected one (fail closed). The check is commit-scoped: a PR from another
-# branch at the very same SHA as staging delivers the identical commit.
+# branch protection that requires the check named exactly
+# "PRs into main must come from staging", which is the main-via-staging.yml
+# job itself: this script's exit code fails that job. The check is
+# commit-scoped: a PR from another branch at the very same SHA as staging
+# delivers the identical commit.
 # Forged same-name jobs are scripts/check-forged-gate-names.py's concern.
 set -euo pipefail
 : "${HEAD_REF:?HEAD_REF is required}"

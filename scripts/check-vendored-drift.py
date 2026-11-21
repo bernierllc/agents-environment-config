@@ -6,7 +6,9 @@ detector and its test). Dependabot then edits the copy (for example an actions/c
 copy silently stops matching aec. This compares each vendored file with the same path in the canonical
 repo (public, read through `gh api`) so the drift is a failing check, not something to remember.
 
-Usage: python3 scripts/check-vendored-drift.py --canonical-repo OWNER/aec-repo [--ref main] [path ...]
+Usage: python3 scripts/check-vendored-drift.py --canonical-repo OWNER/aec-repo --ref <released tag> [path ...]
+Compare against a released tag, never a branch: a branch moves, and main lags staging. --ref defaults to main only
+for existing callers.
 With no paths, the whole default copy set is compared and a member missing locally is drift (a deleted or
 renamed guard file must not pass); a repo that vendors only a subset names those paths explicitly.
 Exit 0: identical. Exit 1: drift or a missing file (listed on stderr). Exit 2: could not evaluate (fails

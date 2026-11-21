@@ -52,3 +52,25 @@ def test_workflow_header_says_default_branch_not_main():
 def test_plan_states_interim_scope_and_s5():
     assert "into main only" in PLAN
     assert "- S5." in PLAN
+
+
+def test_plan_describes_the_job_as_the_required_check_and_the_default_branch_rule():
+    assert "### The guard job is the required check" in PLAN
+    assert "takes the workflow file and the checkout commit from the repository default branch" in PLAN
+    assert "publishes the context through the Checks API" not in PLAN
+
+
+def test_plan_documents_old_transitional_and_canonical_shapes():
+    assert "### Workflow shapes: old, transitional, canonical" in PLAN
+    assert "a staging-default repo needs no transitional shape" in PLAN
+
+
+def test_plan_names_the_drift_check_and_the_one_resync_command():
+    assert "### Drift check (installer and doctor)" in PLAN
+    assert "python3 scripts/check-vendored-drift.py --canonical-repo" in PLAN
+
+
+def test_plan_requires_vendoring_from_a_released_tag():
+    assert "### Vendoring source is a released tag, never a branch" in PLAN
+    assert "compares a repo's copy against the TAGGED blob" in PLAN
+    assert "prints the tag it vendored from" in PLAN
