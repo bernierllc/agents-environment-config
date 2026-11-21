@@ -16,6 +16,7 @@ spec.loader.exec_module(mod)
 REPO = "https://github.com/my-org/my-repo"
 GUARD = "PRs into main must come from staging"
 TRUSTED_GATE = (".github/workflows/review-gate.yml", "pull_request_target")
+TRUSTED_GUARD = (".github/workflows/main-via-staging.yml", "pull_request_target")
 
 
 def api_run(name, run_id=1):
@@ -43,6 +44,26 @@ def test_disallowed_pr_supplying_a_same_name_success_job_is_detected():
     # ci.yml in the PR head: `jobs: x: name: <guard name>, run: true`.
     runs = [api_run(GUARD), job_run(GUARD, "777")]
     found = mod.forged(runs, lookup_table({"777": (".github/workflows/ci.yml", "pull_request")}))
+    assert [name for name, _ in found] == [GUARD]
+
+
+def test_the_trusted_guard_job_is_not_forged():
+    # The guard workflow's own job IS the required check, so its (path, pull_request_target) pair is trusted.
+    runs = [job_run(GUARD, "780")]
+    assert mod.forged(runs, lookup_table({"780": TRUSTED_GUARD})) == []
+
+
+def test_a_guard_named_job_from_the_trusted_path_on_another_event_is_forged():
+    # A PR head can add a pull_request trigger to its copy of the file; only pull_request_target loads the default branch's.
+    runs = [job_run(GUARD, "781")]
+    found = mod.forged(runs, lookup_table({"781": (TRUSTED_GUARD[0], "pull_request")}))
+    assert [name for name, _ in found] == [GUARD]
+
+
+def test_an_empty_trusted_set_flags_every_actions_job_bearing_the_name():
+    # The pre-job-as-check guard entry: no Actions job, not even the guard workflow's own, may publish the name.
+    runs = [api_run(GUARD), job_run(GUARD, "782")]
+    found = mod.forged(runs, lookup_table({"782": TRUSTED_GUARD}), protected={GUARD: set()})
     assert [name for name, _ in found] == [GUARD]
 
 
@@ -78,7 +99,8 @@ def test_a_failed_run_lookup_fails_closed():
 
 
 def test_paginated_gh_output_is_parsed():
-    text = json.dumps({"check_runs": [api_run("a")]}) + "\n" + json.dumps({"check_runs": [api_run("b")]})
+    text = json.dumps({"total_count": 2, "check_runs": [api_run("a")]}) + "\n" + \
+        json.dumps({"total_count": 2, "check_runs": [api_run("b")]})
     assert [r["name"] for r in mod._load_check_runs(text)] == ["a", "b"]
 
 
@@ -108,9 +130,34 @@ def test_cli_fails_closed_on_empty_malformed_or_runless_input(stdin):
     assert "failing closed" in proc.stderr
 
 
+def test_cli_fails_closed_when_pages_hold_fewer_runs_than_total_count():
+    # A truncated listing (an omitted second page could hold the forged run) must not read as evaluated.
+    proc = _cli('{"total_count":2,"check_runs":[{"name":"ci"}]}')
+    assert proc.returncode == 2
+    assert "failing closed" in proc.stderr
+
+
+@pytest.mark.parametrize("total", [True, 1.0, "1", None, -1, "missing"])
+def test_cli_fails_closed_when_total_count_is_not_a_nonnegative_int(total):
+    # bool is an int subclass and 1.0 == 1, so a loose check would accept them; a page without
+    # total_count would skip the completeness check entirely.
+    page = {"check_runs": [{"name": "ci"}]}
+    if total != "missing":
+        page["total_count"] = total
+    proc = _cli(json.dumps(page))
+    assert proc.returncode == 2
+    assert "failing closed" in proc.stderr
+
+
+def test_cli_passes_when_paginated_runs_match_total_count():
+    pages = json.dumps({"total_count": 2, "check_runs": [api_run("a")]}) + "\n" + \
+        json.dumps({"total_count": 2, "check_runs": [api_run("b")]})
+    assert _cli(pages).returncode == 0
+
+
 def test_cli_passes_a_page_whose_protected_name_came_from_the_checks_api():
     # No Actions job involved, so no workflow-run lookup (no gh call) is needed.
-    assert _cli(json.dumps({"check_runs": [api_run(GUARD)]})).returncode == 0
+    assert _cli(json.dumps({"total_count": 1, "check_runs": [api_run(GUARD)]})).returncode == 0
 
 
 def test_workflow_run_path_with_a_ref_suffix_is_normalized(monkeypatch):

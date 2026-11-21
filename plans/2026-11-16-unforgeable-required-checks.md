@@ -18,10 +18,13 @@ publishing the same name. The name carries no provenance.
 
 **It detects Actions-job forgery only; a `checks: write` Checks-API POST is not detected; only A or B closes it.**
 
-- Fail closed: the named check exists `in_progress` before validation, a rejection completes it `failure`, and a
-  failed check-run listing, a failed detector run or a missing guard script on the base each fail the check.
+- Fail closed: the guard's job IS the named check, so it is `in_progress` from the moment the run starts and its
+  exit code is the result. A rejection, a failed check-run listing, a failed detector run or a missing guard script
+  on the base each fail the job, and so the check.
 - `scripts/check-forged-gate-names.py` flags case 1: an Actions-job check run bearing a protected name whose
-  workflow run is not the pinned trusted path + event.
+  workflow run is not the pinned trusted path + event (`.github/workflows/main-via-staging.yml` +
+  `pull_request_target` for the guard name, `.github/workflows/review-gate.yml` + `pull_request_target` for
+  `Review Gate`).
 - Timing: the workflow checks once. A PR job that publishes its forged name after that check is not seen by it.
   Whoever merges must run the detector immediately before `gh pr merge`
   (`set -o pipefail; gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" --paginate | REPO=$REPO python3 scripts/check-forged-gate-names.py`,
@@ -39,8 +42,8 @@ publishing the same name. The name carries no provenance.
 
 ## What it cannot cover (the residual risk)
 
-Case 2. A check run published through the Checks API is indistinguishable from our own guard's publication:
-same app, same name, no job URL. Reruns and `edited` events legitimately create several same-name check runs on
+Case 2. A check run published through the Checks API is indistinguishable from a legacy guard's publication
+(guards before the job-as-check shape published that way): same app, same name, no job URL. Reruns and `edited` events legitimately create several same-name check runs on
 one sha, so counting or id-matching would break legitimate promotions. No detection can close it. Only
 provenance can: A or B.
 
@@ -79,6 +82,52 @@ Prefer A first when the plan offers it (smaller moving parts); B is the fallback
 `main-via-staging.yml`, `review-gate.yml`, `check-main-source.sh`, `check-forged-gate-names.py`, every
 downstream repo that copies the guard, and every ruleset requiring the guard check or `Review Gate`.
 
+### The guard job is the required check
+
+The guard workflow publishes no hand-made Checks-API run. Its job is named exactly
+`PRs into main must come from staging` and its exit code is the result, the same shape as `review-gate.yml`, whose
+`Review Gate` job already satisfies this repo's ruleset as a required check. A `pull_request_target` job's check run
+lands on `pull_request.head.sha` in that run's own check suite, the suite the required-status rule reads; a Checks-API
+POST lands in the head's oldest suite instead. The workflow has no `concurrency:` group: a cancelled newest run would
+leave the required check cancelled or absent until re-run.
+
+Default-branch rule (GitHub change effective 2025-12-08, verified against GitHub's docs): `pull_request_target`
+takes the workflow file and the checkout commit from the repository default branch, whatever the PR base. So:
+
+- **staging-default repo**: the canonical guard on `staging` governs PRs into `main` as soon as it merges there.
+  No transitional trigger is needed.
+- **main-default repo**: unchanged. The guard counts only once it is on `main`, so it lands on `main` first.
+
+The guard's own `checkout` still selects `pull_request.base.sha`, so the scripts come from `main`.
+
+### Workflow shapes: old, transitional, canonical
+
+- **OLD**: `on: pull_request`, job id `source-branch` named for the check. The workflow file comes from the PR head,
+  so any PR can rewrite it. The detector flags it (pinned path, wrong event).
+- **CANONICAL**: `on: pull_request_target` (branches `[main]`), job named for the check, no `concurrency:`. This
+  repo's `.github/workflows/main-via-staging.yml`.
+- **TRANSITIONAL**: CANONICAL plus a 3-line block, only for a main-default repo whose guard has not reached `main`
+  yet and whose `main` ruleset already requires the context:
+
+  ```yaml
+    pull_request:
+      types: [opened, edited, synchronize, reopened]
+      branches: [main]
+  ```
+
+  On the promotion that carries it to `main`, `main`'s old file has no `pull_request_target` trigger, so the
+  `pull_request` run of the head's file is the only publisher. That run's own scan flags itself (pinned path, event
+  `pull_request`), so the check is red on that one promotion and needs an owner waiver (below).
+
+  Probe evidence (PR #176, a throwaway PR closed after the run, 2026-11-20): the transitional shape with its
+  `pull_request` branch filter pointed at a throwaway base. In run 44877949889 (event `pull_request`) `github.sha`
+  was the merge commit `96316cf`, and the scan for `pull_request.head.sha` `738fdb8` listed the job's own check run
+  (`PRs into main must come from staging`, in progress, job 136766720792). A `pull_request` job's check run is
+  listed under the PR head sha, not the merge commit, so the scan sees it; the detector flagged it as forged and the
+  job exited 1. The waiver step cannot be bypassed by the scan missing its own job. The next
+  `staging` PR deletes the 3 lines; from then on `main`'s file runs under `pull_request_target`, its job is the
+  pinned pair, and promotions pass with no waiver. a staging-default repo needs no transitional shape.
+
 ### Rollout order for a repo adopting the guard
 
 `main-via-staging.yml` runs under `pull_request_target`: GitHub loads the workflow from the repository's DEFAULT
@@ -99,7 +148,7 @@ the default branch alone:
 | Default branch | `main-via-staging.yml` | `main` ruleset requires the context | Waiver needed |
 |---|---|---|---|
 | main | not yet on `main` | no | none: follow the default=main order below |
-| main | legacy on `main` | yes | one, see "Bootstrap for a repo whose main ruleset already requires the context" |
+| main | legacy on `main` | yes | two, see "Bootstrap for a repo whose main ruleset already requires the context" |
 | staging | legacy (`pull_request`) | yes | one, on the scripts promotion |
 | staging | legacy (`pull_request`) | no | none: follow "Waiver-free variant when `main` does not require the context" (delete the legacy file first), not the waiver order |
 | staging | canonical (`pull_request_target`), `main` already has the scripts | either | none |
@@ -127,27 +176,35 @@ The default=main order, for a repo whose `main` has the scripts last:
 
 ### Bootstrap for a repo whose main ruleset already requires the context
 
-Not a free pass: the plan has no sanctioned bootstrap that avoids a scan waiver, because the legacy job is still in
-the head of the promotion that carries the canonical guard to `main`. Exactly one promotion is waived, and the
-waiver is the owner's to grant (a directive or a cop never waives a gate); record the approval on that PR.
+Not a free pass. This bootstrap needs two owner waivers, on two different promotions, and each one is the owner's to
+grant (a directive or a cop never waives a gate); record each approval on its PR:
 
-A same-path swap deadlocks: `pull_request` runs the head's `main-via-staging.yml` (the canonical file has no
-`pull_request` trigger) and `pull_request_target` runs `main`'s (still the legacy file), so the swap promotion has no
-publisher at all. So the canonical workflow arrives under a temporary second filename while the legacy file stays
-in place:
+- **Waiver 1, the scripts promotion (step 1):** its head still carries the legacy `pull_request` job, so the
+  merge-time scan flags that job. The owner waives the scan result on that PR.
+- **Waiver 2, promotion P1 (step 3):** the TRANSITIONAL job's own scan flags itself, so the required check is red.
+  The owner waives the guard check on that PR.
 
-1. `staging`: scripts, their tests and the canonical workflow at a temporary path (for example
-   `.github/workflows/main-via-staging-canonical.yml`). The legacy workflow stays untouched.
-2. Bootstrap promotion P1 to `main`. The legacy job still publishes the required context, so the merge-time scan
-   exits 1 with only that job flagged. The merger waives it only after hand-verifying, and writing on the PR:
-   head repo equals base repo, head ref is `staging`, every flagged run is the legacy workflow's job (path and event
-   both match, none from another workflow), and the promotion adds no other workflow.
-3. A normal PR into `staging` deletes the legacy workflow. Open no further promotion before it lands: with both
-   publishers present, the canonical scan flags the legacy job and fails the context.
-4. Promotion P2: its head has no legacy job, `main`'s canonical file publishes the context through the Checks API,
-   and the scan exits 0. This is the first promotion that needs no waiver.
-5. Move the canonical workflow to its standard path (`main-via-staging.yml`) in a `staging` PR and promote
-   (P3). Flip the required check only after P2 or P3 shows a green guard run.
+A main-default repo whose `main` already carries the canonical workflow is not in this section. It
+does not inherently need a waiver for the first replacement promotion: `main`'s file runs under
+`pull_request_target`, and GitHub evaluates a `pull_request_target` job's check for rulesets
+(<https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks#checks-from-some-workflow-jobs-are-not-evaluated>).
+
+An earlier version of this section put the canonical workflow at a temporary second path while the legacy file
+stayed. That no longer works: the guard's job is now the required check, and a job from the temporary path is not
+the pinned (`.github/workflows/main-via-staging.yml`, `pull_request_target`) pair, so its own scan flags it on every
+promotion until the file moves. Use the TRANSITIONAL shape in place instead:
+
+1. `staging`: scripts and their tests land first (default=main order steps 1 and 2 carry them to `main`), with the
+   legacy workflow untouched. Waiver 1: the merge-time scan flags the legacy job on this scripts promotion; the
+   owner waives it with the waiver text below, recorded on that PR.
+2. `staging`: one PR replaces the legacy `main-via-staging.yml` with the TRANSITIONAL shape at the same path.
+3. Promotion P1 to `main`. Only the head's `pull_request` run publishes the context, and its scan flags its own
+   job, so the check is red. Waiver 2: the owner waives it, after hand-verifying and writing on the PR: head repo equals
+   base repo, head ref is `staging`, every flagged run is this workflow's own job (path matches, event
+   `pull_request`), and the promotion adds no other workflow.
+4. A normal PR into `staging` deletes the 3-line `pull_request:` block. Open no further promotion before it lands.
+5. Promotion P2: `main`'s file runs under `pull_request_target`, its job is the pinned pair, the scan exits 0 and
+   the check is green. This is the first promotion that needs no waiver.
 
 Status: derived from GitHub's event semantics, not yet run end to end. The first repo to adopt it records the
 result here.
@@ -237,6 +294,34 @@ check published by app 15368):
 - A PR into `main` needs the `review:high` label before `Review Gate` goes green; add it when opening a promotion.
 - A head can carry two `Review Gate` runs (the workflow job and a Checks-API run). Rerun the failed one, not only
   the latest; a green latest run does not clear a failed earlier one.
+
+### Drift check (installer and doctor)
+
+Downstream repos copy the guard byte-identically (`scripts/check-vendored-drift.py` `COPY_SET`: the workflow, both
+scripts and the detector's test). A Dependabot bump or a hand edit silently forks the copy. The doctor (and any
+fleet hub) must flag a repo whose copy differs from the canonical blob, by running
+`python3 scripts/check-vendored-drift.py --canonical-repo <owner>/agents-environment-config --ref <released tag>`
+(exit 1 names each drifted file; exit 2 fails closed). The one re-sync command, run from the repo root:
+
+```bash
+for f in .github/workflows/main-via-staging.yml scripts/check-main-source.sh scripts/check-forged-gate-names.py tests/test_check_forged_gate_names.py; do gh api "repos/<owner>/agents-environment-config/contents/$f?ref=<released tag>" -H "Accept: application/vnd.github.raw" > "$f"; done
+```
+
+The doctor wiring is not built yet (plan only); the script itself ships.
+
+### Vendoring source is a released tag, never a branch
+
+Incident: a hub copied its canonical `main-via-staging.yml` from aec `main` (blob `0aea5d69`, `actions/checkout@v4`)
+while aec `staging` already had blob `827ffda7` (`@v7`), so every repo that took the hub's copy was downgraded.
+A branch is a moving target and `main` lags `staging`.
+
+- The vendoring source for the guard workflow and scripts is a released aec tag (or the installer's output for that
+  tag), never a branch.
+- The fleet/hub drift check (`scripts/check-vendored-drift.py` and the doctor) compares a repo's copy against the TAGGED blob: pass `--ref <released tag>`. The script's `--ref main` default stays only for backward compatibility
+  of existing callers; the doctor must always pass a tag.
+- The installer prints the tag it vendored from, so a repo's copy names its source.
+
+Status: plan only. The tag-based doctor check and the installer's tag line are not built.
 
 Input contract of the detector: it fails closed (exit 2) on empty, malformed or check-run-less input, because a head
 always has check runs by merge time; an empty set is not "no forgery". Callers should still use `set -o pipefail`.
