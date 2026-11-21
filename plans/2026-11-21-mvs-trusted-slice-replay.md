@@ -56,6 +56,21 @@ read-only and gates nothing.
   (the downstream repo's throwaway-PR checklist) before any promotion relies on the guard.
 - The detector (`check-forged-gate-names.py`) returns rc 0 on the head.
 
+## Consequence for a downstream repo that re-vendors the guard without `promote/*`
+
+A downstream repo that replaces its local guard variant with the canonical guard drops `promote/*` support, because
+the canonical guard has none until this plan lands. State the consequence rather than leave it to inference:
+
+- Any release route that depends on merge-with-main slice promotions is **blocked** until this plan ships in a
+  tagged canonical release and the downstream repo re-vendors that tag. No slice promotion may be called ready, and
+  no waiver stands in for the replay.
+- Until then, a promotion that needs a merge-with-main slice has no supported path. The only paths are a
+  squash-clean promotion through the canonical guard, or waiting for this plan.
+- Whoever hands such a release route to the downstream repo's merge owner repeats this in the handoff, and the
+  downstream repo's own divergence plan links back here. The supported behavior is deferred, never silently deleted.
+- Unblock criteria: this plan's acceptance list is met, the canonical guard ships it in a tagged release, and the
+  downstream repo re-vendors that tag.
+
 ## Open questions
 
 - Fetch cost for large slices: fetch the compare range only, or the whole head?
