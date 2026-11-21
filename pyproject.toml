@@ -4,7 +4,7 @@ requires = [
     # Release version comes from the git tag (see version-bump.yml), never from a
     # commit to main. Same supply-chain hold as the pynacl pin below: 10.3.3 is one
     # release behind the latest (10.3.4) and about eight weeks old.
-    "setuptools-scm==10.3.3",
+    "setuptools-scm==10.3.4",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -42,7 +42,7 @@ dev = [
     "pytest-cov>=4.0.0",
     "pytest-timeout>=2.0.0",
     "jsonschema>=4.0",
-    "setuptools-scm==10.3.3",  # tests/test_release_tag_only.py builds a version from git archive; same pin as [build-system]
+    "setuptools-scm==10.3.4",  # tests/test_release_tag_only.py builds a version from git archive; same pin as [build-system]
 ]
 org-configs-preview = [
     "PyYAML>=6.0",
