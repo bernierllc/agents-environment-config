@@ -118,6 +118,31 @@ def test_multiple_branches_with_one_merge_ref_does_not_blame_the_config(remote_a
     assert err.detail and "multiple branches" in err.detail.lower()
 
 
+def test_repair_keeps_the_configured_remote_and_branch_name(remote_and_clone):
+    # Codex P2 on #173: the local branch name and remote branch name can differ.
+    _, clone = remote_and_clone
+    git(clone, "checkout", "-q", "-b", "local-aec", "--track", "origin/main")
+
+    err = _diagnose_sync_failure(
+        clone, ["git", "pull", "--ff-only"], "fatal: Cannot fast-forward to multiple branches."
+    )
+
+    assert "git branch --set-upstream-to=origin/main local-aec" in "\n".join(err.fix)
+
+
+def test_repair_uses_the_branchs_own_remote_not_origin(remote_and_clone):
+    _, clone = remote_and_clone
+    git(clone, "remote", "rename", "origin", "upstream")  # rewrites branch.main.remote too
+
+    err = _diagnose_sync_failure(
+        clone, ["git", "pull", "--ff-only"], "fatal: Cannot fast-forward to multiple branches."
+    )
+
+    steps = "\n".join(err.fix)
+    assert "git branch --set-upstream-to=upstream/main main" in steps
+    assert "origin/" not in steps
+
+
 def test_unreachable_remote_points_at_network_or_credentials(remote_and_clone, tmp_path):
     _, clone = remote_and_clone
     git(clone, "remote", "set-url", "origin", str(tmp_path / "gone.git"))

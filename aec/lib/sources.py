@@ -459,8 +459,13 @@ def _diagnose_sync_failure(repo_path: Path, cmd: list, stderr: str):
         branch = (_git_out(repo_path, "symbolic-ref", "-q", "--short", "HEAD") or "").strip()
         refs = _git_out(repo_path, "config", "--get-all", f"branch.{branch}.merge") if branch else None
         b = branch or "<branch>"
-        set_upstream = f"git branch --set-upstream-to=origin/{b} {b}"
-        if len((refs or "").split()) > 1:
+        merge_refs = (refs or "").split()
+        # Re-pin to what the branch already tracks: its own remote, and the remote branch name
+        # (it can differ from the local name). Several refs compete, so fall back to the local name.
+        remote = ((_git_out(repo_path, "config", "--get", f"branch.{b}.remote") or "").strip()) or "origin"
+        target = merge_refs[0].removeprefix("refs/heads/") if len(merge_refs) == 1 else b
+        set_upstream = f"git branch --set-upstream-to={remote}/{target} {b}"
+        if len(merge_refs) > 1:
             return RepoSyncError(
                 f"Branch '{branch}' has more than one upstream merge ref configured, "
                 "so `git pull --ff-only` cannot pick one to fast-forward to.",
