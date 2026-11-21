@@ -460,23 +460,27 @@ def _diagnose_sync_failure(repo_path: Path, cmd: list, stderr: str):
         # Full ref, not --short: a tag with the branch's name makes --short print `heads/<name>`.
         head = (_git_out(repo_path, "symbolic-ref", "-q", "HEAD") or "").strip()
         branch = head.removeprefix("refs/heads/") if head.startswith("refs/heads/") else ""
-        refs = _git_out(repo_path, "config", "--get-all", f"branch.{branch}.merge") if branch else None
+        # NUL-delimited, not stripped or split: an empty value or one with a space is a value of its own.
+        done = subprocess.run(["git", "config", "--get-all", "-z", f"branch.{branch}.merge"],
+                              cwd=repo_path, capture_output=True) if branch else None
+        refs = ([os.fsdecode(v) for v in done.stdout.split(b"\0")[:-1]]
+                if done is not None and done.returncode == 0 else [])
         # The printed steps are pasted into a shell and a branch name can hold `;` or `$(...)`: quote it.
         # Never guess an upstream (remote names, fetch mappings and same-named tags all break a guess):
         # the repair offers one ready, quoted line per merge ref git already lists, or names a placeholder.
         b = shlex.quote(branch) if branch else "<branch>"
         key = shlex.quote(f"branch.{branch}.merge") if branch else "branch.<branch>.merge"
-        if len((refs or "").split()) > 1:
+        if len(refs) > 1:
             return RepoSyncError(
                 f"Branch '{branch}' has more than one upstream merge ref configured, "
                 "so `git pull --ff-only` cannot pick one to fast-forward to.",
-                detail=detail or refs,
+                detail=detail or "\n".join(refs),
                 fix=[
                     cd,
                     f"git config --get-all {key}   # lists the competing refs",
                     "Run ONE of these lines, the one for the ref you want to keep (it drops the others):",
                     # Each ref is quoted here: a ref the user copied out of git's listing could hold `;` or `$(...)`.
-                    *[f"git config --replace-all {key} {shlex.quote(r)}" for r in refs.split()],
+                    *[f"git config --replace-all {key} {shlex.quote(r)}" for r in refs],
                     rerun,
                 ],
             )

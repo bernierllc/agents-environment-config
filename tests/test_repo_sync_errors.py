@@ -111,6 +111,12 @@ def run_repair(clone, err, keep):
         subprocess.run(["bash", "-c", step], cwd=clone, check=True, capture_output=True, text=True)
 
 
+def merge_refs_raw(clone, branch="main"):
+    out = subprocess.run(["git", "config", "--get-all", "-z", f"branch.{branch}.merge"], cwd=clone, check=True,
+                         capture_output=True, text=True)
+    return out.stdout.split("\0")[:-1]
+
+
 def merge_refs(clone, branch="main"):
     out = subprocess.run(["git", "config", "--get-all", f"branch.{branch}.merge"], cwd=clone, check=True,
                          capture_output=True, text=True)
@@ -206,6 +212,22 @@ def test_a_listed_ref_with_shell_metacharacters_cannot_inject_through_the_printe
 
     assert not list(clone.glob("INJECTED*"))
     assert merge_refs(clone) == [evil]
+
+
+@pytest.mark.parametrize("odd", ["", "refs/heads/a b"])
+def test_merge_values_keep_their_boundaries_when_one_is_empty_or_has_a_space(remote_and_clone, odd):
+    # Codex P2 on #173 round 6: strip()/split() dropped an empty value and split "refs/heads/a b" in two,
+    # so the repair was missing or offered refs that match no configured value.
+    _, clone = remote_and_clone
+    git(clone, "config", "--add", "branch.main.merge", odd)
+
+    err = multi_ref_error(clone)
+
+    assert "'main' has more than one upstream merge ref" in err.message
+    run_repair(clone, err, keep="refs/heads/main")
+    assert merge_refs_raw(clone) == ["refs/heads/main"]
+    # the odd value itself is also offered as a choice, exactly as configured
+    assert f"git config --replace-all branch.main.merge {shlex.quote(odd)}" in err.fix
 
 
 def test_cd_step_quotes_a_checkout_path_with_spaces(remote_and_clone, tmp_path):
