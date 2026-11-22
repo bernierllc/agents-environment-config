@@ -52,7 +52,11 @@ version (the guard's released tag). Two separate jobs, each owned once:
 - **The guard owns "the replay describes the merge that lands against this base"**: the second parent must equal
   `base.sha` (Correct fix, step 3). Re-running the same event cannot select a newer main (the event's `base.sha` is
   immutable), so freshness is never obtained by re-evaluation. A stale slice is rebuilt on the new main, which pushes
-  a new head and fires a new event with the new `base.sha`.
+  a new head and fires a new event with the new `base.sha`. Rebuild means re-cutting the slice from its ORIGINAL
+  staging cut with the new main as second parent. The generic `pr-merge-flow` advice for a BEHIND PR (`gh pr
+  update-branch`) does not apply to a slice: it would merge main into the existing slice, giving parents
+  `(old-slice, new-main)`, whose first parent fails the staging-first-parent rule. The slice exception is stated
+  in the downstream handoff and as a docs-only note in `pr-merge-flow` (no hook change) when this plan ships.
 - **The server owns "the base did not move between evaluation and merge"**: the repo ruleset for main requires
   branches to be up to date before merging (the strict required-status-checks policy). GitHub rejects the merge
   atomically when main has moved past the head's main parent, so there is no check-then-merge race for `pr-merge-flow`
