@@ -28,6 +28,8 @@ COPY_SET = (
     "tests/test_check_forged_gate_names.py",
     "scripts/check-slice-provenance.sh",
     "tests/test_check_slice_provenance.py",
+    "scripts/replay-promote-slice.py",
+    "tests/test_replay_promote_slice.py",
 )
 
 

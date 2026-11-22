@@ -257,7 +257,7 @@ def test_a_tampered_commit_graph_cannot_fake_provenance(g):
     assert code == 1 and "not on staging's first-parent history" in out, out
 
 
-@pytest.mark.parametrize("where", ["checkout", "parameters", "global", "system"])
+@pytest.mark.parametrize("where", ["checkout", "parameters", "env-pairs", "global", "system"])
 def test_a_config_redirect_to_a_forged_remote_cannot_fake_provenance(g, tmp_path, where):
     head = slice_of(g, g.f1, g.m1)  # f1 is only staging's second parent
     forged = tmp_path / "forged.git"
@@ -270,6 +270,8 @@ def test_a_config_redirect_to_a_forged_remote_cannot_fake_provenance(g, tmp_path
         g.git(clone, "config", f"url.{fake}.insteadOf", real)
     elif where == "parameters":
         extra = {"GIT_CONFIG_PARAMETERS": f"'url.{fake}.insteadof'='{real}'"}
+    elif where == "env-pairs":  # inherited GIT_CONFIG_COUNT/KEY_n/VALUE_n reach every git call, git init included
+        extra = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"url.{fake}.insteadOf", "GIT_CONFIG_VALUE_0": real}
     else:
         cfg = tmp_path / f"{where}.gitconfig"
         cfg.write_text(f'[url "{fake}"]\n\tinsteadOf = {real}\n')
@@ -294,3 +296,34 @@ def test_an_explicit_git_remote_is_used_literally(g):
     code, out = g.run(PROVENANCE, head, g.m1, GITHUB_SERVER_URL="", GITHUB_REPOSITORY="",
                       GIT_REMOTE=f"file://{g.origin}")
     assert code == 0, out
+
+
+def test_inherited_git_exec_and_transport_env_never_reaches_git(g, tmp_path):
+    # GIT_EXEC_PATH would swap git's helpers (upload-pack runs from it on a local fetch); GIT_SSH_COMMAND and
+    # GIT_PROXY_COMMAND would run code on a transport. Every GIT_* variable but GIT_REMOTE is dropped first.
+    marker = tmp_path / "ran"
+    head = slice_of(g, g.s1, g.m1)
+    code, out = g.run(PROVENANCE, head, g.m1, GIT_EXEC_PATH=str(tmp_path / "nowhere"),
+                      GIT_SSH_COMMAND=f"touch {marker}", GIT_PROXY_COMMAND=f"touch {marker}")
+    assert code == 0, out
+    assert not marker.exists()
+
+
+def test_a_fetch_token_is_never_sent_to_a_non_https_remote_or_printed(g):
+    head = slice_of(g, g.s1, g.m1)
+    token = "ghs_" + "x" * 36
+    code, out = g.run(PROVENANCE, head, g.m1, SLICE_FETCH_TOKEN=token)
+    assert code == 1 and "only sent to an https remote" in out, out
+    assert token not in out
+
+
+def test_a_kept_scratch_repo_must_be_new(g, tmp_path):
+    head = slice_of(g, g.s1, g.m1)
+    existing = tmp_path / "scratch"
+    existing.mkdir()
+    code, out = g.run(PROVENANCE, head, g.m1, SLICE_SCRATCH=str(existing))
+    assert code == 1 and "must be a new directory" in out, out
+    fresh = tmp_path / "fresh"
+    code, out = g.run(PROVENANCE, head, g.m1, SLICE_SCRATCH=str(fresh))
+    assert code == 0, out
+    assert (fresh / "walk.git").is_dir()  # kept for the replay; the caller removes it

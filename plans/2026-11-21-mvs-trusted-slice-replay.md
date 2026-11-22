@@ -1,7 +1,7 @@
 # Trusted replay for merge-with-main promote slices (main-via-staging guard)
 
-> Status: R1 (step 3 provenance, rejection-only) implemented; every merge-with-main slice still fails closed.
-> R2 (trusted replay) and R3 (hosted evidence) not started.
+> Status: R1 (step 3 provenance, rejection-only) and R2 (trusted replay, `scripts/replay-promote-slice.py`,
+> rejection-only) implemented; every merge-with-main slice still fails closed. R3 (hosted evidence) not started.
 > Owner of the follow-up: aec (the canonical `main-via-staging.yml` and `scripts/check-main-source.sh`).
 
 ## Problem
@@ -142,6 +142,30 @@ read-only and gates nothing.
 - Compare pagination beyond 124 commits and the live truncation path are exercised on a throwaway PR
   (the downstream repo's throwaway-PR checklist) before any promotion relies on the guard.
 - The detector (`check-forged-gate-names.py`) returns rc 0 on the head.
+
+### R2 acceptance: hardening carried from the R1 review (round 4)
+
+R2 also closes the P2 items raised on R1's last review round, each with a real-graph test in
+`tests/test_check_slice_provenance.py`:
+
+- (a) Env-injected git config (`GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` pairs) is removed before the
+  first git call, `git init` included, so it cannot redirect the fetch.
+- (b) Every inherited `GIT_*` variable except the `GIT_REMOTE` input is unset (`GIT_EXEC_PATH`, `GIT_SSH_COMMAND`,
+  `GIT_PROXY_COMMAND`, `GIT_ASKPASS`, `GIT_TEMPLATE_DIR`, ...). HTTP proxy and TLS variables stay: they are the
+  runner's environment, which the `pull_request_target` job controls, never the PR head.
+- (c) A private repo's fetch authenticates with `SLICE_FETCH_TOKEN`, sent as an `http.extraHeader` through env config
+  (never argv), only to an `https` remote, and never printed.
+- (d) A fresh adversarial review of the replay and the activation diff stays an activation gate for R3: R2 passing its
+  review does not stand in for it.
+- (e) R3 proves the fetch cost on a large slice and that the workflow passes the event's immutable SHAs
+  (`github.event.pull_request.head.sha` / `base.sha`) and `SLICE_REPLAY_TOOL_VERSION`; R2 only consumes them.
+
+R2 decisions, stated: the generator config lives in BASE_SHA's tree at `.github/slice-replay.json`
+(`{"generator": {"entry": ..., "outputs": [...]}}`); with none, the replay is git's plain merge. A conflict outside the
+declared outputs fails closed; a conflicted output starts from BASE_SHA's copy, a clean one from git's merge, and the
+generator rewrites both. The tool version in the tuple is the release tag plus a digest of the replay and provenance
+scripts. Network isolation of the generator is not OS-enforced in R2: it runs with no token, no proxy variables and
+no installed packages, but Node can still open a socket; R3 decides whether the hosted job adds a network sandbox.
 
 ## Consequence for a downstream repo that re-vendors the guard without `promote/*`
 

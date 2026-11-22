@@ -36,14 +36,15 @@ case "$HEAD_REF" in
     exit 0
     ;;
 esac
-# A merge-with-main promote slice is still rejected, exactly as before this branch existed: provenance may only
-# add a reason. Acceptance needs the trusted replay (plan 2026-11-21-mvs-trusted-slice-replay, R2) and its
-# hosted evidence (R3); until both land no exit path here is 0. Provenance output feeds that later work.
+# A merge-with-main promote slice is still rejected, exactly as before this branch existed: provenance and the
+# trusted replay (plan 2026-11-21-mvs-trusted-slice-replay, R1 and R2) may only add a reason. Acceptance also needs
+# the replay's hosted evidence (R3); until it lands no exit path here is 0. The replay tuple feeds that work.
 if [[ "$HEAD_REF" =~ ^promote/[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+$ ]]; then
-  if bash "$(dirname "${BASH_SOURCE[0]}")/check-slice-provenance.sh"; then
-    echo "::notice::slice provenance holds for '$HEAD_REF'; that alone never admits a slice."
+  # The replay runs provenance first and prints both results; it is not yet allowed to admit anything.
+  if python3 -I "$(dirname "${BASH_SOURCE[0]}")/replay-promote-slice.py"; then
+    echo "::notice::slice replay holds for '$HEAD_REF'; that alone never admits a slice until its hosted evidence (R3) lands."
   fi
-  echo "::error::promote slice '$HEAD_REF' rejected: this guard has no trusted replay yet, so no slice is accepted."
+  echo "::error::promote slice '$HEAD_REF' rejected: this guard does not admit slices yet, so no slice is accepted."
   echo "Promote 'staging' -> main instead."
   exit 1
 fi
