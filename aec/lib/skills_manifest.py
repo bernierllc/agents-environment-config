@@ -271,7 +271,8 @@ def version_satisfies(version: str, spec) -> bool:
     """
     # A pin naming the exact version string the source ships always holds, even an opaque
     # one (an MCP's "2026-11-21"), so an exported manifest re-applies unchanged.
-    if isinstance(spec, str) and spec.strip() and spec.strip() == str(version).strip():
+    exact = spec.strip() if isinstance(spec, str) else ""
+    if exact == str(version).strip() and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", exact):
         return True
     clauses = parse_version_spec(spec)
     if not clauses:

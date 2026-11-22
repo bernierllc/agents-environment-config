@@ -68,6 +68,8 @@ def test_exact_opaque_version_round_trips():
         version_satisfies("2026-11-22", "2026-11-21")
     entry = _plan("2026-11-21", available="2026-11-21", installed="2026-11-21")
     assert entry.action == "noop"
+    for shaped in (">=2.0", "^2.0", "*"):  # an operator-shaped "version" never matches itself
+        assert _plan(shaped, available=shaped).action == "unsatisfiable"
 
 
 # --- plan_apply: default catalog ("") and a custom source, same evaluator ---
