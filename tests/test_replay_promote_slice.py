@@ -127,11 +127,13 @@ def rule(strict):
                                                               "required_status_checks": []}}
 
 
-def gh_path(tmp_path, rules=(rule(True),), fail=False):
-    """PATH with a `gh` that answers only GET rules/branches/main, logging every call to tmp_path/gh.log."""
+def gh_path(tmp_path, rules=(rule(True),), fail=False, pages=None):
+    """PATH with a `gh` that answers only GET rules/branches/main, logging every call to tmp_path/gh.log.
+
+    The reply is what `gh api --paginate --slurp` prints: one array per page (one page of `rules` by default)."""
     bindir, log = tmp_path / "bin", tmp_path / "gh.log"
     bindir.mkdir(exist_ok=True)
-    reply = "exit 4" if fail else f"echo '{json.dumps(list(rules))}'"
+    reply = "exit 4" if fail else f"echo '{json.dumps([list(p) for p in (pages or (rules,))])}'"
     (bindir / "gh").write_text(f'#!/bin/sh\necho "$@" >> {log}\n'
                                f'case "$*" in *rules/branches/main*) {reply} ;; *) exit 98 ;; esac\n')
     (bindir / "gh").chmod(0o755)
@@ -157,7 +159,14 @@ def test_the_guard_admits_a_slice_whose_replay_holds_while_main_requires_up_to_d
     code, out = g.run(GUARD, head, PATH=gh_path(tmp_path))
     assert code == 0, out
     assert holds(out) and "allowed" in out, out
-    assert (tmp_path / "gh.log").read_text().split() == ["api", "repos/my-org/my-repo/rules/branches/main?per_page=100"]
+    assert (tmp_path / "gh.log").read_text().split() == ["api", "--paginate", "--slurp",
+                                                         "repos/my-org/my-repo/rules/branches/main?per_page=100"]
+
+
+def test_the_guard_reads_mains_strict_rule_from_any_page_of_the_rules_reply(g, tmp_path):
+    other = {"type": "deletion"}
+    code, out = g.run(GUARD, g.slice(g.good_files()), PATH=gh_path(tmp_path, pages=((other,) * 100, (rule(True),))))
+    assert code == 0 and "allowed" in out, out
 
 
 @pytest.mark.parametrize("rules,fail", [((rule(False),), False), ((), False), ((rule(True),), True)],

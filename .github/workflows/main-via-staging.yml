@@ -105,7 +105,7 @@ jobs:
             fi
           done <<'PINS'
           15044e42b03aa9005ecda101e09f75814c913b091a3011e3b096fb471ab075ce  scripts/check-forged-gate-names.py
-          31039532206e9d2cedaee4d175812996864f86a07c9365b1d5e3b78481eac886  scripts/check-main-source.sh
+          67e364d8c52831d2721d3e90c71d292a979129f1eadaf9b2460f9f84726c9266  scripts/check-main-source.sh
           37d0d031fb0742b7d1d23e418ec4f75d235fbe3d13a198b7d0d2eea7edb39659  scripts/check-slice-provenance.sh
           581e905e253299b7cd2aea781a53e149e88156d9e59e6976c30035472389a32b  scripts/replay-promote-slice.py
           PINS

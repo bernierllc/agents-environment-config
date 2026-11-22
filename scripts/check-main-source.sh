@@ -50,14 +50,15 @@ if [[ "$HEAD_REF" =~ ^promote/[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+$ ]]; then
   # The replay describes the merge against BASE_SHA; only the server can keep main from moving before the merge.
   # Without main's strict up-to-date policy a slice evaluated at one main could land on a newer one, so a slice is
   # never admitted until the rules GitHub applies to main carry it (a ruleset; classic protection is not read).
-  if ! rules=$(gh api "repos/$REPO/rules/branches/main?per_page=100"); then
+  # --slurp: one array per page, so a strict rule past the first page still counts.
+  if ! rules=$(gh api --paginate --slurp "repos/$REPO/rules/branches/main?per_page=100"); then
     echo "::error::promote slice '$HEAD_REF' rejected: could not read the rules for main, failing closed."
     exit 1
   fi
   if ! printf '%s' "$rules" | python3 -I -c 'import json, sys
 sys.exit(0 if any(r.get("type") == "required_status_checks"
                   and (r.get("parameters") or {}).get("strict_required_status_checks_policy") is True
-                  for r in json.load(sys.stdin)) else 1)'; then
+                  for page in json.load(sys.stdin) for r in page) else 1)'; then
     echo "::error::promote slice '$HEAD_REF' rejected: main's ruleset does not require branches to be up to date"
     echo "(strict required status checks), so the replayed merge may not be the one that lands. Enable it first."
     exit 1

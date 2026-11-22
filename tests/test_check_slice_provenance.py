@@ -105,8 +105,8 @@ def test_provenance_and_replay_alone_do_not_admit_a_slice_without_mains_up_to_da
     bindir = tmp_path / "bin"
     bindir.mkdir()
     (bindir / "gh").write_text("#!/bin/sh\n"
-                               'case "$*" in *rules/branches/main*) echo \'[{"type":"required_status_checks",'
-                               '"parameters":{"strict_required_status_checks_policy":false}}]\' ;; *) exit 98 ;; esac\n')
+                               'case "$*" in *rules/branches/main*) echo \'[[{"type":"required_status_checks",'
+                               '"parameters":{"strict_required_status_checks_policy":false}}]]\' ;; *) exit 98 ;; esac\n')
     (bindir / "gh").chmod(0o755)
     head = slice_of(g, g.s1, g.m1)
     code, out = g.run(GUARD, head, g.m1, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}")
