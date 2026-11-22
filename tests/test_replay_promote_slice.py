@@ -342,6 +342,10 @@ def test_the_merge_tree_reply_parses(raw, expected):
     f"{TREE}\0out\0\0" "1\0out\0CONFLICT (contents)\0text",  # last message not NUL-terminated
     f"{TREE}\0out\0\0" "1\0out\0CONFLICT (contents)\0",  # last message has no text field
     f"{TREE}\0out\0",  # conflicted paths with no terminating empty field
+    f"{TREE}\0out\0\0",  # conflicted paths with every message cut off
+    f"{TREE}\0\0" "+1\0a\0CONFLICT (x)\0t\0",  # signed count
+    f"{TREE}\0\0" " 1\0a\0CONFLICT (x)\0t\0",  # padded count
+    f"{TREE}\0\0" "\u0661\0a\0CONFLICT (x)\0t\0",  # non-ASCII digit
     f"{TREE}",  # tree not terminated
     f"{TREE}\0\0" "3\0a\0CONFLICT (x)\0",  # count runs past the reply
     f"{TREE}\0\0" "x\0a\0CONFLICT (x)\0t\0",  # count is not a number

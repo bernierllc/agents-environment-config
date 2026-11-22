@@ -184,13 +184,17 @@ def parse_merge_tree(raw):
             sep = rest.index("")
             conflicted, rest = rest[:sep], rest[sep + 1:]
         while rest:
+            if not re.fullmatch(r"[0-9]+", rest[0]):
+                raise ValueError(f"message count {rest[0]!r} is not a plain decimal")
             n = int(rest[0])
-            if n < 0 or len(rest) < n + 3:
+            if len(rest) < n + 3:
                 raise ValueError(f"message count {n} runs past the reply")
             messages.append((rest[n + 1], rest[1:n + 1]))
             rest = rest[n + 3:]
     except ValueError as e:
         raise Reject(f"git merge-tree reply is not in its -z format: {e}")
+    if conflicted and not messages:
+        raise Reject("git merge-tree reply lists conflicted paths but no message for them, so it is cut short")
     return tree, sorted(set(conflicted)), messages
 
 
