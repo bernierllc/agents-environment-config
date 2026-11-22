@@ -122,9 +122,9 @@ def g(tmp_path, env):
     return Graph(tmp_path, env)
 
 
-def rule(strict):
+def rule(strict, checks=({"context": "PRs into main must come from staging"},)):
     return {"type": "required_status_checks", "parameters": {"strict_required_status_checks_policy": strict,
-                                                              "required_status_checks": []}}
+                                                              "required_status_checks": list(checks)}}
 
 
 def gh_path(tmp_path, rules=(rule(True),), fail=False, pages=None, raw=None):
@@ -171,8 +171,9 @@ def test_the_guard_reads_mains_strict_rule_from_any_page_of_the_rules_reply(g, t
     assert code == 0 and "allowed" in out, out
 
 
-@pytest.mark.parametrize("rules,fail", [((rule(False),), False), ((), False), ((rule(True),), True)],
-                         ids=["not-strict", "no-status-check-rule", "rules-unreadable"])
+@pytest.mark.parametrize("rules,fail", [((rule(False),), False), ((), False), ((rule(True),), True),
+                                        ((rule(True, checks=()),), False)],
+                         ids=["not-strict", "no-status-check-rule", "rules-unreadable", "strict-without-checks"])
 def test_the_guard_rejects_a_slice_whose_replay_holds_unless_main_requires_up_to_date_branches(g, tmp_path, rules,
                                                                                               fail):
     # Without strict checks main can move after the event, so the merge that lands is not the one replayed.

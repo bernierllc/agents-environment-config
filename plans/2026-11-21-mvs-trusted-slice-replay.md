@@ -174,8 +174,10 @@ no installed packages, but Node can still open a socket; R3 decides whether the 
 
 `check-main-source.sh` admits a `promote/<date>-<n>` slice (same repo only) when, in this order: the trusted replay
 exits 0 (provenance, then the replayed merge equals the head's tree), and `GET repos/{repo}/rules/branches/main` carries
-a `required_status_checks` rule with `strict_required_status_checks_policy: true`. Everything else rejects, and an
-unreadable rules reply rejects. The replay runs first, so a tampered slice is rejected from git objects alone, before
+a `required_status_checks` rule with `strict_required_status_checks_policy: true` and a non-empty
+`required_status_checks` list (GitHub: strict mode does not take effect unless at least one status check is
+required). Every page of the reply is read and it is decoded strictly from its raw bytes. Everything else rejects, and
+an unreadable or malformed rules reply rejects. The replay runs first, so a tampered slice is rejected from git objects alone, before
 any API call. `main-via-staging.yml` passes `HEAD_SHA` / `BASE_SHA` (the event's immutable SHAs),
 `SLICE_FETCH_TOKEN` (the job's `GITHUB_TOKEN`, `contents: read`) and `SLICE_REPLAY_TOOL_VERSION`.
 
@@ -216,8 +218,9 @@ live remote and the live rules API; main-via-staging runs from main, so the host
 
 Remaining live steps, each recorded here when it runs:
 
-1. Platform ops: enable `strict_required_status_checks_policy` on aec's `main promotion gate` ruleset (checked
-   against the CI-cost note first); verify a slice whose main parent is stale cannot merge.
+1. Platform ops: enable `strict_required_status_checks_policy` on aec's `main promotion gate` ruleset (it already
+   requires 4 status checks; checked against the CI-cost note first); verify a slice whose main parent is stale
+   cannot merge.
 2. Main-default activation: after the staging → main promotion carrying R3, open a PR from a fresh slice into main
    and record the hosted `PRs into main must come from staging` run (admitted with the strict policy on; rejected
    before it).

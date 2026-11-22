@@ -68,11 +68,15 @@ pages = json.loads(open(sys.argv[1], "rb").read().decode("utf-8"), object_pairs_
 ok = isinstance(pages, list) and all(isinstance(p, list) and all(
     isinstance(r, dict) and isinstance(r.get("type"), str) and isinstance(r.get("parameters", {}), dict)
     for r in p) for p in pages)
+# GitHub: strict mode does not take effect unless at least one status check is required.
 sys.exit(0 if ok and any(r["type"] == "required_status_checks"
                          and r.get("parameters", {}).get("strict_required_status_checks_policy") is True
+                         and isinstance(r["parameters"].get("required_status_checks"), list)
+                         and r["parameters"]["required_status_checks"]
                          for p in pages for r in p) else 1)' "$rules"; then
     echo "::error::promote slice '$HEAD_REF' rejected: main's ruleset does not require branches to be up to date"
-    echo "(strict required status checks), so the replayed merge may not be the one that lands. Enable it first."
+    echo "(strict required status checks, with at least one check), so the replayed merge may not be the one that"
+    echo "lands. Enable it first."
     exit 1
   fi
   echo "::notice::promote slice '$HEAD_REF' is the trusted replay of its staging cut merged with main: allowed."
