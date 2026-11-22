@@ -1,4 +1,6 @@
-"""The promotion guard: only a same-repo `staging` branch may open a PR into main."""
+"""The promotion guard: only a same-repo `staging` branch, or a promote slice whose trusted replay holds, may open a
+PR into main (the replay itself: test_replay_promote_slice.py)."""
+import hashlib
 import json
 import os
 import subprocess
@@ -81,11 +83,35 @@ def test_permissions_are_minimal():
     assert DOC["permissions"] == {"contents": "read", "actions": "read", "checks": "read"}
 
 
+GUARD_SCRIPTS = ("check-forged-gate-names.py", "check-main-source.sh", "check-slice-provenance.sh",
+                 "replay-promote-slice.py")
+
+
+def _pins():
+    (step,) = [s for s in _job()["steps"] if "run" in s]
+    body = step["run"].split("<<'PINS'\n", 1)[1].split("\nPINS\n", 1)[0]
+    return {path: want for want, path in (line.split() for line in body.splitlines())}
+
+
 def test_missing_guard_script_on_base_fails_with_a_clear_message_before_running_them():
     # Bootstrap artifact: workflow on the base branch before its scripts (was a silent exit 127).
     missing = WORKFLOW.index("guard script missing on base")
     assert missing < WORKFLOW.index("scripts/check-forged-gate-names.py 2>&1")
-    assert "scripts/check-forged-gate-names.py scripts/check-main-source.sh; do" in WORKFLOW
+
+
+def test_the_workflow_pins_every_guard_script_it_runs_at_its_current_hash():
+    # The pins are the released copy set's own hashes: editing a guard script without its pin fails here first.
+    root = Path(__file__).resolve().parent.parent
+    assert _pins() == {f"scripts/{n}": hashlib.sha256((root / "scripts" / n).read_bytes()).hexdigest()
+                       for n in GUARD_SCRIPTS}
+
+
+def test_the_job_passes_the_replay_its_event_shas_and_a_named_tool_version():
+    env = [s for s in _job()["steps"] if "run" in s][0]["env"]
+    assert env["HEAD_SHA"] == "${{ github.event.pull_request.head.sha }}"
+    assert env["BASE_SHA"] == "${{ github.event.pull_request.base.sha }}"
+    assert env["SLICE_REPLAY_TOOL_VERSION"] == "${{ github.sha }}"
+    assert env["SLICE_FETCH_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
 
 
 def test_check_run_listing_uses_filter_all_so_an_earlier_same_name_run_is_not_hidden():
@@ -101,17 +127,18 @@ OWN_JOB_ONLY = json.dumps({"total_count": 1, "check_runs": [{
 
 def _run_workflow_step(tmp_path, head_ref, list_fails=False, list_json=OWN_JOB_ONLY,
                        run_path_event=".github/workflows/main-via-staging.yml\tpull_request_target",
-                       head_repo="my-org/my-repo", drop_script=None):
+                       head_repo="my-org/my-repo", drop_script=None, stale_script=None):
     """Run the guard step's shell body with a fake `gh`; return (exit code, combined output)."""
     (step,) = [s for s in _job()["steps"] if "run" in s]
     root = Path(__file__).resolve().parent.parent
     work = tmp_path / "repo"
     (work / "scripts").mkdir(parents=True)
-    for name in ("check-forged-gate-names.py", "check-main-source.sh"):
+    for name in GUARD_SCRIPTS:
         if name != drop_script:
-            (work / "scripts" / name).write_bytes((root / "scripts" / name).read_bytes())
+            data = (root / "scripts" / name).read_bytes()
+            (work / "scripts" / name).write_bytes(data + b"\n# an older copy\n" if name == stale_script else data)
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
+    bin_dir.mkdir(parents=True)
     gh = bin_dir / "gh"
     gh.write_text(
         "#!/bin/bash\n"
@@ -132,7 +159,7 @@ def _run_workflow_step(tmp_path, head_ref, list_fails=False, list_json=OWN_JOB_O
         "HEAD_REF": head_ref,
         "HEAD_REPO": head_repo,
         "REPO": "my-org/my-repo",
-        "SHA": "deadbeef",
+        "HEAD_SHA": "deadbeef",
         "GH_TOKEN": "unused",
     }
     proc = subprocess.run(["bash", "-c", step["run"]], cwd=work, env=env, capture_output=True, text=True)
@@ -149,6 +176,13 @@ def test_a_disallowed_branch_fails_the_job_naming_the_head(tmp_path):
     code, out = _run_workflow_step(tmp_path, "feat/x")
     assert code == 1
     assert "feat/x" in out and "staging" in out
+
+
+def test_a_promote_slice_whose_replay_cannot_run_fails_the_job(tmp_path):
+    # HEAD_SHA is not a commit here, so the replay rejects before any fetch or API call.
+    code, out = _run_workflow_step(tmp_path, "promote/2026-11-22-1")
+    assert code == 1
+    assert "trusted replay does not hold" in out and "or a promote slice whose trusted replay holds" in out
 
 
 def test_a_fork_fails_the_job_naming_the_head_repo(tmp_path):
@@ -175,8 +209,18 @@ def test_a_forged_same_name_job_fails_the_job_even_from_staging(tmp_path):
     assert "forged check" in out
 
 
-@pytest.mark.parametrize("script", ["check-main-source.sh", "check-forged-gate-names.py"])
+@pytest.mark.parametrize("script", GUARD_SCRIPTS)
 def test_a_missing_guard_script_fails_the_job_with_a_message_not_127(tmp_path, script):
     code, out = _run_workflow_step(tmp_path, "staging", drop_script=script)
     assert code == 1
     assert f"guard script missing on base: scripts/{script}" in out
+
+
+@pytest.mark.parametrize("script", GUARD_SCRIPTS)
+def test_a_stale_guard_script_fails_the_job_until_the_copy_set_is_revendored(tmp_path, script):
+    # An older replay beside this workflow must not judge slices; even staging is refused until the set matches.
+    code, out = _run_workflow_step(tmp_path / "stale", "staging", stale_script=script)
+    assert code == 1
+    assert f"guard script stale on base: scripts/{script}" in out and "Re-vendor" in out
+    code, out = _run_workflow_step(tmp_path / "revendored", "staging")
+    assert code == 0, out

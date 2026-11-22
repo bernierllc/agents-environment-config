@@ -1,8 +1,9 @@
 """Merge-with-main promote slice provenance, on real git graphs served by a local bare remote.
 
 check-slice-provenance.sh only decides whether a slice's parents may feed the trusted replay (plan
-2026-11-21-mvs-trusted-slice-replay, step 3). check-main-source.sh still rejects every slice: no replay, no pass.
-The network boundary is the git remote; it is a real bare repository here, so nothing is stubbed.
+2026-11-21-mvs-trusted-slice-replay, step 3): provenance alone is never a pass. The network boundary is the git
+remote; it is a real bare repository here. The one guard test that gets past the replay reads main's rules from a
+stub `gh`, the GitHub API boundary.
 """
 import hashlib
 import os
@@ -98,13 +99,19 @@ def test_a_valid_slice_satisfies_provenance_even_from_a_shallow_checkout(g):
     assert f"staging={g.s2}" in out and f"base={g.m1}" in out
 
 
-def test_a_slice_that_satisfies_provenance_is_still_rejected_by_the_guard(g):
-    # Program-cop constraint for R1: provenance may only add rejections. No slice passes until the
-    # trusted replay (R2) and its hosted evidence (R3) land.
+def test_provenance_and_replay_alone_do_not_admit_a_slice_without_mains_up_to_date_rule(g, tmp_path):
+    # The plain merge of these empty trees is the empty tree, so the replay holds; main's rules without the strict
+    # up-to-date policy still reject it (test_replay_promote_slice.py covers admission).
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "gh").write_text("#!/bin/sh\n"
+                               'case "$*" in *rules/branches/main*) echo \'[{"type":"required_status_checks",'
+                               '"parameters":{"strict_required_status_checks_policy":false}}]\' ;; *) exit 98 ;; esac\n')
+    (bindir / "gh").chmod(0o755)
     head = slice_of(g, g.s1, g.m1)
-    code, out = g.run(GUARD, head, g.m1)
+    code, out = g.run(GUARD, head, g.m1, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}")
     assert code == 1, out
-    assert "slice provenance holds" in out and "rejected" in out
+    assert "slice replay holds" in out and "does not require branches to be up to date" in out, out
 
 
 @pytest.mark.parametrize("head_repo", ["someone/my-repo", "my-org/other-repo", ""],
@@ -196,7 +203,7 @@ def test_head_content_is_never_checked_out_or_run(g, tmp_path):
     before = g.git(clone, "rev-parse", "HEAD")
     code, out = g.run(GUARD, head, g.m1, cwd=clone)
     assert code == 1, out
-    assert "slice provenance holds" in out, out  # the head objects were examined, not an early error
+    assert "slice provenance holds" in out and "is not the replayed merge" in out, out  # examined, not an early error
     assert not marker.exists()
     assert g.git(clone, "rev-parse", "HEAD") == before
     assert g.git(clone, "status", "--porcelain") == ""
@@ -206,7 +213,7 @@ def test_head_content_is_never_checked_out_or_run(g, tmp_path):
 
 
 def test_the_guard_without_provenance_inputs_still_rejects_a_slice(g):
-    # Today's workflow passes no HEAD_SHA/BASE_SHA; the slice branch must fail closed, never skip.
+    # A workflow copy that passes no HEAD_SHA/BASE_SHA must fail closed on the slice branch, never skip.
     e = {k: v for k, v in g.env.items() if k not in ("HEAD_SHA", "BASE_SHA")}
     e.update(HEAD_REF=SLICE, HEAD_REPO="my-org/my-repo", REPO="my-org/my-repo")
     p = subprocess.run(["bash", str(GUARD)], cwd=g.guard_clone(), env=e, capture_output=True, text=True)

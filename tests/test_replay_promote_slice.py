@@ -2,8 +2,9 @@
 
 replay-promote-slice.py (plan 2026-11-21-mvs-trusted-slice-replay, R2) replays git's own merge of a slice's
 authorized parents, regenerates the declared outputs with the BASE's generator, and requires the head's tree.
-check-main-source.sh still rejects every slice until R3. The network boundary is the git remote, a real bare repo
-here; the generator is a real Node script run by the replay. Nothing we own is stubbed.
+check-main-source.sh (R3) admits a slice only when that holds and main's rules require up-to-date branches. The
+network boundaries are the git remote, a real bare repo here, and the GitHub API, a stub `gh` that serves main's
+rules; the generator is a real Node script run by the replay. Nothing we own is stubbed.
 """
 import importlib.util
 import json
@@ -121,6 +122,22 @@ def g(tmp_path, env):
     return Graph(tmp_path, env)
 
 
+def rule(strict):
+    return {"type": "required_status_checks", "parameters": {"strict_required_status_checks_policy": strict,
+                                                              "required_status_checks": []}}
+
+
+def gh_path(tmp_path, rules=(rule(True),), fail=False):
+    """PATH with a `gh` that answers only GET rules/branches/main, logging every call to tmp_path/gh.log."""
+    bindir, log = tmp_path / "bin", tmp_path / "gh.log"
+    bindir.mkdir(exist_ok=True)
+    reply = "exit 4" if fail else f"echo '{json.dumps(list(rules))}'"
+    (bindir / "gh").write_text(f'#!/bin/sh\necho "$@" >> {log}\n'
+                               f'case "$*" in *rules/branches/main*) {reply} ;; *) exit 98 ;; esac\n')
+    (bindir / "gh").chmod(0o755)
+    return f"{bindir}{os.pathsep}{os.environ['PATH']}"
+
+
 def holds(out):
     line = [x for x in out.splitlines() if x.startswith("slice replay holds:")]
     return line[0] if line else None
@@ -135,12 +152,22 @@ def test_a_slice_equal_to_the_replayed_merge_holds(g):
     assert f"head={head} staging={g.s1} base={g.m1} " in line and f"generator={gen_tree}" in line, out
 
 
-def test_the_guard_still_rejects_a_slice_whose_replay_holds(g):
-    # R2 may only add rejections: no slice is admitted until the replay's hosted evidence (R3) lands.
+def test_the_guard_admits_a_slice_whose_replay_holds_while_main_requires_up_to_date_branches(g, tmp_path):
     head = g.slice(g.good_files())
-    code, out = g.run(GUARD, head)
+    code, out = g.run(GUARD, head, PATH=gh_path(tmp_path))
+    assert code == 0, out
+    assert holds(out) and "allowed" in out, out
+    assert (tmp_path / "gh.log").read_text().split() == ["api", "repos/my-org/my-repo/rules/branches/main?per_page=100"]
+
+
+@pytest.mark.parametrize("rules,fail", [((rule(False),), False), ((), False), ((rule(True),), True)],
+                         ids=["not-strict", "no-status-check-rule", "rules-unreadable"])
+def test_the_guard_rejects_a_slice_whose_replay_holds_unless_main_requires_up_to_date_branches(g, tmp_path, rules,
+                                                                                              fail):
+    # Without strict checks main can move after the event, so the merge that lands is not the one replayed.
+    code, out = g.run(GUARD, g.slice(g.good_files()), PATH=gh_path(tmp_path, rules, fail))
     assert code == 1, out
-    assert holds(out) and "rejected" in out, out
+    assert holds(out) and "rejected" in out and "allowed" not in out, out
 
 
 def test_two_runs_give_the_identical_tuple_and_tree(g):
@@ -302,21 +329,13 @@ def test_a_truncated_fetch_fails_closed(g):
     assert code == 1 and not holds(out), out
 
 
-def test_a_forged_promote_slice_check_changes_nothing(g, tmp_path):
-    # The guard derives its verdict from git objects only. A gh on PATH that would report a passing
-    # 'Promote slice' check run is never consulted.
-    bindir, log = tmp_path / "bin", tmp_path / "gh.log"
-    bindir.mkdir()
-    gh = bindir / "gh"
-    gh.write_text(f'#!/bin/sh\necho "$@" >> {log}\necho \'{{"name":"Promote slice","conclusion":"success"}}\'\n')
-    gh.chmod(0o755)
-    path = f"{bindir}{os.pathsep}{os.environ['PATH']}"
+def test_a_tampered_slice_is_rejected_before_any_api_call_even_with_up_to_date_rules(g, tmp_path):
+    # The verdict on the head comes from git objects only; no check run (a forged 'Promote slice' one included) and
+    # no API reply can admit a slice whose replay fails, so gh is never called for it.
     tampered = g.good_files(**{"src/backdoor.js": b"evil\n"})
-    code, out = g.run(REPLAY, g.slice(tampered), PATH=path)
-    assert code == 1 and "is not the replayed merge" in out, out
-    code, out = g.run(GUARD, g.slice(g.good_files()), PATH=path)
-    assert code == 1 and "rejected" in out, out
-    assert not log.exists()
+    code, out = g.run(GUARD, g.slice(tampered), PATH=gh_path(tmp_path))
+    assert code == 1 and "is not the replayed merge" in out and "rejected" in out, out
+    assert not (tmp_path / "gh.log").exists()
 
 
 def _replay_module():
