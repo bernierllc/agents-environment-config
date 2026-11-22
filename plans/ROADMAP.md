@@ -17,6 +17,12 @@ unit of impact lives — not a contract.
 
 ## Review follow-ups awaiting prioritization
 
+- [Trusted replay for merge-with-main promote slices](2026-11-21-mvs-trusted-slice-replay.md): a
+  downstream slice-aware mid guard fails closed for a slice head that merges main into its staging cut. The
+  guard should run the base ref's script and generator over fetched head objects; consuming the
+  `Promote slice` check result is rejected (it runs from the PR head, so a forged check passes).
+  Scheduling pending.
+
 - [Land org-config Phase 4 from the parked branch](2026-11-19-org-config-phase-4-landing.md): time-bound
   rules, per-project overlays, `enrollment_script` and branding are built, tested and documented on
   `claude/org-config-phase-4` (tip `7aa2967`, 15 commits, never a PR) and exist nowhere else. `staging` moved
