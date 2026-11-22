@@ -1,0 +1,3 @@
+# Lets `git archive` and GitHub source ZIP/tarballs carry the release version
+# (read by setuptools-scm from .git_archival.txt when there is no .git directory).
+.git_archival.txt export-subst

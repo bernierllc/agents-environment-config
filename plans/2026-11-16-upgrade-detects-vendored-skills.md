@@ -93,7 +93,9 @@ has no manifest row on this machine, so it is invisible to the comparison. Silen
   clean.
 - `aec outdated` itself (not only the `update` summary) lists the vendored copy.
 - Cross-repo: the stale vendored-only skill sits in a tracked repo other than the current one, with no manifest row
-  for it. `aec upgrade` from the current repo reaches that repo: `_find_outdated_repos` (`aec/commands/upgrade.py`)
+  for it. `aec upgrade --all` from the current repo reaches that repo (a default `aec upgrade` is current-repo only once the
+  upgrade-scope fix, tracker id AEC-UPGRADE-SCOPE, defines `--all`; see `2026-11-21-stale-skills-fail-loudly.md` step 2):
+  `_find_outdated_repos` (`aec/commands/upgrade.py`)
   currently examines manifest entries only, so it must also return a repo whose only stale item is a vendored copy
   before `_upgrade_scope` runs on it. The test fails if `outdated --all` lists it and `upgrade` skips it.
 - A vendored copy with local edits: reported, not overwritten.

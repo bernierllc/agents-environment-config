@@ -2,6 +2,8 @@
 # Cleanup hung processes and Docker resources.
 # Only kills actually hung/unresponsive processes, not active ones.
 # Safe to run from Raycast or CLI.
+# Exit codes: 0 ok; 1 a Colima restart failed; 3 free space is still under
+# CLEANUP_MIN_FREE_PERCENT (default 15) after cleanup. See low_disk_check.
 
 
 # Run a command with timeout (macOS doesn't have GNU timeout)
@@ -133,10 +135,52 @@ free_kb() {
     df -Pk "$HOME" | awk 'NR==2 {print $4}'
 }
 
+# Free space on the volume holding $HOME, as a whole percent of used + free.
+# Fails (prints nothing) when df fails or its row is not usable numbers, so a
+# broken measurement is never read as a number.
+free_percent() {
+    local out
+    out=$(df -Pk "$HOME") || return 1
+    printf '%s\n' "$out" | awk 'NR==2 && $3 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/ && $3 + $4 > 0 {print int($4 * 100 / ($3 + $4)); ok=1} END {exit !ok}'
+}
+
+# Fails loudly (banner on stderr, return 1) when free space is under
+# CLEANUP_MIN_FREE_PERCENT (default 15). A full disk stops apps from writing
+# their own state, so a scheduled run must say so instead of ending quietly.
+# CLEANUP_PRUNE_ON_LOW_DISK=1 first runs the sibling prune-merged-worktrees.sh
+# (override the path with CLEANUP_PRUNE_SCRIPT); off by default because that
+# script removes worktrees and each user opts in to that themselves.
+low_disk_check() {
+    local min="${CLEANUP_MIN_FREE_PERCENT:-15}" pct
+    local prune="${CLEANUP_PRUNE_SCRIPT:-$(dirname "${BASH_SOURCE[0]}")/prune-merged-worktrees.sh}"
+    case "$min" in
+        ''|*[!0-9]*|????*) echo "LOW DISK check failed: CLEANUP_MIN_FREE_PERCENT must be a whole number from 0 to 100 (got '$min')." >&2; return 1 ;;
+    esac
+    [ "$((10#$min))" -le 100 ] || { echo "LOW DISK check failed: CLEANUP_MIN_FREE_PERCENT must be a whole number from 0 to 100 (got '$min')." >&2; return 1; }
+    min=$((10#$min))
+    pct=$(free_percent) || { echo "LOW DISK check failed: could not read free space on the volume holding $HOME." >&2; return 1; }
+    [ "$pct" -ge "$min" ] && return 0
+    if [ "${CLEANUP_PRUNE_ON_LOW_DISK:-0}" = 1 ]; then
+        if [ -x "$prune" ]; then
+            echo "  Free space is ${pct}%, under ${min}%: running $prune"
+            "$prune" || echo "  (prune exited non-zero: $prune)"
+            pct=$(free_percent) || { echo "LOW DISK check failed: could not re-read free space after the prune." >&2; return 1; }
+            [ "$pct" -ge "$min" ] && return 0
+        else
+            # A symlinked invocation looks for the sibling next to the link, so name the fix.
+            echo "  CLEANUP_PRUNE_ON_LOW_DISK=1 but no executable prune script at $prune (set CLEANUP_PRUNE_SCRIPT)." >&2
+        fi
+    fi
+    echo "LOW DISK: only ${pct}% free on the volume holding $HOME (threshold ${min}%)." >&2
+    echo "  Free space by removing unused worktrees, build output and caches, then re-run." >&2
+    return 1
+}
+
 # Stop/start bookkeeping for the Colima recycle. on_exit makes sure an
 # interrupted run still brings Colima back.
 COLIMA_STOPPED_BY_US=0
 RESTART_FAILED=0
+LOW_DISK=0
 
 # Start Colima again. Containers are not started here: the daemon restarts
 # those whose restart policy is unless-stopped/always, and leaves `no` ones down.
@@ -553,6 +597,8 @@ done
 echo ""
 echo "Package manager cache cleanup complete"
 
+low_disk_check || LOW_DISK=1
+
 FREE_AFTER_KB=$(free_kb)
 GIB=1048576
 echo ""
@@ -563,5 +609,9 @@ echo "================================="
 
 if [ "$RESTART_FAILED" != 0 ]; then
     exit 1
+fi
+# Exit 3: cleanup finished but the disk is still under the free-space threshold.
+if [ "$LOW_DISK" != 0 ]; then
+    exit 3
 fi
 exit 0

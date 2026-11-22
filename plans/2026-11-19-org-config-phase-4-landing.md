@@ -1,0 +1,116 @@
+# Land org-config Phase 4 (policy expressiveness) from the parked branch
+
+**Status:** Scheduling pending (Needs-PM). Decided 2026-11-19: keep the branch, land it by this plan.
+**Branch:** `claude/org-config-phase-4`, tip `7aa296725c25390cc3b0e3f9ae2b437443f7841e`, 15 commits, no PR was ever opened.
+**Merge base with `staging`:** `1e42850`. `staging` is now 208 commits ahead, 9 of them touch `aec/lib/org_config/` or `aec/commands/org.py`.
+
+## Problem
+
+Org configs cannot yet express time-bound rules, per-project overlays, an `enrollment_script`, or branding.
+The design (`docs/superpowers/specs/2026-05-04-org-config-overlay-design.md`) and the build plan
+(`docs/superpowers/plans/2026-05-25-org-config-overlay-phase-4.md`) both exist, and the work was built, tested and
+documented on the branch above. It never reached a PR, so none of it is on `staging` or `main`, and the build plan
+on `staging` still says "build-ready". The unreleased work is only as safe as the branch ref: it exists nowhere else.
+
+## What exists only on that branch
+
+Counts are from `git diff --stat` against the merge base: 29 files, +2186 / -81.
+
+| Feature | Commits | New or changed code | Tests |
+|---|---|---|---|
+| 4b time-bound rules (`required_after`, `expires_at` per item) | `289f21f`, `28ff874`, `2ee13f8` | `timebound.py`, validator, `apply.py` | `test_timebound.py`, validator tests |
+| 4a per-project overlays (`projects[]`, match by git remote or directory, first match wins, repo-scope apply) | `97d8813`, `efa9bb8`, `f2dc87d`, `3b6a845` | `projects.py`, `schema.py`, `effective.py`, `apply.py` | `test_projects.py`, `test_effective_projects.py`, `test_org_apply_repo.py` |
+| 4c `enrollment_script` (closed action set, no shell) | `782a29e`, `838bcc4`, `7ffab1e` | `enrollment.py`, validator, `aec/commands/org.py` | `test_enrollment.py`, `test_org_enroll_script.py` |
+| 4c custom source clone (superseded by `staging`, dropped) | `d9e00a4` | `sources_sync.py` | `test_sources_sync.py` |
+| 4d branding (`display_name`, `welcome_message`, `doctor_footer`) | `fdc05ec` | `aec/commands/org.py`, `aec/commands/doctor.py` | `test_branding.py` |
+| Public surface, docs, example | `fe96bfd`, `e2e5a45`, `7aa2967` | `__init__.py`, `docs/orgs/authoring-org-configs.md`, `docs/users/org-configs.md`, `docs/orgs/examples/phase4-features.yaml` | `tests/docs/test_org_examples.py` |
+
+The roadmap's icebox row "Executable shell in `enrollment_script`" stays true: the closed action set is `add_source`,
+`install_items`, `set_hooks`, `run_doctor`, `set_pref`.
+
+## What would have to change before it can land
+
+A trial `git merge-tree` of the branch onto `staging` conflicts in two files, `aec/lib/org_config/apply.py` and
+`aec/lib/org_config/validator.py`. The text conflicts are the small part. The design drift is the large one:
+
+1. **Custom source clone is already on `staging` in another shape.** `aec/lib/org_config/git_source.py` and the
+   publish path in `apply.py` (PR #132, plus `2026-11-14-custom-source-version-ranges.md`,
+   `2026-11-15-custom-source-validation-hardening.md` and `2026-11-15-local-org-ref-tip-check.md`) own cloning,
+   ref pinning, validation and crash-safe publication. The branch's `sources_sync.py` (`d9e00a4`) is a second clone
+   implementation that predates all of that. Per "check what already provides it", it is dropped, not rebased.
+   Nothing from it is kept. Its per-source error capture (a failed source skips only its own items) contradicts
+   `staging`'s contract, where `sync_custom_sources` discards every staged checkout and applies nothing when any source
+   fails, so a mandatory item in the failed source can never be silently absent. That all-or-nothing contract stays.
+2. **The validator was rewritten around it.** `validator.py` on the branch changed by about 286 lines and assumes
+   the old `projects`/`enrollment_script` rejection seams (validator lines 82 and 88 at the merge base). `staging`
+   added source, version-range and hardening checks in the same functions. Re-apply the Phase 4 checks onto the
+   current validator instead of merging the old file.
+3. **Overlay answers are machine-global on `staging`.** `2026-11-15-owner-scoped-overlay-answers.md` is the
+   open plan for that. Per-project overlays apply at repo scope, so S3 states how they interact with it and
+   either sequences after it or pins today's behavior with a test.
+4. **Python 3.9.** CI runs 3.9 and 3.12 on macOS. The branch was written against that rule; re-run on 3.9 after the rebase.
+5. **The plan move.** `7aa2967` archives the build plan to `docs/superpowers/plans/archive/`. Do that only in the
+   last PR, once the work is actually on `staging`.
+
+## Steps
+
+Each step is one dispatchable unit and its own PR into `staging`, rebased fresh from `staging`, not merged from the branch.
+Treat the branch's commits as intent, not patches: the branch predates `staging`'s apply lifecycle (plan, publish,
+execute), its `_catalog(paths, synced, published)` signature, and `effective_policy(paths)`, so any call into those
+seams is ported, not cherry-picked. The per-step notes below name the known cases; each step also greps its commits for
+calls into `apply.py`, `effective.py` and `validator.py` and ports every one it finds.
+
+- **S1. Time-bound rules (4b).** Cherry-pick `289f21f`, `28ff874`, `2ee13f8` onto a fresh branch, resolve in `apply.py`
+  and `validator.py`, tests green on 3.9 and 3.12. Smallest, no dependency on the others.
+- **S2. Enrollment script and source sync (4c).** `782a29e`, `838bcc4`, `7ffab1e` only. Drop `d9e00a4`, and adapt what
+  depended on it, because those commits do not apply as written: `838bcc4` imports `sync_source` from the dropped
+  `sources_sync.py` and calls `apply_mod._catalog("global")`, while `staging` requires `_catalog(paths, synced)`. Rewrite
+  the enrollment `add_source` and `install_items` actions, `tests/lib/org_config/test_enrollment.py` and `tests/commands/test_org_enroll_script.py`
+  to go through `staging`'s source lifecycle (`git_source.py` and the publish path in `apply.py`), keeping its validation,
+  ref pinning and crash-safe publication. `apply_items` no longer exists on `staging` (apply is now plan, publish,
+  execute), so `838bcc4` cannot call it either. It also builds the install policy directly from `config.items` with
+  `held=()`; replace that with `effective_policy(paths)` so enrollment never installs an item whose `required_after`
+  is in the future, whose `expires_at` has passed, or that a cross-org conflict holds. Integration tests cover each of those three cases. Enrollment `add_source` keeps `staging`'s all-or-nothing contract:
+  one failing source discards every staged checkout and applies nothing. A test pins that an enrollment run with one
+  failing source and one good source leaves nothing applied.
+- **S3. Per-project overlays (4a).** `97d8813`, `efa9bb8`, `f2dc87d`, `3b6a845`. Includes the owner-scoped answers interaction from item 3.
+  `3b6a845` does not apply as written: its `_apply_repo_overlays()` calls `_catalog(scope)` and `apply_items()`, and
+  `staging` has `_catalog(paths, synced, published)` and no `apply_items`. Port repo-scope item application into
+  `staging`'s plan, publish, execute lifecycle, with validation before publication and failure recording, and test that a
+  matching project overlay applies end to end and that a failing one is recorded rather than swallowed.
+- **S4. Branding (4d), public surface, docs.** `fdc05ec`, `fe96bfd`, `e2e5a45`, example YAML, plus archiving the build plan (`7aa2967`).
+  `fe96bfd` exports `SyncResult`, `sync_source` and `sync_sources` from `aec/lib/org_config/__init__.py`; those names no
+  longer exist, so export only what S1 to S3 actually landed.
+- **S5. Retire the branch.** After S4 merges, verify each branch-only change against its landing commit and record, per
+  commit of the 15, the PR that landed it or the reason it was replaced or omitted (`d9e00a4` is the intentional omission).
+  A full-tree `git diff origin/staging origin/claude/org-config-phase-4 -- aec docs tests` is diagnostic only: it also
+  holds 208 intervening `staging` commits and the dropped `sources_sync.py`, so it never reaches empty. Squash merges make
+  `ahead_by` meaningless. Take a bundle (`git bundle create`) as the restore point, then delete the branch.
+  Deleting it is destructive, so it stays with the maintainer.
+
+Order: S1, S2, S3 can run in parallel only if their file ownership is split (they all touch `apply.py` and `validator.py`),
+so run them in sequence. S4 last.
+
+## Contract change coverage
+
+Every step adds optional keys to the org config schema, and `schema_version` stays `"1.0"`. Older readers do not
+treat all new keys alike. Today's `staging` validator (`validator.py` lines 147 to 156) rejects `projects` and
+`install.enrollment_script`, but silently ignores `required_after`, `expires_at` and `branding`. An older `aec` therefore
+accepts an org config with an expired blocking rule and keeps enforcing it forever. The step that adds each key states
+this in `docs/orgs/authoring-org-configs.md` (the branch carries draft text), names the minimum `aec` version an org
+must require of its members before using the key, and adds a compatibility test that pins what the previous release
+does with that key. Released clients cannot be changed, so the rollout requirement (members upgrade before the org
+config uses the key) is the only control for time-bound rules and branding. Before each step, grep every
+writer and reader of the org config: `validate_org_config`, `parse_org_config_text`, `effective_policy`, `apply_org_policy`,
+`aec org enroll`, `aec org apply`, `aec doctor`, the examples under `docs/orgs/examples/`, and the tests that enumerate them.
+
+## Done when
+
+- S1 through S4 merged to `staging`, each with tests on Python 3.9 and 3.12, `docs/qa-verification.md` updated where a user-visible flow changed.
+- `parse_org_config_text()` and `validate_org_config()` accept `docs/orgs/examples/phase4-features.yaml` on `staging` (`tests/docs/test_org_examples.py` pins it). There is no `aec org validate` command and this plan does not add one.
+- No second clone implementation in `aec/lib/org_config/`.
+- The branch is retired by the maintainer after S5's check, with the bundle kept.
+
+## Out of scope
+
+Org-to-org inheritance, per-user overrides, telemetry and a central registry stay on the icebox (see `plans/ROADMAP.md`).

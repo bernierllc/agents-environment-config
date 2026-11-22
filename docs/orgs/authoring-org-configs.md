@@ -126,14 +126,36 @@ Required fields: `source` (must be a reserved or declared custom ID) and `stance
 | `required` | Item must be installed; AEC will install or warn loudly if missing. |
 | `recommended` | Suggested at install time; user can decline. |
 | `blocked` | Item must not be installed; AEC removes/refuses it. |
-| `pinned` | Item must be installed at exactly the declared `version`. |
+| `pinned` | Item must be installed at exactly the declared `version` (one exact version such as `"2.1.0"`, never a range). |
 | `silent` | No prompts about this item; useful for org-internal experiments. |
 
-`version` is optional except when stance is `pinned` (then required).
+`version` is optional except when stance is `pinned` (then required). Quote it (`"2.10"`, not `2.10`, which YAML reads as the number 2.1).
 
-Items from a custom source take an **exact** version only (for example `"2.1.0"`); constraints such as `>=2.0.0` are rejected at enrollment until range support lands (see `plans/2026-11-14-custom-source-version-ranges.md`).
+### Version constraints
 
-A `required` or `pinned` item that its source cannot provide (missing, or at a different version) stops `aec org apply` before anything is published or approved: the command exits non-zero and names the item. A `recommended` item that is missing is skipped.
+A `version` is checked the same way for every source, the built-in catalog and custom sources alike. It is one of:
+
+| Form | Meaning |
+|---|---|
+| `"latest"` or no `version` | No constraint. |
+| `"2.1.0"` or `"==2.1.0"` | Exactly that version. |
+| `">=2.0.0"`, `">2.0.0"`, `"<=2.0.0"`, `"<2.0.0"` | Comparison. |
+| `"~=2.2"`, `"~=1.4.5"` | Compatible release: `~=2.2` is `>=2.2, <3`; `~=1.4.5` is `>=1.4.5, <1.5`. Needs at least two parts. |
+| `">=2.0.0, <3.0.0"` | Comma-joined clauses; all must hold. |
+
+Versions are dotted integers and compare as if padded with zeros (`2.1` equals `2.1.0`). Nothing else is understood: no pre-release tags (`2.0.0-rc1`), wildcards (`2.x`, `*`), `!=`, or npm-style `^`/`~`. A `version` AEC cannot parse is rejected when the config is enrolled, with an error that names the field and the supported forms.
+
+**A constraint gates; it does not select.** Every source offers exactly one version of each item: the built-in catalog ships one version per AEC release, and a custom source offers what is at its applied commit. `aec org apply` checks that version against the constraint. If it satisfies, the item installs (an installed copy outside the constraint is replaced with it). If it does not, the item is unsatisfiable, whatever its stance: `aec org apply` stops before anything is published or approved, and the error names the item, the constraint and the version the source has. AEC never searches for an older version that would satisfy the constraint.
+
+**Rolling an item back.** Because a constraint only gates, editing `version` to an older release cannot install that older release: the source no longer has it, so the apply fails. To roll back, install the item from an immutable source that contains the version you want:
+
+1. Put the item, at the version you want, in a repo with the custom-source layout above (for example, copy `.claude/skills/my-skill/` from the release you trust).
+2. Declare that repo under `sources.custom` with `commit` set to the full SHA of that content. A commit never moves, so the item cannot change under you.
+3. Point the item at that source and pin it: `source: "my-pinned-skills"`, `stance: pinned`, `version: "1.4.0"`.
+
+AEC has no setting that pins the built-in catalog itself to an older AEC release; the built-in catalog is always the one that ships with the installed AEC version.
+
+An item whose source has it at a version outside its constraint, or a `required` or `pinned` item its source does not have at all, stops `aec org apply` before anything is published or approved: the command exits non-zero and names the item. A `recommended` item that is missing is skipped.
 
 ### Plugins
 

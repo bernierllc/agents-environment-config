@@ -4,7 +4,6 @@ description: "Toolkit for creating animated GIFs optimized for Slack, with valid
 tags: ["skill"]
 ---
 
-
 # Slack GIF Creator - Flexible Toolkit
 
 A toolkit for creating animated GIFs optimized for Slack. Provides validators for Slack's constraints, composable animation primitives, and optional helper utilities. **Apply these tools however needed to achieve the creative vision.**
@@ -645,3 +644,16 @@ To use this toolkit, install these dependencies only if they aren't already pres
 ```bash
 pip install pillow imageio numpy
 ```
+
+<!-- feedback-loop:begin -->
+## Feedback
+
+If the `feedback-loop` skill is installed, use it to improve this skill over time:
+
+- When this skill's own instructions cause rework, a wrong default, a missed case or a needless
+  pause, log it as it happens: subject `skill:slack-gif-creator`, with the phase or section at fault and the
+  concrete fix to these instructions.
+- At the end of a run, check `skill:slack-gif-creator`; if a review is due, make the feedback-loop offer.
+
+If `feedback-loop` is not installed, ignore this section.
+<!-- feedback-loop:end -->

@@ -2,6 +2,11 @@ version: 2
 updates:
   - package-ecosystem: "pip"
     directory: "/"
+    # Version-update bumps open against the integration branch: the main
+    # promotion guard allows only staging as the source of a pull request into
+    # main. Dependabot ignores target-branch for security-update pull requests,
+    # which still open against main; retarget those by hand.
+    target-branch: "staging"
     # AEC is a library installed on Python 3.9+: keep ">=" floors as low as
     # they work. Only raise a range when it excludes the latest release.
     versioning-strategy: increase-if-necessary
@@ -9,5 +14,6 @@ updates:
       interval: "weekly"
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "staging"
     schedule:
       interval: "weekly"
