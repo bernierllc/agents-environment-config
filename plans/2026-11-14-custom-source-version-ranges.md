@@ -58,3 +58,4 @@ all covered by tests.
   older AEC release (follow-up, not built here).
 - Side effect: `aec apply <portable manifest>` now enforces the exact versions that
   `aec export` writes; a catalog at another version fails that item unless `--latest`.
+- Review round 1 (Codex high, two P2s, fixed): a pin that is exactly the version string the source ships always holds, so `aec export` → `aec apply` still round-trips an MCP with an opaque version such as `2026-11-21` (org configs still reject such a pin at enrollment); a candidate version must be plain dotted digits, so signed parts like `1.-1` no longer parse through `int()`.

@@ -56,6 +56,18 @@ def test_unparseable_version_under_a_constraint_raises():
     with pytest.raises(ValueError, match="not a dotted-integer"):
         version_satisfies("2.0.0-beta", ">=1.0.0")
     assert version_satisfies("2.0.0-beta", "latest") is True  # no constraint, nothing to parse
+    for signed in ("1.-1", "+2.0", "2.0 .1"):
+        with pytest.raises(ValueError, match="not a dotted-integer"):
+            version_satisfies(signed, "<3.0")
+
+
+def test_exact_opaque_version_round_trips():
+    """An exported manifest pins an MCP's opaque version verbatim; re-applying it must hold."""
+    assert version_satisfies("2026-11-21", "2026-11-21") is True
+    with pytest.raises(ValueError, match="invalid version pin"):
+        version_satisfies("2026-11-22", "2026-11-21")
+    entry = _plan("2026-11-21", available="2026-11-21", installed="2026-11-21")
+    assert entry.action == "noop"
 
 
 # --- plan_apply: default catalog ("") and a custom source, same evaluator ---

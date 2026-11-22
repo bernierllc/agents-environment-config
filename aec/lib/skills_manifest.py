@@ -269,13 +269,16 @@ def version_satisfies(version: str, spec) -> bool:
     Versions compare zero-padded (``2.1 == 2.1.0``); ``~=X.Y`` means ``>=X.Y`` and ``==X.*``.
     Raises ValueError for a malformed spec, or for an unparseable version under a constraint.
     """
+    # A pin naming the exact version string the source ships always holds, even an opaque
+    # one (an MCP's "2026-11-21"), so an exported manifest re-applies unchanged.
+    if isinstance(spec, str) and spec.strip() and spec.strip() == str(version).strip():
+        return True
     clauses = parse_version_spec(spec)
     if not clauses:
         return True
-    try:
-        have = parse_version(str(version))
-    except ValueError:
+    if not re.fullmatch(r"\d+(?:\.\d+)*", str(version).strip()):
         raise ValueError(f"version {version!r} is not a dotted-integer version, so pin {spec!r} cannot be checked")
+    have = parse_version(str(version).strip())
     for op, want in clauses:
         width = max(len(have), len(want))
         v, w = have + (0,) * (width - len(have)), want + (0,) * (width - len(want))
