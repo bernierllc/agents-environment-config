@@ -19,8 +19,8 @@ set -euo pipefail
 : "${BASE_SHA:?BASE_SHA is required (github.event.pull_request.base.sha)}"
 : "${HEAD_REF:?HEAD_REF is required}"
 remote="${GIT_REMOTE:-origin}"
-# Walk the immutable objects, never a locally rewritten graph: no replacement refs, no grafts.
-export GIT_NO_REPLACE_OBJECTS=1
+# Walk the immutable objects, never a locally rewritten graph: no replacement refs, no commit-graph cache, no grafts.
+export GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.commitGraph GIT_CONFIG_VALUE_0=false
 
 reject() { echo "::error::slice provenance: $*" >&2; exit 1; }
 

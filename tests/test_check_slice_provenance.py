@@ -4,6 +4,7 @@ check-slice-provenance.sh only decides whether a slice's parents may feed the tr
 2026-11-21-mvs-trusted-slice-replay, step 3). check-main-source.sh still rejects every slice: no replay, no pass.
 The network boundary is the git remote; it is a real bare repository here, so nothing is stubbed.
 """
+import hashlib
 import os
 import subprocess
 from pathlib import Path
@@ -61,10 +62,10 @@ class Graph:
         self.git(self.author, "push", "-q", "-f", "origin", f"{sha}:refs/heads/{branch}")
 
     def guard_clone(self, depth=1):
-        """The guard's checkout: main at the event commit, shallow like actions/checkout."""
+        """The guard's checkout: main at the event commit, shallow like actions/checkout (depth=None: full)."""
         dest = self.author.parent / f"guard{self.n}"
         self.n += 1
-        self.git(None, "clone", "-q", "--no-local", f"--depth={depth}", "--branch", "main",
+        self.git(None, "clone", "-q", "--no-local", *([f"--depth={depth}"] if depth else []), "--branch", "main",
                  f"file://{self.origin}", str(dest))
         return dest
 
@@ -222,3 +223,29 @@ def test_a_locally_rewritten_staging_graph_cannot_fake_provenance(g, how):
     head = slice_of(g, g.f1, g.m1)  # f1 is only staging's second parent
     code, out = g.run(PROVENANCE, head, g.m1, cwd=_rewritten_clone(g, how))
     assert code == 1, out
+
+
+def _swap_parents_in_commit_graph(graph_file, oid):
+    """Swap oid's two parents in a v1 SHA-1 commit-graph file and re-sign it; the commit objects stay untouched."""
+    data = bytearray(graph_file.read_bytes())
+    chunks = {bytes(data[8 + 12 * i:12 + 12 * i]): int.from_bytes(data[12 + 12 * i:20 + 12 * i], "big")
+              for i in range(data[6])}
+    n = int.from_bytes(data[chunks[b"OIDF"] + 255 * 4:chunks[b"OIDF"] + 256 * 4], "big")
+    oids = [bytes(data[chunks[b"OIDL"] + 20 * i:chunks[b"OIDL"] + 20 * (i + 1)]).hex() for i in range(n)]
+    at = chunks[b"CDAT"] + 36 * oids.index(oid) + 20
+    data[at:at + 8] = data[at + 4:at + 8] + data[at:at + 4]
+    data[-20:] = hashlib.sha1(data[:-20]).digest()
+    graph_file.chmod(0o644)  # git writes the file read-only
+    graph_file.write_bytes(bytes(data))
+
+
+def test_a_tampered_commit_graph_cannot_fake_provenance(g):
+    clone = g.guard_clone(depth=None)
+    g.git(clone, "fetch", "-q", "origin", "staging")
+    g.git(clone, "commit-graph", "write", "--reachable")
+    graph = Path(g.git(clone, "rev-parse", "--absolute-git-dir"), "objects", "info", "commit-graph")
+    _swap_parents_in_commit_graph(graph, g.s2)  # the cache now claims f1 is staging's first parent
+    assert g.git(clone, "rev-list", "--first-parent", g.s2).split()[1] == g.f1  # the tamper is live
+    head = slice_of(g, g.f1, g.m1)
+    code, out = g.run(PROVENANCE, head, g.m1, cwd=clone)
+    assert code == 1 and "not on staging's first-parent history" in out, out
