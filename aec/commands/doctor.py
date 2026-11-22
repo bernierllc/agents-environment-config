@@ -30,6 +30,31 @@ def _check(name: str, condition: bool, success_msg: str, failure_msg: str) -> bo
         return False
 
 
+def _check_required_mcp_servers() -> list:
+    """Fail loudly when a required MCP server is missing from an installed agent client."""
+    from pathlib import Path
+
+    from ..lib.preferences import get_setting
+    from ..lib.required_mcp import (
+        REQUIRED_MCP_SETTING,
+        check_required_mcp_servers,
+        required_servers,
+    )
+
+    Console.subheader("Required MCP servers")
+    required = required_servers(get_setting(REQUIRED_MCP_SETTING))
+    if not required:
+        Console.info(f"None required (set preferences settings.{REQUIRED_MCP_SETTING} to a list of server names)")
+        return []
+    problems = check_required_mcp_servers(required, Path.home())
+    if not problems:
+        Console.success(f"{', '.join(required)} registered in every installed agent client")
+        return []
+    for problem in problems:
+        Console.error(problem)
+    return [f"Required MCP servers: {p}" for p in problems]
+
+
 def _check_org_configurations() -> list:
     """Render the 'Org configurations' section. Returns issues for the summary.
 
@@ -533,6 +558,9 @@ def run_doctor() -> Tuple[bool, List[str]]:
                 Console.info(f"Latest known: v{cache_data.get('latest_version', 'unknown')}")
             except Exception:
                 pass
+
+    # Required MCP servers (opt-in: settings.required_mcp_servers; empty means no check)
+    issues.extend(_check_required_mcp_servers())
 
     # Org configurations (Phase 1: 0 or 1 enrolled org)
     issues.extend(_check_org_configurations())
