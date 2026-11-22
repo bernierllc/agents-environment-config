@@ -33,9 +33,12 @@ the detector, Review Gate and merge-time checks. It does not add a parallel mech
 3. **Provenance first (retained from the downstream validator, not replaced by tree equality).** Tree equality alone
    does not authorize ancestry: a same-repo author could merge a legitimate staging cut with an unrelated commit and
    replay it faithfully. Before the replay the script requires: exactly two parents; the first parent on staging's
-   first-parent history; the second parent an ancestor of main (or main's tip at the recorded base); and no appended
-   commits beyond the merge. Octopus merges, extra parents and non-first-parent staging cuts fail closed. Same-repo
-   ownership never authorizes replay inputs.
+   first-parent history; the second parent EQUAL to the event's `base.sha` (the main tip being evaluated), not merely
+   an ancestor of main; and no appended commits beyond the merge. A slice built against an older main is stale and
+   fails closed: it is rebuilt, never re-evaluated into a pass. Octopus merges, extra parents and non-first-parent
+   staging cuts fail closed. Same-repo ownership never authorizes replay inputs. (Departure, stated: the downstream
+   validator accepts any main ancestor; this guard is stricter on purpose, because the replay must describe the
+   merge that will actually land.)
 4. The base script replays the slice from those authorized parents under the trusted generator contract below and
    compares the result to the head's tree by object id.
 5. A merge-with-main slice passes only when provenance holds and the replayed result equals the head's tree. Any
@@ -43,18 +46,33 @@ the detector, Review Gate and merge-time checks. It does not add a parallel mech
 
 ### Replay tuple and freshness
 
-A pass is valid only for this tuple: head SHA, staging snapshot SHA, main/base SHA, and the trusted tool version
-(the guard's released tag). The merge owner (`pr-merge-flow`'s merge step, run by the repo's traffic cop) owns
-freshness: immediately before `gh pr merge`, it re-evaluates the guard against the current base and treats a pass
-recorded against an older base SHA as stale. `--match-head-commit` protects the head only, not the base the replay
-used. Two slices validated against main at M0 therefore cannot both merge on their M0 passes: after the first merges
-(M1), the second is re-evaluated against M1. Decision: the merge step does the re-evaluation (one owner, no extra
-workflow trigger on pushes to the base), and the guard's output names the base SHA it used so the merge step can compare.
+A pass is valid only for this tuple: head SHA, staging snapshot SHA, main/base SHA (`base.sha`), and the trusted tool
+version (the guard's released tag). Two separate jobs, each owned once:
+
+- **The guard owns "the replay describes the merge that lands against this base"**: the second parent must equal
+  `base.sha` (Correct fix, step 3). Re-running the same event cannot select a newer main (the event's `base.sha` is
+  immutable), so freshness is never obtained by re-evaluation. A stale slice is rebuilt on the new main, which pushes
+  a new head and fires a new event with the new `base.sha`.
+- **The server owns "the base did not move between evaluation and merge"**: the repo ruleset for main requires
+  branches to be up to date before merging (the strict required-status-checks policy). GitHub rejects the merge
+  atomically when main has moved past the head's main parent, so there is no check-then-merge race for `pr-merge-flow`
+  or the traffic cop to close, and neither changes. `--match-head-commit` still protects the head.
+
+Rollout dependencies: the strict policy on main is an infra change, so it goes through the platform-ops issue queue and
+is verified live (a slice whose main parent is stale cannot merge); it is checked against the CI-cost note on
+serialising flags before it is enabled. Two slices validated at M0 then behave correctly in either merge order: the
+second is blocked as out of date after the first merges, rebuilt on M1 and re-evaluated.
 
 ### Trusted generator contract
 
-- **Trusted code** is the base checkout's script, generator and its sibling imports, pinned by path, run with `python3 -I`,
-  with no installation of head dependencies and the minimum token permissions (`contents: read`).
+- **Trusted code** is the base checkout's replay script and the downstream's own generator, whose runtime and entry
+  point the downstream declares in base-controlled config (the canonical guard does not own a repo-specific
+  generator). Today's downstream generator is a Node script (`scripts/verification-playwright/bootstrap-manifest.mjs`
+  and its imports `sync-tests.js` and `lib/manifest.js`), so the whole base-side directory is the trusted dependency
+  closure, run as `node <entry>` and never `python3 -I`. Isolation: `contents: read` token, no network, no
+  `npm install` of head or base dependencies, and no `node_modules` on the path, so imports resolve only to Node
+  builtins and the base tree. A generator whose imports need installed packages is out of scope here and needs its
+  own generator-migration plan before it can be replayed. Python helpers, where present, run with `python3 -I`.
 - **Inert data** is the fetched head objects: read as git objects, never imported, never executed, symlinks not followed.
 - The replay is deterministic: manifest initialization is defined (start from the base-side manifest), output paths are
   fixed, and `updated_at` (and any timestamp) is normalized the way the downstream replay already normalizes it
@@ -85,6 +103,8 @@ read-only and gates nothing.
 - The forged-check detector pins in `scripts/check-forged-gate-names.py` (the guard name and the
   `Promote slice` name must stay distinct; no new job may take a protected name).
 - Any downstream repo's slice-aware mid guard, its `promote-slice.yml` and the tests that pin them.
+- The main ruleset's strict up-to-date policy (infra, via the platform-ops issue queue). `pr-merge-flow` and its merge
+  hook are deliberately NOT changed: the server enforces base movement at merge time.
 - Every repo carrying the mid guard or the canonical guard re-vendors after this lands.
 - **Drift mechanisms (existing owners, extend, do not duplicate).**
   [2026-11-16-upgrade-detects-vendored-skills](2026-11-16-upgrade-detects-vendored-skills.md) owns guard drift
@@ -101,8 +121,10 @@ read-only and gates nothing.
   (one test per case, a real git graph, stubbed `gh` only at the network boundary).
 - Provenance, real-graph tests: an unrelated second parent, a first parent that is not on staging's first-parent
   history, an octopus merge, an appended commit and a head ref moved after the event each fail closed.
-- Freshness, real-graph tests: two concurrently validated slices merged in either order (the second is re-evaluated
-  against the moved base), repeated evaluation of the same tuple, and base movement during evaluation.
+- Freshness, real-graph tests: a slice whose second parent is an older main ancestor fails (never passes on
+  re-evaluation); two concurrently validated slices merged in either order (the second is blocked as out of date, then
+  rebuilt and passes); a rerun of the same event keeps the same `base.sha`. Live: the main ruleset rejects the merge of
+  a slice whose main parent is stale.
 - Generator behavior tests: two runs give an identical tree, a changed generator version changes the tuple, a malicious
   sibling import or symlink in the head objects is never loaded, and a generator failure fails closed.
 - Drift tests: a missing or stale replay dependency blocks evaluation, and re-vendoring the complete released copy set
