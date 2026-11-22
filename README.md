@@ -81,7 +81,7 @@ Adding another agent is one JSON entry — see [Adding agent support](docs/contr
 aec install                  # full setup
 aec install <type> <name>    # one skill / rule / agent
 aec update && aec upgrade    # fetch + apply upgrades
-aec doctor                   # health check
+aec doctor                   # health check; also fails if a server listed in settings.required_mcp_servers is missing from an installed client
 
 # Projects
 aec setup [path]             # track a project
