@@ -10,8 +10,8 @@
 # for replay-promote-slice.py; the caller removes it.
 #
 # Exit 0 means only "these parents may feed the trusted replay". It is NOT a pass for the slice: the replay
-# (R2) and its hosted evidence (R3) decide that, and until they land check-main-source.sh rejects every slice
-# whatever this returns. Exit 1 is a rejection, including every input, fetch or object error (fail closed).
+# (replay-promote-slice.py) decides that, and check-main-source.sh admits a slice only on the replay's exit 0.
+# Exit 1 is a rejection, including every input, fetch or object error (fail closed).
 #
 # Inputs are the event's immutable SHAs, fetched as git objects only, into a fresh scratch repo, from GIT_REMOTE
 # (default $GITHUB_SERVER_URL/$GITHUB_REPOSITORY): the checkout is never read or written, nothing the head carries

@@ -2,8 +2,9 @@
 
 replay-promote-slice.py (plan 2026-11-21-mvs-trusted-slice-replay, R2) replays git's own merge of a slice's
 authorized parents, regenerates the declared outputs with the BASE's generator, and requires the head's tree.
-check-main-source.sh still rejects every slice until R3. The network boundary is the git remote, a real bare repo
-here; the generator is a real Node script run by the replay. Nothing we own is stubbed.
+check-main-source.sh (R3) admits a slice only when that holds and main's rules require up-to-date branches. The
+network boundaries are the git remote, a real bare repo here, and the GitHub API, a stub `gh` that serves main's
+rules; the generator is a real Node script run by the replay. Nothing we own is stubbed.
 """
 import importlib.util
 import json
@@ -121,6 +122,26 @@ def g(tmp_path, env):
     return Graph(tmp_path, env)
 
 
+def rule(strict, checks=({"context": "PRs into main must come from staging"},)):
+    return {"type": "required_status_checks", "parameters": {"strict_required_status_checks_policy": strict,
+                                                              "required_status_checks": list(checks)}}
+
+
+def gh_path(tmp_path, rules=(rule(True),), fail=False, pages=None, raw=None):
+    """PATH with a `gh` that answers only GET rules/branches/main, logging every call to tmp_path/gh.log.
+
+    The reply is what `gh api --paginate --slurp` prints: one array per page (one page of `rules` by default)."""
+    bindir, log = tmp_path / "bin", tmp_path / "gh.log"
+    bindir.mkdir(exist_ok=True)
+    body = raw if raw is not None else json.dumps([list(p) for p in (pages or (rules,))])
+    (tmp_path / "rules.json").write_bytes(body if isinstance(body, bytes) else body.encode())
+    reply = "exit 4" if fail else f"cat {tmp_path / 'rules.json'}"
+    (bindir / "gh").write_text(f'#!/bin/sh\necho "$@" >> {log}\n'
+                               f'case "$*" in *rules/branches/main*) {reply} ;; *) exit 98 ;; esac\n')
+    (bindir / "gh").chmod(0o755)
+    return f"{bindir}{os.pathsep}{os.environ['PATH']}"
+
+
 def holds(out):
     line = [x for x in out.splitlines() if x.startswith("slice replay holds:")]
     return line[0] if line else None
@@ -135,12 +156,55 @@ def test_a_slice_equal_to_the_replayed_merge_holds(g):
     assert f"head={head} staging={g.s1} base={g.m1} " in line and f"generator={gen_tree}" in line, out
 
 
-def test_the_guard_still_rejects_a_slice_whose_replay_holds(g):
-    # R2 may only add rejections: no slice is admitted until the replay's hosted evidence (R3) lands.
+def test_the_guard_admits_a_slice_whose_replay_holds_while_main_requires_up_to_date_branches(g, tmp_path):
     head = g.slice(g.good_files())
-    code, out = g.run(GUARD, head)
+    code, out = g.run(GUARD, head, PATH=gh_path(tmp_path))
+    assert code == 0, out
+    assert holds(out) and "allowed" in out, out
+    assert (tmp_path / "gh.log").read_text().split() == ["api", "--paginate", "--slurp",
+                                                         "repos/my-org/my-repo/rules/branches/main?per_page=100"]
+
+
+def test_the_guard_reads_mains_strict_rule_from_any_page_of_the_rules_reply(g, tmp_path):
+    other = {"type": "deletion"}
+    code, out = g.run(GUARD, g.slice(g.good_files()), PATH=gh_path(tmp_path, pages=((other,) * 100, (rule(True),))))
+    assert code == 0 and "allowed" in out, out
+
+
+@pytest.mark.parametrize("rules,fail", [((rule(False),), False), ((), False), ((rule(True),), True),
+                                        ((rule(True, checks=()),), False)],
+                         ids=["not-strict", "no-status-check-rule", "rules-unreadable", "strict-without-checks"])
+def test_the_guard_rejects_a_slice_whose_replay_holds_unless_main_requires_up_to_date_branches(g, tmp_path, rules,
+                                                                                              fail):
+    # Without strict checks main can move after the event, so the merge that lands is not the one replayed.
+    code, out = g.run(GUARD, g.slice(g.good_files()), PATH=gh_path(tmp_path, rules, fail))
     assert code == 1, out
-    assert holds(out) and "rejected" in out, out
+    assert holds(out) and "rejected" in out and "allowed" not in out, out
+
+
+STRICT = json.dumps(rule(True))
+
+
+KEY = b'"strict_required_status_checks_policy"'
+MALFORMED = {
+    "null-page": f"[[{STRICT}], null]", "object-page": f"[{{}}, [{STRICT}]]", "non-object-rule": f"[[{STRICT}, 7]]",
+    "unslurped": f"[{STRICT}]", "object-reply": f'{{"pages": [[{STRICT}]]}}', "empty": "",
+    "list-parameters": f'[[{STRICT}, {{"type": "required_status_checks", "parameters": [1]}}]]',
+    "error-object": f'[[{STRICT}, {{"message": "Not Found"}}]]',
+    "nan": f'[[{STRICT}, {{"type": "x", "parameters": {{"n": NaN}}}}]]',
+    "duplicate-key": b'[[{"type": "required_status_checks", "parameters": {' + KEY + b": false, " + KEY + b": true}}]]",
+    "invalid-utf8": f'[[{STRICT}, {{"type": "x\udcff"}}]]'.encode("utf-8", "surrogateescape"),
+    "nul-in-key": b'[[{"type": "required_status_checks", "parameters": {"strict_required_status_checks_po\x00licy": true}}]]',
+    **{f"check-{k}": f"[[{STRICT}, {json.dumps(rule(False, checks=(c,)))}]]" for k, c in
+       {"null": None, "number": 7, "no-context": {}, "null-context": {"context": None}, "empty-context": {"context": ""}}.items()},
+    "checks-not-a-list": f'[[{STRICT}, {{"type": "required_status_checks", "parameters": {{"required_status_checks": {{}}}}}}]]',
+}
+
+
+@pytest.mark.parametrize("raw", MALFORMED.values(), ids=MALFORMED.keys())
+def test_a_malformed_rules_reply_rejects_even_beside_a_strict_rule(g, tmp_path, raw):
+    code, out = g.run(GUARD, g.slice(g.good_files()), PATH=gh_path(tmp_path, raw=raw))
+    assert code == 1 and "allowed" not in out, out
 
 
 def test_two_runs_give_the_identical_tuple_and_tree(g):
@@ -302,21 +366,13 @@ def test_a_truncated_fetch_fails_closed(g):
     assert code == 1 and not holds(out), out
 
 
-def test_a_forged_promote_slice_check_changes_nothing(g, tmp_path):
-    # The guard derives its verdict from git objects only. A gh on PATH that would report a passing
-    # 'Promote slice' check run is never consulted.
-    bindir, log = tmp_path / "bin", tmp_path / "gh.log"
-    bindir.mkdir()
-    gh = bindir / "gh"
-    gh.write_text(f'#!/bin/sh\necho "$@" >> {log}\necho \'{{"name":"Promote slice","conclusion":"success"}}\'\n')
-    gh.chmod(0o755)
-    path = f"{bindir}{os.pathsep}{os.environ['PATH']}"
+def test_a_tampered_slice_is_rejected_before_any_api_call_even_with_up_to_date_rules(g, tmp_path):
+    # The verdict on the head comes from git objects only; no check run (a forged 'Promote slice' one included) and
+    # no API reply can admit a slice whose replay fails, so gh is never called for it.
     tampered = g.good_files(**{"src/backdoor.js": b"evil\n"})
-    code, out = g.run(REPLAY, g.slice(tampered), PATH=path)
-    assert code == 1 and "is not the replayed merge" in out, out
-    code, out = g.run(GUARD, g.slice(g.good_files()), PATH=path)
-    assert code == 1 and "rejected" in out, out
-    assert not log.exists()
+    code, out = g.run(GUARD, g.slice(tampered), PATH=gh_path(tmp_path))
+    assert code == 1 and "is not the replayed merge" in out and "rejected" in out, out
+    assert not (tmp_path / "gh.log").exists()
 
 
 def _replay_module():

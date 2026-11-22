@@ -1,4 +1,5 @@
-# Promotion guard for PRs into main: only a same-repo `staging` branch may open one.
+# Promotion guard for PRs into main: only a same-repo `staging` branch, or a promote/<date>-<n> slice whose
+# trusted replay holds (scripts/replay-promote-slice.py), may open one.
 #
 # Uses pull_request_target so GitHub loads this workflow from the repository's
 # DEFAULT branch (main, or staging in a repo whose default is staging), never from
@@ -9,7 +10,9 @@
 # sha would be main, which in a staging-default repo can still carry the previous
 # detector while this file is already new: the first promotion carrying both is then
 # judged by the old detector and fails its own required check.) Only PR *metadata*
-# (head ref / repo) is read from the event; no PR code is checked out or executed.
+# (head ref / repo / head and base SHAs) is read from the event; no PR code is checked
+# out or executed. A promote slice's commits are fetched into a scratch repo as git
+# objects only and compared, never run (the generator, if any, is the base's copy).
 #
 # This job IS the required check: its name is exactly "PRs into main must come from
 # staging" and its exit code is the result (0 = allowed source, non-zero = rejected,
@@ -29,7 +32,10 @@
 # is an idempotent read of the PR's metadata and check runs.
 #
 # Activation: advisory until the `main promotion gate` ruleset requires the
-# check "PRs into main must come from staging".
+# check "PRs into main must come from staging". A promote slice is admitted only
+# while main's rules also require strict (up-to-date) status checks, so the merge
+# the replay judged against BASE_SHA is the merge that lands; check-main-source.sh
+# reads that and fails closed without it.
 #
 # Known limits (SEC-MVS-01). pull_request_target runs this file from the DEFAULT
 # branch, never from the PR. But a required check is matched by NAME and a
@@ -73,25 +79,44 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-          SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           REPO: ${{ github.repository }}
+          # A promote slice's trusted replay fetches the event objects as git data (contents: read).
+          SLICE_FETCH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The replay tuple names the guard revision that judged it: this run's own commit.
+          SLICE_REPLAY_TOOL_VERSION: ${{ github.sha }}
         run: |
           set -u
-          # Bootstrap: the scripts load from the default branch, with this file. If one
-          # is missing, say so; never exit 127 silently.
-          for guard_script in scripts/check-forged-gate-names.py scripts/check-main-source.sh; do
+          # The scripts load from the default branch with this file and must be the exact copy set it was
+          # released with: a missing one says so (never a silent exit 127) and a stale one (an older replay
+          # or detector beside a newer workflow) fails closed. Update a pin only with its script.
+          pins_ok=1
+          while read -r want guard_script; do
             if [ ! -f "$guard_script" ]; then
               echo "::error::guard script missing on base: $guard_script. Land the scripts and this workflow together."
-              exit 1
+              pins_ok=0
+              continue
             fi
-          done
+            got=$(python3 -I -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$guard_script")
+            if [ "$got" != "$want" ]; then
+              echo "::error::guard script stale on base: $guard_script (sha256 $got, pinned $want). Re-vendor the complete released copy set."
+              pins_ok=0
+            fi
+          done <<'PINS'
+          15044e42b03aa9005ecda101e09f75814c913b091a3011e3b096fb471ab075ce  scripts/check-forged-gate-names.py
+          619bf0d13c5b8ba01bfcc23a611f890a6cfa12d1cb0cbefe05a9cf4942cc5bd2  scripts/check-main-source.sh
+          37d0d031fb0742b7d1d23e418ec4f75d235fbe3d13a198b7d0d2eea7edb39659  scripts/check-slice-provenance.sh
+          581e905e253299b7cd2aea781a53e149e88156d9e59e6976c30035472389a32b  scripts/replay-promote-slice.py
+          PINS
+          [ "$pins_ok" -eq 1 ] || exit 1
           # A PR-controlled job can borrow this job's name (see
           # scripts/check-forged-gate-names.py). Detection only; the unforgeable
           # fix is a required workflow or a distinct publisher app.
           # filter=all: the default (latest) can hide an earlier same-name run. The list
           # is captured on its own so an API failure cannot reach the detector as empty
           # input and read as "none forged".
-          runs_json=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100&filter=all" --paginate)
+          runs_json=$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs?per_page=100&filter=all" --paginate)
           list_rc=$?
           if [ "$list_rc" -eq 0 ]; then
             printf '%s' "$runs_json" | REPO="$REPO" python3 scripts/check-forged-gate-names.py 2>&1
@@ -100,14 +125,14 @@ jobs:
             echo "::error::could not list check runs (gh api exit $list_rc); failing closed"
             forged_rc=2
           fi
-          HEAD_REF="$HEAD_REF" HEAD_REPO="$HEAD_REPO" REPO="$REPO" bash scripts/check-main-source.sh 2>&1
+          bash scripts/check-main-source.sh 2>&1
           source_rc=$?
           if [ "$forged_rc" -ne 0 ]; then
             echo "::error::forged check name or unreadable check runs (detector exit $forged_rc); rejected"
             exit 1
           fi
           if [ "$source_rc" -ne 0 ]; then
-            echo "::error::head '$HEAD_REF' from '$HEAD_REPO' rejected: only the 'staging' branch of $REPO may open a PR into main"
+            echo "::error::head '$HEAD_REF' from '$HEAD_REPO' rejected: only the 'staging' branch of $REPO, or a promote slice whose trusted replay holds, may open a PR into main"
             exit 1
           fi
-          echo "head '$HEAD_REF' from '$HEAD_REPO' is staging of $REPO: allowed"
+          echo "head '$HEAD_REF' from '$HEAD_REPO' is an allowed source for main of $REPO"
