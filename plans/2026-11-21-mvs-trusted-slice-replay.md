@@ -20,14 +20,55 @@ merge commit and cut a plain slice, or use a `hotfix/*` branch.
 The guard runs the BASE ref's script and generator over fetched head objects. It never runs the
 head's generator.
 
+Incumbent: a downstream `scripts/check-main-source.sh` already replays with `git merge-tree` and regenerates
+manifests. What is missing is trusted execution of that replay, so this plan extends the existing guard and keeps
+the detector, Review Gate and merge-time checks. It does not add a parallel mechanism.
+
 1. The trusted-base checkout (already in the guard) supplies the script and the generator from the
-   PR base.
-2. The job fetches the head's git objects only (no checkout of head files into the working tree, no
-   execution of anything the head carries).
-3. The base script replays the slice: it recomputes the expected merge result and the regenerated
-   manifest from the fetched objects and compares them to the head's tree by object id.
-4. A merge-with-main slice passes only when the replayed result equals the head's tree. Any
+   PR base. In `pull_request_target` that checkout is the base ref, which is main in a staging-default repo (see
+   Bootstrap).
+2. The job fetches the head's git objects only, by the event's immutable head SHA (`github.event.pull_request.head.sha`),
+   never by ref name, so a moved head ref cannot change what is evaluated. No checkout of head files into the working
+   tree, no execution of anything the head carries.
+3. **Provenance first (retained from the downstream validator, not replaced by tree equality).** Tree equality alone
+   does not authorize ancestry: a same-repo author could merge a legitimate staging cut with an unrelated commit and
+   replay it faithfully. Before the replay the script requires: exactly two parents; the first parent on staging's
+   first-parent history; the second parent an ancestor of main (or main's tip at the recorded base); and no appended
+   commits beyond the merge. Octopus merges, extra parents and non-first-parent staging cuts fail closed. Same-repo
+   ownership never authorizes replay inputs.
+4. The base script replays the slice from those authorized parents under the trusted generator contract below and
+   compares the result to the head's tree by object id.
+5. A merge-with-main slice passes only when provenance holds and the replayed result equals the head's tree. Any
    difference, a missing object, a truncated fetch or an API error fails closed.
+
+### Replay tuple and freshness
+
+A pass is valid only for this tuple: head SHA, staging snapshot SHA, main/base SHA, and the trusted tool version
+(the guard's released tag). The merge owner (`pr-merge-flow`'s merge step, run by the repo's traffic cop) owns
+freshness: immediately before `gh pr merge`, it re-evaluates the guard against the current base and treats a pass
+recorded against an older base SHA as stale. `--match-head-commit` protects the head only, not the base the replay
+used. Two slices validated against main at M0 therefore cannot both merge on their M0 passes: after the first merges
+(M1), the second is re-evaluated against M1. Decision: the merge step does the re-evaluation (one owner, no extra
+workflow trigger on pushes to the base), and the guard's output names the base SHA it used so the merge step can compare.
+
+### Trusted generator contract
+
+- **Trusted code** is the base checkout's script, generator and its sibling imports, pinned by path, run with `python3 -I`,
+  with no installation of head dependencies and the minimum token permissions (`contents: read`).
+- **Inert data** is the fetched head objects: read as git objects, never imported, never executed, symlinks not followed.
+- The replay is deterministic: manifest initialization is defined (start from the base-side manifest), output paths are
+  fixed, and `updated_at` (and any timestamp) is normalized the way the downstream replay already normalizes it
+  (`check-main-source.sh` normalizes timestamps before comparing). A generator failure fails closed.
+
+### Bootstrap for a staging-default downstream repo
+
+The guard workflow merged into staging activates immediately, but `pull_request_target` checks out the base ref,
+which is main. Main may not yet carry the replay script, the generator or their dependencies, so the slice meant to
+deliver them cannot use them. Re-vendoring the tag is therefore not activation. The supported route is two steps:
+(1) a scripts-first promotion lands the script, generator and dependencies on downstream main with the guard
+workflow unchanged; (2) only then is the guard workflow change activated. Each step carries its own live evidence:
+a staging-default first-promotion run and a main-default activation run. aec is main-default, so an aec promotion
+cannot prove the staging-default bootstrap and does not count as that evidence.
 
 ## Rejected: consuming the `Promote slice` check result
 
@@ -45,13 +86,32 @@ read-only and gates nothing.
   `Promote slice` name must stay distinct; no new job may take a protected name).
 - Any downstream repo's slice-aware mid guard, its `promote-slice.yml` and the tests that pin them.
 - Every repo carrying the mid guard or the canonical guard re-vendors after this lands.
+- **Drift mechanisms (existing owners, extend, do not duplicate).**
+  [2026-11-16-upgrade-detects-vendored-skills](2026-11-16-upgrade-detects-vendored-skills.md) owns guard drift
+  detection and [2026-11-21-stale-skills-fail-loudly](2026-11-21-stale-skills-fail-loudly.md) owns its automatic
+  execution and released-source checks. `scripts/check-vendored-drift.py` `COPY_SET` lists only four files
+  (`main-via-staging.yml`, `check-main-source.sh`, `check-forged-gate-names.py`, its test). Every new replay helper,
+  generator and test this plan adds goes into `COPY_SET`, so a downstream with no drift on the old four files cannot
+  keep an obsolete replay dependency. Rollout owner: aec, in the same release that ships the replay.
 
 ## Acceptance
 
 - A merge-with-main promote slice whose replayed tree equals the head passes the guard.
 - A tampered slice, a fork head, a deleted fork, a truncated fetch and an API error each fail closed
   (one test per case, a real git graph, stubbed `gh` only at the network boundary).
-- A forged `Promote slice` check run changes nothing (test).
+- Provenance, real-graph tests: an unrelated second parent, a first parent that is not on staging's first-parent
+  history, an octopus merge, an appended commit and a head ref moved after the event each fail closed.
+- Freshness, real-graph tests: two concurrently validated slices merged in either order (the second is re-evaluated
+  against the moved base), repeated evaluation of the same tuple, and base movement during evaluation.
+- Generator behavior tests: two runs give an identical tree, a changed generator version changes the tuple, a malicious
+  sibling import or symlink in the head objects is never loaded, and a generator failure fails closed.
+- Drift tests: a missing or stale replay dependency blocks evaluation, and re-vendoring the complete released copy set
+  restores it. Detector rc 0 and byte-identical vendoring alone do not prove replay behavior; they are necessary only.
+- Bootstrap evidence: a staging-default first promotion and a main-default activation, each run live and recorded
+  separately.
+- A forged `Promote slice` check run changes nothing (test). The detector's direct Checks-API forgery limitation and
+  late-publication race stay as documented; the replay preserves the merge-time detection requirement and does not
+  claim to close them.
 - Compare pagination beyond 124 commits and the live truncation path are exercised on a throwaway PR
   (the downstream repo's throwaway-PR checklist) before any promotion relies on the guard.
 - The detector (`check-forged-gate-names.py`) returns rc 0 on the head.
@@ -68,8 +128,9 @@ the canonical guard has none until this plan lands. State the consequence rather
   squash-clean promotion through the canonical guard, or waiting for this plan.
 - Whoever hands such a release route to the downstream repo's merge owner repeats this in the handoff, and the
   downstream repo's own divergence plan links back here. The supported behavior is deferred, never silently deleted.
-- Unblock criteria: this plan's acceptance list is met, the canonical guard ships it in a tagged release, and the
-  downstream repo re-vendors that tag.
+- Unblock criteria: this plan's acceptance list is met (including the separate bootstrap evidence), the canonical guard
+  ships it in a tagged release, the scripts-first promotion has reached downstream main, and the downstream repo
+  re-vendors that tag.
 
 ## Open questions
 
