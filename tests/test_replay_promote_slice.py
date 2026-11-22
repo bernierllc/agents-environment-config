@@ -5,6 +5,7 @@ authorized parents, regenerates the declared outputs with the BASE's generator, 
 check-main-source.sh still rejects every slice until R3. The network boundary is the git remote, a real bare repo
 here; the generator is a real Node script run by the replay. Nothing we own is stubbed.
 """
+import importlib.util
 import json
 import os
 import shutil
@@ -316,3 +317,35 @@ def test_a_forged_promote_slice_check_changes_nothing(g, tmp_path):
     code, out = g.run(GUARD, g.slice(g.good_files()), PATH=path)
     assert code == 1 and "rejected" in out, out
     assert not log.exists()
+
+
+def _replay_module():
+    spec = importlib.util.spec_from_file_location("replay_promote_slice", REPLAY)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+TREE = "a" * 40
+
+
+@pytest.mark.parametrize("raw, expected", [
+    (f"{TREE}\0".encode(), (TREE, [], [])),
+    (f"{TREE}\0out\0\0" "1\0out\0Auto-merging\0t\0" "1\0old\0CONFLICT (x)\0t\0".encode(),
+     (TREE, ["out"], [("Auto-merging", ["out"]), ("CONFLICT (x)", ["old"])])),
+])
+def test_the_merge_tree_reply_parses(raw, expected):
+    assert _replay_module().parse_merge_tree(raw) == expected
+
+
+@pytest.mark.parametrize("raw", [
+    f"{TREE}\0out\0\0" "1\0out\0CONFLICT (contents)\0text",  # last message not NUL-terminated
+    f"{TREE}",  # tree not terminated
+    f"{TREE}\0\0" "3\0a\0CONFLICT (x)\0",  # count runs past the reply
+    f"{TREE}\0\0" "x\0a\0CONFLICT (x)\0t\0",  # count is not a number
+    f"{TREE}\0\0" "1\0a\0CONFLICT (x)\0t\0\0junk\0",  # fields after the messages
+])
+def test_a_malformed_merge_tree_reply_fails_closed(raw):
+    mod = _replay_module()
+    with pytest.raises(mod.Reject):
+        mod.parse_merge_tree(raw.encode())

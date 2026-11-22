@@ -174,6 +174,8 @@ def run_generator(env, gen, base, worktree, index, scratch):
 def parse_merge_tree(raw):
     """merge-tree --write-tree -z --name-only: <tree>NUL, conflicted <path>NUL..., NUL, then per message
     <count>NUL<path>NUL...<kind>NUL<text>NUL. Anything else is a malformed reply (fail closed)."""
+    if not raw.endswith(b"\0"):
+        raise Reject("git merge-tree reply does not end in NUL, so its last field may be cut short")
     f = raw.decode("utf-8", errors="surrogateescape").split("\0")
     try:
         sep = f.index("", 1)
