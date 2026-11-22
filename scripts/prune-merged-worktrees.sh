@@ -73,8 +73,6 @@ idle_hours() {
   echo $(( ($(date +%s) - newest) / 3600 ))
 }
 
-# An ignored .env that is a symlink to, or a byte-identical copy of, the primary checkout's holds no
-# data of its own: only a .env that differs keeps the tree.
 # Another worktree, clone or submodule inside this one: `git worktree remove` deletes ignored
 # content, which would take that nested checkout and its uncommitted work with it.
 holds_nested_checkout() {
@@ -82,9 +80,32 @@ holds_nested_checkout() {
   find "$1" -mindepth 2 -name .git -print -quit 2>/dev/null | grep -q .
 }
 
-holds_own_env() {
-  git -C "$1" ls-files -o -i --exclude-standard | grep -E '(^|/)\.env' \
-    | while IFS= read -r f; do [ -L "$1/$f" ] || cmp -s "$1/$f" "$2/$f" || echo "$f"; done | grep -q .
+env_data_reason() { # worktree primary -> returns 0 and prints why when the tree must be kept, 1 when it holds no .env data
+  # Fails closed: anything that cannot be verified keeps the tree. A .env that is a byte-identical copy of the
+  # primary checkout's, a symlink out of the worktree, a symlink to a tracked file or a dangling symlink holds no
+  # data of its own; a symlink to an ignored file inside the worktree does (deleting the tree deletes the target).
+  # No `grep -q` at the end of a pipeline: under pipefail its early exit SIGPIPEs the writer and reads as "none".
+  local path="$1" repo="$2" ign rc wt f tgt
+  ign="$(git -C "$path" ls-files -o -i --exclude-standard)"; rc=$?
+  [ "$rc" -eq 0 ] || { echo "could not list ignored files (git ls-files exit $rc)"; return 0; }
+  wt="$(cd -P "$path" 2>/dev/null && pwd -P)" || { echo "could not resolve the worktree path"; return 0; }
+  while IFS= read -r f; do
+    case "/$f" in */.env*) ;; *) continue ;; esac
+    if [ -L "$path/$f" ]; then
+      [ -e "$path/$f" ] || continue
+      tgt="$(realpath "$path/$f" 2>/dev/null || readlink -f "$path/$f" 2>/dev/null)"
+      case "$tgt" in
+        "") echo "holds ignored .env files"; return 0 ;;
+        # exact tracked file only: --literal-pathspecs stops `only-copy[1]` globbing onto a tracked `only-copy1`,
+        # and [ -f ] stops a directory target counting as tracked because one file under it is
+        "$wt"/*) { [ -f "$tgt" ] && git --literal-pathspecs -C "$path" ls-files --error-unmatch -- "${tgt#"$wt"/}" >/dev/null 2>&1; } \
+                   || { echo "holds ignored .env files"; return 0; } ;;
+      esac
+    else
+      cmp -s "$path/$f" "$repo/$f" || { echo "holds ignored .env files"; return 0; }
+    fi
+  done <<<"$ign"
+  return 1
 }
 
 remove_worktree() { # repo path branch reason
@@ -150,8 +171,8 @@ for gitdir in "$ROOT"/*/.git "$ROOT"/*/*/.git; do
             reason="pushed, idle ${idle}h"
           fi
           if [ -n "$reason" ]; then
-            if holds_own_env "$path" "$repo"; then
-              echo "keep    $path  ($label: holds ignored .env files)"
+            if why="$(env_data_reason "$path" "$repo")"; then
+              echo "keep    $path  ($label: $why)"
             elif holds_nested_checkout "$path"; then
               echo "keep    $path  ($label: holds a nested worktree, clone or submodule)"
             else

@@ -237,6 +237,61 @@ def version_is_newer(available: str, installed: str) -> bool:
     return parse_version(available) > parse_version(installed)
 
 
+VERSION_SPEC_SYNTAX = (
+    "'latest', an exact version like '1.2.0', or comma-joined clauses using "
+    "==, >=, >, <=, <, ~= on dotted integers (for example '>=2.0.0, <3.0.0')"
+)
+_SPEC_CLAUSE_RE = re.compile(r"^(==|>=|<=|~=|>|<)?\s*(\d+(?:\.\d+)*)$")
+
+
+def parse_version_spec(spec) -> List[tuple]:
+    """Parse a version pin into ``(operator, version_tuple)`` clauses; ``[]`` means no constraint.
+
+    The one parser for version pins: the org-config validator and ``plan_apply`` both call it.
+    A bare version means ``==``. Dotted integers only (no pre-releases, wildcards or ``^``).
+    Raises ValueError naming the pin and the supported syntax.
+    """
+    text = spec.strip() if isinstance(spec, str) else None
+    if text in ("", "latest"):
+        return []
+    clauses = []
+    for part in (text.split(",") if text else [None]):
+        m = _SPEC_CLAUSE_RE.match(part.strip()) if part is not None else None
+        if not m or (m.group(1) == "~=" and "." not in m.group(2)):
+            raise ValueError(f"invalid version pin {spec!r}: use {VERSION_SPEC_SYNTAX}")
+        clauses.append((m.group(1) or "==", parse_version(m.group(2))))
+    return clauses
+
+
+def version_satisfies(version: str, spec) -> bool:
+    """True if dotted-integer ``version`` meets every clause of ``spec``.
+
+    Versions compare zero-padded (``2.1 == 2.1.0``); ``~=X.Y`` means ``>=X.Y`` and ``==X.*``.
+    Raises ValueError for a malformed spec, or for an unparseable version under a constraint.
+    """
+    # A pin naming the exact version string the source ships always holds, even an opaque
+    # one (an MCP's "2026-11-21"), so an exported manifest re-applies unchanged.
+    exact = spec.strip() if isinstance(spec, str) else ""
+    if exact == str(version).strip() and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", exact):
+        return True
+    clauses = parse_version_spec(spec)
+    if not clauses:
+        return True
+    if not re.fullmatch(r"\d+(?:\.\d+)*", str(version).strip()):
+        raise ValueError(f"version {version!r} is not a dotted-integer version, so pin {spec!r} cannot be checked")
+    have = parse_version(str(version).strip())
+    for op, want in clauses:
+        width = max(len(have), len(want))
+        v, w = have + (0,) * (width - len(have)), want + (0,) * (width - len(want))
+        ok = {
+            "==": v == w, ">=": v >= w, ">": v > w, "<=": v <= w, "<": v < w,
+            "~=": v >= w and v[: len(want) - 1] == w[: len(want) - 1],
+        }[op]
+        if not ok:
+            return False
+    return True
+
+
 def hash_skill_directory(path: Path) -> str:
     """Compute SHA-256 hash of all non-hidden files in a skill directory."""
     hasher = hashlib.sha256()

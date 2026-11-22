@@ -18,7 +18,7 @@ from .installed_store import record_item_install
 from .manifest_v2 import get_installed, load_manifest, record_mcp_install, save_manifest
 from .mcp_settings import get_settings_path, write_mcp_server
 from .scope import Scope
-from .skills_manifest import version_is_newer
+from .skills_manifest import version_is_newer, version_satisfies
 from .sources import checkout_commit
 
 TYPE_TO_PLURAL = {"skill": "skills", "rule": "rules", "agent": "agents", "mcp": "mcps"}
@@ -31,7 +31,7 @@ class DesiredItem:
     item_type: str  # "skill" | "rule" | "agent" | "mcp"
     name: str
     scope: str  # "global" or an absolute repo-path string
-    version_spec: str = "latest"  # "latest" or an exact version
+    version_spec: str = "latest"  # "latest"/"" or a pin parsed by skills_manifest.parse_version_spec
     package: str = ""  # mcp only
     # "<org_id>/<custom_source_id>" for an org custom source; "" is the AEC catalog.
     # source_dirs / available_by_type key such items by (source_id, plural).
@@ -42,6 +42,14 @@ class DesiredItem:
 
 def _source_key(item: DesiredItem, plural: str):
     return (item.source_id, plural) if item.source_id else plural
+
+
+def _installed_meets_pin(installed_version: str, spec: str) -> bool:
+    """The spec already parsed for the available version; an unreadable installed one fails the pin."""
+    try:
+        return version_satisfies(installed_version, spec)
+    except ValueError:
+        return False
 
 
 @dataclass
@@ -73,11 +81,18 @@ def plan_apply(items, *, manifest: dict, available_by_type: dict) -> list:
             plan.append(ApplyPlanEntry(item, "skip-missing", reason="not in catalog"))
             continue
         avail_version = avail[item.name].get("version", "0.0.0")
-        if item.source_id and item.version_spec not in ("", "latest") and avail_version != item.version_spec:
-            # A custom source is the only place this item can come from; never swap in another version.
+        # Every source, default catalog included, ships one version of an item, so a pin can
+        # only gate it: never swap in another version, never ignore the pin.
+        try:
+            pin_ok = version_satisfies(avail_version, item.version_spec)
+        except ValueError as exc:
+            plan.append(ApplyPlanEntry(item, "unsatisfiable", None, avail_version, str(exc)))
+            continue
+        if not pin_ok:
             plan.append(ApplyPlanEntry(
                 item, "unsatisfiable", None, avail_version,
-                f"pinned to {item.version_spec} but the source has {avail_version}",
+                f"{item.item_type} '{item.name}' is pinned to {item.version_spec} "
+                f"but the source has {avail_version}",
             ))
             continue
         installed = get_installed(manifest, item.scope, plural).get(item.name)
@@ -86,6 +101,12 @@ def plan_apply(items, *, manifest: dict, available_by_type: dict) -> list:
             continue
         installed_version = installed.get("version", "0.0.0") if isinstance(installed, dict) else "0.0.0"
         rec = installed if isinstance(installed, dict) else {}
+        if installed_version != avail_version and not _installed_meets_pin(installed_version, item.version_spec):
+            plan.append(ApplyPlanEntry(
+                item, "upgrade", installed_version, avail_version,
+                f"installed {installed_version} does not satisfy pin {item.version_spec}",
+            ))
+            continue
         if (rec.get("source") or "") != item.source_id or (
             item.source_commit and rec.get("source_commit") != item.source_commit
         ):

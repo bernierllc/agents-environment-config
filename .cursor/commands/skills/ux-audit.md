@@ -158,3 +158,16 @@ Check for framework indicators and use the appropriate patterns:
 ## Detailed Checklist
 
 See `references/audit-checklist.md` for the complete category-by-category checklist.
+
+<!-- feedback-loop:begin -->
+## Feedback
+
+If the `feedback-loop` skill is installed, use it to improve this skill over time:
+
+- When this skill's own instructions cause rework, a wrong default, a missed case or a needless
+  pause, log it as it happens: subject `skill:ux-audit`, with the phase or section at fault and the
+  concrete fix to these instructions.
+- At the end of a run, check `skill:ux-audit`; if a review is due, make the feedback-loop offer.
+
+If `feedback-loop` is not installed, ignore this section.
+<!-- feedback-loop:end -->

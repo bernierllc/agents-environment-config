@@ -4,7 +4,6 @@ description: "Use when committing in a repo that requires lowercase conventional
 tags: ["skill"]
 ---
 
-
 # Git conventions
 
 One rule, enforced where the commit happens: the first line of every commit is
@@ -39,3 +38,16 @@ or by hand: `git commit --allow-empty -m 'Bad Subject'` is rejected, `git commit
 The global rules said "Commitlint enforces it." Nothing did: no repo had commitlint, husky or a
 `commit-msg` hook. A dependency-free hook that aec installs is the smallest thing that is true
 in every repo, including ones with no `package.json`.
+
+<!-- feedback-loop:begin -->
+## Feedback
+
+If the `feedback-loop` skill is installed, use it to improve this skill over time:
+
+- When this skill's own instructions cause rework, a wrong default, a missed case or a needless
+  pause, log it as it happens: subject `skill:git-conventions`, with the phase or section at fault and the
+  concrete fix to these instructions.
+- At the end of a run, check `skill:git-conventions`; if a review is due, make the feedback-loop offer.
+
+If `feedback-loop` is not installed, ignore this section.
+<!-- feedback-loop:end -->

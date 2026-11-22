@@ -62,4 +62,4 @@ python3 scripts/generate-agent-files.py
 ## Scripts
 
 - `scripts/prune-merged-worktrees.sh` — removes linked git worktrees under `$PROJECTS_ROOT` (default `~/projects`, two levels deep) whose branch has a merged PR and whose HEAD is exactly the merged commit, then deletes the local branch. Keeps and reports dirty worktrees, unpushed commits, reused branch names with an open PR, and ignored `.env*` files. `DRY_RUN=1` previews. Needs `gh` authenticated. Schedule it daily with cron or launchd.
-- `scripts/cleanup-hung-processes.sh` — kills hung processes, prunes Docker and package-manager caches. Schedule it daily the same way.
+- `scripts/cleanup-hung-processes.sh` — kills hung processes, prunes Docker and package-manager caches, then checks free space on the volume holding `$HOME`: below `CLEANUP_MIN_FREE_PERCENT` (default 15) it prints a `LOW DISK` banner on stderr and exits 3. `CLEANUP_PRUNE_ON_LOW_DISK=1` first runs `prune-merged-worktrees.sh` (opt-in, because that script removes worktrees; override the path with `CLEANUP_PRUNE_SCRIPT`). Schedule it daily the same way and alert on a non-zero exit.

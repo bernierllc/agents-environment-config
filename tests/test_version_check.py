@@ -10,15 +10,63 @@ class TestParseVersion:
 
     def test_parses_plain_version(self):
         from aec.lib.version_check import parse_version
-        assert parse_version("2.0.0") == (2, 0, 0)
+        assert parse_version("2.0.0") == parse_version("2.0.0")
+        assert parse_version("2.0.0").release == (2, 0, 0)
 
     def test_parses_v_prefix(self):
         from aec.lib.version_check import parse_version
-        assert parse_version("v2.1.0") == (2, 1, 0)
+        assert parse_version("v2.1.0").release == (2, 1, 0)
 
     def test_parses_two_part_version(self):
         from aec.lib.version_check import parse_version
-        assert parse_version("2.1") == (2, 1)
+        assert parse_version("2.1").release == (2, 1)
+
+    @pytest.mark.parametrize("scm_version", [
+        "2.52.8.dev14+g19465b4",
+        "2.52.8.dev14+g19465b4.d20261120",
+        "0.1.dev1+g374151e",
+    ])
+    def test_parses_setuptools_scm_dev_and_local_versions(self, scm_version):
+        from aec.lib.version_check import parse_version
+        parse_version(scm_version)  # old int()-per-part split raised ValueError here
+
+    @pytest.mark.parametrize("lower, higher", [
+        ("2.52.8.dev14+g19465b4", "2.52.8"),  # a dev build of X sorts below X
+        ("2.52.7", "2.52.8.dev14+g19465b4"),  # ...and above the previous release
+        ("2.53.0rc1", "2.53.0"),
+        ("2.9.0", "2.10.0"),  # numeric, not lexicographic
+    ])
+    def test_orders_scm_and_prerelease_versions(self, lower, higher):
+        from aec.lib.version_check import parse_version
+        assert parse_version(lower) < parse_version(higher)
+
+    def test_local_suffix_is_ignored(self):
+        from aec.lib.version_check import parse_version
+        assert parse_version("2.52.8.dev14+g19465b4") == parse_version("2.52.8.dev14+gabcdef0.d20261120")
+
+    @pytest.mark.parametrize("bad", ["", "latest", "2.x.0", "2.0.0-beta"])
+    def test_rejects_unrecognised_versions(self, bad):
+        from aec.lib.version_check import parse_version
+        with pytest.raises(ValueError):
+            parse_version(bad)
+
+    def test_cli_imports_without_the_packaging_distribution(self):
+        """`aec update` pulls sources but installs no dependencies, so the runtime import
+        graph must not need anything beyond what an existing install already has."""
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        repo = Path(__file__).resolve().parent.parent
+        code = (
+            "import sys; sys.modules['packaging'] = None; "
+            f"sys.path.insert(0, {str(repo)!r}); "
+            "import aec.cli; "
+            "from aec.lib.version_check import parse_version; "
+            "assert parse_version('2.52.8.dev14+g19465b4') < parse_version('2.52.8')"
+        )
+        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
 
     def test_comparison_newer(self):
         from aec.lib.version_check import parse_version
@@ -183,6 +231,36 @@ class TestCheckForUpdate:
             assert result is not None
             assert result["current_version"] == "2.0.0"
             assert result["latest_version"] == "2.1.0"
+
+    @pytest.mark.parametrize("installed, latest, expect_update", [
+        # dev build between tags: the next release is newer than it, the last one is not
+        ("2.52.8.dev14+g19465b4", "2.52.8", True),
+        ("2.52.8.dev14+g19465b4", "2.52.7", False),
+        # dev build with a local date suffix (dirty working tree)
+        ("2.52.8.dev14+g19465b4.d20261120", "2.53.0", True),
+        # exactly on a release tag
+        ("2.53.0", "2.53.0", False),
+        ("2.52.7", "2.53.0", True),
+    ])
+    def test_update_decision_for_scm_versions(
+        self, temp_dir, monkeypatch, installed, latest, expect_update
+    ):
+        monkeypatch.setattr("aec.lib.version_check.VERSION_CACHE_FILE", temp_dir / "vc.json")
+        monkeypatch.setattr("aec.lib.version_check.VERSION", installed)
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = json_mod.dumps({
+            "tag_name": f"v{latest}",
+            "html_url": "https://example.com",
+            "prerelease": False,
+        }).encode()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+
+        with patch("aec.lib.version_check.urllib.request.urlopen", return_value=mock_response):
+            from aec.lib.version_check import check_for_update
+            result = check_for_update()
+        assert (result is not None) is expect_update
 
     def test_uses_cache_when_fresh(self, temp_dir, monkeypatch):
         cache_file = temp_dir / "vc.json"

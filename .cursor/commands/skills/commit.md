@@ -82,3 +82,16 @@ Run `git status` after commit to confirm clean state.
 - Do not push unless the user specifically asked to push
 - Do not capitalize the commit subject
 - Do not read or explore code beyond what git commands show — this is a commit skill, not a code review
+
+<!-- feedback-loop:begin -->
+## Feedback
+
+If the `feedback-loop` skill is installed, use it to improve this skill over time:
+
+- When this skill's own instructions cause rework, a wrong default, a missed case or a needless
+  pause, log it as it happens: subject `skill:commit`, with the phase or section at fault and the
+  concrete fix to these instructions.
+- At the end of a run, check `skill:commit`; if a review is due, make the feedback-loop offer.
+
+If `feedback-loop` is not installed, ignore this section.
+<!-- feedback-loop:end -->

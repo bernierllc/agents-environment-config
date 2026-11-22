@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import shlex
 import subprocess
 import unicodedata
 from pathlib import Path
@@ -389,7 +390,7 @@ def _diagnose_sync_failure(repo_path: Path, cmd: list, stderr: str):
     from .errors import RepoSyncError
 
     text = stderr.lower()
-    cd = f"cd {repo_path}"
+    cd = f"cd {shlex.quote(str(repo_path))}"
     # git's "hint:" lines restate generic options; our fix steps replace them
     detail = "\n".join(
         line for line in stderr.strip().splitlines() if not line.startswith("hint:")
@@ -452,6 +453,47 @@ def _diagnose_sync_failure(repo_path: Path, cmd: list, stderr: str):
                 "Commit them, or set them aside: git stash push -m before-aec-update",
                 rerun,
                 "If you stashed: git stash pop",
+            ],
+        )
+    if "multiple branches" in text:
+        # `git pull --ff-only` refuses when the branch has more than one branch.<name>.merge value.
+        # Full ref, not --short: a tag with the branch's name makes --short print `heads/<name>`.
+        head = (_git_out(repo_path, "symbolic-ref", "-q", "HEAD") or "").strip()
+        branch = head.removeprefix("refs/heads/") if head.startswith("refs/heads/") else ""
+        # NUL-delimited, not stripped or split: an empty value or one with a space is a value of its own.
+        done = subprocess.run(["git", "config", "--get-all", "-z", f"branch.{branch}.merge"],
+                              cwd=repo_path, capture_output=True) if branch else None
+        refs = ([os.fsdecode(v) for v in done.stdout.split(b"\0")[:-1]]
+                if done is not None and done.returncode == 0 else [])
+        # The printed steps are pasted into a shell and a branch name can hold `;` or `$(...)`: quote it.
+        # Never guess an upstream (remote names, fetch mappings and same-named tags all break a guess):
+        # the repair offers one ready, quoted line per merge ref git already lists, or names a placeholder.
+        b = shlex.quote(branch) if branch else "<branch>"
+        key = shlex.quote(f"branch.{branch}.merge") if branch else "branch.<branch>.merge"
+        if len(refs) > 1:
+            return RepoSyncError(
+                f"Branch '{branch}' has more than one upstream merge ref configured, "
+                "so `git pull --ff-only` cannot pick one to fast-forward to.",
+                detail=detail or "\n".join(refs),
+                fix=[
+                    cd,
+                    f"git config --get-all {key}   # lists the competing refs",
+                    "Run ONE of these lines, the one for the ref you want to keep (it drops the others):",
+                    # Each ref is quoted here: a ref the user copied out of git's listing could hold `;` or `$(...)`.
+                    *[f"git config --replace-all {key} {shlex.quote(r)}" for r in refs],
+                    rerun,
+                ],
+            )
+        # One or no merge value: the config is not the cause (nevar-auth saw this on such a checkout),
+        # so do not tell the user to rewrite it. Show what the branch tracks and let them pin it.
+        return RepoSyncError(
+            "`git pull --ff-only` found more than one branch to fast-forward to in your AEC checkout.",
+            detail=detail,
+            fix=[
+                cd,
+                "git branch -vv   # shows the upstream each local branch tracks",
+                f"git branch --set-upstream-to=<remote>/<branch> {b}   # if it tracks nothing, or the wrong branch",
+                rerun,
             ],
         )
     if "no tracking information" in text or "not currently on a branch" in text:

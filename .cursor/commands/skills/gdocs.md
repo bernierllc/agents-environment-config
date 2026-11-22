@@ -769,3 +769,16 @@ When user provides meeting notes + Google Doc:
 ---
 
 **Remember:** This skill is about **intelligent synthesis**, not smart location finding. The value is in transformation, not insertion mechanics.
+
+<!-- feedback-loop:begin -->
+## Feedback
+
+If the `feedback-loop` skill is installed, use it to improve this skill over time:
+
+- When this skill's own instructions cause rework, a wrong default, a missed case or a needless
+  pause, log it as it happens: subject `skill:gdocs`, with the phase or section at fault and the
+  concrete fix to these instructions.
+- At the end of a run, check `skill:gdocs`; if a review is due, make the feedback-loop offer.
+
+If `feedback-loop` is not installed, ignore this section.
+<!-- feedback-loop:end -->

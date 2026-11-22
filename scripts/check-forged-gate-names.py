@@ -5,22 +5,24 @@ Required checks are matched by NAME (plus the GitHub Actions app id), and a same
 workflows in its own head. So a PR can add a job named exactly like a required check, with
 `run: true`, and Actions publishes a success under that name.
 
-A legitimate result for a protected name is either published through the Checks API (its
-details_url is `.../runs/<id>`, no `/actions/`) or comes from one pinned trusted workflow
-(path + event). Any other Actions-job check run bearing a protected name is forged.
+A legitimate result for a protected name comes from one pinned trusted workflow (path + event):
+that workflow's job IS the required check. A run published through the Checks API (details_url
+`.../runs/<id>`, no `/actions/`) is not flagged (see KNOWN LIMIT). Any other Actions-job check run
+bearing a protected name is forged.
 
 This is DETECTION, not prevention: the forged success still sits beside our result. The
-unforgeable fix is a required workflow or a distinct publisher app (plans/2026-11-16-unforgeable-required-checks.md).
+unforgeable fix is a required workflow or a distinct publisher app (plan `plans/2026-11-16-unforgeable-required-checks.md` in the aec repo; copies of this
+script elsewhere do not carry it).
 It exists so the guard, and the merge step of whoever merges, fail loudly instead of trusting a name.
 
 KNOWN LIMIT: a PR workflow with `checks: write` can also POST the name straight to the Checks API. That
-check run has no job URL, so it looks exactly like our own guard's publication (same app, same name) and
-this script cannot tell them apart; reruns and `edited` events legitimately add same-name runs too. Only
+check run has no job URL and is not flagged: older guards published their result that way, so an API run
+cannot be told apart from a legacy legitimate one; reruns and `edited` events legitimately add same-name runs too. Only
 provenance (required workflow or a distinct publisher app) closes it. Pinned by
 test_api_published_guard_check_is_not_forged_known_limit.
 
 SCOPE: the only invoker in this repo is main-via-staging.yml, which runs for PRs into main. PRs into other
-branches are covered only by the merger's merge-time run of this script; review-gate.yml invoking it is plan step S5.
+branches are covered only by the merger's merge-time run of this script; review-gate.yml invoking it is plan step S5 (in the aec repo plan named above).
 
 TIMING: the guard workflow runs this once. A PR job that publishes its forged name after that scan is
 not seen by it, so whoever merges runs this again immediately before the merge.
@@ -40,7 +42,7 @@ import sys
 # name -> allowed (workflow path, event) pairs for an Actions-job check run bearing that name.
 # An empty set means no Actions job may use the name: only the Checks API publishes it.
 PROTECTED = {
-    "PRs into main must come from staging": set(),
+    "PRs into main must come from staging": {(".github/workflows/main-via-staging.yml", "pull_request_target")},
     "Review Gate": {(".github/workflows/review-gate.yml", "pull_request_target")},
 }
 _JOB_URL = re.compile(r"/actions/runs/(\d+)/job/")
@@ -89,14 +91,32 @@ def _gh_run_lookup(repo):
 
 def _load_check_runs(text):
     """`gh api --paginate` concatenates one JSON object per page."""
-    decoder, index, runs = json.JSONDecoder(), 0, []
+    decoder, index, runs, totals = json.JSONDecoder(), 0, [], set()
     while index < len(text):
         while index < len(text) and text[index].isspace():
             index += 1
         if index >= len(text):
             break
         page, index = decoder.raw_decode(text, index)
-        runs.extend(page["check_runs"])
+        page_runs = page["check_runs"]
+        # Every entry must look like a check run, or a nonempty but garbage listing would pass as "evaluated".
+        if not isinstance(page_runs, list) or not all(
+            isinstance(run, dict) and isinstance(run.get("name"), str) for run in page_runs
+        ):
+            raise ValueError("check_runs holds an entry that is not a named check run")
+        runs.extend(page_runs)
+        # The API sends total_count on every page; missing, bool, float or negative is not a listing we trust.
+        total = page.get("total_count")
+        if type(total) is not int or total < 0:
+            raise ValueError(f"page total_count is not a nonnegative integer: {total!r}")
+        totals.add(total)
+    # Fail closed: a head always has check runs by merge time (the guard's own, at least), so
+    # empty input (a caller without pipefail, a silent `gh api`) or zero runs is not "no forgery".
+    if not runs:
+        raise ValueError("input contains no check runs")
+    # A truncated listing (an omitted page could hold the forged run) is not an evaluated one.
+    if totals != {len(runs)}:
+        raise ValueError(f"listing holds {len(runs)} check runs but total_count says {sorted(totals)}")
     return runs
 
 
@@ -107,7 +127,7 @@ def main():
         return 2
     try:
         bad = forged(_load_check_runs(sys.stdin.read()), _gh_run_lookup(repo))
-    except (ValueError, KeyError, subprocess.CalledProcessError) as exc:
+    except (ValueError, KeyError, TypeError, subprocess.CalledProcessError) as exc:
         print(f"::error::could not evaluate check runs, failing closed: {exc}", file=sys.stderr)
         return 2
     for name, where in bad:

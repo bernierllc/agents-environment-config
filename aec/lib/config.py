@@ -6,36 +6,16 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-# Version — read from pyproject.toml so there's a single source of truth
+# Version — the release tag is the single source of truth. setuptools-scm turns it
+# into the package metadata at install time (pyproject.toml has no static version),
+# so the metadata is what we read, for editable and wheel installs alike.
 def _read_version() -> str:
-    """Read version from pyproject.toml, falling back to hardcoded default."""
-    try:
-        import tomllib
-    except ImportError:
-        try:
-            import tomli as tomllib  # type: ignore[no-redef]
-        except ImportError:
-            tomllib = None  # type: ignore[assignment]
-
-    if tomllib is not None:
-        pyproject = Path(__file__).resolve().parent.parent.parent / "pyproject.toml"
-        if pyproject.exists():
-            with open(pyproject, "rb") as f:
-                data = tomllib.load(f)
-            return data.get("project", {}).get("version", "2.0.0")
-
-    # Fallback: parse version line directly (no toml library needed)
-    pyproject = Path(__file__).resolve().parent.parent.parent / "pyproject.toml"
-    if pyproject.exists():
-        for line in pyproject.read_text().splitlines():
-            if line.strip().startswith("version"):
-                return line.split("=", 1)[1].strip().strip('"')
-
-    # Installed from a wheel (pipx, pip install): no pyproject beside the package.
+    """Return the installed aec version; "0.0.0" when aec is not installed at all."""
     from importlib.metadata import PackageNotFoundError, version
     try:
         return version("aec")
     except PackageNotFoundError:
+        # Running from a bare checkout that was never `pip install`ed: no metadata exists.
         return "0.0.0"
 
 
