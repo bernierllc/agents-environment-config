@@ -5,7 +5,7 @@ default, so a first-time user sees no check). Each installed client is checked o
 
 - Claude Code: ``mcpServers`` in ``~/.claude.json`` or ``~/.claude/settings.json``
 - Cursor: ``mcpServers`` in ``~/.cursor/mcp.json``
-- Codex: a ``[mcp_servers.<name>]`` table in ``~/.codex/config.toml``
+- Codex: a ``[mcp_servers.<name>]`` table in ``~/.codex/config.toml`` (parsed with tomllib/tomli)
 
 A client counts as installed when its config directory or file exists. A server registered with a
 ``command`` (stdio) must point at an executable that exists; a ``url`` entry needs no local binary.
@@ -15,19 +15,31 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11
+    import tomli as tomllib  # type: ignore[no-redef]
 
 REQUIRED_MCP_SETTING = "required_mcp_servers"
 
 
 def required_servers(settings_value: Any) -> List[str]:
-    """Normalise the preference value to a list of server names."""
-    if not isinstance(settings_value, list):
+    """Normalise the preference value to a de-duplicated list of server names.
+
+    Raises ValueError for a value that is set but malformed, so a typo cannot silently turn the
+    check off.
+    """
+    if settings_value is None:
         return []
-    return [s for s in settings_value if isinstance(s, str) and s.strip()]
+    if not isinstance(settings_value, list) or not all(
+        isinstance(s, str) and s.strip() for s in settings_value
+    ):
+        raise ValueError("must be a list of non-empty server names")
+    return list(dict.fromkeys(s.strip() for s in settings_value))
 
 
 def _json_servers(path: Path) -> Optional[Dict[str, Any]]:
@@ -40,33 +52,20 @@ def _json_servers(path: Path) -> Optional[Dict[str, Any]]:
     return servers if isinstance(servers, dict) else {}
 
 
-def _toml_entry(path: Path, name: str) -> Optional[Dict[str, str]]:
-    """Fields of ``[mcp_servers.<name>]`` in a Codex config.toml, None when the table is absent.
-
-    Hand-rolled because Python 3.9 has no tomllib; only the table header and its ``command`` /
-    ``url`` lines matter here.
-    """
-    text = path.read_text(encoding="utf-8")
-    header = re.compile(r"^\[mcp_servers\.(?:%s|\"%s\")\]\s*$" % (re.escape(name), re.escape(name)))
-    entry: Optional[Dict[str, str]] = None
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("["):
-            if entry is not None:
-                break
-            if header.match(stripped):
-                entry = {}
-            continue
-        if entry is not None:
-            m = re.match(r'^(command|url)\s*=\s*"([^"]*)"', stripped)
-            if m:
-                entry[m.group(1)] = m.group(2)
-    return entry
+def _codex_servers(path: Path) -> Optional[Dict[str, Any]]:
+    """The mcp_servers table of a Codex config.toml, or None when the file cannot be parsed."""
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except (OSError, ValueError):  # ValueError covers TOMLDecodeError and UnicodeDecodeError
+        return None
+    servers = data.get("mcp_servers", {})
+    return servers if isinstance(servers, dict) else {}
 
 
 def _command_problem(command: str) -> Optional[str]:
     resolved = command if os.path.isabs(command) else shutil.which(command)
-    if not resolved or not os.path.exists(resolved):
+    if not resolved or not os.path.isfile(resolved):
         return "command %s does not exist" % command
     if not os.access(resolved, os.X_OK):
         return "command %s is not executable" % command
@@ -77,6 +76,8 @@ def _entry_problem(entry: Any) -> Optional[str]:
     """Why a registered entry cannot work, or None when it looks usable."""
     if not isinstance(entry, dict):
         return "entry is not a table"
+    if entry.get("disabled") is True or entry.get("enabled") is False:
+        return "entry is disabled"
     command = entry.get("command")
     if command:
         return _command_problem(str(command))
@@ -123,19 +124,14 @@ def check_required_mcp_servers(required: List[str], home: Path) -> List[str]:
                     problems.append("Cursor: MCP server '%s' is broken: %s" % (name, _entry_problem(servers[name])))
 
     if (home / ".codex").exists():
-        for name in required:
-            try:
-                entry = _toml_entry(codex_file, name) if codex_file.exists() else None
-            except OSError:
-                problems.append("Codex: cannot read config.toml, so required MCP servers are unverified")
-                break
-            if entry is None:
-                problems.append("Codex: MCP server '%s' is not registered (~/.codex/config.toml)" % name)
-            elif entry.get("command"):
-                why = _command_problem(entry["command"])
-                if why:
-                    problems.append("Codex: MCP server '%s' is broken: %s" % (name, why))
-            elif not entry.get("url"):
-                problems.append("Codex: MCP server '%s' is broken: entry has neither command nor url" % name)
+        servers = _codex_servers(codex_file) if codex_file.exists() else {}
+        if servers is None:
+            problems.append("Codex: cannot parse config.toml, so required MCP servers are unverified")
+        else:
+            for name in required:
+                if name not in servers:
+                    problems.append("Codex: MCP server '%s' is not registered (~/.codex/config.toml)" % name)
+                elif _entry_problem(servers[name]):
+                    problems.append("Codex: MCP server '%s' is broken: %s" % (name, _entry_problem(servers[name])))
 
     return problems

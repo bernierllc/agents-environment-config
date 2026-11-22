@@ -54,9 +54,10 @@ relevant subsystems before merging.
 
 ### Required MCP servers
 1. In `~/.agents-environment-config/preferences.json` set `"settings": {"required_mcp_servers": ["my-server"]}`.
-2. With `my-server` registered in none of Claude Code (`~/.claude.json`), Cursor (`~/.cursor/mcp.json`) or Codex (`~/.codex/config.toml`) that is installed, run `aec doctor`; it prints one error per client and fails.
+2. With `my-server` registered in none of Claude Code (`~/.claude.json`), Cursor (`~/.cursor/mcp.json`) or Codex (`~/.codex/config.toml`) that is installed, run `aec doctor`; it prints one error per client and exits 1.
 3. Register `my-server` with a real `command` in each client; `aec doctor` passes. Point `command` at a missing file; it fails with "does not exist".
-4. Remove the setting; `aec doctor` reports "None required" and passes.
+4. Set the value to a string (`"my-server"`) instead of a list; `aec doctor` reports that it must be a list and exits 1.
+5. Remove the setting; `aec doctor` reports "None required" and passes.
 
 ## Hook scripts run without their exec bit (#67)
 

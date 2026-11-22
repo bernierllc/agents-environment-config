@@ -42,7 +42,12 @@ def _check_required_mcp_servers() -> list:
     )
 
     Console.subheader("Required MCP servers")
-    required = required_servers(get_setting(REQUIRED_MCP_SETTING))
+    try:
+        required = required_servers(get_setting(REQUIRED_MCP_SETTING))
+    except ValueError as exc:
+        message = f"Required MCP servers: settings.{REQUIRED_MCP_SETTING} {exc}"
+        Console.error(message)
+        return [message]
     if not required:
         Console.info(f"None required (set preferences settings.{REQUIRED_MCP_SETTING} to a list of server names)")
         return []

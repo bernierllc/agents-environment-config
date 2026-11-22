@@ -38,10 +38,12 @@ def _codex(home: Path, body: str) -> None:
     (home / ".codex" / "config.toml").write_text(body)
 
 
-def test_required_servers_ignores_non_lists_and_blanks() -> None:
+def test_required_servers_normalises_and_rejects_malformed() -> None:
     assert required_servers(None) == []
-    assert required_servers("notion") == []
-    assert required_servers(["my-server", "", 3]) == ["my-server"]
+    assert required_servers([" my-server ", "my-server", "other"]) == ["my-server", "other"]
+    for bad in ("my-server", ["my-server", 3], ["my-server", ""], {"a": 1}):
+        with pytest.raises(ValueError):
+            required_servers(bad)
 
 
 def test_no_clients_installed_means_nothing_to_check(tmp_path: Path) -> None:
@@ -77,6 +79,47 @@ def test_codex_entry_is_read_only_from_its_own_table(tmp_path: Path) -> None:
     _codex(tmp_path, '[mcp_servers.my-server]\nstartup_timeout_sec = 60.0\n\n[mcp_servers.other]\ncommand = "/bin/sh"\n')
     problems = check_required_mcp_servers(["my-server"], tmp_path)
     assert len(problems) == 1 and "neither command nor url" in problems[0]
+
+
+@pytest.mark.parametrize(
+    "toml",
+    [
+        '[mcp_servers.my-server] # note\ncommand = "/bin/sh"\n',
+        "[mcp_servers.my-server]\ncommand = '/bin/sh'\n",
+        "[mcp_servers.'my-server']\ncommand = \"/bin/sh\"\n",
+        '[mcp_servers.my-server]\nargs = [\n  ["x"],\n]\ncommand = "/bin/sh"\n',
+        '[mcp_servers.my-server]\ncommand = "/bin/sh"\n[mcp_servers.my-server.env]\nKEY = "v"\n',
+    ],
+)
+def test_valid_codex_toml_variants_pass(tmp_path: Path, toml: str) -> None:
+    _codex(tmp_path, toml)
+    assert check_required_mcp_servers(["my-server"], tmp_path) == []
+
+
+def test_unparseable_codex_toml_is_unverified(tmp_path: Path) -> None:
+    _codex(tmp_path, "[mcp_servers.my-server\ncommand = ")
+    (problem,) = check_required_mcp_servers(["my-server"], tmp_path)
+    assert "unverified" in problem
+
+
+def test_non_utf8_codex_toml_is_unverified_not_a_crash(tmp_path: Path) -> None:
+    (tmp_path / ".codex").mkdir()
+    (tmp_path / ".codex" / "config.toml").write_bytes(b"\xff\xfe[x]")
+    (problem,) = check_required_mcp_servers(["my-server"], tmp_path)
+    assert "unverified" in problem
+
+
+def test_disabled_server_is_not_registered_for_use(tmp_path: Path) -> None:
+    _codex(tmp_path, '[mcp_servers.my-server]\ncommand = "/bin/sh"\nenabled = false\n')
+    _cursor(tmp_path, {"my-server": {"command": "/bin/sh", "disabled": True}})
+    problems = check_required_mcp_servers(["my-server"], tmp_path)
+    assert len(problems) == 2 and all("disabled" in p for p in problems)
+
+
+def test_command_that_is_a_directory_is_broken(tmp_path: Path) -> None:
+    _claude(tmp_path, {"my-server": {"command": str(tmp_path)}})
+    (problem,) = check_required_mcp_servers(["my-server"], tmp_path)
+    assert "does not exist" in problem
 
 
 def test_stdio_command_that_does_not_exist_is_broken(tmp_path: Path) -> None:
@@ -134,3 +177,25 @@ def test_doctor_requires_nothing_by_default(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     with patch("aec.lib.preferences.AEC_PREFERENCES", tmp_path / "absent.json"):
         assert _check_required_mcp_servers() == []
+
+
+def test_doctor_flags_a_malformed_setting_instead_of_passing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aec.commands.doctor import _check_required_mcp_servers
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    prefs = tmp_path / "preferences.json"
+    prefs.write_text(json.dumps({"settings": {"required_mcp_servers": "my-server"}}))
+    with patch("aec.lib.preferences.AEC_PREFERENCES", prefs):
+        (issue,) = _check_required_mcp_servers()
+    assert "must be a list" in issue
+
+
+def test_doctor_command_exits_nonzero_when_a_check_fails() -> None:
+    from typer.testing import CliRunner
+
+    from aec.cli import app
+
+    with patch("aec.commands.doctor.run_doctor", return_value=(False, ["x"])):
+        assert CliRunner().invoke(app, ["doctor"]).exit_code == 1
+    with patch("aec.commands.doctor.run_doctor", return_value=(True, [])):
+        assert CliRunner().invoke(app, ["doctor"]).exit_code == 0
