@@ -4,7 +4,6 @@ description: "Verifies who can call each REST endpoint and MCP tool by running a
 tags: ["skill"]
 ---
 
-
 # API Verification
 
 Runs the access matrix. Docs say who should get in (`access:` frontmatter, merged into `docs/verification/access-manifest.json`); this skill checks the running server agrees.
@@ -27,7 +26,7 @@ Runs the access matrix. Docs say who should get in (`access:` frontmatter, merge
    - `flag-off-reachable`: only with `--flags-off NAME,...` on `plan`/`evaluate`. Entries `gated_by` a flag that is off in this environment must answer 404 or a denied status; anything else means the flag does not gate the route (add 302 to `--denied-status` for apps that redirect to a login page).
 5. Write the report to `docs/verification/findings/api-verification-<date>.md` (the scanners skip `findings/`) with a **Cross-agent feedback** section (what docs agents and test runs told you, what changed). Fixes to wrong docs go through `api-verification-writer`, then regenerate the manifest.
 
-Run via `aec run-script skill:api-verification matrix.py <subcommand> ...`.
+Run via `aec run-script skill:api-verification matrix.py -- <subcommand> ...` (script flags such as `--base-url` go after `--`).
 
 ## Rules
 
@@ -36,3 +35,20 @@ Run via `aec run-script skill:api-verification matrix.py <subcommand> ...`.
 - An unreachable route is a `no-response` mismatch, not a pass. A planned row missing from the results file (and not listed in `skipped_mutating`) is a `missing-result` mismatch, for any surface that has at least one result.
 - Status 404/400 caused by the placeholder path id counts as allowed: the auth gate passed the request.
 - Do not log or print tokens; reports name principals only.
+
+## Installed verification directory
+
+Read `.aec/directories.json` before using verification docs. Its `verification` value is the shared directory selected during AEC setup; absent configuration defaults to `docs/verification`. All documentation paths in this skill are relative to that chosen root. The scripts read this configuration automatically; explicit API matrix file arguments still take precedence.
+
+<!-- feedback-loop:begin -->
+## Feedback
+
+If the `feedback-loop` skill is installed, use it to improve this skill over time:
+
+- When this skill's own instructions cause rework, a wrong default, a missed case or a needless
+  pause, log it as it happens: subject `skill:api-verification`, with the phase or section at fault and the
+  concrete fix to these instructions.
+- At the end of a run, check `skill:api-verification`; if a review is due, make the feedback-loop offer.
+
+If `feedback-loop` is not installed, ignore this section.
+<!-- feedback-loop:end -->

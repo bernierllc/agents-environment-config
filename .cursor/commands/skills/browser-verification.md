@@ -655,3 +655,22 @@ Verification-writer will re-analyze the affected sections against current code a
 - Changed file is imported by many features (shared code)
 - Console shows auth/session errors (may indicate environment issue, not code bug)
 - Multiple failures in the same section suggest a systemic issue — consider logging instead of fixing individually
+
+## Installed verification directory
+
+Runtime prerequisite: Python 3 must be available as `python3` on PATH. Preflight checks it explicitly before reading the directory configuration.
+
+Read `.aec/directories.json` before using verification docs. Its `verification` value is the shared directory selected during AEC setup; absent configuration defaults to `docs/verification`. All documentation paths in this skill are relative to that chosen root. The scripts read this configuration automatically; explicit API matrix file arguments still take precedence.
+
+<!-- feedback-loop:begin -->
+## Feedback
+
+If the `feedback-loop` skill is installed, use it to improve this skill over time:
+
+- When this skill's own instructions cause rework, a wrong default, a missed case or a needless
+  pause, log it as it happens: subject `skill:browser-verification`, with the phase or section at fault and the
+  concrete fix to these instructions.
+- At the end of a run, check `skill:browser-verification`; if a review is due, make the feedback-loop offer.
+
+If `feedback-loop` is not installed, ignore this section.
+<!-- feedback-loop:end -->

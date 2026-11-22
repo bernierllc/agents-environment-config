@@ -72,3 +72,19 @@ acting on it. One line per drift found:
 - **Conflicting states** (two runs, a stale run, or state contradicting git in a way
   you can't resolve): present the conflict in a few lines and let the user pick. This is
   the only case where resume pauses.
+
+<!-- feedback-loop:begin -->
+## Feedback
+
+If the `feedback-loop` skill is installed, use it to improve this skill over time:
+
+- When this skill's own instructions cause rework, a wrong default, a missed case or a needless
+  pause, log it as it happens: subject `skill:resume`, with the phase or section at fault and the
+  concrete fix to these instructions.
+- When the project's own process causes friction during this skill's work (for example a flaky
+  or slow CI job, a test that missed a regression, a plan that was wrong about the code), log it
+  as subject `process:<project>` with `--area <ci|test|plan|review|deploy|dev>`.
+- At the end of a run, check `skill:resume`; if a review is due, make the feedback-loop offer.
+
+If `feedback-loop` is not installed, ignore this section.
+<!-- feedback-loop:end -->
