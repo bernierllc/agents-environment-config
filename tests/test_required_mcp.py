@@ -199,3 +199,19 @@ def test_doctor_command_exits_nonzero_when_a_check_fails() -> None:
         assert CliRunner().invoke(app, ["doctor"]).exit_code == 1
     with patch("aec.commands.doctor.run_doctor", return_value=(True, [])):
         assert CliRunner().invoke(app, ["doctor"]).exit_code == 0
+
+
+def test_real_doctor_run_exits_1_for_a_missing_required_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from typer.testing import CliRunner
+
+    from aec.cli import app
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    prefs = tmp_path / "preferences.json"
+    prefs.write_text(json.dumps({"settings": {"required_mcp_servers": ["my-server"]}}))
+    _claude(tmp_path, {})
+    with patch("aec.lib.preferences.AEC_PREFERENCES", prefs):
+        result = CliRunner().invoke(app, ["doctor"])
+    assert result.exit_code == 1
+    assert "my-server" in result.output
