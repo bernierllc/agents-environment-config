@@ -19,6 +19,8 @@ set -euo pipefail
 : "${BASE_SHA:?BASE_SHA is required (github.event.pull_request.base.sha)}"
 : "${HEAD_REF:?HEAD_REF is required}"
 remote="${GIT_REMOTE:-origin}"
+# Walk the immutable objects, never a locally rewritten graph: no replacement refs, no grafts.
+export GIT_NO_REPLACE_OBJECTS=1
 
 reject() { echo "::error::slice provenance: $*" >&2; exit 1; }
 
@@ -43,6 +45,8 @@ unshallow=()
 [ "$(git rev-parse --is-shallow-repository)" = "true" ] && unshallow=(--unshallow)
 git fetch --quiet --no-tags --no-write-fetch-head ${unshallow[@]+"${unshallow[@]}"} "$remote" \
   "$HEAD_SHA" "$BASE_SHA" "$staging_sha" || reject "fetch of the event objects from $remote failed"
+[ ! -e "$(git rev-parse --git-path info/grafts)" ] || reject "this checkout has info/grafts, which rewrites ancestry"
+[ "$(git rev-parse --is-shallow-repository)" = "false" ] || reject "this checkout is still shallow after the fetch"
 for sha in "$HEAD_SHA" "$BASE_SHA" "$staging_sha"; do
   git cat-file -e "$sha^{commit}" 2>/dev/null || reject "commit $sha is missing after fetch"
 done

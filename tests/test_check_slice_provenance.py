@@ -192,6 +192,7 @@ def test_head_content_is_never_checked_out_or_run(g, tmp_path):
     before = g.git(clone, "rev-parse", "HEAD")
     code, out = g.run(GUARD, head, g.m1, cwd=clone)
     assert code == 1, out
+    assert "slice provenance holds" in out, out  # the head objects were examined, not an early error
     assert not marker.exists()
     assert g.git(clone, "rev-parse", "HEAD") == before
     assert g.git(clone, "status", "--porcelain") == ""
@@ -203,3 +204,21 @@ def test_the_guard_without_provenance_inputs_still_rejects_a_slice(g):
     e.update(HEAD_REF=SLICE, HEAD_REPO="my-org/my-repo", REPO="my-org/my-repo")
     p = subprocess.run(["bash", str(GUARD)], cwd=g.guard_clone(), env=e, capture_output=True, text=True)
     assert p.returncode == 1 and "HEAD_SHA is required" in p.stderr
+
+
+def _rewritten_clone(g, how):
+    """A guard checkout whose local history claims f1 is staging's first parent (s2 really is s1 + f1)."""
+    clone = g.guard_clone()
+    g.git(clone, "fetch", "-q", "origin", "staging")
+    if how == "replace":
+        g.git(clone, "replace", "--graft", g.s2, g.f1, g.s1)
+    else:
+        Path(g.git(clone, "rev-parse", "--absolute-git-dir"), "info", "grafts").write_text(f"{g.s2} {g.f1} {g.s1}\n")
+    return clone
+
+
+@pytest.mark.parametrize("how", ["replace", "grafts"])
+def test_a_locally_rewritten_staging_graph_cannot_fake_provenance(g, how):
+    head = slice_of(g, g.f1, g.m1)  # f1 is only staging's second parent
+    code, out = g.run(PROVENANCE, head, g.m1, cwd=_rewritten_clone(g, how))
+    assert code == 1, out
