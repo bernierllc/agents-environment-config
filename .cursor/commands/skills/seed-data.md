@@ -246,3 +246,16 @@ Before committing changes that introduce new models, enums, or lookup data:
 - Companion rule: `~/.agent-tools/rules/agents-environment-config/frameworks/database/seed-data.md` — authoritative written rules this skill operationalizes.
 - Connection management: `~/.agent-tools/rules/agents-environment-config/frameworks/database/connection-management.md` — pool lifecycle, migration ordering, and env-var expectations that seed scripts must respect.
 - Testing standards: `~/.agent-tools/rules/agents-environment-config/frameworks/testing/standards.md` — owns fixture / factory patterns that this skill defers to.
+
+<!-- feedback-loop:begin -->
+## Feedback
+
+If the `feedback-loop` skill is installed, use it to improve this skill over time:
+
+- When this skill's own instructions cause rework, a wrong default, a missed case or a needless
+  pause, log it as it happens: subject `skill:seed-data`, with the phase or section at fault and the
+  concrete fix to these instructions.
+- At the end of a run, check `skill:seed-data`; if a review is due, make the feedback-loop offer.
+
+If `feedback-loop` is not installed, ignore this section.
+<!-- feedback-loop:end -->

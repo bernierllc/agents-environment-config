@@ -38,7 +38,9 @@ Run it manually:
 python3 verification-writer/scripts/scan-versions.py --root .
 ```
 
-The output is JSON: counts of `current` / `stale` / `missing_frontmatter` / `stamp_missing` / `no_affected_paths` plus per-file lists. Use this at the start of any update pass to know which docs need migration. See `references/version-fingerprints.md` for how versions are inferred when a `generated_by` stamp is missing.
+The scanner reads its own version from the `SKILL.md` beside `scripts/`. A repo that vendors only `scripts/` must pass `--current-version <x.y.z>`, or it exits with `no version in SKILL.md`.
+
+The output is JSON: counts of `current` / `stale` / `missing_frontmatter` / `stamp_missing` / `stamp_malformed` / `other_skill` (docs stamped by a sibling skill) / `no_affected_paths` plus per-file lists (each bucket except `current` has a path list). `current + stale + other_skill + missing_frontmatter + stamp_missing + stamp_malformed` equals `total`. Use this at the start of any update pass to know which docs need migration. See `references/version-fingerprints.md` for how versions are inferred when a `generated_by` stamp is missing.
 
 ### Integrity pass
 
@@ -555,6 +557,8 @@ Do not block the update on frontmatter migration — add frontmatter to docs you
 `access:` frontmatter says what a page requires. `visibility` says who may be *told about* it. Customer-docs agents, `llms.txt`/sitemap build steps and CI must read that decision from data, not from an agent's judgment.
 
 `scripts/build-access-manifest.py` merges the `access:` blocks of `docs/verification/{pages,api,mcp}/` (flows are not entries: they have no `access` block) into `docs/verification/access-manifest.json` (surface, id, visibility, auth_model, endpoint, roles, scopes, permissions, tier, mfa_required, gated_by, user_types, affected_paths, plus `findings`). API and MCP docs come from the `api-verification-writer` skill; this script is the one shared merge.
+
+Manifests built before 3.7 carried placeholder `flow` rows with `visibility: draft`. They are gone, so a consumer keyed on `surface: flow` must read the flow docs instead.
 
 ```bash
 python3 verification-writer/scripts/build-access-manifest.py --root .          # write
@@ -1210,3 +1214,20 @@ HTML visualization: [flow-views | sitemap | both | none]
 - About to generate a checklist item without a bold `**ID**` — Format A is mandatory for all generated items; derive or skip the item before writing without an ID
 - About to remove an item for a reverted feature — removal orphans downstream references; add a `<!-- DEFERRED: reason -->` annotation instead
 - A flow doc has steps with no Format A IDs and the test generator has been invoked — report the gap to the user; do not generate flow step IDs on behalf of the verification-writer
+
+## Installed directory
+
+AEC prompts for the shared `verification` directory (default `docs/verification`) and whether to install hooks. It creates the directory even if hooks are declined. The choice is stored in `.aec/directories.json` as `{"verification": "docs/verification"}`. Read that setting before writing docs or invoking tools; every `docs/verification` path in this skill is relative to that selected root. Track this configuration with the project so teammates use the same location. Existing projects without this file use `docs/verification`.
+
+<!-- feedback-loop:begin -->
+## Feedback
+
+If the `feedback-loop` skill is installed, use it to improve this skill over time:
+
+- When this skill's own instructions cause rework, a wrong default, a missed case or a needless
+  pause, log it as it happens: subject `skill:verification-writer`, with the phase or section at fault and the
+  concrete fix to these instructions.
+- At the end of a run, check `skill:verification-writer`; if a review is due, make the feedback-loop offer.
+
+If `feedback-loop` is not installed, ignore this section.
+<!-- feedback-loop:end -->
