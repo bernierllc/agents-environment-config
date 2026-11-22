@@ -127,13 +127,14 @@ def rule(strict):
                                                               "required_status_checks": []}}
 
 
-def gh_path(tmp_path, rules=(rule(True),), fail=False, pages=None):
+def gh_path(tmp_path, rules=(rule(True),), fail=False, pages=None, raw=None):
     """PATH with a `gh` that answers only GET rules/branches/main, logging every call to tmp_path/gh.log.
 
     The reply is what `gh api --paginate --slurp` prints: one array per page (one page of `rules` by default)."""
     bindir, log = tmp_path / "bin", tmp_path / "gh.log"
     bindir.mkdir(exist_ok=True)
-    reply = "exit 4" if fail else f"echo '{json.dumps([list(p) for p in (pages or (rules,))])}'"
+    body = raw if raw is not None else json.dumps([list(p) for p in (pages or (rules,))])
+    reply = "exit 4" if fail else f"echo '{body}'"
     (bindir / "gh").write_text(f'#!/bin/sh\necho "$@" >> {log}\n'
                                f'case "$*" in *rules/branches/main*) {reply} ;; *) exit 98 ;; esac\n')
     (bindir / "gh").chmod(0o755)
@@ -177,6 +178,19 @@ def test_the_guard_rejects_a_slice_whose_replay_holds_unless_main_requires_up_to
     code, out = g.run(GUARD, g.slice(g.good_files()), PATH=gh_path(tmp_path, rules, fail))
     assert code == 1, out
     assert holds(out) and "rejected" in out and "allowed" not in out, out
+
+
+STRICT = json.dumps(rule(True))
+
+
+@pytest.mark.parametrize("raw", [f"[[{STRICT}], null]", f"[{{}}, [{STRICT}]]", f"[[{STRICT}, 7]]", f"[{STRICT}]",
+                                 f'{{"pages": [[{STRICT}]]}}', '[[{"type": "required_status_checks", "parameters": [1]}]]',
+                                 ""],
+                         ids=["null-page", "object-page", "non-object-rule", "unslurped", "object-reply",
+                              "list-parameters", "empty"])
+def test_a_malformed_rules_reply_rejects_even_beside_a_strict_rule(g, tmp_path, raw):
+    code, out = g.run(GUARD, g.slice(g.good_files()), PATH=gh_path(tmp_path, raw=raw))
+    assert code == 1 and "allowed" not in out, out
 
 
 def test_two_runs_give_the_identical_tuple_and_tree(g):

@@ -55,10 +55,14 @@ if [[ "$HEAD_REF" =~ ^promote/[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+$ ]]; then
     echo "::error::promote slice '$HEAD_REF' rejected: could not read the rules for main, failing closed."
     exit 1
   fi
+  # Every page must be a list of rule objects before any of them counts: a malformed reply rejects.
   if ! printf '%s' "$rules" | python3 -I -c 'import json, sys
-sys.exit(0 if any(r.get("type") == "required_status_checks"
-                  and (r.get("parameters") or {}).get("strict_required_status_checks_policy") is True
-                  for page in json.load(sys.stdin) for r in page) else 1)'; then
+pages = json.load(sys.stdin)
+rules = [r for p in pages for r in p] if isinstance(pages, list) and all(isinstance(p, list) for p in pages) else None
+ok = rules is not None and all(isinstance(r, dict) for r in rules) and any(
+    r.get("type") == "required_status_checks" and isinstance(r.get("parameters"), dict)
+    and r["parameters"].get("strict_required_status_checks_policy") is True for r in rules)
+sys.exit(0 if ok else 1)'; then
     echo "::error::promote slice '$HEAD_REF' rejected: main's ruleset does not require branches to be up to date"
     echo "(strict required status checks), so the replayed merge may not be the one that lands. Enable it first."
     exit 1
