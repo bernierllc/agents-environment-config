@@ -53,7 +53,7 @@ def test_a_missing_vendored_file_is_drift(tmp_path):
 
 
 def test_cli_default_set_flags_a_deleted_member_instead_of_passing(tmp_path, monkeypatch):
-    # Only one of the four default files exists locally; the rest were deleted. Must not exit 0.
+    # Only one of the default files exists locally; the rest were deleted. Must not exit 0.
     _tree(tmp_path, {mod.COPY_SET[0]: b"x"})
     monkeypatch.setattr(mod, "gh_fetch", lambda repo, ref, path: b"x")
     assert mod.main(["--canonical-repo", "my-org/my-aec", "--root", str(tmp_path)]) == 1

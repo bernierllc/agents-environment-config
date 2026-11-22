@@ -24,6 +24,8 @@ COPY_SET = (
     "scripts/check-main-source.sh",
     "scripts/check-forged-gate-names.py",
     "tests/test_check_forged_gate_names.py",
+    "scripts/check-slice-provenance.sh",
+    "tests/test_check_slice_provenance.py",
 )
 
 
