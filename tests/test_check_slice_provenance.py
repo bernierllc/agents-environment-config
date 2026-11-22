@@ -68,9 +68,9 @@ class Graph:
                  f"file://{self.origin}", str(dest))
         return dest
 
-    def run(self, script, head, base, ref=SLICE, cwd=None):
+    def run(self, script, head, base, ref=SLICE, cwd=None, head_repo="my-org/my-repo"):
         e = {**self.env, "HEAD_SHA": head, "BASE_SHA": base, "HEAD_REF": ref,
-             "HEAD_REPO": "my-org/my-repo", "REPO": "my-org/my-repo"}
+             "HEAD_REPO": head_repo, "REPO": "my-org/my-repo"}
         p = subprocess.run(["bash", str(script)], cwd=cwd or self.guard_clone(), env=e,
                            capture_output=True, text=True)
         return p.returncode, p.stdout + p.stderr
@@ -101,6 +101,16 @@ def test_a_slice_that_satisfies_provenance_is_still_rejected_by_the_guard(g):
     code, out = g.run(GUARD, head, g.m1)
     assert code == 1, out
     assert "slice provenance holds" in out and "rejected" in out
+
+
+@pytest.mark.parametrize("head_repo", ["someone/my-repo", "my-org/other-repo", ""],
+                         ids=["fork", "other-repo", "deleted-fork"])
+def test_a_slice_from_outside_this_repo_fails_closed_before_provenance(g, head_repo):
+    head = slice_of(g, g.s1, g.m1)  # a slice that would satisfy provenance
+    code, out = g.run(GUARD, head, g.m1, head_repo=head_repo)
+    assert code == 1, out
+    assert "slice provenance" not in out and "promote slice" not in out
+    assert ("not a fork" in out) if head_repo else ("HEAD_REPO is required" in out)
 
 
 @pytest.mark.parametrize("extra", [1, 2], ids=["octopus", "four-parents"])
