@@ -127,6 +127,37 @@ def test_symlink_to_tracked_file_in_worktree_is_removable(fx: Fixture) -> None:
     assert fx.verdict() == "would"
 
 
+def _commit_in_wt(fx: Fixture, *paths: str) -> None:
+    _git(fx.wt, "add", "-f", *paths)
+    _git(fx.wt, "commit", "-q", "-m", "track")
+    fx.sha = _git(fx.wt, "rev-parse", "HEAD")
+
+
+def _exclude(fx: Fixture, *patterns: str) -> None:
+    # info/exclude is shared by the worktrees and leaves the tracked .gitignore (and so the clean status) alone
+    with (fx.repo / ".git" / "info" / "exclude").open("a") as f:
+        f.write("\n".join(patterns) + "\n")
+
+
+def test_symlink_target_with_glob_chars_is_not_matched_as_a_pathspec(fx: Fixture) -> None:
+    _exclude(fx, "only-copy*")
+    (fx.wt / "only-copy1").write_text("tracked\n")
+    _commit_in_wt(fx, "only-copy1")
+    (fx.wt / "only-copy[1]").write_text("PRECIOUS=1\n")  # ignored; a glob would match the tracked only-copy1
+    (fx.wt / ".env").symlink_to("only-copy[1]")
+    assert fx.verdict() == "keep"
+
+
+def test_symlink_to_directory_holding_ignored_files_keeps(fx: Fixture) -> None:
+    _exclude(fx, "secrets/prod.txt")
+    (fx.wt / "secrets").mkdir()
+    (fx.wt / "secrets" / "README").write_text("tracked\n")
+    _commit_in_wt(fx, "secrets/README")
+    (fx.wt / "secrets" / "prod.txt").write_text("PRECIOUS=1\n")
+    (fx.wt / ".env.d").symlink_to("secrets")
+    assert fx.verdict() == "keep"
+
+
 def test_symlink_to_target_outside_worktree_is_removable(fx: Fixture) -> None:
     outside = fx.repo / ".env"
     outside.write_text("PRIMARY=1\n")

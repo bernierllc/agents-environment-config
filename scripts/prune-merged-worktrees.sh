@@ -34,7 +34,9 @@ env_data_reason() { # worktree primary -> returns 0 and prints why when the tree
       tgt="$(realpath "$path/$f" 2>/dev/null || readlink -f "$path/$f" 2>/dev/null)"
       case "$tgt" in
         "") echo "holds ignored .env files"; return 0 ;;
-        "$wt"/*) git -C "$path" ls-files --error-unmatch -- "${tgt#"$wt"/}" >/dev/null 2>&1 \
+        # exact tracked file only: --literal-pathspecs stops `only-copy[1]` globbing onto a tracked `only-copy1`,
+        # and [ -f ] stops a directory target counting as tracked because one file under it is
+        "$wt"/*) { [ -f "$tgt" ] && git --literal-pathspecs -C "$path" ls-files --error-unmatch -- "${tgt#"$wt"/}" >/dev/null 2>&1; } \
                    || { echo "holds ignored .env files"; return 0; } ;;
       esac
     else

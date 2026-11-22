@@ -21,6 +21,10 @@ unit of impact lives — not a contract.
   under pipefail read 2+ unique `.env` files as none, and any `.env` symlink was exempt; both deleted unique
   data. P1 data loss; fix shipped with the plan.
 
+- [prune-merged-worktrees guard hardening](2026-11-22-prune-env-guard-hardening.md): follow-up to the fail-open
+  fix. `assume-unchanged`/`skip-worktree` targets, C-quoted names (`ls-files -z`) and macOS `readlink -f`
+  portability still read as "nothing to keep". P1 data loss; planned, Tracker row PRUNE-ENV-GUARD-HARDEN.
+
 - [Trusted replay for merge-with-main promote slices](2026-11-21-mvs-trusted-slice-replay.md): a
   downstream slice-aware mid guard fails closed for a slice head that merges main into its staging cut. The
   guard should run the base ref's script and generator over fetched head objects; consuming the
