@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Provenance of a merge-with-main promote slice (plan 2026-11-21-mvs-trusted-slice-replay, step 3).
 #
-#   HEAD_SHA=<event head sha> BASE_SHA=<event base sha> HEAD_REF=<head branch> \
+#   HEAD_SHA=<event head sha> BASE_SHA=<event base sha> HEAD_REF=<head branch> [GIT_REMOTE=<url>] \
 #     bash scripts/check-slice-provenance.sh
 #
 # Exit 0 means only "these parents may feed the trusted replay". It is NOT a pass for the slice: the replay
 # (R2) and its hosted evidence (R3) decide that, and until they land check-main-source.sh rejects every slice
 # whatever this returns. Exit 1 is a rejection, including every input, fetch or object error (fail closed).
 #
-# Inputs are the event's immutable SHAs, fetched from GIT_REMOTE (default: the checkout's origin URL) as git objects
-# only, into a fresh scratch repo: the checkout is never written, nothing the head carries is run. The head ref name is read only to detect
+# Inputs are the event's immutable SHAs, fetched as git objects only, into a fresh scratch repo, from GIT_REMOTE
+# (default $GITHUB_SERVER_URL/$GITHUB_REPOSITORY): the checkout is never read or written, nothing the head carries
+# is run, and no system, global, checkout or env git config applies. The head ref name is read only to detect
 # that it moved after the event; staging is resolved to one SHA, reported as part of the replay tuple.
 #
 # The slice head must be exactly the merge: two parents, the first on staging's first-parent history, the
@@ -20,8 +21,19 @@ set -euo pipefail
 : "${HEAD_REF:?HEAD_REF is required}"
 reject() { echo "::error::slice provenance: $*" >&2; exit 1; }
 
-remote="${GIT_REMOTE:-origin}"
-url=$(git remote get-url "$remote" 2>/dev/null) || url="$remote"
+# No config but ours: system, global, checkout-local and env-injected config could redirect the fetch (url.insteadOf)
+# to a forged remote, so none of it is read, before the first git call.
+unset GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_SYSTEM
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+# The remote is an input, never read from the checkout: GIT_REMOTE taken literally, else this run's repo on the
+# runner's server (under pull_request_target that is the base repo, which holds staging and the same-repo slice).
+if [ -n "${GIT_REMOTE:-}" ]; then
+  url="$GIT_REMOTE"
+elif [ -n "${GITHUB_SERVER_URL:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
+  url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+else
+  reject "GIT_REMOTE or GITHUB_SERVER_URL and GITHUB_REPOSITORY are required to know which remote to fetch from"
+fi
 # The walk runs in a fresh empty repo that holds only the fetched event objects, so nothing local to the checkout
 # (replace refs, grafts, shallow file, commit-graph, alternates, config, hooks) can rewrite ancestry. The flags below
 # are defense in depth inside that repo.

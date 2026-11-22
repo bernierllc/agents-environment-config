@@ -69,9 +69,12 @@ class Graph:
                  f"file://{self.origin}", str(dest))
         return dest
 
-    def run(self, script, head, base, ref=SLICE, cwd=None, head_repo="my-org/my-repo"):
+    def run(self, script, head, base, ref=SLICE, cwd=None, head_repo="my-org/my-repo", **extra_env):
+        # The remote comes from the runner (GITHUB_SERVER_URL/GITHUB_REPOSITORY), never from the checkout.
         e = {**self.env, "HEAD_SHA": head, "BASE_SHA": base, "HEAD_REF": ref,
-             "HEAD_REPO": head_repo, "REPO": "my-org/my-repo"}
+             "HEAD_REPO": head_repo, "REPO": "my-org/my-repo",
+             "GITHUB_SERVER_URL": f"file://{self.origin.parent}", "GITHUB_REPOSITORY": self.origin.name,
+             **extra_env}
         p = subprocess.run(["bash", str(script)], cwd=cwd or self.guard_clone(), env=e,
                            capture_output=True, text=True)
         return p.returncode, p.stdout + p.stderr
@@ -252,3 +255,42 @@ def test_a_tampered_commit_graph_cannot_fake_provenance(g):
     head = slice_of(g, g.f1, g.m1)
     code, out = g.run(PROVENANCE, head, g.m1, cwd=clone)
     assert code == 1 and "not on staging's first-parent history" in out, out
+
+
+@pytest.mark.parametrize("where", ["checkout", "parameters", "global", "system"])
+def test_a_config_redirect_to_a_forged_remote_cannot_fake_provenance(g, tmp_path, where):
+    head = slice_of(g, g.f1, g.m1)  # f1 is only staging's second parent
+    forged = tmp_path / "forged.git"
+    g.git(None, "clone", "-q", "--mirror", str(g.origin), str(forged))
+    g.git(forged, "config", "uploadpack.allowAnySHA1InWant", "true")
+    g.git(forged, "update-ref", "refs/heads/staging", g.f1)  # the forged staging makes f1 a first parent
+    real, fake = f"file://{g.origin}", f"file://{forged}"
+    clone, extra = g.guard_clone(), {}
+    if where == "checkout":
+        g.git(clone, "config", f"url.{fake}.insteadOf", real)
+    elif where == "parameters":
+        extra = {"GIT_CONFIG_PARAMETERS": f"'url.{fake}.insteadof'='{real}'"}
+    else:
+        cfg = tmp_path / f"{where}.gitconfig"
+        cfg.write_text(f'[url "{fake}"]\n\tinsteadOf = {real}\n')
+        extra = {"GIT_CONFIG_GLOBAL": str(cfg)} if where == "global" else {"GIT_CONFIG_SYSTEM": str(cfg)}
+        if where == "system":
+            extra["GIT_CONFIG_NOSYSTEM"] = ""
+    live = subprocess.run(["git", "ls-remote", real, "refs/heads/staging"], cwd=clone, env={**g.env, **extra},
+                          check=True, capture_output=True, text=True).stdout.split()[0]
+    assert live == g.f1  # the redirect is live for an unsanitized git
+    code, out = g.run(PROVENANCE, head, g.m1, cwd=clone, **extra)
+    assert code == 1 and "not on staging's first-parent history" in out, out
+
+
+def test_no_remote_input_fails_closed(g):
+    head = slice_of(g, g.s1, g.m1)
+    code, out = g.run(PROVENANCE, head, g.m1, GITHUB_SERVER_URL="", GITHUB_REPOSITORY="")
+    assert code == 1 and "GIT_REMOTE or GITHUB_SERVER_URL" in out, out
+
+
+def test_an_explicit_git_remote_is_used_literally(g):
+    head = slice_of(g, g.s1, g.m1)
+    code, out = g.run(PROVENANCE, head, g.m1, GITHUB_SERVER_URL="", GITHUB_REPOSITORY="",
+                      GIT_REMOTE=f"file://{g.origin}")
+    assert code == 0, out
