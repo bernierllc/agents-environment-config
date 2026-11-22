@@ -53,6 +53,8 @@ permissions:
   contents: read
   # the forged-name scan reads GET /actions/runs/{id}; private repos need this scope
   actions: read
+  # the forged-name scan lists GET /commits/{sha}/check-runs; private repos need this scope
+  checks: read
 jobs:
   guard:
     # This job IS the required check: its exit code is the guard result.

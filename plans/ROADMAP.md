@@ -17,6 +17,12 @@ unit of impact lives — not a contract.
 
 ## Review follow-ups awaiting prioritization
 
+- [Trusted replay for merge-with-main promote slices](2026-11-21-mvs-trusted-slice-replay.md): a
+  downstream slice-aware mid guard fails closed for a slice head that merges main into its staging cut. The
+  guard should run the base ref's script and generator over fetched head objects; consuming the
+  `Promote slice` check result is rejected (it runs from the PR head, so a forged check passes).
+  Scheduling pending.
+
 - [Land org-config Phase 4 from the parked branch](2026-11-19-org-config-phase-4-landing.md): time-bound
   rules, per-project overlays, `enrollment_script` and branding are built, tested and documented on
   `claude/org-config-phase-4` (tip `7aa2967`, 15 commits, never a PR) and exist nowhere else. `staging` moved
@@ -118,7 +124,7 @@ pass before tasks are picked up.
 | Render agent rules per user | `.agent-rules/` is tracked **and** is every user's installed rule set (symlinked from `~/.agent-tools`), so `aec install` renders personal settings into tracked files: every non-default user gets a permanently dirty checkout. Keep the repo copy default-rendered and exact-validated; render a per-user installed copy. | `docs/superpowers/plans/2026-09-26-agent-rules-per-user-render.md` | High — root cause + fix scoped; pairs with managed symlink ownership |
 | Loadout open-standard extraction (Phase 2) | Move the `loadout` / `plugin.json` schema + docs out of AEC into the open repo `github.com/mbernier/loadout` so any AI tool — not just AEC — can publish and consume loadout manifests, making loadout a tool-neutral standard. | `docs/superpowers/specs/2026-06-25-aec-plugin-management-and-loadout-schema-design.md` (Phase 2; repo cloned at `~/projects/loadout`) | Med — gated on Phase 1 shipping + intent to publish |
 | API and MCP verification skills + access manifest | The UI verification chain (verification-writer → browser-verification → playwright-*) has no API or MCP counterpart, so nothing tells docs agents what is customer-facing, role-gated, tier-gated or unreleased. Adds `api-verification-writer`, `api-verification` (role/scope matrix runner) and a generated access manifest, and wires feedback between the docs and verification agents. | `plans/api-mcp-verification-skills.md` | Medium (open questions in plan) |
-| Org-config version constraints | AEC has no version-constraint evaluator, so `version: ">=2.0.0"` is compared as a literal string (custom sources) or ignored (default catalog). PR #132 rejects non-exact versions on custom-source items; this adds one evaluator used everywhere and lifts that restriction. | `plans/2026-11-14-custom-source-version-ranges.md` | Medium — root cause + fix scoped |
+| Org-config version constraints | One evaluator (`version_satisfies`, beside `parse_version`) now gates every source, default catalog included: mismatch or malformed pin is unsatisfiable, the validator accepts exactly what it parses, and a constraint gates but never selects an older version. | `plans/2026-11-14-custom-source-version-ranges.md` | In review — Tracker AEC-VERSION-RANGES-1 |
 | Org-config ref-tip check for local enrollments | A locally enrolled org with a ref-only custom source never notices its branch moved: the tip check lives in `_refresh_one`, which `refresh_remote_orgs` skips for local orgs. `git+`/url enrollments are unaffected. Split the check out and run it for local orgs too. | `plans/2026-11-15-local-org-ref-tip-check.md` | Medium — root cause + fix scoped |
 
 **Gate to advance to Now:** answer the 6 open questions in the Phase-2 skeleton

@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from ..confine import item_name_problem
+from ..skills_manifest import parse_version_spec
 from .allow_lists import (
     PREFERENCES_ALLOW_LIST,
     PREFERENCES_DYNAMIC_NAMESPACES,
@@ -26,8 +27,25 @@ from .schema import (
 _STANCE_VALUES = {s.value for s in Stance}
 # org_id names files and dirs under ~/.aec/orgs/, so it can never carry a path.
 _ORG_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
-# The only version form `plan_apply` can compare for a custom source (see plans/2026-11-14-custom-source-version-ranges.md).
-_EXACT_VERSION = re.compile(r"^\d+(\.\d+)*$")
+
+
+def _validate_version(version: Any, stance: str, field_path: str) -> None:
+    """Accept exactly the pins `plan_apply` evaluates (one parser for both); `pinned` needs one exact version."""
+    if version is None:
+        raise OrgConfigValidationError("stance 'pinned' requires a version", field_path=field_path)
+    if not isinstance(version, str):
+        # YAML reads 2.10 as the float 2.1, so an unquoted version can silently change.
+        raise OrgConfigValidationError(
+            f"version {version!r} must be a quoted string, for example \"2.1.0\"", field_path=field_path
+        )
+    try:
+        clauses = parse_version_spec(version)
+    except ValueError as exc:
+        raise OrgConfigValidationError(str(exc), field_path=field_path) from exc
+    if stance == "pinned" and (len(clauses) != 1 or clauses[0][0] != "=="):
+        raise OrgConfigValidationError(
+            f"stance 'pinned' needs one exact version like '1.2.0', not {version!r}", field_path=field_path
+        )
 
 
 def _require(d: dict, key: str, field_path: str) -> Any:
@@ -212,12 +230,8 @@ def validate_org_config(frontmatter: dict, body: dict) -> OrgConfig:
                     "plugin cannot be pinned or given a version; use stance 'required'",
                     field_path=f"{base_path}.{'version' if version is not None else 'stance'}",
                 )
-            if source in contributes_by_source and version is not None and not _EXACT_VERSION.match(str(version)):
-                raise OrgConfigValidationError(
-                    f"version {version!r} must be an exact version like '1.2.0': constraints such as "
-                    "'>=2.0.0' are not evaluated for custom-source items",
-                    field_path=f"{base_path}.version",
-                )
+            if version is not None or stance_raw == "pinned":
+                _validate_version(version, stance_raw, f"{base_path}.version")
             validated[item_name] = ItemPolicy(
                 source=source,
                 stance=Stance(stance_raw),
