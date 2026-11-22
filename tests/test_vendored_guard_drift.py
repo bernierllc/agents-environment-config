@@ -87,6 +87,24 @@ def test_a_release_that_carries_the_new_files_flags_them_missing(tmp_path, monke
     assert "scripts/check-slice-provenance.sh differs" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("dep", ["scripts/replay-promote-slice.py", "tests/test_replay_promote_slice.py"])
+@pytest.mark.parametrize("state", ["missing", "stale"])
+def test_a_missing_or_stale_replay_dependency_is_drift_until_revendored(tmp_path, monkeypatch, capsys, dep, state):
+    # The old guard files alone are byte-identical, yet an obsolete or absent replay dependency must still block.
+    files = {p: b"x" for p in mod.COPY_SET}
+    if state == "missing":
+        del files[dep]
+    else:
+        files[dep] = b"an older replay\n"
+    _tree(tmp_path, files)
+    monkeypatch.setattr(mod, "gh_fetch", _release(mod.COPY_SET))
+    args = ["--canonical-repo", "my-org/my-aec", "--root", str(tmp_path)]
+    assert mod.main(args) == 1
+    assert dep in capsys.readouterr().err
+    (tmp_path / dep).write_bytes(b"x")  # re-vendor the complete released copy set
+    assert mod.main(args) == 0
+
+
 @pytest.mark.parametrize("checker", [b"not python (", b"OTHER = ('a',)\n", b"COPY_SET = ()\n", b"COPY_SET = (1,)\n"])
 def test_a_release_without_a_readable_copy_set_fails_closed(tmp_path, monkeypatch, checker):
     _tree(tmp_path, {p: b"x" for p in OLD_RELEASE})

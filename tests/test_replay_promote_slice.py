@@ -1,0 +1,299 @@
+"""Trusted replay of merge-with-main promote slices, on real git graphs served by a local bare remote.
+
+replay-promote-slice.py (plan 2026-11-21-mvs-trusted-slice-replay, R2) replays git's own merge of a slice's
+authorized parents, regenerates the declared outputs with the BASE's generator, and requires the head's tree.
+check-main-source.sh still rejects every slice until R3. The network boundary is the git remote, a real bare repo
+here; the generator is a real Node script run by the replay. Nothing we own is stubbed.
+"""
+import json
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+REPLAY = ROOT / "scripts" / "replay-promote-slice.py"
+GUARD = ROOT / "scripts" / "check-main-source.sh"
+SLICE = "promote/2026-11-22-1"
+CONFIG = json.dumps({"generator": {"entry": "gen/build.mjs", "outputs": ["out"]}})
+# Reads docs/*.md from its working tree (git ls-files, so the replay's git env must work) and writes
+# out/manifest.json, stamped with its run time like the downstream generator.
+BUILD = """import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { item } from './lib.mjs';
+const docs = execFileSync('git', ['ls-files', 'docs'], { encoding: 'utf8' }).split('\\n').filter(Boolean).sort();
+const items = docs.map((d) => item(d, readFileSync(d, 'utf8')));
+mkdirSync('out', { recursive: true });
+writeFileSync('out/manifest.json', JSON.stringify({ items, updated_at: new Date().toISOString() }, null, 2) + '\\n');
+"""
+LIB = "export const item = (path, text) => [path, text.trim()];\n"
+
+
+def manifest(docs, stamp="2026-11-22T10:00:00.000Z"):
+    """What BUILD writes for these docs, with this timestamp (JSON.stringify(_, null, 2) matches json.dumps here)."""
+    items = [[p, docs[p].decode().strip()] for p in sorted(docs)]
+    return (json.dumps({"items": items, "updated_at": stamp}, indent=2) + "\n").encode()
+
+
+@pytest.fixture
+def env(tmp_path):
+    return {
+        **os.environ,
+        "HOME": str(tmp_path),
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
+    }
+
+
+class Graph:
+    """m0 (docs/a.md, the generator, its config, its manifest); staging s1 = m0 + docs/b.md; main m1 = m0 + docs/c.md.
+    Both sides regenerate out/manifest.json, so git's own merge conflicts there and only there."""
+
+    def __init__(self, tmp_path, env):
+        self.tmp, self.env, self.n = tmp_path, env, 0
+        self.origin, self.author = tmp_path / "origin.git", tmp_path / "author"
+        self.git(None, "init", "-q", "--bare", str(self.origin))
+        self.git(self.origin, "config", "uploadpack.allowAnySHA1InWant", "true")
+        self.git(self.origin, "config", "receive.unpackLimit", "100000")
+        self.git(None, "init", "-q", "--bare", str(self.author))
+        self.base_files = {".github/slice-replay.json": CONFIG.encode(), "gen/build.mjs": BUILD.encode(),
+                           "gen/lib.mjs": LIB.encode()}
+        self.m0 = self.commit(self.files({"docs/a.md": b"alpha\n"}))
+        self.s1 = self.commit(self.files({"docs/a.md": b"alpha\n", "docs/b.md": b"bravo\n"}), self.m0)
+        self.m1 = self.commit(self.files({"docs/a.md": b"alpha\n", "docs/c.md": b"charlie\n"}), self.m0)
+        self.push(self.s1, "staging")
+        self.push(self.m1, "main")
+        self.merged_docs = {"docs/a.md": b"alpha\n", "docs/b.md": b"bravo\n", "docs/c.md": b"charlie\n"}
+
+    def git(self, cwd, *args, stdin=None, env=None):
+        return subprocess.run(["git", *args], cwd=cwd or self.tmp, env=env or self.env, check=True, input=stdin,
+                              capture_output=True).stdout.decode().strip()
+
+    def files(self, docs, extra=None, stamp="2026-11-22T09:00:00.000Z"):
+        return {**self.base_files, **docs, "out/manifest.json": manifest(docs, stamp), **(extra or {})}
+
+    def tree(self, files):
+        """files: path -> bytes, or ("link", target) for a symlink."""
+        index = self.tmp / f"index{self.n}"
+        self.n += 1
+        e = {**self.env, "GIT_DIR": str(self.author), "GIT_INDEX_FILE": str(index)}
+        for path, data in files.items():
+            mode, blob = ("120000", data[1].encode()) if isinstance(data, tuple) else ("100644", data)
+            oid = self.git(None, "hash-object", "-w", "--stdin", stdin=blob, env=e)
+            self.git(None, "update-index", "--add", "--cacheinfo", f"{mode},{oid},{path}", env=e)
+        return self.git(None, "write-tree", env=e)
+
+    def commit(self, files, *parents):
+        self.n += 1
+        args = [x for p in parents for x in ("-p", p)]
+        return self.git(self.author, "commit-tree", self.tree(files), *args, "-m", f"c{self.n}")
+
+    def push(self, sha, branch):
+        self.git(self.author, "push", "-q", "-f", str(self.origin), f"{sha}:refs/heads/{branch}")
+
+    def slice(self, files, first=None, second=None):
+        head = self.commit(files, first or self.s1, second or self.m1)
+        self.push(head, SLICE)
+        return head
+
+    def good_files(self, stamp="2026-11-22T11:11:11.111Z", **over):
+        return {**self.files(self.merged_docs, stamp=stamp), **over}
+
+    def run(self, script, head, base=None, **extra_env):
+        e = {**self.env, "HEAD_SHA": head, "BASE_SHA": base or self.m1, "HEAD_REF": SLICE,
+             "HEAD_REPO": "my-org/my-repo", "REPO": "my-org/my-repo",
+             "GITHUB_SERVER_URL": f"file://{self.origin.parent}", "GITHUB_REPOSITORY": self.origin.name,
+             **extra_env}
+        cmd = ["python3", "-I", str(script)] if script.suffix == ".py" else ["bash", str(script)]
+        p = subprocess.run(cmd, cwd=self.tmp, env=e, capture_output=True, text=True)
+        return p.returncode, p.stdout + p.stderr
+
+
+@pytest.fixture
+def g(tmp_path, env):
+    if not shutil.which("node"):
+        pytest.fail("node is required: the replay runs the base's Node generator for real")
+    return Graph(tmp_path, env)
+
+
+def holds(out):
+    line = [x for x in out.splitlines() if x.startswith("slice replay holds:")]
+    return line[0] if line else None
+
+
+def test_a_slice_equal_to_the_replayed_merge_holds(g):
+    head = g.slice(g.good_files())
+    code, out = g.run(REPLAY, head)
+    assert code == 0, out
+    line = holds(out)
+    gen_tree = g.git(g.author, "rev-parse", f"{g.m1}:gen")
+    assert f"head={head} staging={g.s1} base={g.m1} " in line and f"generator={gen_tree}" in line, out
+
+
+def test_the_guard_still_rejects_a_slice_whose_replay_holds(g):
+    # R2 may only add rejections: no slice is admitted until the replay's hosted evidence (R3) lands.
+    head = g.slice(g.good_files())
+    code, out = g.run(GUARD, head)
+    assert code == 1, out
+    assert holds(out) and "rejected" in out, out
+
+
+def test_two_runs_give_the_identical_tuple_and_tree(g):
+    head = g.slice(g.good_files())
+    first, second = g.run(REPLAY, head), g.run(REPLAY, head)
+    assert first[0] == second[0] == 0, first[1] + second[1]
+    assert holds(first[1]) == holds(second[1])
+
+
+@pytest.mark.parametrize("tamper", ["extra-file", "changed-doc", "hand-edited-manifest", "stale-manifest"])
+def test_a_tampered_slice_fails_closed(g, tamper):
+    files = g.good_files()
+    if tamper == "extra-file":
+        files["src/backdoor.js"] = b"evil\n"
+    elif tamper == "changed-doc":
+        files["docs/a.md"] = b"alpha, rewritten\n"
+        files["out/manifest.json"] = manifest({**g.merged_docs, "docs/a.md": b"alpha, rewritten\n"})
+    elif tamper == "hand-edited-manifest":
+        files["out/manifest.json"] = manifest({**g.merged_docs, "docs/z.md": b"zulu\n"})
+    else:
+        files["out/manifest.json"] = manifest({"docs/a.md": b"alpha\n", "docs/b.md": b"bravo\n"})
+    code, out = g.run(REPLAY, g.slice(files))
+    assert code == 1 and "is not the replayed merge" in out and not holds(out), out
+
+
+def test_a_timestamp_differs_only_where_the_generator_stamps_it(g):
+    files = g.good_files()
+    files["out/manifest.json"] = files["out/manifest.json"].replace(b'"updated_at"', b'"updated_at_"')
+    code, out = g.run(REPLAY, g.slice(files))
+    assert code == 1 and "is not the replayed merge" in out, out
+
+
+def test_a_conflict_resolved_by_hand_outside_the_outputs_fails_closed(g):
+    s = g.commit(g.files({"docs/a.md": b"alpha from staging\n"}), g.m0)
+    m = g.commit(g.files({"docs/a.md": b"alpha from main\n"}), g.m0)
+    g.push(s, "staging")
+    g.push(m, "main")
+    docs = {"docs/a.md": b"alpha, resolved\n"}
+    head = g.slice(g.files(docs), s, m)
+    code, out = g.run(REPLAY, head, m)
+    assert code == 1 and "resolve conflicts by hand: docs/a.md" in out, out
+
+
+def test_a_generator_failure_fails_closed(g):
+    g.base_files["gen/build.mjs"] = b"process.exit(3);\n"
+    m = g.commit(g.files({"docs/a.md": b"alpha\n", "docs/c.md": b"charlie\n"}), g.m0)
+    g.push(m, "main")
+    head = g.slice(g.good_files(), g.s1, m)
+    code, out = g.run(REPLAY, head, m)
+    assert code == 1 and "failed with exit 3" in out, out
+
+
+def test_a_changed_generator_version_changes_the_tuple(g):
+    code, out = g.run(REPLAY, g.slice(g.good_files()))
+    assert code == 0, out
+    before = holds(out)
+    g.base_files["gen/lib.mjs"] = b"// v2\n" + LIB.encode()
+    m2 = g.commit(g.files({"docs/a.md": b"alpha\n", "docs/c.md": b"charlie\n"}), g.m1)
+    g.push(m2, "main")
+    code, out = g.run(REPLAY, g.slice(g.good_files(), g.s1, m2), m2)
+    assert code == 0, out
+    after = holds(out)
+    pick = lambda line, key: line.split(f"{key}=")[1].split()[0]  # noqa: E731
+    assert pick(before, "generator") != pick(after, "generator")
+    assert pick(before, "tool") == pick(after, "tool")
+
+
+def test_a_malicious_generator_import_on_the_head_side_is_never_loaded(g):
+    # Staging rewrites the generator's sibling import; the merged tree (and the head) carry it as data. The replay
+    # runs the base's generator, so the rewritten import never runs.
+    marker = g.tmp / "pwned"
+    evil = f"import {{ writeFileSync }} from 'node:fs'; writeFileSync({json.dumps(str(marker))}, 'x');\n{LIB}"
+    staging_files = g.files({"docs/a.md": b"alpha\n", "docs/b.md": b"bravo\n"}, {"gen/lib.mjs": evil.encode()})
+    s = g.commit(staging_files, g.m0)
+    g.push(s, "staging")
+    head = g.slice(g.good_files(**{"gen/lib.mjs": evil.encode()}), s)
+    code, out = g.run(REPLAY, head)
+    assert code == 0, out
+    assert not marker.exists()
+
+
+def test_a_symlink_in_the_head_objects_is_never_followed(g):
+    secret = g.tmp / "secret.txt"
+    secret.write_text("SECRET-VALUE\n")
+    link = ("link", str(secret))
+    s = g.commit(g.files({"docs/a.md": b"alpha\n", "docs/b.md": b"bravo\n"}, {"docs/l.md": link}), g.m0)
+    g.push(s, "staging")
+    # The replay reads the link as a plain file holding its target path, so that is what the manifest holds.
+    docs = {**g.merged_docs, "docs/l.md": str(secret).encode()}
+    head = g.slice({**g.files(docs, stamp="2026-11-22T12:00:00.000Z"), "docs/l.md": link}, s)
+    code, out = g.run(REPLAY, head)
+    assert code == 0, out
+    assert "SECRET-VALUE" not in out
+
+
+def test_a_base_without_a_generator_replays_the_plain_merge(g):
+    del g.base_files[".github/slice-replay.json"]
+    s = g.commit({**g.base_files, "docs/b.md": b"bravo\n"}, g.m0)
+    m = g.commit({**g.base_files, "docs/c.md": b"charlie\n"}, g.m0)
+    g.push(s, "staging")
+    g.push(m, "main")
+    head = g.slice({**g.base_files, "docs/b.md": b"bravo\n", "docs/c.md": b"charlie\n"}, s, m)
+    code, out = g.run(REPLAY, head, m)
+    assert code == 0 and "generator=none" in holds(out), out
+    tampered = g.slice({**g.base_files, "docs/b.md": b"bravo\n", "docs/c.md": b"changed\n"}, s, m)
+    code, out = g.run(REPLAY, tampered, m)
+    assert code == 1 and "is not the replayed merge" in out, out
+
+
+@pytest.mark.parametrize("config", [
+    "not json",
+    json.dumps({"generator": {"entry": "../escape.mjs", "outputs": ["out"]}}),
+    json.dumps({"generator": {"entry": "/abs/build.mjs", "outputs": ["out"]}}),
+    json.dumps({"generator": {"entry": "gen/build.mjs", "outputs": ["gen"]}}),
+    json.dumps({"generator": {"entry": "gen/build.mjs", "outputs": []}}),
+], ids=["not-json", "dotdot-entry", "absolute-entry", "output-over-generator", "no-outputs"])
+def test_a_bad_generator_config_fails_closed(g, config):
+    g.base_files[".github/slice-replay.json"] = config.encode()
+    m = g.commit(g.files({"docs/a.md": b"alpha\n", "docs/c.md": b"charlie\n"}), g.m0)
+    g.push(m, "main")
+    code, out = g.run(REPLAY, g.slice(g.good_files(), g.s1, m), m)
+    assert code == 1 and ".github/slice-replay.json" in out, out
+
+
+def test_failed_provenance_replays_nothing(g):
+    head = g.slice(g.good_files(), g.s1, g.m0)  # an older main as second parent
+    code, out = g.run(REPLAY, head)
+    assert code == 1 and "stale" in out and "provenance does not hold" in out, out
+
+
+def test_a_truncated_fetch_fails_closed(g):
+    # The remote loses one blob the head needs (origin keeps pushed objects loose: receive.unpackLimit).
+    head = g.slice(g.good_files())
+    blob = g.git(g.author, "rev-parse", f"{head}:docs/b.md")
+    loose = g.origin / "objects" / blob[:2] / blob[2:]
+    assert loose.exists()
+    loose.chmod(0o644)
+    loose.unlink()
+    code, out = g.run(REPLAY, head)
+    assert code == 1 and not holds(out), out
+
+
+def test_a_forged_promote_slice_check_changes_nothing(g, tmp_path):
+    # The guard derives its verdict from git objects only. A gh on PATH that would report a passing
+    # 'Promote slice' check run is never consulted.
+    bindir, log = tmp_path / "bin", tmp_path / "gh.log"
+    bindir.mkdir()
+    gh = bindir / "gh"
+    gh.write_text(f'#!/bin/sh\necho "$@" >> {log}\necho \'{{"name":"Promote slice","conclusion":"success"}}\'\n')
+    gh.chmod(0o755)
+    path = f"{bindir}{os.pathsep}{os.environ['PATH']}"
+    tampered = g.good_files(**{"src/backdoor.js": b"evil\n"})
+    code, out = g.run(REPLAY, g.slice(tampered), PATH=path)
+    assert code == 1 and "is not the replayed merge" in out, out
+    code, out = g.run(GUARD, g.slice(g.good_files()), PATH=path)
+    assert code == 1 and "rejected" in out, out
+    assert not log.exists()
