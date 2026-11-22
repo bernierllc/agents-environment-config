@@ -180,7 +180,26 @@ def test_a_conflict_resolved_by_hand_outside_the_outputs_fails_closed(g):
     docs = {"docs/a.md": b"alpha, resolved\n"}
     head = g.slice(g.files(docs), s, m)
     code, out = g.run(REPLAY, head, m)
-    assert code == 1 and "resolve conflicts by hand: docs/a.md" in out, out
+    assert code == 1 and 'resolve conflicts by hand: "docs/a.md"' in out, out
+
+
+@pytest.mark.parametrize("generator", [True, False])
+def test_a_directory_rename_split_conflict_fails_closed(g, generator):
+    # git exits 1 for a directory rename split but lists no unmerged file for it: only its message names the
+    # directory. With a generator, the output conflict sits beside it and must not make the split look authorized.
+    if not generator:
+        del g.base_files[".github/slice-replay.json"]
+    files = g.files if generator else (lambda docs: {**g.base_files, **docs})
+    old = {"docs/old/a.md": b"alpha\n", "docs/old/b.md": b"bravo\n"}
+    m0 = g.commit(files(old), g.m0)
+    s = g.commit(files({"docs/one/a.md": b"alpha\n", "docs/two/b.md": b"bravo\n"}), m0)
+    m = g.commit(files({**old, "docs/old/c.md": b"charlie\n"}), m0)
+    g.push(s, "staging")
+    g.push(m, "main")
+    head = g.slice(files({"docs/one/a.md": b"alpha\n", "docs/two/b.md": b"bravo\n", "docs/old/c.md": b"charlie\n"}), s, m)
+    code, out = g.run(REPLAY, head, m)
+    assert code == 1 and not holds(out), out
+    assert 'resolve conflicts by hand: "docs/old"' in out, out
 
 
 def test_a_generator_failure_fails_closed(g):

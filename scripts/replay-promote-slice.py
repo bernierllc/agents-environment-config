@@ -171,18 +171,49 @@ def run_generator(env, gen, base, worktree, index, scratch):
         raise Reject(f"generator {gen['entry']} (as {base} holds it) failed with exit {p.returncode}")
 
 
+def parse_merge_tree(raw):
+    """merge-tree --write-tree -z --name-only: <tree>NUL, conflicted <path>NUL..., NUL, then per message
+    <count>NUL<path>NUL...<kind>NUL<text>NUL. Anything else is a malformed reply (fail closed)."""
+    f = raw.decode("utf-8", errors="surrogateescape").split("\0")
+    try:
+        sep = f.index("", 1)
+        tree, conflicted, i, messages = f[0], f[1:sep], sep + 1, []
+        while i < len(f) and f[i] != "":
+            n = int(f[i])
+            if n < 0 or i + n + 2 >= len(f):
+                raise ValueError(f"message count {n} runs past the reply")
+            messages.append((f[i + n + 1], f[i + 1:i + n + 1]))
+            i += n + 3
+    except ValueError as e:
+        raise Reject(f"git merge-tree reply is not in its -z format: {e}")
+    if any(f[i:]):
+        raise Reject("git merge-tree reply has trailing fields after its messages")
+    return tree, sorted(set(conflicted)), messages
+
+
 def replay(env, first, second, base, head, scratch):
     gen = load_generator(env, base)
-    code, merged = git(env, "merge-tree", "--write-tree", "--name-only", "--no-messages", first, second, ok=(0, 1))
-    lines = merged.decode().split("\n")
-    tree, conflicted = lines[0], sorted({line for line in lines[1:] if line})
+    code, merged = git(env, "merge-tree", "--write-tree", "-z", "--name-only", first, second, ok=(0, 1))
+    tree, conflicted, messages = parse_merge_tree(merged)
     if not SHA.fullmatch(tree) or out(env, "cat-file", "-t", tree) != "tree":
-        raise Reject(f"git merge-tree could not replay {first} + {second} (first line {tree!r})")
+        raise Reject(f"git merge-tree could not replay {first} + {second} (first field {tree!r})")
     outputs = gen["outputs"] if gen else []
+    # Exit 1 is a conflict. Not every conflict has an unmerged file (a directory rename split has none), so each of
+    # git's structured messages counts: only "Auto-merging" is informational, every other kind must sit in an output.
+    if code == 1:
+        named = set(conflicted)
+        for kind, paths in messages:
+            if kind != "Auto-merging":
+                named.update(paths)
+                if not paths:
+                    raise Reject(f"git's merge of the parents reports {kind!r} with no path, so it cannot be authorized")
+        if not named:
+            raise Reject("git's merge of the parents conflicts without naming a path, so it cannot be authorized")
+        conflicted = sorted(named)
     stray = [c for c in conflicted if not any(inside(c, o) for o in outputs)]
     if stray:
         raise Reject("git's own merge of the parents conflicts outside the generator outputs, and a slice may not "
-                     "resolve conflicts by hand: " + ", ".join(stray))
+                     "resolve conflicts by hand: " + ", ".join(json.dumps(c) for c in stray))
     if not gen:
         return tree, None
     index, worktree = scratch / "index", scratch / "tree"
