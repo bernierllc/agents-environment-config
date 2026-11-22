@@ -1,8 +1,7 @@
 # prune-merged-worktrees: harden the ignored-.env guard (follow-up to #165)
 
-**Status:** planned. Landed under the maintainer's waiver of the named findings below (MATT-75, option a), with these deferred here.
+**Status:** planned. #165 landed with the three findings below waived by the maintainer in its review, and deferred here.
 **Priority:** P1, data loss. The script deletes worktrees; the data the guard misses is unrecoverable.
-**Tracker:** PRUNE-ENV-GUARD-HARDEN (Needs-PM).
 
 ## Root cause
 

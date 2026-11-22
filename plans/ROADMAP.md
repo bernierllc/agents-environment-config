@@ -23,7 +23,7 @@ unit of impact lives — not a contract.
 
 - [prune-merged-worktrees guard hardening](2026-11-22-prune-env-guard-hardening.md): follow-up to the fail-open
   fix. `assume-unchanged`/`skip-worktree` targets, C-quoted names (`ls-files -z`) and macOS `readlink -f`
-  portability still read as "nothing to keep". P1 data loss; planned, Tracker row PRUNE-ENV-GUARD-HARDEN.
+  portability still read as "nothing to keep". P1 data loss; planned.
 
 - [Trusted replay for merge-with-main promote slices](2026-11-21-mvs-trusted-slice-replay.md): a
   downstream slice-aware mid guard fails closed for a slice head that merges main into its staging cut. The
