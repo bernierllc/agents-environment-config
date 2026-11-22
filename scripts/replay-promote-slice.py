@@ -176,20 +176,21 @@ def parse_merge_tree(raw):
     <count>NUL<path>NUL...<kind>NUL<text>NUL. Anything else is a malformed reply (fail closed)."""
     if not raw.endswith(b"\0"):
         raise Reject("git merge-tree reply does not end in NUL, so its last field may be cut short")
-    f = raw.decode("utf-8", errors="surrogateescape").split("\0")
+    # Every field is NUL-terminated, so dropping the final NUL leaves exactly the fields: none is implied.
+    f = raw[:-1].decode("utf-8", errors="surrogateescape").split("\0")
+    tree, rest, conflicted, messages = f[0], f[1:], [], []
     try:
-        sep = f.index("", 1)
-        tree, conflicted, i, messages = f[0], f[1:sep], sep + 1, []
-        while i < len(f) and f[i] != "":
-            n = int(f[i])
-            if n < 0 or i + n + 2 >= len(f):
+        if rest:  # a clean merge is the tree alone; otherwise conflicted paths, an empty field, then messages
+            sep = rest.index("")
+            conflicted, rest = rest[:sep], rest[sep + 1:]
+        while rest:
+            n = int(rest[0])
+            if n < 0 or len(rest) < n + 3:
                 raise ValueError(f"message count {n} runs past the reply")
-            messages.append((f[i + n + 1], f[i + 1:i + n + 1]))
-            i += n + 3
+            messages.append((rest[n + 1], rest[1:n + 1]))
+            rest = rest[n + 3:]
     except ValueError as e:
         raise Reject(f"git merge-tree reply is not in its -z format: {e}")
-    if any(f[i:]):
-        raise Reject("git merge-tree reply has trailing fields after its messages")
     return tree, sorted(set(conflicted)), messages
 
 
