@@ -36,6 +36,17 @@ case "$HEAD_REF" in
     exit 0
     ;;
 esac
+# A merge-with-main promote slice is still rejected, exactly as before this branch existed: provenance may only
+# add a reason. Acceptance needs the trusted replay (plan 2026-11-21-mvs-trusted-slice-replay, R2) and its
+# hosted evidence (R3); until both land no exit path here is 0. Provenance output feeds that later work.
+if [[ "$HEAD_REF" =~ ^promote/[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+$ ]]; then
+  if bash "$(dirname "${BASH_SOURCE[0]}")/check-slice-provenance.sh"; then
+    echo "::notice::slice provenance holds for '$HEAD_REF'; that alone never admits a slice."
+  fi
+  echo "::error::promote slice '$HEAD_REF' rejected: this guard has no trusted replay yet, so no slice is accepted."
+  echo "Promote 'staging' -> main instead."
+  exit 1
+fi
 echo "::error::PRs into main must come from 'staging' (got '$HEAD_REF')."
 echo ""
 echo "main is promotion-only. Merge this into staging first, verify there,"

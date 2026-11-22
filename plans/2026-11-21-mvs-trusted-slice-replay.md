@@ -1,6 +1,7 @@
 # Trusted replay for merge-with-main promote slices (main-via-staging guard)
 
-> Status: plan, not started.
+> Status: R1 (step 3 provenance, rejection-only) implemented; every merge-with-main slice still fails closed.
+> R2 (trusted replay) and R3 (hosted evidence) not started.
 > Owner of the follow-up: aec (the canonical `main-via-staging.yml` and `scripts/check-main-source.sh`).
 
 ## Problem
