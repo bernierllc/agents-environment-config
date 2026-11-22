@@ -1,6 +1,6 @@
 # Version constraints for org-config items
 
-**Source:** Codex P1 r4577168044 on PR #132. Status: not started.
+**Source:** Codex P1 r4577168044 on PR #132. Status: in review (PR into `staging`, Tracker AEC-VERSION-RANGES-1).
 
 ## Root cause
 
@@ -40,3 +40,21 @@ tests for the evaluator and for validator and apply behaviour with ranges.
 `>=2.0.0` against `2.1.0` plans as install or noop on both a custom source and
 the default catalog, and `<2.0.0` against `2.1.0` is reported unsatisfiable,
 all covered by tests.
+
+## Implementation (2026-11-21)
+
+- Incumbent reused: `parse_version` in `aec/lib/skills_manifest.py` (dotted integers
+  only). It parsed but did not evaluate constraints, so `parse_version_spec` and
+  `version_satisfies` sit beside it in the same module; no new module.
+- `plan_apply` evaluates every item's `version_spec` through `version_satisfies`,
+  default catalog and custom sources alike. Mismatch and malformed pins both plan as
+  `unsatisfiable` with a reason naming the item, pin and available version (or the
+  supported syntax). An installed copy outside the pin is replaced.
+- The validator calls `parse_version_spec` for every non-plugin item version (any
+  source), requires a quoted string, requires a version for `pinned`, and limits
+  `pinned` to one exact version. The custom-source-only exact-version guard is gone.
+- Docs: a constraint gates, it does not select; rollback means an immutable custom
+  source pinned by `commit`. AEC has no mechanism to pin the built-in catalog to an
+  older AEC release (follow-up, not built here).
+- Side effect: `aec apply <portable manifest>` now enforces the exact versions that
+  `aec export` writes; a catalog at another version fails that item unless `--latest`.

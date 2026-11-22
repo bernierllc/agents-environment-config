@@ -543,16 +543,24 @@ def test_install_org_config_exits_non_zero_when_a_source_cannot_be_fetched(repos
     assert not list((home / ".agent-tools" / "rules").rglob("example-rule*"))
 
 
-@pytest.mark.parametrize("version", [">=2.0.0", "^1.0", "latest", "1.x"])
-def test_custom_source_item_rejects_a_version_constraint(version):
-    """Only exact versions are compared for a custom source; a range would be silently
-    treated as a literal string, so validation refuses it (plans/2026-11-14-custom-source-version-ranges.md)."""
+@pytest.mark.parametrize("version", ["^1.0", "1.x", "~=2", ">=2.0.0,", "=2.0.0"])
+def test_custom_source_item_rejects_a_version_pin_the_evaluator_cannot_parse(version):
+    """Validation refuses at enrollment any pin `plan_apply` could not evaluate, naming the syntax."""
     text = _config(pin='      ref: "main"\n').replace(
         '      source: "team-rules"\n', f'      source: "team-rules"\n      version: "{version}"\n'
     )
-    with pytest.raises(OrgConfigValidationError, match="exact version") as exc:
+    with pytest.raises(OrgConfigValidationError, match="invalid version pin") as exc:
         _validate(text)
     assert exc.value.field_path == "items.rules.example-rule.version"
+    assert "~=" in str(exc.value)
+
+
+@pytest.mark.parametrize("version", [">=2.0.0", ">=1.0, <2.0", "~=1.4", "latest"])
+def test_custom_source_item_accepts_a_version_constraint(version):
+    text = _config(pin='      ref: "main"\n').replace(
+        '      source: "team-rules"\n', f'      source: "team-rules"\n      version: "{version}"\n'
+    )
+    assert _validate(text).items["rules"]["example-rule"].version == version
 
 
 def test_custom_source_item_accepts_an_exact_version():
