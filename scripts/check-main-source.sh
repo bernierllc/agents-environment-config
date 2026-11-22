@@ -58,16 +58,20 @@ if [[ "$HEAD_REF" =~ ^promote/[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+$ ]]; then
     echo "::error::promote slice '$HEAD_REF' rejected: could not read the rules for main, failing closed."
     exit 1
   fi
-  # Strict decode (UTF-8, no NaN/Infinity, no duplicate keys), and every rule well formed, before any rule counts.
+  # Strict decode (UTF-8, no NaN/Infinity, no duplicate keys), and every rule (and required check) well formed, first.
   if ! python3 -I -c 'import json, sys
 def obj(kv):
     if len({k for k, _ in kv}) != len(kv): raise ValueError("duplicate key")
     return dict(kv)
 def bad(c): raise ValueError(c)
+def checks_ok(r):
+    c = r.get("parameters", {}).get("required_status_checks", [])
+    return r["type"] != "required_status_checks" or isinstance(c, list) and all(
+        isinstance(x, dict) and isinstance(x.get("context"), str) and x["context"] for x in c)
 pages = json.loads(open(sys.argv[1], "rb").read().decode("utf-8"), object_pairs_hook=obj, parse_constant=bad)
 ok = isinstance(pages, list) and all(isinstance(p, list) and all(
     isinstance(r, dict) and isinstance(r.get("type"), str) and isinstance(r.get("parameters", {}), dict)
-    for r in p) for p in pages)
+    and checks_ok(r) for r in p) for p in pages)
 # GitHub: strict mode does not take effect unless at least one status check is required.
 sys.exit(0 if ok and any(r["type"] == "required_status_checks"
                          and r.get("parameters", {}).get("strict_required_status_checks_policy") is True

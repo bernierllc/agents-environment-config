@@ -195,6 +195,9 @@ MALFORMED = {
     "duplicate-key": b'[[{"type": "required_status_checks", "parameters": {' + KEY + b": false, " + KEY + b": true}}]]",
     "invalid-utf8": f'[[{STRICT}, {{"type": "x\udcff"}}]]'.encode("utf-8", "surrogateescape"),
     "nul-in-key": b'[[{"type": "required_status_checks", "parameters": {"strict_required_status_checks_po\x00licy": true}}]]',
+    **{f"check-{k}": f"[[{STRICT}, {json.dumps(rule(False, checks=(c,)))}]]" for k, c in
+       {"null": None, "number": 7, "no-context": {}, "null-context": {"context": None}, "empty-context": {"context": ""}}.items()},
+    "checks-not-a-list": f'[[{STRICT}, {{"type": "required_status_checks", "parameters": {{"required_status_checks": {{}}}}}}]]',
 }
 
 
