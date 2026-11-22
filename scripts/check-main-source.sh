@@ -50,19 +50,27 @@ if [[ "$HEAD_REF" =~ ^promote/[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+$ ]]; then
   # The replay describes the merge against BASE_SHA; only the server can keep main from moving before the merge.
   # Without main's strict up-to-date policy a slice evaluated at one main could land on a newer one, so a slice is
   # never admitted until the rules GitHub applies to main carry it (a ruleset; classic protection is not read).
-  # --slurp: one array per page, so a strict rule past the first page still counts.
-  if ! rules=$(gh api --paginate --slurp "repos/$REPO/rules/branches/main?per_page=100"); then
+  # --slurp: one array per page, so a strict rule past the first page still counts. The reply stays in a file
+  # (command substitution would strip NUL bytes and so alter it).
+  rules=$(mktemp) || { echo "::error::promote slice '$HEAD_REF' rejected: no temp file for main's rules."; exit 1; }
+  trap 'rm -f "$rules"' EXIT
+  if ! gh api --paginate --slurp "repos/$REPO/rules/branches/main?per_page=100" >"$rules"; then
     echo "::error::promote slice '$HEAD_REF' rejected: could not read the rules for main, failing closed."
     exit 1
   fi
-  # Every page must be a list of rule objects before any of them counts: a malformed reply rejects.
-  if ! printf '%s' "$rules" | python3 -I -c 'import json, sys
-pages = json.load(sys.stdin)
-rules = [r for p in pages for r in p] if isinstance(pages, list) and all(isinstance(p, list) for p in pages) else None
-ok = rules is not None and all(isinstance(r, dict) for r in rules) and any(
-    r.get("type") == "required_status_checks" and isinstance(r.get("parameters"), dict)
-    and r["parameters"].get("strict_required_status_checks_policy") is True for r in rules)
-sys.exit(0 if ok else 1)'; then
+  # Strict decode (UTF-8, no NaN/Infinity, no duplicate keys), and every rule well formed, before any rule counts.
+  if ! python3 -I -c 'import json, sys
+def obj(kv):
+    if len({k for k, _ in kv}) != len(kv): raise ValueError("duplicate key")
+    return dict(kv)
+def bad(c): raise ValueError(c)
+pages = json.loads(open(sys.argv[1], "rb").read().decode("utf-8"), object_pairs_hook=obj, parse_constant=bad)
+ok = isinstance(pages, list) and all(isinstance(p, list) and all(
+    isinstance(r, dict) and isinstance(r.get("type"), str) and isinstance(r.get("parameters", {}), dict)
+    for r in p) for p in pages)
+sys.exit(0 if ok and any(r["type"] == "required_status_checks"
+                         and r.get("parameters", {}).get("strict_required_status_checks_policy") is True
+                         for p in pages for r in p) else 1)' "$rules"; then
     echo "::error::promote slice '$HEAD_REF' rejected: main's ruleset does not require branches to be up to date"
     echo "(strict required status checks), so the replayed merge may not be the one that lands. Enable it first."
     exit 1

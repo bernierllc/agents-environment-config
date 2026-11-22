@@ -134,7 +134,8 @@ def gh_path(tmp_path, rules=(rule(True),), fail=False, pages=None, raw=None):
     bindir, log = tmp_path / "bin", tmp_path / "gh.log"
     bindir.mkdir(exist_ok=True)
     body = raw if raw is not None else json.dumps([list(p) for p in (pages or (rules,))])
-    reply = "exit 4" if fail else f"echo '{body}'"
+    (tmp_path / "rules.json").write_bytes(body if isinstance(body, bytes) else body.encode())
+    reply = "exit 4" if fail else f"cat {tmp_path / 'rules.json'}"
     (bindir / "gh").write_text(f'#!/bin/sh\necho "$@" >> {log}\n'
                                f'case "$*" in *rules/branches/main*) {reply} ;; *) exit 98 ;; esac\n')
     (bindir / "gh").chmod(0o755)
@@ -183,11 +184,20 @@ def test_the_guard_rejects_a_slice_whose_replay_holds_unless_main_requires_up_to
 STRICT = json.dumps(rule(True))
 
 
-@pytest.mark.parametrize("raw", [f"[[{STRICT}], null]", f"[{{}}, [{STRICT}]]", f"[[{STRICT}, 7]]", f"[{STRICT}]",
-                                 f'{{"pages": [[{STRICT}]]}}', '[[{"type": "required_status_checks", "parameters": [1]}]]',
-                                 ""],
-                         ids=["null-page", "object-page", "non-object-rule", "unslurped", "object-reply",
-                              "list-parameters", "empty"])
+KEY = b'"strict_required_status_checks_policy"'
+MALFORMED = {
+    "null-page": f"[[{STRICT}], null]", "object-page": f"[{{}}, [{STRICT}]]", "non-object-rule": f"[[{STRICT}, 7]]",
+    "unslurped": f"[{STRICT}]", "object-reply": f'{{"pages": [[{STRICT}]]}}', "empty": "",
+    "list-parameters": f'[[{STRICT}, {{"type": "required_status_checks", "parameters": [1]}}]]',
+    "error-object": f'[[{STRICT}, {{"message": "Not Found"}}]]',
+    "nan": f'[[{STRICT}, {{"type": "x", "parameters": {{"n": NaN}}}}]]',
+    "duplicate-key": b'[[{"type": "required_status_checks", "parameters": {' + KEY + b": false, " + KEY + b": true}}]]",
+    "invalid-utf8": f'[[{STRICT}, {{"type": "x\udcff"}}]]'.encode("utf-8", "surrogateescape"),
+    "nul-in-key": b'[[{"type": "required_status_checks", "parameters": {"strict_required_status_checks_po\x00licy": true}}]]',
+}
+
+
+@pytest.mark.parametrize("raw", MALFORMED.values(), ids=MALFORMED.keys())
 def test_a_malformed_rules_reply_rejects_even_beside_a_strict_rule(g, tmp_path, raw):
     code, out = g.run(GUARD, g.slice(g.good_files()), PATH=gh_path(tmp_path, raw=raw))
     assert code == 1 and "allowed" not in out, out
