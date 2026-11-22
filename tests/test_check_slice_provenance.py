@@ -197,6 +197,9 @@ def test_head_content_is_never_checked_out_or_run(g, tmp_path):
     assert not marker.exists()
     assert g.git(clone, "rev-parse", "HEAD") == before
     assert g.git(clone, "status", "--porcelain") == ""
+    # the walk ran in a scratch repo: the head's objects never entered the checkout, and the checkout stays shallow
+    assert subprocess.run(["git", "cat-file", "-e", f"{head}^{{commit}}"], cwd=clone, env=g.env).returncode != 0
+    assert g.git(clone, "rev-parse", "--is-shallow-repository") == "true"
 
 
 def test_the_guard_without_provenance_inputs_still_rejects_a_slice(g):
