@@ -75,8 +75,10 @@ def test_no_step_publishes_a_hand_made_check_run():
 
 
 def test_permissions_are_minimal():
-    # Setting `permissions:` zeroes every omitted scope; GET /actions/runs/{id} needs actions: read in private repos.
-    assert DOC["permissions"] == {"contents": "read", "actions": "read"}
+    # Setting `permissions:` zeroes every omitted scope. GET /actions/runs/{id} needs actions: read and
+    # GET /commits/{sha}/check-runs needs checks: read in private repos; the step fails closed when the
+    # listing is refused, so without checks: read every promotion in a private repo is rejected.
+    assert DOC["permissions"] == {"contents": "read", "actions": "read", "checks": "read"}
 
 
 def test_missing_guard_script_on_base_fails_with_a_clear_message_before_running_them():
