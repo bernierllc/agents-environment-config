@@ -17,9 +17,10 @@ unit of impact lives — not a contract.
 
 ## Review follow-ups awaiting prioritization
 
-- [Review-gate doctor: required check with no workflow](2026-11-24-doctor-required-check-workflow-exists.md): a ruleset can
-  require a check no workflow can publish (`Review Gate` loads from the default branch), which deadlocks ordinary merges.
-  The doctor should fail on it where it can read rulesets; the installer seed flag and templates were dropped because an org's
+- [Review-gate doctor: `Review Gate` required without a default-branch workflow](2026-11-24-doctor-required-check-workflow-exists.md): a ruleset can
+  require `Review Gate` when the default branch has no workflow that publishes it (it loads from the default branch), which
+  deadlocks ordinary merges. The doctor should fail on that one contract where it can read rulesets; general producer
+  inference is a separate plan. The installer seed flag and templates were dropped because an org's
   repo-create script already seeds before rulesets. Scheduling pending.
 - [prune-merged-worktrees ignored-.env guard fails open](2026-11-16-prune-env-guard-fail-open.md): `grep -q`
   under pipefail read 2+ unique `.env` files as none, and any `.env` symlink was exempt; both deleted unique
