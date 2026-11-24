@@ -17,6 +17,10 @@ unit of impact lives — not a contract.
 
 ## Review follow-ups awaiting prioritization
 
+- [Skill install scan](2026-11-24-skill-install-scan.md): `aec` places third-party skills into full-access agents with no
+  content check, and `aec skills install/update` bypass the one write chokepoint. Run NVIDIA/SkillSpector in `--no-llm`
+  static mode as a blocking, fail-closed check inside `place_installed_item`, route the bypass through it, record the verdict
+  in the manifest, and certify the catalog in CI. Scheduling pending: Tracker placement row `PLACE: Skill install scan`.
 - [Review-gate doctor: `Review Gate` required without a default-branch workflow](2026-11-24-doctor-required-check-workflow-exists.md): a ruleset can
   require `Review Gate` when the default branch has no workflow that publishes it (it loads from the default branch), which
   deadlocks ordinary merges. The doctor should fail on that one contract where it can read rulesets; general producer
