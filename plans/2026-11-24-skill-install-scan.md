@@ -121,8 +121,11 @@ Each behavior lives in the component that owns it; callers call.
   matches the directory, and exits non-zero for it (`run_doctor` returns `(all_passed, issues)` and the CLI already exits 1 on
   failure, so this check adds an issue and needs no new exit-code contract).
 - A CI job in aec scans every skill in the catalog with the same module and fails on `blocked`, so the shipped catalog is
-  certified once at merge, and a user's install of an unmodified catalog skill hits the cache. Path-filtered so it runs only
-  when a skill directory or `aec/lib/skill_scan.py` changes.
+  certified once at merge, so a blocked skill cannot ship in the catalog. This does not save a user the local scan: the
+  cache lives on each user's machine, and a CI runner cannot fill it. Every installing user needs the scanner (the
+  `unavailable` verdict prints how to get it). Shipping a signed or committed attestation that aec could consume instead
+  is a separate decision, not part of this plan. Path-filtered so the job runs only when a skill directory or
+  `aec/lib/skill_scan.py` changes.
 
 ## Sequencing (nothing blocks a user before the baseline exists)
 
