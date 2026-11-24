@@ -34,9 +34,12 @@ A required status check is a name in a ruleset; whether anything can produce tha
 A general "can any workflow publish context X" analyzer is not part of this plan. Producers can be job names, reusable-workflow
 calls, matrices, expressions, PR-supplied workflows (`pull_request` runs from the PR's merge commit, so a baseline branch
 inventory proves neither presence nor absence) or Checks API calls with an explicit name. Getting that wrong yields false FAILs
-and false assurance, so it is a separate plan. This plan hard-fails only on the one contract the review-gate skill itself owns:
-`Review Gate`, produced by a `pull_request_target` workflow, which is read from the default branch only. For that context the
-default branch inventory is sufficient evidence, because nothing else can supply the workflow.
+and false assurance, so it is a separate plan. GitHub also binds a requirement to a context name and an optional integration, not
+to a workflow path or event, so a ruleset alone never proves which producer a repo intends. This plan therefore hard-fails only
+when the **caller asserts** the contract the review-gate skill itself ships: `Review Gate` is produced by the skill's
+`review-gate.yml`, a `pull_request_target` workflow read from the default branch only. The assertion is an explicit doctor option
+(step 3); an operator or an org's post-create step passes it. Without it the same finding is a WARN. Under the assertion the
+default-branch inventory is sufficient evidence, because nothing else can supply that workflow.
 
 ## Where it can run
 
@@ -52,26 +55,32 @@ separate decision for the repo owner. Minimum permissions: ruleset reads need Me
    `ruleset_covered_branches`), read its `required_status_checks`. Other branches are out of scope and the output says so.
 3. Only the context `Review Gate` is analyzed. If it is pinned to an `integration_id` other than 15368 (GitHub Actions), skip it
    (an installed app reports it). Pinned to 15368, or with no `integration_id`, it is analyzed. Every other required context is
-   listed once as "producer not verified (generic producer analysis is out of scope)": a WARN, never a FAIL.
+   listed once as "producer not verified (generic producer analysis is out of scope)": a WARN, never a FAIL. A new doctor option
+   (`--expect-default-branch-gate`) asserts that this repo uses the skill's `review-gate.yml` as the producer; only with it can the
+   analysis FAIL. A source-less context never FAILs without the option (an external publisher or a PR-supplied `pull_request`
+   workflow could satisfy it).
 4. List `.github/workflows/` on the **default branch** once and read the files. The listing is complete only below the Contents API
    cap of 1,000 entries; at the cap, after a partial fetch failure, or on a rate limit, the result is a WARN.
-5. The default branch can publish `Review Gate` when `.github/workflows/review-gate.yml` (or `.yaml`, the installer's path) exists
-   there, or any workflow file there mentions the string `Review Gate` (an older template version published it from a
-   differently named job, and a workflow can also create a check with an explicit name). A mention is deliberately lenient: a
-   false pass is acceptable, a false FAIL is not.
-6. **FAIL** (exit 1, naming the context, the default branch and the fix: "merge review-gate.yml to <default branch> before
-   requiring the check") when the default-branch inventory is complete and readable and nothing there can publish `Review Gate`.
-   That holds even when the workflow exists only on `staging` or another covered branch: it will not load until it reaches the
-   default branch, and the message says so.
+5. The default branch has the producer when `.github/workflows/review-gate.yml` (or `.yaml`, the path the installer writes) exists
+   there and declares a `pull_request_target` trigger. No other file counts: a substring match would let the companion
+   `review-gate-doctor.yml` (which mentions "Review Gate" in a comment and its own name but publishes no such check) mask a deleted
+   gate. A file at another path that the repo wants to use as the producer is the unverified case, so it WARNs.
+6. With the assertion (step 3), **FAIL** (exit 1, naming the context, the default branch and the fix: "merge review-gate.yml to
+   <default branch> before requiring the check") when the default-branch inventory is complete and readable and step 5 finds no
+   producer. That holds even when the workflow exists only on `staging` or another covered branch: it will not load until it
+   reaches the default branch, and the message says so. Without the assertion the same state is a WARN that names the option.
 7. Absence of `.github/workflows/` (a 404 on the listing) counts as the empty inventory only when the repository and the default
    branch are already known readable; the helper keeps the HTTP status. Denied access, a missing ref and a transient failure are
    each a WARN that names the status.
 8. `install-workflow.py`'s closing hint orders the steps: merge the workflow to the default branch first, then require the check.
-9. Contract tests (fixtures, no network): a ruleset requiring `Review Gate` with `review-gate.yml` on the default branch (pass),
-   without it (fail), on a covered branch only (fail, default branch named), a differently named job that mentions `Review Gate`
-   (pass), a non-Actions integration id (skip), a source-less context (analyzed), another required context (warn, not verified),
-   more than one page of rulesets, the 1,000-entry cap, denied access, missing ref and transient failure (each warn), an absent
-   workflows directory on a readable repo (fail), and `main()` exiting 1 on a confirmed failure and 0 on warnings only.
+9. Contract tests (fixtures, no network). With the option: a ruleset requiring `Review Gate` with `review-gate.yml` on the default
+   branch (pass), without it (fail), on a covered branch only (fail, default branch named), with the real companion
+   `review-gate-doctor.yml` present and the gate absent (fail), an absent workflows directory on a readable repo (fail), a
+   `review-gate.yml` without `pull_request_target` (fail). Without the option: the same missing-gate states (warn naming the
+   option), a PR-supplied `pull_request` workflow named `Review Gate` (warn, never fail), a source-less context with no workflow
+   (warn). Either way: a non-Actions integration id (skip), another required context (warn, not verified), more than one page
+   of rulesets, the 1,000-entry cap, denied access, missing ref and transient failure (each warn), and `main()` exiting 1 on a
+   confirmed failure and 0 on warnings only.
 10. Versioning: update the version in every file the doctor's parity check and the repo's manifest consistency check name
     (`review-gate/SKILL.md`, `review-gate/hooks.json`, `skills-manifest.json`), and add a note under the doctor section of
     `review-gate/SKILL.md`.
@@ -80,7 +89,8 @@ separate decision for the repo owner. Minimum permissions: ruleset reads need Me
 
 Author delegate opens the claude-skills PR into `main` with the `review:high` label (squash). aec picks up the new version through
 the normal catalog sync; no fleet upgrade is requested, and no broad `aec upgrade` runs. Repos get the check when they next
-re-vendor.
+re-vendor. Passing `--expect-default-branch-gate` from an org's repo-create post-create step is that org's own change, filed with
+its owner once the doctor ships.
 
 ## Out of scope
 
