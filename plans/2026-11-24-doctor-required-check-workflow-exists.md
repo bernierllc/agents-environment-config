@@ -64,7 +64,8 @@ separate decision for the repo owner. Minimum permissions: ruleset reads need Me
 5. The default branch has the producer when `.github/workflows/review-gate.yml` (or `.yaml`, the path the installer writes) exists
    there and declares a `pull_request_target` trigger. No other file counts: a substring match would let the companion
    `review-gate-doctor.yml` (which mentions "Review Gate" in a comment and its own name but publishes no such check) mask a deleted
-   gate. A file at another path that the repo wants to use as the producer is the unverified case, so it WARNs.
+   gate. A producer at another path is the unverified case: without the option it WARNs; with the option it does not satisfy the
+   asserted contract, so step 6 applies.
 6. With the assertion (step 3), **FAIL** (exit 1, naming the context, the default branch and the fix: "merge review-gate.yml to
    <default branch> before requiring the check") when the default-branch inventory is complete and readable and step 5 finds no
    producer. That holds even when the workflow exists only on `staging` or another covered branch: it will not load until it
