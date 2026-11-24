@@ -18,8 +18,8 @@ unit of impact lives — not a contract.
 ## Review follow-ups awaiting prioritization
 
 - [Review-gate doctor: required check with no workflow](2026-11-24-doctor-required-check-workflow-exists.md): a ruleset can
-  require a check whose workflow is absent on the branch it protects (`Review Gate` loads from the base branch), which
-  deadlocks the first PR. The doctor should fail on it; the installer seed flag and templates were dropped because an org's
+  require a check no workflow can publish (`Review Gate` loads from the default branch), which deadlocks ordinary merges.
+  The doctor should fail on it where it can read rulesets; the installer seed flag and templates were dropped because an org's
   repo-create script already seeds before rulesets. Scheduling pending.
 - [prune-merged-worktrees ignored-.env guard fails open](2026-11-16-prune-env-guard-fail-open.md): `grep -q`
   under pipefail read 2+ unique `.env` files as none, and any `.env` symlink was exempt; both deleted unique
