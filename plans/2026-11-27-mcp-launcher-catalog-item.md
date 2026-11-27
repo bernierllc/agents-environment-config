@@ -114,8 +114,19 @@ legacy record and the absence of the old entry afterwards.
 
 **One manifest transaction owner.** The engine does not load or save the manifest itself (today `_apply_mcp` does, while `run_upgrade` keeps an
 earlier manifest object in memory and saves it unconditionally in `finally`, which would overwrite the engine's new version, fingerprint and
-file hashes with stale state). The caller owns the load and the single save; the engine mutates the manifest object it is handed.
-`execute_apply` loads once and saves once; `run_upgrade` passes the manifest it already holds. Two callers must never save competing copies.
+file hashes with stale state). The caller owns the load and the single save; the engine mutates the manifest object it is handed. The
+non-MCP writer is the same defect: `execute_apply` has no in-memory manifest, and every item (`_apply_mcp` and, for skills, rules and agents,
+`install_cmd._install_single_item`) loads and saves the file by path, so one object saved at the end would overwrite those records. So:
+`_install_single_item` takes an optional `manifest` object and, when given, mutates it and does not save (the interactive `aec install` path
+passes none and keeps loading and saving as today); `execute_apply` loads once, hands that object to both the MCP engine and
+`_install_single_item`, and saves once in a `finally`; `run_upgrade` passes the manifest it already holds. Two writers must never save competing
+copies of the same manifest.
+
+**Spec changes retract what the previous record owned.** The manifest entry records every resource the engine created: files (`dest` and
+sha256), per-client registrations (client, server name, scope) and the hook. On an upgrade the engine diffs the new spec against that
+record before replacing it: a client dropped from `clients`, a renamed server and a changed `dest` have their old registration or file
+removed, except a file whose sha256 no longer matches the record (hand-edited), which is kept and reported. The record is replaced only after
+the retractions succeed, so a failure leaves the old record intact and re-runnable rather than orphaning resources nothing owns any more.
 
 **Public commands.** The engine only helps if the commands call it:
 
@@ -193,7 +204,7 @@ validators), `aec/lib/org_config` MCP entries (`schema.py`, `validator.py`, `app
 keys or is explicitly limited, and test it).
 
 Readers and callers of the apply path: `apply_core.plan_apply` / `execute_apply` / `_apply_mcp`; `commands/install_cmd._install_mcp`;
-`commands/apply_cmd.run_apply`; `commands/upgrade.run_upgrade` (manifest load/save ownership) and `_upgrade_scope` / `_target_base` (the generic branch must stop handling `mcp`);
+`commands/apply_cmd.run_apply`; `commands/install_cmd._install_single_item` (optional manifest object, no save when given); `commands/upgrade.run_upgrade` (manifest load/save ownership) and `_upgrade_scope` / `_target_base` (the generic branch must stop handling `mcp`);
 `aec/lib/mcp_settings` (`write_mcp_server` / `remove_mcp_server` retired for registration, kept only to remove a recorded legacy entry);
 `commands/update.run_update` and `outdated` reporting; `cli.py` exit mapping for `update` / `upgrade`; `sources._discover_available_mcps`
 (fingerprint); `commands/uninstall` (must remove the files, the per-client entries and the hook it created, and only those, by recorded
@@ -209,8 +220,11 @@ Docs: `docs/users` MCP page, `docs/qa-verification.md`, README MCP section (plac
 - Filesystem confinement: `..` in `dest`; symlinked parent; symlinked final component; a parent swapped for a symlink between validation and
   rename (via a test seam); the recorded sha256 equals the sha256 of the bytes written even when the source changes during the copy;
   uninstall removes only a file whose sha256 matches the record.
-- Manifest transaction: after `aec upgrade --yes` exits, the persisted manifest holds the engine's new version, fingerprint and file hashes,
-  including for a batch that upgrades MCP and non-MCP items together; `execute_apply` and `run_upgrade` each save exactly once.
+- Manifest transaction: after the CLI exits, the persisted manifest holds the engine's new version, fingerprint and file hashes **and** the
+  records of the non-MCP items in the same batch, for `aec upgrade --yes`, `aec apply` and `aec org apply` (mixed skill + MCP batches through
+  each); `execute_apply` and `run_upgrade` each save exactly once; interactive `aec install` still persists its own record.
+- Retraction through upgrade: dropping a client from `clients`, renaming a server and changing a launcher `dest` each remove the old
+  registration or file; a hand-edited old launcher is kept and reported; a failed retraction leaves the old record intact.
 - Mode and hooks through the CLI: a mode-only change leaves the launcher executable (assert the filesystem mode and execute it); a
   `hooks.json`-only or hook-script-only change at the same version plans and performs a hook refresh.
 - Client compatibility: Claude registrations go through `claude mcp add/get/remove`; the fake-CLI shim is validated against recorded output of
