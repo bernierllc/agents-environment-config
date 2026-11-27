@@ -40,8 +40,8 @@ Also missing, and not fixable by installing: nothing detects that a client is st
 
 The `mcp` item type models "a package plus a settings entry", and a launcher bridge is "a file plus entries in several clients, gated on a
 key, with processes that outlive the file". On top of that, "apply an `mcp` item" has no single owner: `install_cmd._install_mcp`,
-`apply_core._apply_mcp` and the generic branch of `upgrade._upgrade_scope` each do part of it and disagree, and `aec update` reports nothing
-for it. The staleness is the compound of an install path that cannot update, no single owner of the apply, and the absence of a drift check.
+`apply_core._apply_mcp` and the generic branch of `upgrade._upgrade_scope` each do part of it and disagree, and `aec update` only reports a
+newer catalog version (`_report_scope_outdated`), never same-version content, registration or installed-state drift. The staleness is the compound of an install path that cannot update, no single owner of the apply, and the absence of a drift check.
 
 ## Correct fix
 
@@ -63,7 +63,7 @@ Optional keys, all backwards compatible (an existing `mcp.json` is unchanged):
     write time (step 2).
   - An item that declares `files` is global-scope only in this version (a global file shared by repo-scoped installs would let two
     repositories overwrite or remove each other's launcher). A repo-scoped install of such an item is rejected before any mutation.
-- `clients`: subset of `claude`, `codex`, `cursor`; default `["claude"]` (today's behavior).
+- `clients`: subset of `claude`, `codex`, `cursor`; default `["claude"]` (the client an existing item targets today, now registered through the client; see the legacy migration in step 2).
 - `requires_key`: `{ "file": <path under home>, "var": <env var NAME> }`. Names only: the value is never read into AEC output, logs or the
   manifest. The gate asks the launcher (`<launcher> <target> --has-key`, exit 0/1, prints nothing) when the item declares `files`; otherwise it
   tests that the file defines the variable in a subshell and discards output.
@@ -76,12 +76,20 @@ against it; reject unsupported combinations with a clear message and no partial 
 
 | Client | Global scope | Repository scope |
 |---|---|---|
-| `claude` | `claude mcp add -s user` for items that declare `clients`; otherwise today's `write_mcp_server` on `~/.claude/settings.json` | the repo's `.claude/settings.json` via `write_mcp_server` (today's behavior), never the user scope |
+| `claude` | `claude mcp add -s user` (Claude Code stores user registrations in `~/.claude.json`) | `claude mcp add -s project` (the repository's `.mcp.json`), never the user scope |
 | `cursor` | `~/.cursor/mcp.json`, atomic JSON replace preserving file mode | the repo's `.cursor/mcp.json`, same replace semantics |
 | `codex` | `codex mcp add/get/remove` | not supported: rejected before mutation (Codex registrations are user-global) |
 
 Readback, snapshot-and-restore and removal are scope-aware per client and touch only the entry for that scope. A repository-scoped apply
-never reads, writes or removes a global registration, and one repository's apply never touches another's.
+never reads, writes or removes a global registration, and one repository's apply never touches another's. Claude readback is client-backed
+(`claude mcp get <name>` resolved for that scope), not a JSON assertion on a file the client may not read.
+
+**Legacy Claude registrations move to the supported locations.** Today's `write_mcp_server` writes `mcpServers.<name>` into
+`~/.claude/settings.json` (or the repo's `.claude/settings.json`), which Claude Code does not document as an MCP registration location, so a
+successful install can leave no usable server. The engine stops using it for every `mcp` item, existing items included (the bundled
+`jcodemunch` item is one). A legacy manifest record has no fingerprint, so step 3 treats it as drifted once; that upgrade registers through
+the client, then removes the old settings entry it recorded as its own (only that key, never other settings). Test the migration from a
+legacy record and the absence of the old entry afterwards.
 
 **Files, enforced at the mutation boundary** (a validation-time `resolve()` check alone leaves a window for a parent-directory swap):
 
@@ -91,7 +99,8 @@ never reads, writes or removes a global registration, and one repository's apply
   `O_CREAT | O_EXCL | O_NOFOLLOW` in that directory, set the mode, then `rename` relative to the pinned descriptor. Fail closed when any
   component of `dest` under `$HOME` is a symlink or changed identity between validation and rename, including the final component (policy:
   AEC never writes through or over a symlink at `dest`; it reports the path and stops).
-- Idempotent: compare the sha256 of the installed file with the staged bytes and skip when equal. Record `files: {dest: sha256}` in the
+- Idempotent: skip only when the installed file matches the staged bytes (sha256) **and** the declared mode; a mode-only change rewrites
+  (or chmods through the pinned descriptor) so a launcher whose mode went from `0644` to `0755` ends up executable. Record `files: {dest: sha256}` in the
   manifest entry (`record_mcp_install` gains it).
 - A failed write never truncates a working launcher (write-beside-and-rename).
 - Uninstall applies the same confinement and removes a file only when its sha256 still matches the record.
@@ -103,21 +112,32 @@ never reads, writes or removes a global registration, and one repository's apply
   failed replacement, and confirm the entry the client resolves is ours before reporting success.
 - A SKIPPED target is an `ApplyResult.errors` entry (non-zero exit), never a silent success, so `aec upgrade --yes`, `aec apply` and CI see it.
 
+**One manifest transaction owner.** The engine does not load or save the manifest itself (today `_apply_mcp` does, while `run_upgrade` keeps an
+earlier manifest object in memory and saves it unconditionally in `finally`, which would overwrite the engine's new version, fingerprint and
+file hashes with stale state). The caller owns the load and the single save; the engine mutates the manifest object it is handed.
+`execute_apply` loads once and saves once; `run_upgrade` passes the manifest it already holds. Two callers must never save competing copies.
+
 **Public commands.** The engine only helps if the commands call it:
 
 - `aec upgrade [--yes] [--dry-run]`: in `_upgrade_scope`, an `mcp` item branches to the engine instead of the generic copy (which on its own
   is a bug: it copies the `mcp-servers/<name>` directory into the rules directory). It exits non-zero when the engine reports errors.
-- `aec update`: reports an outdated `mcp` item when its version is newer or its fingerprint differs (step 3), so the report and the apply
-  agree; its exit contract is unchanged.
+- `aec update`: already reports a newer catalog version for an `mcp` item; it additionally reports fingerprint and installed-state drift
+  (step 3), so the report and the apply agree; its exit contract is unchanged.
 - `aec outdated`, `aec apply`, `aec org apply` and `aec install mcp` (`install_cmd._install_mcp`): same predicate, same engine.
 
-### 3. Upgrade on version and full effective spec (aec, `apply_core.plan_apply` and discovery)
+### 3. Upgrade on version, full effective spec and installed state (aec, `apply_core.plan_apply` and discovery)
 
 One predicate, owned by a helper next to `plan_apply` and used by `aec update`, `aec outdated`, `aec upgrade` and `aec apply`: an installed
-`mcp` item needs an upgrade when **the catalog version is newer (`version_is_newer`) or its spec fingerprint differs from the recorded one**.
+`mcp` item needs an upgrade when **the catalog version is newer (`version_is_newer`), its spec fingerprint differs from the recorded one, or
+the engine's installed-state verification fails**.
 
+- **Installed-state verification** (`engine.verify(item)`, read-only): each recorded `files` entry exists with its recorded sha256 and
+  declared mode, and each registered client entry resolves to ours for that scope. This is what makes the fix command real: a launcher
+  deleted or edited by hand with an unchanged catalog is drift that `aec upgrade` repairs, so `doctor` can honestly recommend it.
+  Test detect → recommended command → drift cleared.
 - **Fingerprint** = sha256 over the canonical JSON of the whole effective item: version, `mcpServers`, `install`, `clients`, `requires_key`,
-  `check`, each `files` entry's `dest` and `mode`, and the sha256 of each `files` source. So a version bump, a changed registration (args,
+  `check`, each `files` entry's `dest` and `mode`, the sha256 of each `files` source, and the item's hook inputs (`hooks.json` and every
+  hook script it references), so a hook-only change at the same catalog version still plans a refresh. So a version bump, a changed registration (args,
   clients, key gate, check) or a changed launcher mode upgrades the item even when the launcher bytes are identical. The fingerprint is
   recorded in the manifest entry next to `version`.
 - **Placement:** the fingerprint comparison runs before the equal-version shortcut (`if installed_version == avail_version: noop`), and the
@@ -173,7 +193,8 @@ validators), `aec/lib/org_config` MCP entries (`schema.py`, `validator.py`, `app
 keys or is explicitly limited, and test it).
 
 Readers and callers of the apply path: `apply_core.plan_apply` / `execute_apply` / `_apply_mcp`; `commands/install_cmd._install_mcp`;
-`commands/apply_cmd.run_apply`; `commands/upgrade._upgrade_scope` and `_target_base` (the generic branch must stop handling `mcp`);
+`commands/apply_cmd.run_apply`; `commands/upgrade.run_upgrade` (manifest load/save ownership) and `_upgrade_scope` / `_target_base` (the generic branch must stop handling `mcp`);
+`aec/lib/mcp_settings` (`write_mcp_server` / `remove_mcp_server` retired for registration, kept only to remove a recorded legacy entry);
 `commands/update.run_update` and `outdated` reporting; `cli.py` exit mapping for `update` / `upgrade`; `sources._discover_available_mcps`
 (fingerprint); `commands/uninstall` (must remove the files, the per-client entries and the hook it created, and only those, by recorded
 sha256); `aec/lib/hooks` lifecycle and `catalog_hooks` (MCP hook install, refresh, removal); `portable_manifest`, `skills_manifest`,
@@ -188,8 +209,14 @@ Docs: `docs/users` MCP page, `docs/qa-verification.md`, README MCP section (plac
 - Filesystem confinement: `..` in `dest`; symlinked parent; symlinked final component; a parent swapped for a symlink between validation and
   rename (via a test seam); the recorded sha256 equals the sha256 of the bytes written even when the source changes during the copy;
   uninstall removes only a file whose sha256 matches the record.
+- Manifest transaction: after `aec upgrade --yes` exits, the persisted manifest holds the engine's new version, fingerprint and file hashes,
+  including for a batch that upgrades MCP and non-MCP items together; `execute_apply` and `run_upgrade` each save exactly once.
+- Mode and hooks through the CLI: a mode-only change leaves the launcher executable (assert the filesystem mode and execute it); a
+  `hooks.json`-only or hook-script-only change at the same version plans and performs a hook refresh.
+- Client compatibility: Claude registrations go through `claude mcp add/get/remove`; the fake-CLI shim is validated against recorded output of
+  the real CLI (fixture), and a contract test runs against the real `claude` binary when present and is skipped, visibly, when not.
 - Predicate and discovery: version bump on an installed `mcp` item plans `upgrade`; a config-only change (args, clients, `requires_key`,
-  `check`, mode) with identical launcher bytes plans `upgrade`; launcher content change plans `upgrade`; everything equal is `noop`; a legacy
+  `check`, mode) with identical launcher bytes plans `upgrade`; a launcher deleted or edited by hand with an unchanged catalog plans `upgrade`; launcher content change plans `upgrade`; everything equal is `noop`; a legacy
   record with no fingerprint upgrades once and is backfilled; `_discover_available_mcps` exposes the fingerprint.
 - Public commands (run through the CLI, not the helpers): `aec update` reports the outdated `mcp` item; `aec upgrade --yes` installs the
   launcher, registers the clients and exits non-zero on a SKIPPED target; `aec upgrade` no longer copies an `mcp` item into the rules
@@ -206,8 +233,9 @@ Docs: `docs/users` MCP page, `docs/qa-verification.md`, README MCP section (plac
 
 ## Sequencing
 
-1. Step 3 plus the `aec upgrade` / `aec update` / `aec outdated` routing from step 2 first (small, independent, fixes "an `mcp` item never
-   upgrades" for everyone, including `jcodemunch`).
+1. Step 3 plus the `aec upgrade` / `aec update` / `aec outdated` routing from step 2 first, together with the single manifest transaction
+   owner and the client-backed Claude registration with legacy migration (they are what make the routing correct; shipping the routing
+   alone would be overwritten by `run_upgrade`'s save). Fixes "an `mcp` item never upgrades" for everyone, including `jcodemunch`.
 2. Steps 1 and 2 together (schema, scope rules, filesystem safety, apply), behind the same validators.
 3. The MCP hook lifecycle and the SessionStart adapter from step 4; they do not depend on `doctor`.
 4. The `doctor` check after the exit-code contract plan lands.
