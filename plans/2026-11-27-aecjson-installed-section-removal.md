@@ -27,34 +27,48 @@ writes the repo entry) was rejected: it adds a second writer to keep in step wit
 
 ## Correct fix
 
-1. **Confirm and enumerate (first, before any code).** Confirm `manifest["repos"][<path>]` is populated by every install path
-   (`aec install`, `aec upgrade`, `aec uninstall`, `aec repo setup`, vendored copies). Grep every reader and writer of the
-   `.aec.json` `installed` key across `aec/`, `tests/`, `docs/`, schema files and templates, and ask the downstream reporter owner how it
-   reads versions. Report the punch list in the PR body. If a path fails to record per repo scope, fix that first; this plan then has a
-   step 0.
-2. **Reader.** Make `aec discover` (project scope) read the manifest's repo scope instead of `.aec.json`. Keep the global branch as is.
+Order matters: consumers move first, the reader is repointed second, and the data and the writer are removed last.
+
+1. **Confirm and enumerate (first, before any code).** Confirm which paths record `manifest["repos"][<path>]`. Reviewed 2026-11-27:
+   modern `aec install`, `upgrade` and `uninstall` do; the legacy `skills.py` path writes `installed-skills.json` instead, and
+   `aec repo setup` copies instruction and rule files without recording them. Decide per path: record it per repo scope, or retire it
+   (step 0 if recording is needed). Sweep every reader and writer of the `installed` key; found so far: `create_skeleton` (a writer),
+   `_sync_installed_section`, `update_installed_section`, its re-export in `aec/lib/__init__.py` (import and `__all__`),
+   `discover_catalog.py`, assertions and fixtures in `test_aec_json.py`, `test_setup_integration.py`, `test_discover_catalog_cmd.py`
+   and `test_dismissals.py`, plus `docs/users/aec-json.md`. Ask the downstream reporter owner how it reads versions. Report the punch
+   list in the PR body.
+2. **Reporter first (consumer cutover is a prerequisite).** Incumbent: `aec export` already serializes scoped names and installed
+   versions as JSON (`export_cmd.py`, `portable_manifest.py`). Evaluate it first: if it gives a repo's items and versions, document it
+   as the machine interface and add nothing. Only if a capability is missing (per-repo filter), add `--json` to `aec list`
+   (`--scope local` already prints a repo's items from the manifest) and say what `export` lacks. The downstream reader switches
+   before step 5 ships; the PR names that consumer.
+3. **Reader.** Make `aec discover` (project scope) read the manifest's repo scope instead of `.aec.json`. Keep the global branch.
    Test: a repo with one install in `manifest["repos"][path]` and a different list in the global scope is discovered correctly.
-3. **Writer.** Delete `_sync_installed_section` and `update_installed_section`, and stop `aec repo setup/sync` from writing the
-   section. Test: `aec repo sync` leaves a `.aec.json` without an `installed` key.
-4. **Schema.** Drop `installed` from the skeleton (`create_skeleton`) and from any schema doc. `load_aec_json` ignores an `installed`
-   key in an existing file (no error), so old files keep loading.
-5. **Migration.** One step in `aec migrate` (or `aec repo sync`) that removes the stale `installed` section from tracked repos' `.aec.json`,
-   reports how many were changed, and is idempotent. Never touches anything else in the file. Test: file with `installed` loses only that key.
-6. **Reporter.** `aec list` already prints a repo's items from the manifest (`--scope local`, `aec/commands/list_cmd.py`) but has no
-   `--json` output (checked 2026-11-27). Add `--json` to it so a machine reader gets a repo's installed items and versions. Name the consumer (a downstream version reporter) in the PR so its owner switches.
-7. **Docs.** Update the `.aec.json` reference and CHANGELOG; state that installed versions live in the manifest.
+4. **Writer and schema.** Delete `_sync_installed_section`, `update_installed_section` (and remove its `aec/lib/__init__.py` import and
+   `__all__` entry, then check the remaining exports import cleanly), stop `create_skeleton` and `aec repo setup/sync` writing the
+   section. `load_aec_json` ignores an `installed` key in an existing file. Test: `aec repo sync` and a fresh skeleton leave a
+   `.aec.json` without `installed`.
+5. **Migration (never loses the only record).** For each tracked repo with an `installed` section: first reconcile against
+   `manifest["repos"][resolved path]`; entries the manifest already has are dropped, entries it lacks (missing or partial scope, moved
+   repo) are kept and reported as `unresolved`, never deleted. Parse strictly: invalid JSON means no write and a reported error
+   (`load_aec_json` substitutes a skeleton for malformed JSON, so the migration must not reuse it for writing). Write atomically and
+   preserve every other field. Idempotent; reports changed, kept and failed counts. Tests: moved repo, missing scope, symlink alias,
+   distinct worktree scopes, hand-edited extra fields preserved, malformed file untouched, second run changes nothing.
+6. **Docs.** Update `docs/users/aec-json.md`, the reference and CHANGELOG; state that installed versions live in the manifest.
 
 ## Affected surfaces
 
-`aec/lib/aec_json.py`, `aec/commands/repo.py`, `aec/commands/discover_catalog.py`, `aec/commands/migrate*.py`, `aec/commands/list_cmd.py`,
-the `.aec.json` docs and tests; one external reader (a downstream version reporter). No catalog, hook or skill content changes.
+`aec/lib/aec_json.py`, `aec/lib/__init__.py`, `aec/commands/repo.py`, `aec/commands/discover_catalog.py`, `aec/commands/migrate*.py`,
+`aec/commands/list_cmd.py` or `export_cmd.py`, the tests named in step 1 and `docs/users/aec-json.md`; one external reader (a downstream
+version reporter). No catalog, hook or skill content changes.
 
 ## Done when
 
 No code path writes or reads `.aec.json` `installed`; `aec discover` agrees with the manifest in a repo whose global scope differs; the
-migration has run on this machine's repos with the count reported; the downstream reporter reads the manifest value (its own PR).
+migration acceptance tests in step 5 pass and a run on a fixture repo set reports changed, kept and failed counts; the downstream reporter
+reads the manifest value (its own PR) before the migration is released.
 
-## Stopgap (until step 6 lands)
+## Stopgap (until step 2 lands)
 
-The per-type installed store is global only, so it cannot give a repo's version, and `aec list` has no `--json` yet. Until step 6, read
-`manifest["repos"][<repo path>]` from the v2 manifest file, or parse `aec list --scope local` text output.
+The per-type installed store is global only, so it cannot give a repo's version. Until step 2, read `manifest["repos"][<repo path>]`
+from the v2 manifest file, parse `aec list --scope local` text, or use `aec export` if it covers the repo.
