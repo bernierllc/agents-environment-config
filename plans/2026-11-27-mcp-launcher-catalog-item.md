@@ -88,8 +88,16 @@ never reads, writes or removes a global registration, and one repository's apply
 `~/.claude/settings.json` (or the repo's `.claude/settings.json`), which Claude Code does not document as an MCP registration location, so a
 successful install can leave no usable server. The engine stops using it for every `mcp` item, existing items included (the bundled
 `jcodemunch` item is one). A legacy manifest record has no fingerprint, so step 3 treats it as drifted once; that upgrade registers through
-the client, then removes the old settings entry it recorded as its own (only that key, never other settings). Test the migration from a
-legacy record and the absence of the old entry afterwards.
+the client, then removes the old settings entry **only when ownership is provable**. `record_mcp_install` stores no server names or
+registration snapshot today (only version, `installedAt`, `package` and source fields), so a legacy record proves nothing about which keys the
+old install wrote. The engine therefore removes a legacy `mcpServers.<key>` only when that key is one the current catalog item declares in its
+`mcpServers` or equals the item name (the two names `write_mcp_server` could have used for this item), and the entry's content still matches
+the catalog's old shape for that key. Any other key it cannot prove it owns (a renamed server, a hand-added entry) is left untouched and
+reported by `doctor` as "unrecorded legacy entry `<key>`; remove by hand if unused". Records written from this change on carry the ownership
+data (`registrations`: client, scope, server name; plus `files`), so this ambiguity exists for legacy records only. Tests: a legacy record
+whose key equals the catalog name is migrated and the old entry removed; a legacy record whose server key differs from the catalog name and
+whose new catalog renames that key registers the new name, leaves the unproven old key in place and reports it; a legacy record with an
+unknown old key removes nothing; other settings keys are never touched.
 
 **Files, enforced at the mutation boundary** (a validation-time `resolve()` check alone leaves a window for a parent-directory swap):
 
@@ -138,7 +146,9 @@ the retractions succeed, so a failure leaves the old record intact and re-runnab
 
 ### 3. Upgrade on version, full effective spec and installed state (aec, `apply_core.plan_apply` and discovery)
 
-One predicate, owned by a helper next to `plan_apply` and used by `aec update`, `aec outdated`, `aec upgrade` and `aec apply`: an installed
+One predicate, owned by a helper next to `plan_apply` and used by `aec update`, `aec outdated`, `aec upgrade` (including
+`upgrade._find_outdated_repos`, which decides which other tracked repositories `aec upgrade --yes` visits and today filters on
+`version_is_newer` alone, so drift there would never be repaired) and `aec apply`: an installed
 `mcp` item needs an upgrade when **the catalog version is newer (`version_is_newer`), its spec fingerprint differs from the recorded one, or
 the engine's installed-state verification fails**.
 
@@ -206,7 +216,8 @@ keys or is explicitly limited, and test it).
 Readers and callers of the apply path: `apply_core.plan_apply` / `execute_apply` / `_apply_mcp`; `commands/install_cmd._install_mcp`;
 `commands/apply_cmd.run_apply`; `commands/install_cmd._install_single_item` (optional manifest object, no save when given); `commands/upgrade.run_upgrade` (manifest load/save ownership) and `_upgrade_scope` / `_target_base` (the generic branch must stop handling `mcp`);
 `aec/lib/mcp_settings` (`write_mcp_server` / `remove_mcp_server` retired for registration, kept only to remove a recorded legacy entry);
-`commands/update.run_update` and `outdated` reporting; `cli.py` exit mapping for `update` / `upgrade`; `sources._discover_available_mcps`
+`commands/upgrade._find_outdated_repos` (filters through the shared predicate, so repository-scoped drift in other tracked repos is found and
+repaired) and `_report_scope_outdated`; `commands/update.run_update` and `outdated` reporting; `cli.py` exit mapping for `update` / `upgrade`; `sources._discover_available_mcps`
 (fingerprint); `commands/uninstall` (must remove the files, the per-client entries and the hook it created, and only those, by recorded
 sha256); `aec/lib/hooks` lifecycle and `catalog_hooks` (MCP hook install, refresh, removal); `portable_manifest`, `skills_manifest`,
 `manifest_v2` (`files`, `fingerprint`), `doctor`.
@@ -232,6 +243,8 @@ Docs: `docs/users` MCP page, `docs/qa-verification.md`, README MCP section (plac
 - Predicate and discovery: version bump on an installed `mcp` item plans `upgrade`; a config-only change (args, clients, `requires_key`,
   `check`, mode) with identical launcher bytes plans `upgrade`; a launcher deleted or edited by hand with an unchanged catalog plans `upgrade`; launcher content change plans `upgrade`; everything equal is `noop`; a legacy
   record with no fingerprint upgrades once and is backfilled; `_discover_available_mcps` exposes the fingerprint.
+- Other tracked repositories: a repository-scoped `mcp` item with fingerprint or installed-state drift (same version) in a tracked repo other
+  than the current one is listed by `aec upgrade` and repaired by `aec upgrade --yes`; an up-to-date other repo is not visited.
 - Public commands (run through the CLI, not the helpers): `aec update` reports the outdated `mcp` item; `aec upgrade --yes` installs the
   launcher, registers the clients and exits non-zero on a SKIPPED target; `aec upgrade` no longer copies an `mcp` item into the rules
   directory.
