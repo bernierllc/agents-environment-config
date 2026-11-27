@@ -173,11 +173,12 @@ the engine's installed-state verification fails**.
 - `aec doctor` runs each installed `mcp` item's `check` (when declared) and reports drift with the fix command (`aec upgrade`). It must exit
   non-zero on drift; that depends on the exit-code contract owned by [`2026-11-21-stale-skills-fail-loudly.md`](2026-11-21-stale-skills-fail-loudly.md),
   which this step waits for rather than re-implementing.
-- **SessionStart adapter, not exit 2.** Per the Claude Code hooks reference, a SessionStart hook's exit code 2 shows stderr to the user only
-  and the session proceeds; plain stdout with exit 0 (or `hookSpecificOutput.additionalContext`) is added to Claude's context. So the shipped
-  hook is a small adapter around `check`: it runs the check (which keeps its own non-zero drift contract for `doctor` and CI), and on drift
-  prints the drift report to stdout and exits 0. Test the adapter's output: drift gives a report on stdout; no drift gives nothing; a check
-  that is unreadable or crashed gives a report saying so, never silence.
+- **SessionStart adapter, not exit 2.** Per the Claude Code hooks reference, a SessionStart hook cannot block, and its exit code 2 shows
+  stderr to the user only (the model never sees it). The shipped hook is a small adapter around `check`: it runs the check (which keeps its
+  own non-zero drift contract for `doctor` and CI, every non-zero code counting as drift) and always exits 0. On drift it prints one JSON
+  object on stdout: `systemMessage` carries the report for the user and `hookSpecificOutput.additionalContext` carries it for the model. No
+  drift prints nothing. Test the adapter's output: drift gives valid JSON with both fields and exit 0; no drift gives nothing; a check that is
+  unreadable, crashed or missing gives a report saying so, never silence.
 - **The hook needs an MCP install path; the existing catalog-hook mechanism does not cover it.** `aec/lib/catalog_hooks.py` maps only
   `skill`, `rule` and `agent` (`_PLURAL`), and `_apply_mcp` never invokes a hook lifecycle, so `wire(repo, "mcp", ...)` raises `LookupError`.
   Add an explicit MCP hook lifecycle that reuses the existing installer (`aec/lib/hooks/lifecycle.install_hooks_for_item`, driven by the
@@ -191,8 +192,9 @@ the engine's installed-state verification fails**.
 ### 5. Interim (before steps 1-4 land), owned by the bridge's repo
 
 Until the mechanism exists, the bridge's owner repo wires its read-only `--check` (the same drift report) into a SessionStart hook so a stale
-install is reported at session start instead of waiting to be noticed. The hook must use the step 4 adapter shape (report on stdout, exit
-0), because a SessionStart exit 2 never reaches the model. The check already exists in that repo; the work is the adapter, the hook and its
+install is reported at session start instead of waiting to be noticed. The hook must use the step 4 adapter shape (exit 0, JSON on stdout
+with `systemMessage` for the user and `additionalContext` for the model), because SessionStart cannot block and an exit 2 shows stderr to
+the user only. The check already exists in that repo; the work is the adapter, the hook and its
 test. This plan only records it as the stop-gap; the owner repo's cop carries it.
 
 ### 6. Restart stays a human or client action
@@ -254,7 +256,7 @@ Docs: `docs/users` MCP page, `docs/qa-verification.md`, README MCP section (plac
 - Scope: two repositories plus an existing global registration; each repo's apply and removal leaves the other repo and the global entry
   intact.
 - Hook lifecycle: install on apply, refresh on upgrade, removal on uninstall, for global, repository and custom-source installs; the
-  SessionStart adapter prints the drift report on stdout and exits 0.
+  SessionStart adapter exits 0 and prints the drift report as JSON (`systemMessage` and `additionalContext`) on stdout.
 - Drift check: stale file, orphaned process (spawned test child reparented to pid 1), process older than the installed file, unreadable
   process table (never a false pass).
 
