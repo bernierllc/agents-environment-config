@@ -17,6 +17,10 @@ unit of impact lives — not a contract.
 
 ## Review follow-ups awaiting prioritization
 
+- [Remove `installed` from `.aec.json`](2026-11-27-aecjson-installed-section-removal.md): `aec repo setup/sync` copies the GLOBAL
+  manifest into each repo's `.aec.json` `installed` section, so it shows another scope's versions, while the v2 manifest already
+  records installs per repo. Repoint `aec discover` at the manifest's repo scope, delete the copy writer, drop the schema key,
+  migrate existing files, point readers at the manifest (aec export or aec list). Scheduling pending.
 - [Skill install scan](2026-11-24-skill-install-scan.md): `aec` places third-party skills into full-access agents with no
   content check, and `aec skills install/update` bypass the one write chokepoint. Run NVIDIA/SkillSpector in `--no-llm`
   static mode as a blocking, fail-closed check inside `place_installed_item`, route the bypass through it, record the verdict
