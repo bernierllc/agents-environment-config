@@ -40,8 +40,8 @@ writes the repo entry) was rejected: it adds a second writer to keep in step wit
    key in an existing file (no error), so old files keep loading.
 5. **Migration.** One step in `aec migrate` (or `aec repo sync`) that removes the stale `installed` section from tracked repos' `.aec.json`,
    reports how many were changed, and is idempotent. Never touches anything else in the file. Test: file with `installed` loses only that key.
-6. **Reporter.** A read-only helper, `aec list --json --scope repo` (or the existing `aec list` JSON if it already offers it), that prints a
-   repo's installed items from the manifest. Name the consumer (a downstream version reporter) in the PR so its owner switches.
+6. **Reporter.** `aec list` already prints a repo's items from the manifest (`--scope local`, `aec/commands/list_cmd.py`) but has no
+   `--json` output (checked 2026-11-27). Add `--json` to it so a machine reader gets a repo's installed items and versions. Name the consumer (a downstream version reporter) in the PR so its owner switches.
 7. **Docs.** Update the `.aec.json` reference and CHANGELOG; state that installed versions live in the manifest.
 
 ## Affected surfaces
@@ -56,5 +56,5 @@ migration has run on this machine's repos with the count reported; the downstrea
 
 ## Stopgap (until step 6 lands)
 
-The per-type installed store is global only, so it cannot give a repo's version. Read `manifest["repos"][<repo path>]` in the v2 manifest
-(`~/.agents-environment-config/` manifest file) for the repo value.
+The per-type installed store is global only, so it cannot give a repo's version, and `aec list` has no `--json` yet. Until step 6, read
+`manifest["repos"][<repo path>]` from the v2 manifest file, or parse `aec list --scope local` text output.
