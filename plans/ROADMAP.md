@@ -17,6 +17,12 @@ unit of impact lives — not a contract.
 
 ## Review follow-ups awaiting prioritization
 
+- [MCP launcher catalog items](2026-11-27-mcp-launcher-catalog-item.md): the `mcp` item type installs no files, registers with
+  Claude Code only, and no public command upgrades it on a version bump (`aec upgrade` copies it like a file tree, `plan_apply` skips the
+  newer-version check for `mcp`), so a stdio launcher bridge cannot be managed by `aec upgrade` and a hand-run install script sat stale.
+  One apply engine behind install/apply/upgrade, extended with files, scope-aware clients, a key gate and a full-spec fingerprint upgrade;
+  a drift check that reaches the model at session start, then the owning repo retires its script. Scheduling pending.
+
 - [Remove `installed` from `.aec.json`](2026-11-27-aecjson-installed-section-removal.md): `aec repo setup/sync` copies the GLOBAL
   manifest into each repo's `.aec.json` `installed` section, so it shows another scope's versions, while the v2 manifest already
   records installs per repo. Repoint `aec discover` at the manifest's repo scope, delete the copy writer, drop the schema key,
