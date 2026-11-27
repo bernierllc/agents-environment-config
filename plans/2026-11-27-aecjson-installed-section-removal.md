@@ -1,7 +1,7 @@
 # Remove the installed-versions section from a repo's `.aec.json`; the manifest is the one record
 
 **Status:** planned. Scheduling pending.
-**Priority:** P3 - Everything else (tier set by the project manager on the intake row, 2026-11-22). A stale version shown to a
+**Priority:** P3 - Everything else. A stale version shown to a
 reader (a downstream reporter showed 1.3.0 against an installed 1.4.7) is a wrong fact, not a crash. No merge gate depends on it.
 **Decision:** Option B approved 2026-11-27 (reversible tooling design).
 
