@@ -176,8 +176,9 @@ the engine's installed-state verification fails**.
 - **SessionStart adapter, not exit 2.** Per the Claude Code hooks reference, a SessionStart hook cannot block, and its exit code 2 shows
   stderr to the user only (the model never sees it). The shipped hook is a small adapter around `check`: it runs the check (which keeps its
   own non-zero drift contract for `doctor` and CI, every non-zero code counting as drift) and always exits 0. On drift it prints one JSON
-  object on stdout: `systemMessage` carries the report for the user and `hookSpecificOutput.additionalContext` carries it for the model. No
-  drift prints nothing. Test the adapter's output: drift gives valid JSON with both fields and exit 0; no drift gives nothing; a check that is
+  object on stdout: `systemMessage` carries the report for the user and `hookSpecificOutput` (with `hookEventName` set to `SessionStart`, which
+  the hooks reference requires) carries it for the model in `additionalContext`. No
+  drift prints nothing. Test the adapter's output: drift gives valid JSON with `systemMessage`, `hookEventName: SessionStart` and `additionalContext` and exit 0; no drift gives nothing; a check that is
   unreadable, crashed or missing gives a report saying so, never silence.
 - **The hook needs an MCP install path; the existing catalog-hook mechanism does not cover it.** `aec/lib/catalog_hooks.py` maps only
   `skill`, `rule` and `agent` (`_PLURAL`), and `_apply_mcp` never invokes a hook lifecycle, so `wire(repo, "mcp", ...)` raises `LookupError`.
@@ -256,7 +257,7 @@ Docs: `docs/users` MCP page, `docs/qa-verification.md`, README MCP section (plac
 - Scope: two repositories plus an existing global registration; each repo's apply and removal leaves the other repo and the global entry
   intact.
 - Hook lifecycle: install on apply, refresh on upgrade, removal on uninstall, for global, repository and custom-source installs; the
-  SessionStart adapter exits 0 and prints the drift report as JSON (`systemMessage` and `additionalContext`) on stdout.
+  SessionStart adapter exits 0 and prints the drift report as JSON (`systemMessage`, `hookEventName`, `additionalContext`) on stdout.
 - Drift check: stale file, orphaned process (spawned test child reparented to pid 1), process older than the installed file, unreadable
   process table (never a false pass).
 
