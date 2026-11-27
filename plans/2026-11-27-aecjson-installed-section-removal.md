@@ -15,7 +15,7 @@ built here; a duplicate is removed.
 ## Problem
 
 1. `aec install` never writes `.aec.json`; `aec repo setup/sync` copies the global list into it. The section is therefore a stale copy of a
-   different scope. Of 30 local repos with a `.aec.json`, 12 have an empty section and 18 hold 7 to 24 entries copied from global.
+   different scope. Any repo that ran `aec repo setup/sync` carries entries copied from global.
 2. The only reader of the project-scope section is `aec discover` (`aec/commands/discover_catalog.py:190`), which uses it to skip items
    already tracked. With a copied global list it skips the wrong things.
 3. Anything outside aec that reads `.aec.json` for versions (a downstream version reporter) shows the copied value.
