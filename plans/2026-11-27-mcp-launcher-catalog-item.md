@@ -1,11 +1,11 @@
-# MCP launcher catalog items: a stdio bridge installs, registers and updates through `aec update`
+# MCP launcher catalog items: a stdio bridge installs, registers and updates through `aec upgrade`
 
 **Status:** planned. Scheduling pending.
 **Priority:** high. A hand-run install script sat stale on a machine after two merged fixes, and nothing said so.
 **Tracker id:** AEC-MCP-LAUNCHER-ITEM.
 
 **Incumbent (checked 2026-11-27):** AEC already has an `mcp` item type (`aec/lib/apply_core.py` `_apply_mcp`, `aec/lib/mcp_settings.py`,
-`mcp-servers/<name>/mcp.json`). It cannot carry a launcher bridge, for the four reasons under Problem. This plan extends that type and
+`mcp-servers/<name>/mcp.json`). It cannot carry a launcher bridge, for the reasons under Problem. This plan extends that type and
 adds no second install path. Nothing else in AEC provides a check that a registered MCP server's installed launcher matches its source.
 
 ## Problem
@@ -20,9 +20,16 @@ Why the existing `mcp` item type cannot replace the hand-run script (verified in
    has nowhere to come from, so the entry would point at a file that is not there.
 2. **It registers with Claude Code only.** `get_settings_path` returns `~/.claude/settings.json` (or the repo's `.claude/settings.json`).
    Codex (`codex mcp add`) and Cursor (`~/.cursor/mcp.json`) are never written, although the script registers all three.
-3. **It never upgrades on a version bump.** In `plan_apply`, `newer` is computed only `if item.item_type != "mcp"`; an `mcp` item whose
-   catalog version differs from the installed one lands in the `noop` branch with reason "installed differs from catalog; keeping". Only a
-   changed source or a failed pin produces an `upgrade`. So "installs update on `aec update`" is false for every `mcp` item today.
+3. **It never upgrades on a version bump, through any public command.**
+   - `aec update` only fetches and reports (`aec/commands/update.py`); it takes no options and applies nothing.
+   - `aec upgrade [--yes] [--dry-run]` (`aec/commands/upgrade.py` `_upgrade_scope`) has its own version loop that never calls `plan_apply`
+     or `_apply_mcp`. It treats an `mcp` item like a file tree: `_target_base` falls through to the rules directory, the generic branch copies
+     the `mcp-servers/<name>` directory there, and no client registration is written.
+   - `plan_apply` (used by `aec apply` and `aec org apply`) computes `newer` only `if item.item_type != "mcp"`; an `mcp` item whose catalog
+     version differs lands in the `noop` branch with reason "installed differs from catalog; keeping". Its equal-version branch also returns
+     `noop` before any content comparison could run.
+
+   So "installs update" is false for every `mcp` item through every route.
 4. **It cannot say a key is missing.** A launcher without its key exits at start, so replacing a working entry (for example an OAuth one)
    with it breaks the client. The script guards this with a `--has-key` probe that prints nothing; the `mcp` type has no equivalent gate and
    writes the entry unconditionally.
@@ -32,100 +39,183 @@ Also missing, and not fixable by installing: nothing detects that a client is st
 ## Root cause
 
 The `mcp` item type models "a package plus a settings entry", and a launcher bridge is "a file plus entries in several clients, gated on a
-key, with processes that outlive the file". The staleness is the compound of (3) and the absence of a drift check: an install that cannot
-update, and no signal that it did not.
+key, with processes that outlive the file". On top of that, "apply an `mcp` item" has no single owner: `install_cmd._install_mcp`,
+`apply_core._apply_mcp` and the generic branch of `upgrade._upgrade_scope` each do part of it and disagree, and `aec update` reports nothing
+for it. The staleness is the compound of an install path that cannot update, no single owner of the apply, and the absence of a drift check.
 
 ## Correct fix
 
 Each behavior lives in the one component that owns it; callers call. The launcher script itself stays in its owner's catalog source, never
 in AEC core (the generic mechanism lands here; a specific bridge is just one item in some source).
 
+**One apply engine.** `apply_core._apply_mcp` (extracted to `aec/lib/mcp_apply.py` if it outgrows the file) is the only code that installs,
+registers, upgrades or removes an `mcp` item. `aec install mcp`, `aec apply`, `aec org apply` and `aec upgrade` all call it; none
+re-implements any part of it. Its result is the existing `ApplyResult` (`applied` / `skipped` / `errors`), and every caller maps a non-empty
+`errors` to a non-zero exit.
+
 ### 1. Extend the `mcp.json` schema (aec, `aec/lib/mcp_settings.py` and the catalog validators)
 
 Optional keys, all backwards compatible (an existing `mcp.json` is unchanged):
 
-- `files`: list of `{ "src": <path in the item dir>, "dest": <path under the user's home>, "mode": "0755" }`. Installed by write-beside-and-rename
-  (a failed copy must not truncate a working launcher). `dest` must resolve under `$HOME`; anything else is rejected at validation.
+- `files`: list of `{ "src": <path in the item dir>, "dest": <path under the user's home>, "mode": "0755" }`.
+  - `src` must stay inside the item directory: no `..`, no absolute path, no symlink component; rejected at validation and again at apply.
+  - `dest` must be a normalized path under `$HOME` with no `..`. Validation alone is not confinement; the filesystem boundary is enforced at
+    write time (step 2).
+  - An item that declares `files` is global-scope only in this version (a global file shared by repo-scoped installs would let two
+    repositories overwrite or remove each other's launcher). A repo-scoped install of such an item is rejected before any mutation.
 - `clients`: subset of `claude`, `codex`, `cursor`; default `["claude"]` (today's behavior).
 - `requires_key`: `{ "file": <path under home>, "var": <env var NAME> }`. Names only: the value is never read into AEC output, logs or the
   manifest. The gate asks the launcher (`<launcher> <target> --has-key`, exit 0/1, prints nothing) when the item declares `files`; otherwise it
   tests that the file defines the variable in a subshell and discards output.
-- `check`: optional read-only command (exit non-zero on drift) used by the interim and the doctor check in steps 4 and 5.
+- `check`: optional read-only command (exit non-zero on drift) used by the doctor check and the SessionStart adapter in step 4.
 
-### 2. Apply: files, per-client registration, key gate (aec, `apply_core._apply_mcp`)
+### 2. Apply: files, per-client registration, key gate (aec, the one apply engine)
 
-- Install each `files` entry idempotently (compare sha256 with the source; skip when equal) and record the installed sha256 in the manifest
-  entry (`record_mcp_install` gains `files: {dest: sha256}`).
+**Scope first, before any mutation.** Resolve the target scope (`DesiredItem.scope`: global or a repository) and validate the whole item
+against it; reject unsupported combinations with a clear message and no partial writes:
+
+| Client | Global scope | Repository scope |
+|---|---|---|
+| `claude` | `claude mcp add -s user` for items that declare `clients`; otherwise today's `write_mcp_server` on `~/.claude/settings.json` | the repo's `.claude/settings.json` via `write_mcp_server` (today's behavior), never the user scope |
+| `cursor` | `~/.cursor/mcp.json`, atomic JSON replace preserving file mode | the repo's `.cursor/mcp.json`, same replace semantics |
+| `codex` | `codex mcp add/get/remove` | not supported: rejected before mutation (Codex registrations are user-global) |
+
+Readback, snapshot-and-restore and removal are scope-aware per client and touch only the entry for that scope. A repository-scoped apply
+never reads, writes or removes a global registration, and one repository's apply never touches another's.
+
+**Files, enforced at the mutation boundary** (a validation-time `resolve()` check alone leaves a window for a parent-directory swap):
+
+- Read the source once into memory, hash those exact bytes, and write those bytes. The digest recorded in the manifest is the digest of the
+  staged bytes, never a second read of a source that can change mid-copy.
+- Open the destination parent directory without following symlinks and pin it (a directory file descriptor); stage with
+  `O_CREAT | O_EXCL | O_NOFOLLOW` in that directory, set the mode, then `rename` relative to the pinned descriptor. Fail closed when any
+  component of `dest` under `$HOME` is a symlink or changed identity between validation and rename, including the final component (policy:
+  AEC never writes through or over a symlink at `dest`; it reports the path and stops).
+- Idempotent: compare the sha256 of the installed file with the staged bytes and skip when equal. Record `files: {dest: sha256}` in the
+  manifest entry (`record_mcp_install` gains it).
+- A failed write never truncates a working launcher (write-beside-and-rename).
+- Uninstall applies the same confinement and removes a file only when its sha256 still matches the record.
+
+**Registration and key gate.**
+
 - For each target and each client in `clients`: when `requires_key` is declared and the gate fails, print `SKIPPED, key file missing; existing
   client entries kept` and leave that client's entry alone (mirrors the script's semantics); otherwise register, snapshot-and-restore on a
-  failed replacement, and confirm the entry the client resolves is ours before reporting success. Codex via `codex mcp add/get/remove`, Cursor via
-  atomic JSON replace preserving file mode, Claude via `claude mcp add -s user` (this replaces the hand-written settings.json merge only for
-  items that declare `clients`; items that do not keep `write_mcp_server`).
-- A SKIPPED target is a non-zero apply result (`ApplyResult.errors`), never a silent success, so `aec update --yes` and CI see it.
+  failed replacement, and confirm the entry the client resolves is ours before reporting success.
+- A SKIPPED target is an `ApplyResult.errors` entry (non-zero exit), never a silent success, so `aec upgrade --yes`, `aec apply` and CI see it.
 
-### 3. Upgrade on content, not only version (aec, `apply_core.plan_apply`)
+**Public commands.** The engine only helps if the commands call it:
 
-For `mcp` items, compare the recorded `files` sha256 with the catalog's; a difference plans an `upgrade` with reason "launcher content changed".
-For `mcp` items without `files`, compare versions with `version_is_newer` like every other type (the current `noop` branch is the bug). Add the
-test that a catalog version bump on an installed `mcp` item plans an `upgrade`.
+- `aec upgrade [--yes] [--dry-run]`: in `_upgrade_scope`, an `mcp` item branches to the engine instead of the generic copy (which on its own
+  is a bug: it copies the `mcp-servers/<name>` directory into the rules directory). It exits non-zero when the engine reports errors.
+- `aec update`: reports an outdated `mcp` item when its version is newer or its fingerprint differs (step 3), so the report and the apply
+  agree; its exit contract is unchanged.
+- `aec outdated`, `aec apply`, `aec org apply` and `aec install mcp` (`install_cmd._install_mcp`): same predicate, same engine.
+
+### 3. Upgrade on version and full effective spec (aec, `apply_core.plan_apply` and discovery)
+
+One predicate, owned by a helper next to `plan_apply` and used by `aec update`, `aec outdated`, `aec upgrade` and `aec apply`: an installed
+`mcp` item needs an upgrade when **the catalog version is newer (`version_is_newer`) or its spec fingerprint differs from the recorded one**.
+
+- **Fingerprint** = sha256 over the canonical JSON of the whole effective item: version, `mcpServers`, `install`, `clients`, `requires_key`,
+  `check`, each `files` entry's `dest` and `mode`, and the sha256 of each `files` source. So a version bump, a changed registration (args,
+  clients, key gate, check) or a changed launcher mode upgrades the item even when the launcher bytes are identical. The fingerprint is
+  recorded in the manifest entry next to `version`.
+- **Placement:** the fingerprint comparison runs before the equal-version shortcut (`if installed_version == avail_version: noop`), and the
+  current `item_type != "mcp"` exclusion around `version_is_newer` is removed.
+- **Discovery:** `sources._discover_available_mcps` returns only `version`, `description` and `path` today; it also returns the fingerprint
+  so every command above reads the same value.
+- **Legacy records:** an installed `mcp` entry with no recorded fingerprint is treated as drifted once; the idempotent apply re-registers it
+  and backfills the record (this includes the bundled `jcodemunch` item).
 
 ### 4. Drift check that fails loudly (aec, `aec doctor` and a SessionStart hook)
 
-- `aec doctor` runs each installed `mcp` item's `check` (when declared) and reports drift with the fix command. It must exit non-zero on drift;
-  that depends on the exit-code contract owned by [`2026-11-21-stale-skills-fail-loudly.md`](2026-11-21-stale-skills-fail-loudly.md), which this
-  step waits for rather than re-implementing.
-- A SessionStart hook shipped with the item runs `check` and exits 2 with the drift report on stderr, so the model sees it (a hook that exits 0
-  prints to nowhere the model reads). The hook is wired by the existing catalog-hook mechanism (`aec/lib/catalog_hooks.py` `wire`).
-- Scope of "drift": installed file differs from source; a client entry points elsewhere; a running launcher is older than the installed file;
-  an orphaned launcher process (parent pid 1). Report pids, parents and ages only, never command lines (a command line can carry a key).
+- `aec doctor` runs each installed `mcp` item's `check` (when declared) and reports drift with the fix command (`aec upgrade`). It must exit
+  non-zero on drift; that depends on the exit-code contract owned by [`2026-11-21-stale-skills-fail-loudly.md`](2026-11-21-stale-skills-fail-loudly.md),
+  which this step waits for rather than re-implementing.
+- **SessionStart adapter, not exit 2.** Per the Claude Code hooks reference, a SessionStart hook's exit code 2 shows stderr to the user only
+  and the session proceeds; plain stdout with exit 0 (or `hookSpecificOutput.additionalContext`) is added to Claude's context. So the shipped
+  hook is a small adapter around `check`: it runs the check (which keeps its own non-zero drift contract for `doctor` and CI), and on drift
+  prints the drift report to stdout and exits 0. Test the adapter's output: drift gives a report on stdout; no drift gives nothing; a check
+  that is unreadable or crashed gives a report saying so, never silence.
+- **The hook needs an MCP install path; the existing catalog-hook mechanism does not cover it.** `aec/lib/catalog_hooks.py` maps only
+  `skill`, `rule` and `agent` (`_PLURAL`), and `_apply_mcp` never invokes a hook lifecycle, so `wire(repo, "mcp", ...)` raises `LookupError`.
+  Add an explicit MCP hook lifecycle that reuses the existing installer (`aec/lib/hooks/lifecycle.install_hooks_for_item`, driven by the
+  item's `hooks.json`): install on apply, refresh on upgrade, removal on uninstall, called from the one apply engine. Scope and source
+  resolution: global installs write the hook into the user-level client settings (the installer takes a `repo_root` today, so it needs a
+  user-scope target); repository installs use the repository; the item directory comes from the source the item was installed from (default
+  catalog or custom source), recorded in the manifest.
+- Scope of "drift": installed file differs from source; a client entry points elsewhere; a running launcher is older than the installed
+  file; an orphaned launcher process (parent pid 1). Report pids, parents and ages only, never command lines (a command line can carry a key).
 
-### 5. Interim (before steps 1-3 land), owned by the bridge's repo
+### 5. Interim (before steps 1-4 land), owned by the bridge's repo
 
 Until the mechanism exists, the bridge's owner repo wires its read-only `--check` (the same drift report) into a SessionStart hook so a stale
-install fails at session start instead of waiting to be noticed. The check already exists in that repo; the work is the hook and its test. This
-plan only records it as the stop-gap; the owner repo's cop carries it.
+install is reported at session start instead of waiting to be noticed. The hook must use the step 4 adapter shape (report on stdout, exit
+0), because a SessionStart exit 2 never reaches the model. The check already exists in that repo; the work is the adapter, the hook and its
+test. This plan only records it as the stop-gap; the owner repo's cop carries it.
 
 ### 6. Restart stays a human or client action
 
 AEC replaces the file and the registrations; it never restarts a client or kills a launcher process. The drift check reports the running
-launchers that predate the installed file and names the restart step. A restart can drop an in-flight tool call, so it is not an automatic side
-effect of `aec update`.
+launchers that predate the installed file and names the restart step. A restart can drop an in-flight tool call, so it is not an automatic
+side effect of `aec upgrade`.
 
 ### 7. Migrate the first consumer, then retire the script
 
-The owner repo publishes its bridge as an item in its catalog source (custom source or its own catalog) once steps 1-3 ship, proves parity on
-two machines (installed sha256 equal, all three clients `ok`, missing key `SKIPPED` and entries kept), then deletes its hand-run script and
-points its docs at `aec update`. The owner repo's cop owns this step; AEC does not edit that repo.
+The owner repo publishes its bridge as an item in its catalog source (custom source or its own catalog) once steps 1-3 ship, proves parity
+on two machines (installed sha256 equal, all three clients `ok`, missing key `SKIPPED` and entries kept), then deletes its hand-run script
+and points its docs at `aec upgrade`. The owner repo's cop owns this step; AEC does not edit that repo.
 
 ## Affected surfaces (contract-change punch list)
 
 Writers of `mcp.json`: `mcp-servers/jcodemunch/mcp.json` (unchanged, new keys optional), any custom-source catalog (validated by the same
-validators), `aec/lib/org_config` MCP entries (`schema.py`, `validator.py`, `apply.py`: confirm an org-config `mcp` entry can carry the new keys
-or is explicitly limited, and test it). Readers: `apply_core.plan_apply` / `_apply_mcp`, `install_cmd` MCP install path, `uninstall` (must
-remove the files and the per-client entries it created, and only those), `portable_manifest`, `skills_manifest`, `manifest_v2`, `doctor`.
+validators), `aec/lib/org_config` MCP entries (`schema.py`, `validator.py`, `apply.py`: confirm an org-config `mcp` entry can carry the new
+keys or is explicitly limited, and test it).
+
+Readers and callers of the apply path: `apply_core.plan_apply` / `execute_apply` / `_apply_mcp`; `commands/install_cmd._install_mcp`;
+`commands/apply_cmd.run_apply`; `commands/upgrade._upgrade_scope` and `_target_base` (the generic branch must stop handling `mcp`);
+`commands/update.run_update` and `outdated` reporting; `cli.py` exit mapping for `update` / `upgrade`; `sources._discover_available_mcps`
+(fingerprint); `commands/uninstall` (must remove the files, the per-client entries and the hook it created, and only those, by recorded
+sha256); `aec/lib/hooks` lifecycle and `catalog_hooks` (MCP hook install, refresh, removal); `portable_manifest`, `skills_manifest`,
+`manifest_v2` (`files`, `fingerprint`), `doctor`.
+
 Docs: `docs/users` MCP page, `docs/qa-verification.md`, README MCP section (placeholders only).
 
 ## Tests
 
-- Schema validation: `files.dest` outside `$HOME` rejected; unknown client rejected; old `mcp.json` still valid.
-- `plan_apply`: version bump on an installed `mcp` item plans `upgrade`; content hash change plans `upgrade`; equal hash and version is `noop`.
-- Apply against a temp `$HOME` with fake `claude`/`codex` shims on `PATH` and a temp `~/.cursor`: registers all three; re-run is `ok`; failed
-  `codex mcp add` restores the previous config; missing key prints SKIPPED, leaves existing entries and returns a non-zero result; a `--has-key`
-  probe never prints the key (assert the key value is absent from captured stdout and stderr).
-- Uninstall removes only what apply created.
-- Drift check: stale file, orphaned process (spawned test child reparented to pid 1), process older than the installed file, unreadable process
-  table (never a false pass).
+- Schema validation: `files.dest` outside `$HOME` rejected; `..` and absolute `src` rejected; unknown client rejected; old `mcp.json` still
+  valid; a repo-scoped item with `files`, or with `codex` in `clients`, rejected before any mutation (assert no file or config was touched).
+- Filesystem confinement: `..` in `dest`; symlinked parent; symlinked final component; a parent swapped for a symlink between validation and
+  rename (via a test seam); the recorded sha256 equals the sha256 of the bytes written even when the source changes during the copy;
+  uninstall removes only a file whose sha256 matches the record.
+- Predicate and discovery: version bump on an installed `mcp` item plans `upgrade`; a config-only change (args, clients, `requires_key`,
+  `check`, mode) with identical launcher bytes plans `upgrade`; launcher content change plans `upgrade`; everything equal is `noop`; a legacy
+  record with no fingerprint upgrades once and is backfilled; `_discover_available_mcps` exposes the fingerprint.
+- Public commands (run through the CLI, not the helpers): `aec update` reports the outdated `mcp` item; `aec upgrade --yes` installs the
+  launcher, registers the clients and exits non-zero on a SKIPPED target; `aec upgrade` no longer copies an `mcp` item into the rules
+  directory.
+- Apply against a temp `$HOME` with fake `claude`/`codex` shims on `PATH` and a temp `~/.cursor`: registers all three; re-run is `ok`;
+  failed `codex mcp add` restores the previous config; missing key prints SKIPPED, leaves existing entries and returns a non-zero result; a
+  `--has-key` probe never prints the key (assert the key value is absent from captured stdout and stderr).
+- Scope: two repositories plus an existing global registration; each repo's apply and removal leaves the other repo and the global entry
+  intact.
+- Hook lifecycle: install on apply, refresh on upgrade, removal on uninstall, for global, repository and custom-source installs; the
+  SessionStart adapter prints the drift report on stdout and exits 0.
+- Drift check: stale file, orphaned process (spawned test child reparented to pid 1), process older than the installed file, unreadable
+  process table (never a false pass).
 
 ## Sequencing
 
-1. Step 3 first (small, independent, fixes "`aec update` never upgrades an `mcp` item" for everyone, including `jcodemunch`).
-2. Steps 1 and 2 together (schema plus apply), behind the same validators.
-3. Step 4 after the exit-code contract plan lands; the SessionStart hook can ship earlier because it does not depend on `doctor`.
-4. Step 7 in the owner repo after 1-3 ship.
+1. Step 3 plus the `aec upgrade` / `aec update` / `aec outdated` routing from step 2 first (small, independent, fixes "an `mcp` item never
+   upgrades" for everyone, including `jcodemunch`).
+2. Steps 1 and 2 together (schema, scope rules, filesystem safety, apply), behind the same validators.
+3. The MCP hook lifecycle and the SessionStart adapter from step 4; they do not depend on `doctor`.
+4. The `doctor` check after the exit-code contract plan lands.
+5. Step 7 in the owner repo after 1-3 ship.
 
 Step 5 (interim) is independent and should not wait for any of these.
 
 ## Out of scope
 
-Restarting clients or launcher processes; storing, rotating or reading key values; OAuth flows; adding any specific bridge or its key layout to
-this repo (they belong to the source that publishes the item).
+Restarting clients or launcher processes; storing, rotating or reading key values; OAuth flows; adding any specific bridge or its key layout
+to this repo (they belong to the source that publishes the item).
