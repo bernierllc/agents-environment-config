@@ -678,6 +678,39 @@ class TestRepoLocalScriptRendering:
                 item_version="1.0.0", repo_root=tmp_path / "repo", agents=["gemini"],
             )
 
+    @staticmethod
+    def _install_gemini(tmp_path, item_key="demo", shebang="#!/bin/sh", args=""):
+        from aec.lib.hooks.installer import install_item_hooks
+        item_dir = tmp_path / "repo" / ".claude" / "skills" / item_key
+        (item_dir / "scripts").mkdir(parents=True)
+        (item_dir / "scripts" / "check.sh").write_text(f"{shebang}\nexit 0\n")
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "on_file_edit", "description": "d",
+                "command": f"aec run-script skill:{item_key} check.sh{args}",
+            }],
+        }))
+        return install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key=item_key,
+            item_version="1.0.0", repo_root=tmp_path / "repo", agents=["gemini"],
+        )
+
+    @pytest.mark.parametrize("kwargs", [
+        {"item_key": "demo-$GEMINI_PROJECT_DIR"},  # item-directory path component
+        {"item_key": "demo-${CLAUDE_PROJECT_DIR}"},
+        {"shebang": "#!/opt/$GEMINI_PROJECT_DIR/sh"},  # interpreter token
+    ])
+    def test_gemini_rejects_every_generated_literal_it_would_substitute(self, tmp_path, kwargs):
+        with pytest.raises(ValueError, match="Gemini CLI substitutes"):
+            self._install_gemini(tmp_path, **kwargs)
+
+    def test_gemini_allows_the_bare_variable_name_as_an_argument(self, tmp_path):
+        """Only `$NAME` is rewritten; the bare name is an ordinary string."""
+        self._install_gemini(tmp_path, args=" --check-env GEMINI_PROJECT_DIR")
+        settings = json.loads((tmp_path / "repo" / ".gemini/settings.json").read_text())
+        (cmd,) = list(self._commands(settings))
+        assert "--check-env GEMINI_PROJECT_DIR" in cmd
+
     def test_gemini_uses_unquoted_project_dir_variable(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()

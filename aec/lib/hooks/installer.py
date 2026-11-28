@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 from pathlib import Path
 from typing import Dict, List, Sequence
@@ -73,7 +74,33 @@ CLAUDE_PROJECT_DIR_PREFIX = '"$CLAUDE_PROJECT_DIR"/'
 # env var). The variable must therefore stay UNQUOTED: inside double quotes the
 # inserted backslashes would be literal and a path with a space would break.
 GEMINI_PROJECT_DIR_PREFIX = "$GEMINI_PROJECT_DIR/"
-GEMINI_SUBSTITUTED_VARS = ("GEMINI_PROJECT_DIR", "CLAUDE_PROJECT_DIR")
+# Only the `$NAME` / `${NAME}` forms are rewritten; the bare name is an
+# ordinary string (e.g. `--check-env GEMINI_PROJECT_DIR`).
+GEMINI_SUBSTITUTED_RE = re.compile(r"\$\{?(?:GEMINI|CLAUDE)_PROJECT_DIR")
+
+
+def _relative_or_self(path: Path, root: Path) -> Path:
+    try:
+        return path.relative_to(root)
+    except ValueError:
+        return path
+
+
+def _reject_gemini_substituted(hook_id: str, literals: List[str]) -> None:
+    """Refuse literals Gemini would rewrite before bash runs the command.
+
+    Gemini substitutes `$GEMINI_PROJECT_DIR` textually anywhere in the string,
+    quoted or not, so every literal we emit (script name, item-directory path
+    components, interpreter tokens, arguments, notice text) must be free of it.
+    The project-directory references the renderer itself emits are not in
+    `literals`, so they are unaffected.
+    """
+    for token in literals:
+        if GEMINI_SUBSTITUTED_RE.search(token):
+            raise ValueError(
+                f"hook {hook_id!r}: {token!r} contains a variable "
+                "Gemini CLI substitutes in hook commands; rename it"
+            )
 
 
 # Shell that prints the main checkout's root: the parent of the git common dir,
@@ -204,20 +231,16 @@ def _resolve_script_commands(
                 # The run-script CLI consumes its own option separator.
                 if extra[:1] == ["--"]:
                     extra = extra[1:]
-                if agent == "gemini":
-                    # Gemini rewrites these names textually anywhere in the
-                    # command, quoted or not, so a script name or argument
-                    # carrying one would be changed before bash runs it.
-                    for token in [script_name, *extra]:
-                        if any(v in token for v in GEMINI_SUBSTITUTED_VARS):
-                            raise ValueError(
-                                f"hook {h.id!r}: {token!r} contains a variable "
-                                "Gemini CLI substitutes in hook commands; rename it"
-                            )
                 script_path = item_dir / "scripts" / script_name
                 if not script_path.exists():
                     raise FileNotFoundError(
                         f"hook {h.id!r}: script not found: {script_path}"
+                    )
+                if agent == "gemini":
+                    _reject_gemini_substituted(
+                        h.id,
+                        [script_name, *extra, *interpreter_for(script_path), item_ref, h.id,
+                         str(_relative_or_self(script_path, repo_root))],
                     )
                 # Run through the interpreter rather than exec'ing the path: git
                 # tracks +x itself, so a chmod here is an unstaged mode change
