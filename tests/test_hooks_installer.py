@@ -697,15 +697,22 @@ class TestRepoLocalScriptRendering:
 
     @pytest.mark.parametrize("kwargs", [
         {"item_key": "demo-$GEMINI_PROJECT_DIR"},  # item-directory path component
-        {"item_key": "demo-${CLAUDE_PROJECT_DIR}"},
+        {"item_key": "demo-$CLAUDE_PROJECT_DIR"},
         {"shebang": "#!/opt/$GEMINI_PROJECT_DIR/sh"},  # interpreter token
         {"item_key": "demo-$GEMINI_CWD"},  # the other names expandCommand rewrites
-        {"item_key": "demo-${GEMINI_PLANS_DIR}"},
+        {"item_key": "demo-$GEMINI_PLANS_DIR"},
         {"item_key": "demo-$GEMINI_SESSION_ID"},
     ])
     def test_gemini_rejects_every_generated_literal_it_would_substitute(self, tmp_path, kwargs):
         with pytest.raises(ValueError, match="Gemini CLI substitutes"):
             self._install_gemini(tmp_path, **kwargs)
+
+    @pytest.mark.parametrize("item_key", [
+        "demo-${CLAUDE_PROJECT_DIR}", "demo-${GEMINI_CWD}", "demo-${GEMINI_PLANS_DIR}",
+    ])
+    def test_gemini_allows_braced_names_it_does_not_rewrite(self, tmp_path, item_key):
+        """expandCommand matches only `$NAME`; `${NAME}` reaches bash untouched."""
+        self._install_gemini(tmp_path, item_key=item_key)
 
     def test_gemini_allows_the_bare_variable_name_as_an_argument(self, tmp_path):
         """Only `$NAME` is rewritten; the bare name is an ordinary string."""
