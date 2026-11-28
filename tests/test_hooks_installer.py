@@ -699,6 +699,9 @@ class TestRepoLocalScriptRendering:
         {"item_key": "demo-$GEMINI_PROJECT_DIR"},  # item-directory path component
         {"item_key": "demo-${CLAUDE_PROJECT_DIR}"},
         {"shebang": "#!/opt/$GEMINI_PROJECT_DIR/sh"},  # interpreter token
+        {"item_key": "demo-$GEMINI_CWD"},  # the other names expandCommand rewrites
+        {"item_key": "demo-${GEMINI_PLANS_DIR}"},
+        {"item_key": "demo-$GEMINI_SESSION_ID"},
     ])
     def test_gemini_rejects_every_generated_literal_it_would_substitute(self, tmp_path, kwargs):
         with pytest.raises(ValueError, match="Gemini CLI substitutes"):

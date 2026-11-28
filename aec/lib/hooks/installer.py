@@ -74,9 +74,12 @@ CLAUDE_PROJECT_DIR_PREFIX = '"$CLAUDE_PROJECT_DIR"/'
 # env var). The variable must therefore stay UNQUOTED: inside double quotes the
 # inserted backslashes would be literal and a path with a space would break.
 GEMINI_PROJECT_DIR_PREFIX = "$GEMINI_PROJECT_DIR/"
-# Only the `$NAME` / `${NAME}` forms are rewritten; the bare name is an
-# ordinary string (e.g. `--check-env GEMINI_PROJECT_DIR`).
-GEMINI_SUBSTITUTED_RE = re.compile(r"\$\{?(?:GEMINI|CLAUDE)_PROJECT_DIR")
+# Gemini's expandCommand rewrites five names (hookRunner.ts): the project dir and
+# its CLAUDE alias, GEMINI_CWD, GEMINI_PLANS_DIR and GEMINI_SESSION_ID. Only the
+# `$NAME` / `${NAME}` forms are rewritten; the bare name is an ordinary string
+# (e.g. `--check-env GEMINI_PROJECT_DIR`).
+GEMINI_SUBSTITUTED_RE = re.compile(
+    r"\$\{?(?:GEMINI_PROJECT_DIR|CLAUDE_PROJECT_DIR|GEMINI_CWD|GEMINI_PLANS_DIR|GEMINI_SESSION_ID)")
 
 
 def _relative_or_self(path: Path, root: Path) -> Path:
