@@ -61,7 +61,8 @@ hooks dormant). It blocks:
 
 - `gh pr merge --admin`, always: never bypass required checks; fix the red check or ask Matt;
 - `gh pr merge --auto`, always (see rule 2), and any `gh pr merge` without `--match-head-commit <sha>` naming the full 40-hex SHA;
-- `gh pr merge` unless every check is SUCCESS/SKIPPED/NEUTRAL (it asks
+- `gh pr merge` unless every check is SUCCESS/SKIPPED/NEUTRAL, or, in a repo with `.github/required-checks.json`, unless
+  the rules in "What blocks a merge" below pass (it asks
   `gh pr view --json statusCheckRollup`; an empty rollup or a `gh` failure blocks). Only the newest workflow run of each check counts, identified by the run id in its details URL (GitHub already lists only a run's latest attempt): an older red run superseded by a newer green run of the same workflow (a new PR's first Review Gate run) does not block, while a newer red or still-running run does. Same-named jobs inside one run are distinct jobs and each must be green, so a later green job never hides a failed sibling. A run's start is its earliest job's start, so a dependency-delayed job never makes an older run look newer. Runs started in the same second cannot be ordered, so all of them count (fail closed). An entry with no parsable run id in its details URL has an unknown run, so it supersedes nothing and must be green on its own (fail closed). A workflow is identified by its run's file path and event from the Actions API (one `gh api repos/<repo>/actions/runs?head_sha=<head>` call), never by its editable `name:`: a PR that adds a workflow also named `CI` cannot supersede the real CI's failed job. A run the API does not list (or an API failure) supersedes nothing (fail closed). Because `detailsUrl` is writable, an entry counts as a run's job only when that run's jobs API lists its job id with the same name and conclusion; a custom check pointing at a legitimate run supersedes nothing. Two PRs can share a head sha (one branch into staging and main), and the rollup lists both PRs' runs: a run counts for the merged PR only when its `pull_requests` list is exactly that PR, its head branch and repo are the PR's, and a review-gate run-name (`Review Gate - PR #<n>`, 3.2.6+) names no other PR. Any other run (another PR's, one listing several PRs, a fork's with none) supersedes nothing and must be green on its own (1.4.7). The lookups use the PR's own host and repo from its URL, so a URL selector from another checkout or an Enterprise `-R HOST/OWNER/REPO` resolves runs, and read JSON rather than `@tsv`, so a job name with a backslash or tab still matches (1.4.7). All of a merge check's `gh` calls share one 15 s budget under the hook's 20 s timeout; a run whose jobs lookup would overrun it supersedes nothing (fail closed). Boolean flags are last-wins like gh's own parser: `--disable-auto --disable-auto=false` merges and gets the full checks. PR #325 once
   merged on a CANCELLED check. The wanted shape is `gh pr merge <n> --squash --match-head-commit <sha>` (`--merge`
   for promotions into main);
@@ -91,13 +92,15 @@ hooks dormant). It blocks:
   quotes or unquoted the line joins and it blocks. When the command holds quoting a flat scan can't follow (a
   heredoc, `$(...)`, a backtick, `$'...'`, a quote in a comment) every backslash-newline is joined, so such a
   split still blocks. Wrappers (1.5.2): after `env`, `sudo`, `nice`, `timeout`, `xargs`, `nohup`, `time` and
-  `exec` every later word is tried as the command, so no option argument hides `gh` or `git` (`env -S gh …`,
-  `env -u gh gh …`, `sudo -u x gh …`, `timeout 60 git rebase …`); a quoted or attached split string
-  (`env -S 'gh pr merge' …`, `-Sgh`, `--split-string=gh pr merge`, env's `\_` separator, and its `\c`, which ends the string (1.5.3; both cuts checked, 1.5.4)) is split and each of its
-  words tried too; a word that splits to `(` or `)` is never read as a subshell bound. Their options are not parsed, so the command's
+  `exec` every later word is tried as the command, so no option argument hides `gh` or `git`
+  (`env -u gh gh …`, `sudo -u x gh …`, `timeout 60 git rebase …`); `env` given any split-string
+  option (`-S`, `-Sgh`, `-vS`, `-uXS`, `--split-string`, `--sp=…`) is blocked outright, since env expands and ends that
+  string its own way, and so is an `env` option word or value the shell still expands (`$X`, a backtick, `{-S,x}`,
+  `$'\x2dS'`); a NAME=value word ends env's options, so `env GH_TOKEN=$T gh …` is fine; a `# sync-base:` comment
+  does not waive this check (1.6.1); a guard crash blocks with exit 2 instead of exiting 1, which let the command run (1.6.1); command words match by basename (`/usr/bin/env`, `/opt/homebrew/bin/gh`); a word that splits to `(` or `)` is never read as a subshell bound. Their options are not parsed, so the command's
   directory and root are known only behind no prefix, a plain `command`, or `env NAME=value…`; `env -C DIR` /
   `--chdir[=]DIR` keeps the root, so only an absolute plain body path is read. Behind anything else (any wrapper,
-  any option such as `env -i`/`-u`/`-S`, `command -p`, `sudo -D`/`-R`) no body file is read and the call blocks,
+  any option such as `env -i`/`-u`, `command -p`, `sudo -D`/`-R`) no body file is read and the call blocks,
   and a base sync or merge there runs in an unresolved directory, even with an absolute `git -C` (blocked;
   workaround: run `gh`/`git` without the wrapper, or pass `-R owner/repo` to `gh pr merge`). A `gh pr create`
   there blocks unless it passes `-R owner/repo`, since the fork check can't run in an unknown directory. `env -i`/`env -u` before a body file are new false
@@ -124,7 +127,14 @@ bodies are dropped, and input `shlex` can't parse is split on every operator cha
 (every later word is tried as the command, in an unknown directory). Any shell form that rewrites the command after
 the hook sees it is out of scope: `bash -c`, `eval`, variables and command substitution. A parity test
 (`tests/test_pr_guard_parity.py`, in CI) replays every test and fixture input against the previous release and
-fails when a block is lost, unless the input is listed in its `ALLOWED_FLIPS` with a reason.
+fails when a block is lost, unless the input is listed in its `ALLOWED_FLIPS` with a reason. It reads the
+claude-skills repo's `origin/main` history, so a vendored copy (any checkout where this skill's parent dir is not
+the claude-skills repo root) skips it instead of failing (1.6.2). The guard checks the directory the command runs
+in: `tool_input.dir_path` (Gemini `run_shell_command`) or `tool_input.workdir` (Codex `exec_command`, 1.6.3; every earlier release read only the session `cwd` for Codex, so a `gh pr merge` with no `-R` was checked against the session's repo, not the one it ran in) first, then the session `cwd` (1.6.2). It checks every
+routed tool that carries a command (`tool_input` or `input`, `command` or `cmd`), whatever the harness names it
+(`Bash`, `mcp__…__Bash`, `run_shell_command`), reading the payload the way review-gate's merge guard does; a command
+that is present but not a string, or a string `tool_input` on a shell tool, blocks, and a string `tool_input` on any
+other tool (`apply_patch`) is not a shell call (1.6.2). 1.6.1 and earlier checked only `tool_name == "Bash"`.
 
 **Override:** when you genuinely need a specific commit from the base (a fix your tests
 depend on), append `# sync-base: <reason>` to the command. Say which commit and why.
@@ -135,6 +145,59 @@ The reason stays in the transcript.
 `# codex-review-ok <reason>` works too; quoted text does not count).
 
 Self-check: `python3 pr-merge-flow/tests/test_pr_guard.py`.
+
+## What blocks a merge
+
+Every check in a PR's rollup falls in one of three kinds (1.6.0):
+
+1. **Required:** the union of the base branch's ruleset `required_status_checks`, its classic
+   branch protection, and the repo's policy file. Each one must be on the current head, satisfy its pin,
+   and be `SUCCESS`. `SKIPPED` and `NEUTRAL` do not count for a required check (a job skipped by an `if:`
+   never ran). Missing: `required check <name> is MISSING on <sha>`; anything else:
+   `required check <name> is <state> on <sha>`. Same-named jobs in the newest run are each judged.
+2. **Advisory:** an entry on the guard's pinned `ADVISORY_CHECKS` list that no source requires. It may be
+   red or pending and never blocks. Today the list holds one entry: job `doctor` from
+   `.github/workflows/review-gate-doctor.yml` on `pull_request` (the review-gate doctor's drift report).
+   It matches only through provenance and check-run identity, never by name: the run must be this PR's,
+   the jobs API must list the job with the same name and conclusion, and exactly one check run on the head
+   may claim that job, with its id equal to the job id and published by GitHub Actions. On an allowed merge
+   the line `advisory check doctor is FAILURE (pinned advisory: …); not blocking` reaches the model as the
+   hook's `additionalContext` (plain exit-0 stdout from a PreToolUse hook is not shown to the model).
+3. **Everything else** must be green (SUCCESS, SKIPPED or NEUTRAL), as before. A red `Test & Build`,
+   CodeQL or Security Scan blocks even where no rule requires it.
+
+**The policy file** is `.github/required-checks.json`, read from the repo's **default branch** (the
+contents call carries no ref, so neither a PR's head nor a base branch its author created can pick it):
+
+```json
+{"schema": 1, "required": [
+  {"name": "Test & Build", "workflow": ".github/workflows/ci.yml", "event": "pull_request"},
+  {"name": "Deploy preview", "app_id": 12345}
+]}
+```
+
+Each entry names a check and exactly one pin: `workflow` + `event` (an Actions job, matched through
+provenance) or `app_id` (a check run published by that app). Status contexts cannot be pinned in schema 1,
+so a status context never satisfies an entry. The file can only add requirements; it has no way to exempt a
+check. Any other key, schema or shape is a malformed file. Without the file (404) the repo has not opted in:
+every check must be green and the guard makes no rules or protection lookups.
+
+**Who can change the advisory list:** only a claude-skills PR to `pr-guard.py`, labelled `review:high`. A
+deny-list test keeps tests, builds, security scans and Review Gate off it.
+
+**The fallback:** when any lookup does not resolve (the policy file unreadable or malformed, the rules,
+classic protection or check-runs call failing), the advisory exemption is off and every check must be green;
+requirements from the sources that did resolve still apply. The block message adds
+`required-check lookup unavailable: <source> <status or error>; using the all-green rule` per failed source.
+No override comment or environment variable changes any of this.
+
+**Identity in every mode:** with or without the file, a rollup entry joins the newest-run collapse only when
+its check run is the Actions job it claims (above). A check run that copies a real job's details URL makes
+that job claimed twice, so neither counts as that run's job and neither can move the run's start time.
+
+**1.6.0 release note:** without `.github/required-checks.json`, the only change is the authenticated
+collapse, which can only block more (a forged, backdated check run can no longer discard a newer failed
+run). With it, only the pinned `doctor` may be red, and listed checks must be present, pinned and SUCCESS.
 
 <!-- feedback-loop:begin -->
 ## Feedback
