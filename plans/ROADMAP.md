@@ -17,6 +17,33 @@ unit of impact lives — not a contract.
 
 ## Review follow-ups awaiting prioritization
 
+- [MCP launcher catalog items](2026-11-27-mcp-launcher-catalog-item.md): the `mcp` item type installs no files, registers with
+  Claude Code only, and no public command upgrades it on a version bump (`aec upgrade` copies it like a file tree, `plan_apply` skips the
+  newer-version check for `mcp`), so a stdio launcher bridge cannot be managed by `aec upgrade` and a hand-run install script sat stale.
+  One apply engine behind install/apply/upgrade, extended with files, scope-aware clients, a key gate and a full-spec fingerprint upgrade;
+  a drift check that reaches the model at session start, then the owning repo retires its script. Scheduling pending.
+
+- [Remove `installed` from `.aec.json`](2026-11-27-aecjson-installed-section-removal.md): `aec repo setup/sync` copies the GLOBAL
+  manifest into each repo's `.aec.json` `installed` section, so it shows another scope's versions, while the v2 manifest already
+  records installs per repo. Repoint `aec discover` at the manifest's repo scope, delete the copy writer, drop the schema key,
+  migrate existing files, point readers at the manifest (aec export or aec list). Scheduling pending.
+- [Skill install scan](2026-11-24-skill-install-scan.md): `aec` places third-party skills into full-access agents with no
+  content check, and `aec skills install/update` bypass the one write chokepoint. Run NVIDIA/SkillSpector in `--no-llm`
+  static mode as a blocking, fail-closed check inside `place_installed_item`, route the bypass through it, record the verdict
+  in the manifest, and certify the catalog in CI. Scheduling pending: Tracker placement row `PLACE: Skill install scan`.
+- [Review-gate doctor: `Review Gate` required without a default-branch workflow](2026-11-24-doctor-required-check-workflow-exists.md): a ruleset can
+  require `Review Gate` when the default branch has no workflow that publishes it (it loads from the default branch), which
+  deadlocks ordinary merges. The doctor should fail on that one contract where it can read rulesets; general producer
+  inference is a separate plan. The installer seed flag and templates were dropped because an org's
+  repo-create script already seeds before rulesets. Scheduling pending.
+- [prune-merged-worktrees ignored-.env guard fails open](2026-11-16-prune-env-guard-fail-open.md): `grep -q`
+  under pipefail read 2+ unique `.env` files as none, and any `.env` symlink was exempt; both deleted unique
+  data. P1 data loss; fix shipped with the plan.
+
+- [prune-merged-worktrees guard hardening](2026-11-22-prune-env-guard-hardening.md): follow-up to the fail-open
+  fix. `assume-unchanged`/`skip-worktree` targets, C-quoted names (`ls-files -z`) and macOS `readlink -f`
+  portability still read as "nothing to keep". P1 data loss; planned.
+
 - [Trusted replay for merge-with-main promote slices](2026-11-21-mvs-trusted-slice-replay.md): a
   downstream slice-aware mid guard fails closed for a slice head that merges main into its staging cut. The
   guard should run the base ref's script and generator over fetched head objects; consuming the

@@ -4,7 +4,6 @@ description: "Use when the user wants a task or project planned and executed end
 tags: ["skill"]
 ---
 
-
 # Orchata
 
 Plan and execute a task end-to-end: intake → plan → orchestrate → escalate → retro.
@@ -76,8 +75,15 @@ proceed. Do not ask again until the retro.
 
 All orchata state lives in `~/.claude/orchata/` — **never** in the skill's own directory
 (skills are installed by copying; state in the skill dir would fragment and leak between
-installs). First run: create the directory and write `capabilities.json` (`{}`) and
-`friction.json` (`{"opt_out": false, "last_review": null, "source_repo": null, "entries": []}`).
+installs). First run: create the directory and write `capabilities.json` (`{}`).
+
+Friction is no longer kept here: it goes to the `feedback-loop` skill as subject
+`skill:orchata` (see the Feedback section). If a pre-2.0 register `~/.claude/orchata/friction.json`
+still exists and `feedback-loop` is installed, run its `scripts/feedback.py import-orchata` once:
+it moves every entry, the review date, the source repo and an opt-out into the shared store and
+renames the old file to `friction.json.migrated`.
+If that register exists and `feedback-loop` is not installed, nothing reads its entries: say
+so once in the retro, with the install command (`aec install skill feedback-loop`).
 
 `capabilities.json` is keyed by absolute project path (installed agents/skills differ per
 project). Refresh this project's entry when missing, older than 7 days, `aec` errors, or a
@@ -152,6 +158,12 @@ the actual work as possible:
   stalling at once is a usage limit — see Supervisor resilience),
   confirm it stopped (cancel it) before re-running it at lower parallelism — never
   hand-triage its raw finder output, and never run the replacement alongside it.
+- A long local verification run (a full gate, a browser suite: anything over ~5 minutes) is
+  fan-out too. Start it only after the independent review has returned and its fixes are
+  applied, because a fix invalidates the run. Check host load first (`uptime`, or the host's
+  equivalent) and wait while it is above the core count. Run one at a time, never beside
+  another suite or a worker wave. A run that dies on timeouts under load is a host problem:
+  re-run it only once the load has dropped.
 
 ### Shared-worktree mode
 
@@ -195,7 +207,9 @@ Worktree hygiene (either mode):
   a background task killed mid-stream loses its output, and some hosts lack coreutils
   `timeout`. Fetch bounded slices (`-n N`, `--since`) instead.
 - Log friction as it happens — a wrong default in these instructions, an unnecessary pause, a
-  missed case that caused rework → append to the friction register (see Phase 5).
+  missed case that caused rework → log it as `skill:orchata` with the phase at fault (see the
+  Feedback section). Friction in the project's own process (flaky CI, a test that missed a
+  regression, a plan wrong about the code) is logged as `process:<project>` instead.
 
 ### Checkpoint discipline
 
@@ -240,6 +254,10 @@ Fan-out runs assume workers die. Rules:
   states any contract its files must honor with files it doesn't own (e.g. "CI assumes a
   `packageManager` field in package.json") — or a smoke stage runs the consumer's setup
   after integration. Ownership splits hide exactly these seams.
+- **Pinned output needs the whole suite:** when a change alters output that other tests may
+  pin exactly (rendered markup, serialised bytes, snapshots, size budgets), the worker runs
+  the owning package's whole suite once before returning, not a hand-picked set of related
+  tests. Pins live in files that share no name with the change.
 
 ### Integration & shipping
 
@@ -308,26 +326,26 @@ legitimate mid-run stop. One blocker never stops the run while other work can pr
      concurrency 1 before diagnosing a timeout as a code defect.
    - Before waiting on bot reviews for a PR, check `.github/workflows` is non-empty or the
      repo has known review bots — if neither, skip the wait.
+   - A gate that chains its steps (`a && b && c`) stops at the first failure and hides the
+     rest. When it stops on a failure the diff did not cause, read the chain, run each
+     remaining step on its own, and report every step's exit code. "The gate failed on a
+     pre-existing test" says nothing about the steps after it.
 2. **Report:** what shipped, what's on the punch list (inline summary + file path), what was
    assumed at intake.
-3. **Friction register** — read `references/friction-register.md`. Log this run's friction,
-   then evaluate the register: any high-severity entry, ≥3 medium, or ≥5 total since the
-   last review → present the compact register verdict from the reference (verdict line, top
-   entries with proposed fixes, proposed diffs) — every line attributed to the **orchata
-   skill** and to previous runs, never presented as bare "Friction register" output that
-   reads like it came from the current conversation — and offer the improvement conversation
-   (Y / N / Never) exactly as the reference describes. On Y: review entries together, draft
-   concrete diffs to this skill's files, and offer a PR back to the skill's source repo —
-   PR only with explicit confirmation. Entries addressed by a shipped fix are pruned on
-   review — the register is a queue, not an archive.
+3. **Feedback** — make sure this run's friction is logged (see the Feedback section), then
+   check `skill:orchata` and `process:<project>` with feedback-loop's `status`. When either is
+   due, make the feedback-loop review offer for it exactly as that skill describes. When folding
+   an orchata lesson, land it in the section that owns the concern: tracker lessons in External
+   tracker, git-integration lessons in Integration & shipping, verify lessons in the retro
+   checklist above. A lesson that also governs a sibling skill (for example tracker queries
+   used by `resume`) lands in both.
 
 ## State files
 
 All state is user-global at `~/.claude/orchata/`, created lazily on first run (see Phase 1
-for defaults). `capabilities.json` per Phase 1; `friction.json` per
-`references/friction-register.md` — one register across all projects, so opt-out is a
-user-level decision. If `friction.json` has `"opt_out": true`, skip all friction logging and
-never offer the improvement conversation.
+for defaults): `capabilities.json` per Phase 1. Friction lives in the user-level
+`feedback-loop` store, so turning it off (globally or for `skill:orchata`) is that skill's
+setting, not orchata's.
 
 **Per-run state is different:** it lives in the project at `<state-dir>/` (run-state.json,
 fleet-results.json) and is committed to the working branch — see `references/run-state.md`.
@@ -357,3 +375,19 @@ matches only when no such filter exists — before concluding a row doesn't exis
 Tracker API down but a human's answer lives in a row: read it through any other surface
 the host offers (e.g. the row's page text in a browser) before punch-listing it as
 unreadable. Writes fall back per the user's instructions, or to run-state.
+
+<!-- feedback-loop:begin -->
+## Feedback
+
+If the `feedback-loop` skill is installed, use it to improve this skill over time:
+
+- When this skill's own instructions cause rework, a wrong default, a missed case or a needless
+  pause, log it as it happens: subject `skill:orchata`, with the phase or section at fault and the
+  concrete fix to these instructions.
+- When the project's own process causes friction during this skill's work (for example a flaky
+  or slow CI job, a test that missed a regression, a plan that was wrong about the code), log it
+  as subject `process:<project>` with `--area <ci|test|plan|review|deploy|dev>`.
+- At the end of a run, check `skill:orchata`; if a review is due, make the feedback-loop offer.
+
+If `feedback-loop` is not installed, ignore this section.
+<!-- feedback-loop:end -->

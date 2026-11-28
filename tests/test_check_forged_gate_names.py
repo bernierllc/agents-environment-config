@@ -115,12 +115,14 @@ def _cli(stdin):
     "not json",
     "",  # empty stdin: no pipefail, or a silent `gh api`
     " \n",
-    '{"check_runs": []}',  # a head always has check runs by merge time; an empty page is suspicious
+    '{"total_count": 0, "check_runs": []}',  # a head always has check runs by merge time; an empty page is suspicious
     '{"total_count": 0}',  # page without check_runs
-    '{"check_runs": [{}]}',  # nonempty but malformed entries must not count as an evaluated listing
-    '{"check_runs": [{"name": null}]}',
-    '{"check_runs": ["x"]}',
-    '{"check_runs": "abc"}',
+    # Nonempty but malformed entries must not count as an evaluated listing. Each carries a total_count that matches
+    # what it holds (a string counts its characters), so it fails on the entry check and not on a missing count.
+    '{"total_count": 1, "check_runs": [{}]}',
+    '{"total_count": 1, "check_runs": [{"name": null}]}',
+    '{"total_count": 1, "check_runs": ["x"]}',
+    '{"total_count": 3, "check_runs": "abc"}',
     "[]",  # JSON of the wrong shape
     "5",
 ])

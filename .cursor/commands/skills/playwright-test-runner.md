@@ -489,3 +489,25 @@ When the failure count is high (>10 failures), consider parallel diagnosis:
 - Environment teardown failed — orphaned containers or processes remain. Report and guide manual cleanup.
 - Tests are running against a production or shared staging database — stop immediately
 - Test scope was never confirmed with the user — do not run tests without explicit scope agreement
+
+## Installed verification directory
+
+Runtime prerequisite: Python 3 must be available as `python3` on PATH. Preflight checks it explicitly before reading the directory configuration.
+
+Read `.aec/directories.json` before using verification docs. Its `verification` value is the shared directory selected during AEC setup; absent configuration defaults to `docs/verification`. All verification-document paths below that default in this skill use the selected root. Preflight reads the saved location automatically.
+
+<!-- feedback-loop:begin -->
+## Feedback
+
+If the `feedback-loop` skill is installed, use it to improve this skill over time:
+
+- When this skill's own instructions cause rework, a wrong default, a missed case or a needless
+  pause, log it as it happens: subject `skill:playwright-test-runner`, with the phase or section at fault and the
+  concrete fix to these instructions.
+- When the project's own process causes friction during this skill's work (for example a flaky
+  or slow CI job, a test that missed a regression, a plan that was wrong about the code), log it
+  as subject `process:<project>` with `--area <ci|test|plan|review|deploy|dev>`.
+- At the end of a run, check `skill:playwright-test-runner`; if a review is due, make the feedback-loop offer.
+
+If `feedback-loop` is not installed, ignore this section.
+<!-- feedback-loop:end -->

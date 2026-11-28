@@ -547,7 +547,9 @@ def discover_catalog_cmd(
 def doctor_cmd():
     """Check installation health."""
     from .commands.doctor import run_doctor
-    run_doctor()
+    all_passed, _ = run_doctor()
+    if not all_passed:
+        raise typer.Exit(1)
 
 @app.command("configure-agent")
 def configure_agent_cmd(

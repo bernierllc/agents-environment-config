@@ -1,6 +1,10 @@
 # Trusted replay for merge-with-main promote slices (main-via-staging guard)
 
-> Status: plan, not started.
+> Status: R1 (step 3 provenance) and R2 (trusted replay, `scripts/replay-promote-slice.py`) implemented; R3 activates
+> the replay in `check-main-source.sh` and `main-via-staging.yml` (recorded evidence below). A slice is admitted only
+> while main's rules require up-to-date branches, which aec's main does not yet: every slice still fails closed there
+> until that infra change lands. Remaining: the live strict-policy change, the main-default activation run, the
+> staging-default bootstrap run (downstream), and R4 (tagged release, `pr-merge-flow` docs note, downstream re-vendor).
 > Owner of the follow-up: aec (the canonical `main-via-staging.yml` and `scripts/check-main-source.sh`).
 
 ## Problem
@@ -142,6 +146,86 @@ read-only and gates nothing.
   (the downstream repo's throwaway-PR checklist) before any promotion relies on the guard.
 - The detector (`check-forged-gate-names.py`) returns rc 0 on the head.
 
+### R2 acceptance: hardening carried from the R1 review (round 4)
+
+R2 also closes the P2 items raised on R1's last review round, each with a real-graph test in
+`tests/test_check_slice_provenance.py`:
+
+- (a) Env-injected git config (`GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` pairs) is removed before the
+  first git call, `git init` included, so it cannot redirect the fetch.
+- (b) Every inherited `GIT_*` variable except the `GIT_REMOTE` input is unset (`GIT_EXEC_PATH`, `GIT_SSH_COMMAND`,
+  `GIT_PROXY_COMMAND`, `GIT_ASKPASS`, `GIT_TEMPLATE_DIR`, ...). HTTP proxy and TLS variables stay: they are the
+  runner's environment, which the `pull_request_target` job controls, never the PR head.
+- (c) A private repo's fetch authenticates with `SLICE_FETCH_TOKEN`, sent as an `http.extraHeader` through env config
+  (never argv), only to an `https` remote, and never printed.
+- (d) A fresh adversarial review of the replay and the activation diff stays an activation gate for R3: R2 passing its
+  review does not stand in for it.
+- (e) R3 proves the fetch cost on a large slice and that the workflow passes the event's immutable SHAs
+  (`github.event.pull_request.head.sha` / `base.sha`) and `SLICE_REPLAY_TOOL_VERSION`; R2 only consumes them.
+
+R2 decisions, stated: the generator config lives in BASE_SHA's tree at `.github/slice-replay.json`
+(`{"generator": {"entry": ..., "outputs": [...]}}`); with none, the replay is git's plain merge. A conflict outside the
+declared outputs fails closed; a conflicted output starts from BASE_SHA's copy, a clean one from git's merge, and the
+generator rewrites both. The tool version in the tuple is the release tag plus a digest of the replay and provenance
+scripts. Network isolation of the generator is not OS-enforced in R2: it runs with no token, no proxy variables and
+no installed packages, but Node can still open a socket; R3 decides whether the hosted job adds a network sandbox.
+
+### R3: activation
+
+`check-main-source.sh` admits a `promote/<date>-<n>` slice (same repo only) when, in this order: the trusted replay
+exits 0 (provenance, then the replayed merge equals the head's tree), and `GET repos/{repo}/rules/branches/main` carries
+a `required_status_checks` rule with `strict_required_status_checks_policy: true` and a non-empty
+`required_status_checks` list (GitHub: strict mode does not take effect unless at least one status check is
+required). Every page of the reply is read and it is decoded strictly from its raw bytes. Everything else rejects, and
+an unreadable or malformed rules reply rejects. The replay runs first, so a tampered slice is rejected from git objects alone, before
+any API call. `main-via-staging.yml` passes `HEAD_SHA` / `BASE_SHA` (the event's immutable SHAs),
+`SLICE_FETCH_TOKEN` (the job's `GITHUB_TOKEN`, `contents: read`) and `SLICE_REPLAY_TOOL_VERSION`.
+
+R3 decisions, stated:
+
+- **The guard reads the strict policy itself.** The plan made the up-to-date ruleset a rollout dependency; aec's live
+  main ruleset (`main promotion gate`) has `strict_required_status_checks_policy: false`. Rather than rely on someone
+  remembering to enable it before the first slice, the guard refuses every slice until the rules GitHub applies to
+  main carry it. Only rulesets are read (`rules/branches`); a repo that relies on classic branch protection for the
+  strict policy must move it into a ruleset. The ruleset change itself goes through the platform-ops queue.
+- **Tool version = `github.sha`, not a release tag.** Releases here are tags cut after a push to main, so the run
+  cannot know its own tag; the workflow's commit names the guard revision exactly, and the tuple's script digest
+  stays beside it (`tool=<sha>@<sha256[:12] of replay + provenance>`).
+- **The workflow pins every guard script by sha256.** The scripts load from the default branch with the workflow; a
+  missing one says so and a stale one (an older replay beside a newer workflow) fails the job, staging included,
+  until the complete copy set is re-vendored. `tests/test_check_main_source.py` fails when a script changes without
+  its pin. `COPY_SET` already lists all eight files, so it is unchanged.
+- **No network sandbox for the generator.** Ubuntu runners restrict unprivileged user namespaces, so `unshare -n` is
+  not available without privilege. The generator is the BASE's own code with no token, no installed packages and a
+  clean env; add an OS sandbox before accepting a generator that parses untrusted data with a third-party parser.
+
+R3 evidence (2026-11-22, the R3 scripts run against `https://github.com/bernierllc/agents-environment-config`, the
+live remote and the live rules API; main-via-staging runs from main, so the hosted job runs only after promotion):
+
+- Slice `promote/2026-11-22-1` = `cf966531`: parents staging `c9720e14` (first) and main `2eccc573` (second), tree
+  `300c10e4` from `git merge-tree --write-tree` (clean; aec has no `.github/slice-replay.json`, so the plain merge).
+  Replay: `slice replay holds: head=cf966531… staging=c9720e14… base=2eccc573… tool=c9720e14…@d1b304ec9a50
+  generator=none tree=300c10e4…`, rc 0, 2 s.
+- Fetch cost (open question (e)): the scratch repo starts empty, so it fetches the three tips' whole history:
+  5444 objects, one 4.71 MiB pack, about 2 s from a laptop. Fetching the whole head is kept; a compare-range fetch
+  would need the merge base's objects anyway and saves little at this size. Re-measure on the first downstream repo
+  whose history is two orders of magnitude larger.
+- Tampered slice `promote/2026-11-22-2` = `37856634` (the same merge plus one file): provenance holds, the replay
+  rejects (`tree dcc62017… is not the replayed merge 300c10e4…; it differs at: D r3-tamper.txt`), rc 1.
+- Stale base (BASE_SHA = main's previous tip `74efe761`): provenance rejects, nothing is replayed, rc 1.
+- The full guard on the good slice against the live rules: replay holds, then `rejected: main's ruleset does not
+  require branches to be up to date`, rc 1. That is the expected fail-closed state until the ruleset change lands.
+
+Remaining live steps, each recorded here when it runs:
+
+1. Platform ops: enable `strict_required_status_checks_policy` on aec's `main promotion gate` ruleset (it already
+   requires 4 status checks; checked against the CI-cost note first); verify a slice whose main parent is stale
+   cannot merge.
+2. Main-default activation: after the staging → main promotion carrying R3, open a PR from a fresh slice into main
+   and record the hosted `PRs into main must come from staging` run (admitted with the strict policy on; rejected
+   before it).
+3. Staging-default bootstrap: the downstream repo's first promotion after it re-vendors the R4 tag.
+
 ## Consequence for a downstream repo that re-vendors the guard without `promote/*`
 
 A downstream repo that replaces its local guard variant with the canonical guard drops `promote/*` support, because
@@ -160,7 +244,7 @@ the canonical guard has none until this plan lands. State the consequence rather
 
 ## Open questions
 
-- Fetch cost for large slices: fetch the compare range only, or the whole head?
+- Fetch cost for large slices: answered in R3 for aec (whole head, 4.71 MiB); re-measure downstream.
 - Does the replay live in the canonical guard (aec) with downstream repos adopting it, or stay a
   downstream script until a second repo needs it? Recommendation: canonical, because every
   staging-default repo with slices needs the same rule.
