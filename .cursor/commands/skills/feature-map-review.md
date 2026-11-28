@@ -4,7 +4,6 @@ description: "Map every feature of a software project, find its gaps, re-cut pla
 tags: ["skill"]
 ---
 
-
 # Feature map and plan review
 
 This skill runs a project-wide review in stages. Each stage leaves files in the repo that the next stage

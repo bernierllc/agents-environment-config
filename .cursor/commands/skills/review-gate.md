@@ -4,18 +4,21 @@ description: "Enforce adversarial review before merge via a trusted pull_request
 tags: ["skill"]
 ---
 
-
 # Review gate
 
 Programmatic enforcement for the adversarial review loop. Ships:
 
 1. **Workflow template** — `.github/workflows/review-gate.yml` (`pull_request_target`)
 2. **Trusted checker** — `scripts/check-review-gate.py` (loaded only from the repo **default branch**)
-   plus the **forged-check detector** `scripts/check-forged-gate-names.py` (vendored byte-identical from
-   `bernierllc/agents-environment-config@41f629945c291c4e0a84f20f14a077852e7dd9dc`, never edited here; the
-   installer never overwrites a repo's differing copy) and
+   plus the **forged-check detector** `scripts/check-forged-gate-names.py` (vendored from
+   `bernierllc/agents-environment-config@41f629945c291c4e0a84f20f14a077852e7dd9dc`; 3.7.0 adds the `Notion Sync`
+   pin here first and aec re-syncs from this copy; a consuming repo never edits it, and the installer never
+   overwrites a differing copy it does not know as older). Its protected names, each pinned to one workflow
+   path and event: `Review Gate` (review-gate.yml), `PRs into main must come from staging` (main-via-staging.yml)
+   and `Notion Sync` (notion-sync.yml), all `pull_request_target`. Names match exactly: `Notion Sync (daily)` is
+   not protected. It also ships
    its wrapper `scripts/check-forged-review-gate.py`, also loaded from the default branch
-3. **Doctor** — warns when the workflow, checker, ruleset conversation-resolution flag, or required `Review Gate` status check is missing
+3. **Doctor** — warns when the workflow, checker, ruleset conversation-resolution flag, or required `Review Gate` status check is missing; with `--expect-default-branch-gate` it fails when a ruleset requires `Review Gate` that the default branch cannot publish
 4. **PreToolUse merge guard** — blocks `gh pr merge` when the local gate check fails
 
 ## Install (per repo)
@@ -28,7 +31,7 @@ aec run-script skill:review-gate install-workflow.py
 # or manually:
 #   cp …/templates/review-gate.yml .github/workflows/review-gate.yml
 #   cp …/scripts/check-review-gate.py …/scripts/check-forged-gate-names.py \
-#      …/scripts/check-forged-review-gate.py …/scripts/lint-review-body.py scripts/
+#      …/scripts/check-forged-review-gate.py …/scripts/check-security-scan.py …/scripts/lint-review-body.py scripts/
 ```
 
 A PR body the gate accepts (rule 2): under `## Review`, only the attestation line and plain sentences; links, lists, code, tables and the generated footer go under a later `## ` heading. Replace the sample SHA with the full 40-hex head OID that was reviewed.
@@ -41,7 +44,7 @@ A PR body the gate accepts (rule 2): under `## Review`, only the attestation lin
 ## Review
 
 Fallback review: claude-sonnet on 0123456789abcdef0123456789abcdef01234567 — verdict: findings fixed
-Two P2s were fixed in this head and one is tracked in Notion.
+Two P2s were fixed in this head and one is a separate planned unit with an existing plan file, tracked in Notion.
 
 ## Notes
 
@@ -52,7 +55,36 @@ Two P2s were fixed in this head and one is tracked in Notion.
 
 Lint the body before you push, `gh pr create` or `gh pr edit`: `python3 scripts/lint-review-body.py body.md` (or pipe it on stdin, e.g. `gh pr view 12 --json body -q .body | python3 scripts/lint-review-body.py`). It runs the gate's own body rules from `scripts/check-review-gate.py` beside it and exits 1 with each failing line number and the offending character or construct; it does not check the attestation's SHA. `install-workflow.py` vendors it next to the checker.
 
+To close a P2 thread, post the reply with `reply-close.py` instead of typing the closing line by hand. It builds the line rule 3 accepts, checks it with the checker's own `closes()`, and posts it as the gh user running it:
+
+```bash
+aec run-script skill:review-gate reply-close.py -- -R my-org/my-app --pr 12 --thread PRRT_abc123 \
+  --head <full 40-hex head OID you reviewed> --fixed --note "The parser now rejects empty input." --dry-run
+```
+
+Name exactly one disposition: `--fixed` (writes `fixed in <head>`), `--tracked <Notion URL>` (only when the fix is a separate planned unit that already has a plan file; otherwise fix the P2 now) or `--not-a-finding <reason>`. Nothing is inferred, and fixed is never the default. `--head` must equal the PR's live head, or the helper refuses, so a reply cannot vouch for a head nobody reviewed. It refuses a thread from another PR and a `--thread` that is not a `PRRT_` id, and warns when your repo permission is below write, since the gate then counts the reply only if GitHub lists you as an owner, member or collaborator. `--dry-run` runs every check and prints the reply without posting it. Exit 0 = posted (or the dry run passed), 1 = a check failed and nothing was posted, 2 = usage or API error. It never resolves the thread and never changes labels, the body or checks: it prints the command that re-fires the gate, for you to run.
+
+3.4.0 adds `scripts/reply-close.py` (above) and `tests/test_reply_close.py`. Authors run it through `aec run-script`; it is not vendored into repos, and the workflow, checker and detector bytes are unchanged, so there is nothing to re-vendor.
+
+Upgrading to 3.8.2: the merge guard (`merge-guard.py`) takes the directory a command runs in from `tool_input.workdir` (Codex `exec_command`) as well as `tool_input.dir_path` (Gemini), ahead of the session `cwd`. Before, a `gh pr merge` with no `-R` that Codex ran in another checkout was gate-checked against the session's repo. Re-vendor the skill (`aec install skill review-gate`) to pick it up; no workflow change.
+
+Upgrading to 3.8.0: `doctor-review-gate.py --expect-default-branch-gate` fails (exit 1) when an enforcing `main`/`staging` ruleset requires `Review Gate` and the default branch has no `review-gate.yml`/`.yaml`, the state that deadlocks every ordinary merge in a new repo. Without the option the same finding is a WARN. Details under Doctor below. The doctor now pages through rulesets (it read only the first 30) and names the HTTP status when a read fails. `install-workflow.py` now says to merge the workflow to the default branch first and only then require the check. The workflow, checker and detector bytes are unchanged, so there is nothing to re-vendor for the gate itself; re-vendor `.claude/skills/review-gate` to get the new doctor.
+
+Upgrading to 3.7.0 (claude-skills #152): the vendored detector `scripts/check-forged-gate-names.py` also protects `Notion Sync`, pinned to (`.github/workflows/notion-sync.yml`, `pull_request_target`). An Actions job named exactly `Notion Sync` from any other workflow or event is forged (exit 1) when a repo runs the detector unscoped, as `main-via-staging.yml` does; names match exactly, so `Notion Sync (daily)` is not flagged. The Review Gate step's wrapper still checks only `Review Gate`. `install-workflow.py --force` replaces the 3.2.20-3.6.0 detector (aec 41f6299) instead of keeping it as a newer copy. Re-run `install-workflow.py --force` and commit `scripts/` and the whole `.claude/skills/review-gate` directory.
+
+Upgrading to 3.6.0 (security lane freshness, SKILLS-SEC-CLAIM-2): a passing scan no longer stands forever. The lane adds check (g): the scan's notice must name this PR, head and base ref, the default branch's current scan workflow and policy revision, no expired exception, and a completion within 36 h, or the gate fails with the reason and "re-run Security Scan". New `templates/review-gate-security-refresh.yml` (Security Refresh) re-dispatches the scan for every open PR when the default branch changes the scan workflow, `.github/security-scan/**` or the policy files, and daily, and re-runs a PR's gate when its scan completes; the lane accepts a `workflow_dispatch` scan only from the default branch and titled for the PR and head. `install-workflow.py` installs it when `.github/workflows/review-gate-security-scan.yml` exists, and the doctor warns when it is missing or differs. The merge-guard hook now also runs `check-security-scan.py` after the forged step, inside the same 20 s budget, so a slow GitHub blocks the merge with a retry message. The scanner side needs nevar-security-review 1.2.0 (the new notice fields and dispatch inputs): a 1.1.0 scan fails (g). Install both together: re-run `install-workflow.py --force`, copy the 1.2.0 scan workflow and `.github/security-scan/`, and commit the whole `.claude/skills/review-gate` directory. UNPROVEN until the canary runs: whether `workflow_run` fires for dispatched scans and whether the `GITHUB_TOKEN` re-run is allowed; both fail closed (the gate stays red, never green). Check (h): a gate run must execute the default branch's current `review-gate.yml`, since a re-run keeps the old file, so after a `review-gate.yml` change every open PR needs a push, a close and reopen, or a label toggle. A dispatched re-scan counts only when its `head_sha` is on the default branch. Security Refresh skips drafts. Timestamps ending in `Z` now parse on Python 3.10.
+
+Upgrading to 3.5.0: the fallback attestation now accepts `cursor` (`Fallback review: cursor on <head> — verdict: ...`), so a Cursor review, the third step of the chain Codex → agy → Cursor → Claude Sonnet, can be attested. Before 3.5.0 a Cursor pass could only be skipped or mislabelled. The reviewer list is now one tuple in the checker, `FALLBACK_REVIEWERS`, and the attestation regex, the gate's failure message and `lint-review-body.py`'s message are all built from it. A test checks that every step of adversarial-review's reviewer order names a token the gate accepts, and that both skills' allowed-reviewer lists equal the tuple. The change only widens the allow-list, so existing attestations still pass. The new linter needs the new checker beside it (it exits 2 with the fix otherwise). Re-run `install-workflow.py --force` and commit the whole `.claude/skills/review-gate` directory, so the repo's gate accepts `cursor`.
+
 Upgrading to 3.2.2: re-run `install-workflow.py --force` to pick up the fail-closed detector (aec dba592db). A repo whose `scripts/check-forged-gate-names.py` differs from the skill's copy keeps its own and gets a `KEPT` message. The merge guard no longer reads `pr-merge-flow` as `pr … merge`. Also in 3.2.2: a known older vendored detector (3.2.0/3.2.1 or any pre-dba592db aec copy) is now replaced on `--force`; only a newer or custom copy is KEPT, and an identical file is left untouched; each `Review Gate` check run carries `external_id: review-gate-pr-<n>` and is reused only by that PR, so two PRs on one head sha cannot complete each other's runs (pre-3.2.2 unmarked runs are left alone; push a new commit if one stays red); the PR that replaces a legacy review-gate.yml passes the forged-check step when its own legacy `Review Gate` job ran that file from the default branch under pull_request_target (needs `PR_NUMBER`); a `##` line with `Review` on the next line no longer counts as the `## Review` section. 3.2.3: `## Review-notes`, `## Reviewers` and other headings that only start with `Review` no longer count as the `## Review` section. A heading, list item, fence or thematic break after a `>` quote now ends the quote, so a `## Review` section that follows a quote is seen. 3.2.4: the vendored `check-forged-gate-names.py` is re-vendored from aec b4a8c9c (comment-only: the plan path now names the aec repo); `install-workflow.py --force` replaces the 3.2.2/3.2.3 copy. 3.2.5: only what CommonMark lets interrupt a paragraph ends a `>` quote's lazy continuation: an ATX heading, a thematic break, a real fence, a non-empty bullet item, or a non-empty ordered item starting at 1. `2. note`, an empty `-` and a ``` line whose info string holds a backtick stay inside the quote, so a quoted example can no longer satisfy the gate. A fenced block now ends the paragraph before it, so an attestation after a closed fence that follows a quote is seen. Re-run `install-workflow.py --force` to pick up `scripts/check-review-gate.py`. 3.2.6: every gate evaluation publishes a NEW `Review Gate` check run and completes all of this PR's runs on the head with the same result, because the Checks API cannot choose a suite and a reused run left in an older suite read "expected" (BLOCKED, all green) on claude-skills #90, nevar-logs #12 and nevar-audit #17. The exact trigger is unresolved: nevar-content #12 had runner-only suites and was not blocked. The gate fails closed, naming the fix, when a non-cancelled review-gate suite on the head holds none of this PR's runs (a 3.2.6 POST that missed its own suite); a cancelled duplicate suite is exempt. This template change is UNPROVEN until a live run, because `pull_request_target` runs the default branch's copy. Until it is proven, keep the interim author rule: set the `review:high` label and the `## Review` section in the `gh pr create` call itself (its opened + labeled pair cancels one run, which merged CLEAN on nevar-audit #18), and change neither the body nor the labels after the first gate run (an edit-triggered suite blocked nevar-logs #12 at d1c6e07); if a PR still reads BLOCKED with every check green, rerun the gate in place, then push a new head. The bootstrap exception for a legacy `Review Gate` job now requires the run's own head fields (sha, branch, repo) to equal this PR's head (never the run's `pull_requests` association), no other PR on that head, and the workflow file at the PR's base to equal the default branch's copy. A `>` line with nothing after the marker now ends a quote's lazy continuation, so `fixed in <sha>` after it closes a P2 thread. `doctor-review-gate.py` warns when the installed workflow differs from the template. Re-run `install-workflow.py --force`. 3.2.7 (P1): do not vendor 3.2.6. Its `run-name` was an unquoted YAML scalar, so ` #` started a comment and every run was titled `Review Gate - PR` with no number; the suite check matched no runs and passed without checking anything (fail-open). The value is now quoted, and the gate fails closed unless its own run is among the runs it matched. UNPROVEN until a live run (nevar-auth #23 after its re-vendor). Evidence for the unresolved BLOCKED trigger (claude-skills #104, 3.2.6 gate): `gh pr create --label` fired opened + labeled, concurrency cancelled the older run, and every `Review Gate` POST, including those from the surviving run and its reruns, landed in the cancelled run's (older) suite. The required-status rule reads the workflow's latest suite, which held only review-gate-runner, so the merge API refused with "Review Gate is expected" while every check read green; rerunning in place did not help; recover with a new head (one synchronize event, one suite). Re-run `install-workflow.py --force`.
+
+3.3.3 changes only the tests: `test_merge_guard_hyphen.py` measures the guard's work on huge commands by counted calls and its real denial, not wall clock, which flaked at 1.004 s on a shared runner. The guard, workflow and detector bytes are unchanged, so there is nothing to re-vendor.
+
+Upgrading to 3.3.2: a security-lane claim error now says how to fix a failure report. Any `## Review` or `Security scan:` line that names a scanner with a pass word is still a claim, negated or not ("semgrep did not pass" counts), because every negation parser tried in review let an affirmative line through ("not only passed", "did not fail to pass", "no pass-blocking issues"; SKILLS-SEC-CLAIM-2). The error now adds: if that line reports a failure, reword it without a pass word, e.g. "semgrep reported 2 findings". Re-vendor the whole `.claude/skills/review-gate` directory; the workflow and detector bytes are unchanged.
+
+Upgrading to 3.3.1: the security lane's activation marker is now `.github/workflows/review-gate-security-scan.yml`, a name only the nevar-security-review scanner template installs, instead of `security-scan.yml`. A repo can already have its own unrelated `security-scan.yml`, and under 3.3.0 that file turned the lane on, so every PR failed with no trusted `Security Scan` run, or failed closed when the lane script was not vendored. With 3.3.1 such a file is ignored: the lane stays off, and a missing `check-security-scan.py` skips it as before. The marker is still read from the default branch only, so a PR that adds it does not turn the lane on, and with the marker present a missing script still fails closed. The scanner template that installs the marker has not shipped, so no repo has a marker to rename. Also in 3.3.1: `doctor-review-gate.py` run from the vendored copy itself, as the `--doctor-job` workflow does, now FAILS (exit 1) when that copy's hooks.json version disagrees with its SKILL.md and names the fix (`aec install skill review-gate`, then commit `.claude/skills/review-gate`); 3.2.19-3.3.0 returned before any check there, so the doctor job passed a mismatched copy. Only the newer-release comparison is still skipped in that case, since a copy cannot see a release newer than itself. Re-run `install-workflow.py --force` and commit the whole `.claude/skills/review-gate` directory; the detector bytes are unchanged.
+
+Upgrading to 3.3.0: adds the opt-in security lane, `scripts/check-security-scan.py`, which the gate loads from the default branch beside the other scripts. With the lane off, a default branch without that script (a manual install that skipped it) skips the lane and the gate result is unchanged; with the lane on, a missing script fails the gate. `install-workflow.py --force` now also replaces a kept `check-forged-gate-names.py` that lacks `job_run_id`, which the lane calls. It does nothing until the default branch has `.github/workflows/security-scan.yml` (the nevar-security-review OSS scanner template); a PR that adds or deletes that file does not change its own result. Once enabled, the gate fails unless that workflow's own `pull_request_target` job published a passing `Security Scan` check run on the current head with the default branch's scanner config (rule 6 below). A PR body that claims a scanner pass fails without that check run. `Security review:` body lines are model-review coverage and are printed as ADVISORY/UNVERIFIED. Re-run `install-workflow.py --force` and commit the whole `.claude/skills/review-gate` directory; the detector bytes are unchanged.
 
 Upgrading to 3.2.22: `install-workflow.py` now checks every directory from the repo root down to each destination for a symlink before ANY write or early return, including when the final path is absent. 3.2.21 returned "nothing vendored" for an absent `.claude/skills/review-gate` without looking, so a symlinked `.claude` or `.claude/skills` passed as clean and the run exited 0; it now exits 1 and names the symlinked component, with or without `--force`, and writes nothing. Where the platform supports it the walk opens each directory from its parent's file descriptor with `O_NOFOLLOW`; native Windows, which has neither, walks by `lstat` per path component and refuses identically, treating a symlink or any entry carrying `FILE_ATTRIBUTE_REPARSE_POINT` (an NTFS junction included) as a link. The writes themselves still address paths on every platform, so a link planted between the check and a write is not closed. The detector bytes are unchanged. Re-run `install-workflow.py --force` and commit the whole `.claude/skills/review-gate` directory.
 
@@ -120,6 +152,8 @@ aec run-script skill:review-gate doctor-review-gate.py
 # or: python3 review-gate/scripts/doctor-review-gate.py
 ```
 
+The doctor also checks that a required `Review Gate` can report (3.8.0). For each enforcing ruleset covering `main` or `staging` that requires `Review Gate` (unpinned, or pinned to GitHub Actions, integration 15368), it probes exactly `.github/workflows/review-gate.yml` and `.github/workflows/review-gate.yaml` on the **default branch**, one Contents API request per path; it lists nothing and reads no file content. GitHub loads that workflow from the default branch only, so a copy on `staging` does not count, and no other file does either: `review-gate-doctor.yml` mentions the name but publishes no such check. With `--expect-default-branch-gate`, which says this repo uses the skill's `review-gate.yml`, a readable default branch where both paths return a JSON 404 is a FAIL (exit 1) naming the branch and the fix: merge review-gate.yml to the default branch before requiring the check. Without the option it is a WARN, since a PR-supplied `pull_request` workflow or an app could publish the name. A gate file that exists (a 200 file object at the requested path) never FAILs and reports OK; the doctor does not analyze its trigger or branch filters. A `Review Gate` pinned to another app is skipped. Every other required context WARNs as not verified. Any other probe result WARNs, exit 0 even with the option, and names the status or shape: a directory, symlink or submodule at the path, another path, an unparsable body, an unreadable branch, a missing ref, a denied, rate-limited or failed request. Ruleset reads need Metadata read and workflow reads Contents read, so in the `--doctor-job` CI job, whose token cannot read rulesets, the check is skipped with a WARN that says so. Pass the option where `gh` can read both: an operator shell, or a repo-create post-create step.
+
 ## What the workflow does
 
 Triggers **only** `pull_request_target` so the workflow YAML always comes from the repository **default branch** (trusted), whatever the PR base (sandbox PR #27, base `repro-api`, ran main's file in run 43982863036). Same-repo `pull_request_review` / `pull_request_review_comment` would execute PR-modified workflow code with write tokens — not used. After Codex completes, a new P2 thread, or a P2 closing reply with no push, **re-fire the gate** via a label toggle or PR body edit (agents: see `adversarial-review`); into main, where the label must end present: `gh pr edit <n> -R <owner>/<repo> --remove-label review:high && gh pr edit <n> -R <owner>/<repo> --add-label review:high`; do not reintroduce review-event workflow triggers. A green Checks API run can otherwise go stale relative to later threads — the PreToolUse merge guard still re-evaluates live before `gh pr merge`.
@@ -139,10 +173,53 @@ Loads `scripts/check-review-gate.py` from the repository **default branch** only
    unreadable listing or lookup (exit 2, fails closed). The legitimate `Review Gate` is this workflow's
    own job, which sits on the PR head in its run's own suite (3.2.8). The wrapper checks only
    `Review Gate`: the vendored map also names `PRs into main must come from staging`, which several
-   repos still publish from a plain `pull_request` job; that name stays with each repo's main-via-staging guard.
+   repos still publish from a plain `pull_request` job, and `Notion Sync` (3.7.0); those names stay with
+   each repo's main-via-staging guard or whatever else runs the detector unscoped.
    Residual: a PR job with `checks: write` POSTing `Review Gate` straight to the Checks API looks the same as
    a legacy (3.2.0-3.2.7) run and is not detected (plan options A/B in aec). A job publishing after the scan is
    caught only if whoever merges runs the detector by hand (pr-merge-flow rule 2); the merge-guard hook does not run it.
+
+6. **Security lane** (3.3.0, marker renamed in 3.3.1, opt-in, PRs into every branch): active only when the DEFAULT branch has
+   `.github/workflows/review-gate-security-scan.yml`. Activation, the scanner config digest and `check-security-scan.py` are all read
+   from the default branch (f), so a PR cannot switch the lane off or change its own config. The scanner jobs are found
+   through the Actions API (every job, all attempts, of every `review-gate-security-scan.yml` `pull_request_target` run on the head,
+   plus, since 3.6.0, every `workflow_dispatch` run of that file from the default branch titled `Security Scan - PR #<n> @ <head>`),
+   never through check-run names, which anyone with `checks: write` can edit. When active the gate passes only when the
+   newest such job, by its `started_at` then id, and its own check run are (a) from a run triggered by THIS PR (the forged
+   wrapper's provenance) or a default-branch dispatch run titled for this PR and head whose `head_sha` is the default branch's tip or behind it (compare `identical` or `behind`), the job listed under that run with a `check_run_url` naming its own id, and the check run's id,
+   `details_url` job id and name `Security Scan` all matching it, so a Checks API POST never counts and a renamed check
+   fails instead of dropping out of freshness; (b) published by `github-actions`; (c) on the current head; (d) completed,
+   with status and conclusion read from the job (an older success never masks a newer failure); (e) carrying exactly one
+   `security-scan` annotation `outcome=<passed|not-applicable|findings|scanner-error> config-tree=<sha> pr=<n> head=<sha>
+   base-ref=<ref> workflow=<blob> policy=<sha256> exceptions-until=<date|none>`, where config-tree is the default branch's
+   current tree of `.github/security-scan/` and the outcome agrees with the conclusion; (g, 3.6.0) still fresh: it names
+   this PR, head and base ref, the default branch's current scan-workflow blob and policy revision (`--policy-revision`
+   over the gate workflow and its scripts), no relied-on exception has expired, and the job completed within 36 h; (h, 3.6.0) inside Actions, this gate run executes the
+   default branch's current `review-gate.yml`: the file's blob at `GITHUB_WORKFLOW_SHA` must equal it, because a re-run keeps
+   its original workflow file. A mismatch fails and says to push, close and reopen, or toggle a label; a run without a valid
+   `GITHUB_WORKFLOW_SHA` exits 2. The merge guard strips both variables, so it skips (h). Any other
+   Actions job's check run named `Security Scan` is forged. An unreadable listing, an annotation count that disagrees with `annotations_count`, or a head that moved
+   exits 2 and fails closed. A line in `## Review`, or any `Security review:` / `Security scan:` line, that names a scanner
+   (gitleaks, osv-scanner, zizmor, semgrep) with a pass word, negated or not (reword a failure report without one, 3.3.2), fails the gate unless the verified scan passed; with the lane
+   off such a claim always fails, provided `scripts/check-security-scan.py` is on the default branch (without it the
+   lane is skipped and the claim is not checked; tracked as SKILLS-SEC-CLAIM-1). `Security review:` lines are printed as ADVISORY/UNVERIFIED and never count.
+   Enforceable now: a-h and the claim rule, in this gate and the merge guard. Waits on trust: the scanner workflow (nevar-security-review
+   template) and its canary proving the annotation, the dispatch re-scan and the gate re-run; until then no repo enables the lane.
+   Security Refresh (`templates/review-gate-security-refresh.yml`, installed beside the scan, 3.6.0) re-dispatches the scan for
+   every open PR on a default-branch change to the scan workflow, `.github/security-scan/**` or the policy files, and daily,
+   then re-runs each PR's gate (drafts are skipped); when a scan completes it re-runs that PR's gate, so no label toggle is needed. The merge-guard
+   hook runs the lane (`check-security-scan.py`) after the forged step, so a scan gone stale since CI blocks the merge; when the
+   local lane differs from the default branch's `scripts/check-security-scan.py`, its block says to re-vendor review-gate.
+   Residuals: GitHub can delay or drop the daily run (36 h leaves 12 h of margin); after a default-branch change to
+   `review-gate.yml`, every open PR's gate fails (h) until a person pushes, closes and reopens it, or toggles a label, because
+   Security Refresh can only re-run it (events from `GITHUB_TOKEN` start no workflow, and a dispatched gate's check lands on
+   the default-branch commit, not the PR head); a PR retargeted to another base waits for the daily refresh; a merge through the web UI skips the hook; a pass claim worded outside `## Review` and the labelled lines is not detected
+   (and is still not evidence); a default branch that moves after the scan changes the digest, which fails with
+   "re-run Security Scan"; every job of `review-gate-security-scan.yml` counts as a scanner job, so the template keeps a single job;
+   finding runs by `head_sha` assumes the `pull_request_target` run records the PR head, as provenance already does, and
+   the scanner template's canary must prove it. Body lines split on CRLF, CR and LF alike, as the gate's other checks do.
+   With the lane on, any other Actions job whose check run is named `Security Scan` reads as forged and fails the gate, so a
+   repo that enables the lane must rename such a job of its own first.
 
 Fallback attestations use exactly this format (plain text on its own line inside `## Review`):
 
@@ -150,7 +227,7 @@ Fallback attestations use exactly this format (plain text on its own line inside
 Fallback review: <reviewer> on <sha> — verdict: <verdict>
 ```
 
-- `reviewer`: `codex` (a local Codex review, such as T3 Codex high, that the GitHub Codex bot did not post), `agy`, `antigravity`, `superpowers`, or `claude-sonnet`.
+- `reviewer`: `codex` (a local Codex review, such as T3 Codex high, that the GitHub Codex bot did not post), `agy`, `antigravity`, `cursor`, `superpowers`, or `claude-sonnet`.
 - `sha`: the current `headRefOid` in full (40 hex characters). A prefix does not count: a short one can be ground onto an unreviewed commit.
 - `verdict`: `clean` or `findings fixed`; attest only after the review completed and any findings were fixed.
 

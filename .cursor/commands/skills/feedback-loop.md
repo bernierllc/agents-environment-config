@@ -4,7 +4,6 @@ description: "Use when a skill, agent, hook, plugin, AEC or the development proc
 tags: ["skill"]
 ---
 
-
 # Feedback loop
 
 Every skill, agent, hook, plugin, AEC itself and the way a project's work runs can teach us
