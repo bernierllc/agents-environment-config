@@ -57,14 +57,17 @@ def _is_repo_local(script_path: Path, repo_root: Path) -> bool:
 # exports $CLAUDE_PROJECT_DIR, so a repo-local script can be addressed
 # portably — the same settings.json then works in a clone, a worktree, or on a
 # teammate's machine. Git hooks run with cwd at the repo root, so a plain
-# relative path is enough there. gemini/cursor expose no verified project-dir
-# variable, so they keep the absolute path.
+# relative path is enough there. Gemini CLI documents $GEMINI_PROJECT_DIR (its
+# own hook example is `$GEMINI_PROJECT_DIR/.gemini/hooks/x.sh`). Cursor documents
+# that project hooks run from the project root, with paths relative to it
+# (`.cursor/hooks/x.sh`, not `./hooks/x.sh`). So neither needs an absolute path.
 # ponytail: per-agent rendering, not a plugin registry — add one when a fourth
 # agent needs a third rendering.
 # The rendering claude gets. Also the marker drift detection keys on: a command
 # STARTING with this is a resolved repo-local script path, not just any hook that
 # happens to mention the variable.
 CLAUDE_PROJECT_DIR_PREFIX = '"$CLAUDE_PROJECT_DIR"/'
+GEMINI_PROJECT_DIR_PREFIX = '"$GEMINI_PROJECT_DIR"/'
 
 
 # Shell that prints the main checkout's root: the parent of the git common dir,
@@ -89,9 +92,10 @@ def _render_script_path(script_path: Path, repo_root: Path, agent: str) -> str:
         return shlex.quote(str(script_path))
     if agent == "claude":
         return CLAUDE_PROJECT_DIR_PREFIX + shlex.quote(str(rel))
-    if agent == "git":
-        return shlex.quote(str(rel))
-    return shlex.quote(str(script_path))
+    if agent == "gemini":
+        return GEMINI_PROJECT_DIR_PREFIX + shlex.quote(str(rel))
+    # git and cursor both run from the repo / project root.
+    return shlex.quote(str(rel))
 
 
 # Skill/agent/rule sources are frequently untracked (a repo may gitignore
@@ -110,9 +114,10 @@ def _render_script_path(script_path: Path, repo_root: Path, agent: str) -> str:
 GUARD_PREFIX = "if [ -f "
 
 # Agents whose command string is evaluated by a POSIX shell. claude runs hooks
-# through `sh -c`; git hooks ARE shell scripts. cursor/gemini render absolute
-# paths (already checkout-specific) and their execution model isn't documented
-# as shell, so they stay unguarded.
+# through `sh -c`; git hooks ARE shell scripts. cursor/gemini docs don't say
+# how the command string is spawned (Gemini's own example expands a variable,
+# so it is shell-evaluated in practice, but that is not a documented
+# guarantee), so they stay unguarded.
 _SHELL_GUARD_AGENTS = frozenset({"claude", "git"})
 
 

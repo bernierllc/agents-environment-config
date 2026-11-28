@@ -515,8 +515,8 @@ class TestRepoLocalScriptRendering:
     Claude Code exports $CLAUDE_PROJECT_DIR, so settings.json can address the
     script portably — the same file then works in a clone, a worktree, or on a
     teammate's checkout. Git hooks run with cwd at the repo root, so a plain
-    relative path is enough there. gemini/cursor have no verified project-dir
-    variable, so they keep absolute.
+    relative path is enough there. Gemini documents $GEMINI_PROJECT_DIR and
+    Cursor runs project hooks from the project root, so both render portably too.
     """
 
     @staticmethod
@@ -625,14 +625,70 @@ class TestRepoLocalScriptRendering:
         result = subprocess.run(["sh", "-c", cmd], env=env, capture_output=True, text=True)
         assert result.returncode == 2 and "blocked" in result.stderr, result
 
-    def test_gemini_keeps_absolute_path(self, tmp_path):
+    @staticmethod
+    def _commands(node):
+        """Every `command` string in a gemini/cursor hooks config."""
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == "command" and isinstance(v, str):
+                    yield v
+                else:
+                    yield from TestRepoLocalScriptRendering._commands(v)
+        elif isinstance(node, list):
+            for v in node:
+                yield from TestRepoLocalScriptRendering._commands(v)
+
+    def test_gemini_uses_project_dir_variable(self, tmp_path):
+        import subprocess
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
         script = self._install(repo_root, ["gemini"])
         settings = json.loads((repo_root / ".gemini/settings.json").read_text())
-        cmd = json.dumps(settings)
-        assert str(script) in cmd
-        assert "CLAUDE_PROJECT_DIR" not in cmd
+        (cmd,) = list(self._commands(settings))
+        assert cmd == ('/bin/sh "$GEMINI_PROJECT_DIR"/.claude/skills/demo/scripts/check.sh --flag')
+        assert str(repo_root) not in cmd and "CLAUDE_PROJECT_DIR" not in cmd
+        # Gemini sets the variable and may start the hook anywhere: it must run.
+        env = {"GEMINI_PROJECT_DIR": str(repo_root), "PATH": "/usr/bin:/bin"}
+        out = subprocess.run(["sh", "-c", cmd], env=env, cwd=tmp_path,
+                             capture_output=True, text=True)
+        assert out.returncode == 0 and out.stdout == "ok\n", out
+        assert script.exists()
+
+    def test_cursor_uses_project_root_relative_path(self, tmp_path):
+        import subprocess
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install(repo_root, ["cursor"])
+        cfg = json.loads((repo_root / ".cursor/hooks.json").read_text())
+        (cmd,) = list(self._commands(cfg))
+        assert cmd == "/bin/sh .claude/skills/demo/scripts/check.sh --flag"
+        assert str(repo_root) not in cmd
+        # Cursor runs project hooks from the project root.
+        out = subprocess.run(["sh", "-c", cmd], cwd=repo_root,
+                             capture_output=True, text=True)
+        assert out.returncode == 0 and out.stdout == "ok\n", out
+
+    def test_gemini_cursor_render_is_independent_of_checkout_location(self, tmp_path):
+        """The same install from a main checkout and a worktree must write the
+        same bytes, or every worktree install churns the committed config."""
+        rendered = []
+        for name in ("main-checkout", "deep/nested/worktree"):
+            repo_root = tmp_path / name
+            repo_root.mkdir(parents=True)
+            self._install(repo_root, ["gemini", "cursor"])
+            rendered.append((
+                (repo_root / ".gemini/settings.json").read_text(),
+                (repo_root / ".cursor/hooks.json").read_text(),
+            ))
+        assert rendered[0] == rendered[1]
+
+    def test_verify_repo_ok_after_gemini_cursor_install(self, tmp_path):
+        from aec.lib.hooks.drift import Drift, verify_repo
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        self._install(repo_root, ["gemini", "cursor"])
+        statuses = verify_repo(repo_root)
+        assert statuses and all(s.status is Drift.OK for s in statuses), statuses
 
     def test_global_item_dir_stays_absolute(self, tmp_path):
         """An item installed from outside the repo has no relative rendering."""

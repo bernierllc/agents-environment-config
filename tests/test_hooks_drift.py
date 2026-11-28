@@ -536,10 +536,12 @@ class TestUnguardedScriptCommands:
         event = next(iter(settings["hooks"]))
         entry = settings["hooks"][event][0]
         current = json.dumps(entry)
-        assert f"/bin/sh {script}" in current
+        assert entry["hooks"][0]["command"] == (
+            '/bin/sh "$GEMINI_PROJECT_DIR"/.claude/skills/demo/scripts/check.sh')
 
-        # What the pre-interpreter install wrote: the bare path.
-        entry = json.loads(current.replace(f"/bin/sh {script}", str(script)))
+        # What the pre-interpreter install wrote: the bare absolute path.
+        entry = json.loads(current)
+        entry["hooks"][0]["command"] = str(script)
         settings["hooks"][event] = [entry]
         settings_path.write_text(json.dumps(settings))
         st = load_state(repo_root, item_type="skill", item_key="demo")
