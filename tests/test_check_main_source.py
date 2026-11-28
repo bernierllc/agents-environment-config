@@ -199,7 +199,7 @@ def test_a_failed_check_run_listing_fails_the_job_closed(tmp_path):
 
 def test_an_empty_listing_fails_the_job_closed(tmp_path):
     # The guard's own job is always in the listing, so an empty one means the listing is wrong.
-    code, out = _run_workflow_step(tmp_path, "staging", list_json='{"check_runs":[]}')
+    code, out = _run_workflow_step(tmp_path, "staging", list_json='{"total_count":0,"check_runs":[]}')
     assert code == 1
 
 
