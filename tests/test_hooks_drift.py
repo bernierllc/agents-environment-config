@@ -536,8 +536,9 @@ class TestUnguardedScriptCommands:
         event = next(iter(settings["hooks"]))
         entry = settings["hooks"][event][0]
         current = json.dumps(entry)
-        assert entry["hooks"][0]["command"] == (
-            '/bin/sh "$GEMINI_PROJECT_DIR"/.claude/skills/demo/scripts/check.sh')
+        target = "$GEMINI_PROJECT_DIR/.claude/skills/demo/scripts/check.sh"
+        assert entry["hooks"][0]["command"].startswith(
+            f"if [ -f {target} ]; then /bin/sh {target}; else ")
 
         # What the pre-interpreter install wrote: the bare absolute path.
         entry = json.loads(current)

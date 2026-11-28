@@ -638,21 +638,85 @@ class TestRepoLocalScriptRendering:
             for v in node:
                 yield from TestRepoLocalScriptRendering._commands(v)
 
-    def test_gemini_uses_project_dir_variable(self, tmp_path):
+    @staticmethod
+    def _run_as_gemini(cmd, project_dir, cwd):
+        """Run `cmd` the way Gemini CLI does: `bash -c`, with `$GEMINI_PROJECT_DIR`
+        first replaced textually by the shell-quoted project path (hookRunner.ts
+        `expandCommand`; shell-quote backslash-escapes spaces and other specials).
+        """
+        import re
         import subprocess
+        quoted = re.sub(r"([^A-Za-z0-9_\-.,:/@])", r"\\\1", str(project_dir))
+        expanded = cmd.replace("$GEMINI_PROJECT_DIR", quoted)
+        env = {"GEMINI_PROJECT_DIR": str(project_dir), "PATH": "/usr/bin:/bin"}
+        return subprocess.run(["bash", "-c", expanded], env=env, cwd=cwd,
+                              capture_output=True, text=True)
+
+    def test_gemini_uses_unquoted_project_dir_variable(self, tmp_path):
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
         script = self._install(repo_root, ["gemini"])
         settings = json.loads((repo_root / ".gemini/settings.json").read_text())
         (cmd,) = list(self._commands(settings))
-        assert cmd == ('/bin/sh "$GEMINI_PROJECT_DIR"/.claude/skills/demo/scripts/check.sh --flag')
+        target = "$GEMINI_PROJECT_DIR/.claude/skills/demo/scripts/check.sh"
+        # Unquoted: Gemini inserts a shell-quoted path itself. Guarded like claude.
+        assert cmd.startswith(f"if [ -f {target} ]; then /bin/sh {target} --flag; else ")
+        assert '"$r"/.claude/skills/demo/scripts/check.sh' in cmd
         assert str(repo_root) not in cmd and "CLAUDE_PROJECT_DIR" not in cmd
-        # Gemini sets the variable and may start the hook anywhere: it must run.
-        env = {"GEMINI_PROJECT_DIR": str(repo_root), "PATH": "/usr/bin:/bin"}
-        out = subprocess.run(["sh", "-c", cmd], env=env, cwd=tmp_path,
-                             capture_output=True, text=True)
+        # Gemini may start the hook anywhere: it must run.
+        out = self._run_as_gemini(cmd, repo_root, cwd=tmp_path)
         assert out.returncode == 0 and out.stdout == "ok\n", out
         assert script.exists()
+
+    def test_gemini_hook_runs_when_project_path_has_a_space(self, tmp_path):
+        """A double-quoted variable would receive `/a\\ b` and fail; unquoted works."""
+        repo_root = tmp_path / "my project" / "repo"
+        repo_root.mkdir(parents=True)
+        self._install(repo_root, ["gemini"])
+        (cmd,) = list(self._commands(json.loads(
+            (repo_root / ".gemini/settings.json").read_text())))
+        out = self._run_as_gemini(cmd, repo_root, cwd=tmp_path)
+        assert out.returncode == 0 and out.stdout == "ok\n", out
+
+    def test_gemini_blocking_hook_runs_from_worktree_with_gitignored_skill(self, tmp_path):
+        """Same worktree case as claude: the installed skill is gitignored, so the
+        worktree has none and the hook must fall back to the main checkout."""
+        import subprocess
+        from aec.lib.hooks.installer import install_item_hooks
+        repo_root = tmp_path / "my repo"
+        git = lambda *a, cwd=repo_root: subprocess.run(  # noqa: E731
+            ["git", *a], cwd=cwd, check=True, capture_output=True)
+        repo_root.mkdir()
+        git("init", "-q", "-b", "main")
+        git("config", "user.email", "t@t")
+        git("config", "user.name", "t")
+        (repo_root / ".gitignore").write_text(".claude/skills/*\n")
+        item_dir = repo_root / ".claude" / "skills" / "demo"
+        (item_dir / "scripts").mkdir(parents=True)
+        (item_dir / "scripts" / "guard.sh").write_text("#!/bin/sh\necho blocked >&2\nexit 2\n")
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "g", "event": "pre_tool_use", "blocking": True,
+                "command": "aec run-script skill:demo guard.sh", "description": "d",
+            }],
+        }))
+        install_item_hooks(
+            item_dir=item_dir, item_type="skill", item_key="demo",
+            item_version="1.0.0", repo_root=repo_root, agents=["gemini"],
+        )
+        git("add", "-A")
+        git("commit", "-q", "-m", "init")
+        worktree = tmp_path / "wt dir"
+        git("worktree", "add", "-q", str(worktree), "-b", "topic")
+        assert not (worktree / ".claude/skills/demo").exists()
+        (cmd,) = list(self._commands(json.loads(
+            (worktree / ".gemini/settings.json").read_text())))
+        result = self._run_as_gemini(cmd, worktree, cwd=worktree)
+        assert result.returncode == 2 and "blocked" in result.stderr, result
+        # Neither checkout has the skill: loud notice, not a failed hook.
+        (repo_root / ".claude/skills/demo/scripts/guard.sh").unlink()
+        gone = self._run_as_gemini(cmd, worktree, cwd=worktree)
+        assert gone.returncode == 0 and "OFF" in gone.stderr, gone
 
     def test_cursor_uses_project_root_relative_path(self, tmp_path):
         import subprocess

@@ -67,7 +67,12 @@ def _is_repo_local(script_path: Path, repo_root: Path) -> bool:
 # STARTING with this is a resolved repo-local script path, not just any hook that
 # happens to mention the variable.
 CLAUDE_PROJECT_DIR_PREFIX = '"$CLAUDE_PROJECT_DIR"/'
-GEMINI_PROJECT_DIR_PREFIX = '"$GEMINI_PROJECT_DIR"/'
+# Gemini CLI runs the command with `bash -c` and rewrites `$GEMINI_PROJECT_DIR`
+# (and the `$CLAUDE_PROJECT_DIR` alias) textually, in place, with a shell-quoted
+# copy of the project path (hookRunner.ts `expandCommand`; also exported as an
+# env var). The variable must therefore stay UNQUOTED: inside double quotes the
+# inserted backslashes would be literal and a path with a space would break.
+GEMINI_PROJECT_DIR_PREFIX = "$GEMINI_PROJECT_DIR/"
 
 
 # Shell that prints the main checkout's root: the parent of the git common dir,
@@ -80,6 +85,12 @@ MAIN_CHECKOUT_ASSIGN = (
     '&& pwd || printf %s "$CLAUDE_PROJECT_DIR")'
 )
 MAIN_CHECKOUT_PREFIX = '"$r"/'
+# Same lookup for Gemini, with $GEMINI_PROJECT_DIR left unquoted (see above).
+GEMINI_MAIN_CHECKOUT_ASSIGN = (
+    'r=$(cd $GEMINI_PROJECT_DIR 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)/.." 2>/dev/null '
+    '&& pwd || printf %s $GEMINI_PROJECT_DIR)'
+)
+_MAIN_CHECKOUT_ASSIGN = {"claude": MAIN_CHECKOUT_ASSIGN, "gemini": GEMINI_MAIN_CHECKOUT_ASSIGN}
 
 
 def _render_script_path(script_path: Path, repo_root: Path, agent: str) -> str:
@@ -114,11 +125,11 @@ def _render_script_path(script_path: Path, repo_root: Path, agent: str) -> str:
 GUARD_PREFIX = "if [ -f "
 
 # Agents whose command string is evaluated by a POSIX shell. claude runs hooks
-# through `sh -c`; git hooks ARE shell scripts. cursor/gemini docs don't say
-# how the command string is spawned (Gemini's own example expands a variable,
-# so it is shell-evaluated in practice, but that is not a documented
-# guarantee), so they stay unguarded.
-_SHELL_GUARD_AGENTS = frozenset({"claude", "git"})
+# through `sh -c`; git hooks ARE shell scripts; Gemini CLI spawns the command
+# with `bash -c` (hookRunner.ts, google-gemini/gemini-cli main, 2026-11-28).
+# Cursor's docs don't say how the command string is spawned, so it stays
+# unguarded: a missing script there fails the hook instead of going dormant.
+_SHELL_GUARD_AGENTS = frozenset({"claude", "git", "gemini"})
 
 
 def guard_script_command(rendered_path: str, command: str, missing: str = "") -> str:
@@ -209,14 +220,14 @@ def _resolve_script_commands(
                 ):
                     notice = (missing_script_notice(agent, item_ref, h.id)
                               if h.blocking else "")
-                    if agent == "claude":
+                    if agent in _MAIN_CHECKOUT_ASSIGN:
                         # Installed skills are often gitignored, so a linked
                         # worktree has none: fall back to the main checkout's
                         # copy before declaring the hook off.
                         main_path = MAIN_CHECKOUT_PREFIX + shlex.quote(
                             str(script_path.relative_to(repo_root)))
                         main_cmd = " ".join(interp + [main_path] + extra_q)
-                        notice = (f"{MAIN_CHECKOUT_ASSIGN}; "
+                        notice = (f"{_MAIN_CHECKOUT_ASSIGN[agent]}; "
                                   + guard_script_command(main_path, main_cmd, notice))
                     cmd = guard_script_command(rendered, cmd, notice)
         resolved[h.id] = cmd
