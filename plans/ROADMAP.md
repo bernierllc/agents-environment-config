@@ -17,6 +17,11 @@ unit of impact lives — not a contract.
 
 ## Review follow-ups awaiting prioritization
 
+- [Cursor skill mirrors: relative references resolve](2026-11-28-cursor-skill-mirror-references.md): `scripts/sync-agents-skills.py`
+  mirrors only `SKILL.md`, so every relative link in a mirrored skill (`references/…`, `PROVENANCE.md`, `scripts/…`) is dead under
+  `.cursor/commands/skills/`. Rewrite links to the pinned source, add a test that every mirror link resolves, regenerate, and state
+  the mirror's audience. Scheduling pending.
+
 - [MCP launcher catalog items](2026-11-27-mcp-launcher-catalog-item.md): the `mcp` item type installs no files, registers with
   Claude Code only, and no public command upgrades it on a version bump (`aec upgrade` copies it like a file tree, `plan_apply` skips the
   newer-version check for `mcp`), so a stdio launcher bridge cannot be managed by `aec upgrade` and a hand-run install script sat stale.
