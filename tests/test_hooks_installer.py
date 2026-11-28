@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 
 def _write_item(item_dir: Path, *, hooks: list) -> None:
     item_dir.mkdir(parents=True, exist_ok=True)
@@ -651,6 +653,30 @@ class TestRepoLocalScriptRendering:
         env = {"GEMINI_PROJECT_DIR": str(project_dir), "PATH": "/usr/bin:/bin"}
         return subprocess.run(["bash", "-c", expanded], env=env, cwd=cwd,
                               capture_output=True, text=True)
+
+    @pytest.mark.parametrize("name,args", [
+        ("check-$GEMINI_PROJECT_DIR.sh", ""),
+        ("check-$CLAUDE_PROJECT_DIR.sh", ""),
+        ("check.sh", " --root=$GEMINI_PROJECT_DIR"),
+    ])
+    def test_gemini_rejects_names_gemini_would_substitute(self, tmp_path, name, args):
+        """Gemini rewrites the variable textually even inside single quotes, so a
+        script name or argument carrying it would run a different command."""
+        from aec.lib.hooks.installer import install_item_hooks
+        item_dir = tmp_path / "repo" / ".claude" / "skills" / "demo"
+        (item_dir / "scripts").mkdir(parents=True)
+        (item_dir / "scripts" / name).write_text("#!/bin/sh\nexit 0\n")
+        (item_dir / "hooks.json").write_text(json.dumps({
+            "$schema": "x", "version": "1.0.0", "hooks": [{
+                "id": "lint", "event": "on_file_edit", "description": "d",
+                "command": f"aec run-script skill:demo '{name}'{args}",
+            }],
+        }))
+        with pytest.raises(ValueError, match="Gemini CLI substitutes"):
+            install_item_hooks(
+                item_dir=item_dir, item_type="skill", item_key="demo",
+                item_version="1.0.0", repo_root=tmp_path / "repo", agents=["gemini"],
+            )
 
     def test_gemini_uses_unquoted_project_dir_variable(self, tmp_path):
         repo_root = tmp_path / "repo"

@@ -73,6 +73,7 @@ CLAUDE_PROJECT_DIR_PREFIX = '"$CLAUDE_PROJECT_DIR"/'
 # env var). The variable must therefore stay UNQUOTED: inside double quotes the
 # inserted backslashes would be literal and a path with a space would break.
 GEMINI_PROJECT_DIR_PREFIX = "$GEMINI_PROJECT_DIR/"
+GEMINI_SUBSTITUTED_VARS = ("GEMINI_PROJECT_DIR", "CLAUDE_PROJECT_DIR")
 
 
 # Shell that prints the main checkout's root: the parent of the git common dir,
@@ -203,6 +204,16 @@ def _resolve_script_commands(
                 # The run-script CLI consumes its own option separator.
                 if extra[:1] == ["--"]:
                     extra = extra[1:]
+                if agent == "gemini":
+                    # Gemini rewrites these names textually anywhere in the
+                    # command, quoted or not, so a script name or argument
+                    # carrying one would be changed before bash runs it.
+                    for token in [script_name, *extra]:
+                        if any(v in token for v in GEMINI_SUBSTITUTED_VARS):
+                            raise ValueError(
+                                f"hook {h.id!r}: {token!r} contains a variable "
+                                "Gemini CLI substitutes in hook commands; rename it"
+                            )
                 script_path = item_dir / "scripts" / script_name
                 if not script_path.exists():
                     raise FileNotFoundError(
